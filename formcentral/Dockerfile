@@ -1,20 +1,16 @@
-FROM golang:alpine AS build
+FROM golang:alpine
+
 RUN apk add --no-cache \
-        gcc \
-        libc-dev
+    bash \
+    gcc \
+    libc-dev
+
 RUN mkdir /app
 WORKDIR /app
 
-ADD go.mod .
-ADD go.sum .
+COPY go.mod .
+COPY go.sum .
 RUN go mod download
-ADD . /app/
+
+COPY . /app
 RUN go build -o main .
-
-
-FROM alpine
-WORKDIR /app
-COPY --from=build /app/main /app/
-
-EXPOSE 1323
-CMD ["/app/main"]
