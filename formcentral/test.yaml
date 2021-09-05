@@ -1,0 +1,30 @@
+version: '3'
+
+services:
+  main:
+    depends_on:
+      - postgres
+    build: .
+    image: formcentral
+    environment:
+      POSTGRES_DB: test-db
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: test-user
+      POSTGRES_PASSWORD: test-pass
+    command: |
+      bash -c '
+        tools/wait-for-it.sh postgres:5432 -t 60 &&
+        go test
+      '
+    volumes:
+      - ./:/app
+      - ../tools:/app/tools
+  postgres:
+    image: postgres:9.6.11-alpine
+    environment:
+      POSTGRES_DB: test-db
+      POSTGRES_USER: test-user
+      POSTGRES_PASSWORD: test-pass
+    ports:
+      - 5432:5432
