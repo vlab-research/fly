@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgconn"
@@ -17,7 +18,8 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 }
 
 func testPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/test")
+	url := fmt.Sprintf("postgres://%s:%s@%s:%s/%s", PostgresUser, PostgresPassword, PostgresHost, PostgresPort, PostgresDb)
+	config, err := pgxpool.ParseConfig(url)
 	handle(err)
 
 	ctx := context.Background()
