@@ -14,8 +14,10 @@ services:
       POSTGRES_PASSWORD: test-pass
     command: |
       bash -c '
+        go get -u github.com/nathany/looper
         tools/wait-for-it.sh postgres:5432 -t 60 &&
-        go test
+        go test &&
+        looper
       '
     volumes:
       - ./:/app

@@ -3,7 +3,8 @@ FROM golang:alpine
 RUN apk add --no-cache \
     bash \
     gcc \
-    libc-dev
+    libc-dev \
+    readline-dev
 
 RUN mkdir /app
 WORKDIR /app
