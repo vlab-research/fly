@@ -108,8 +108,8 @@ func main() {
 	server := &Server{pool}
 
 	e := echo.New()
-	e.GET("/", server.GetSurveysByPageID)
 	e.GET("/health", server.Health)
+	e.GET("/surveys", server.GetSurveysByPageID)
 	e.GET("/translators/:surveyid", server.GetTranslator)
 	e.POST("/translators", server.CreateTranslator)
 

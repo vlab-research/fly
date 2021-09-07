@@ -34,7 +34,7 @@ async function getForm(pageid, shortcode, timestamp) {
   const {token, tokenType} = await getDashboardToken()
 
   const headers = {Authorization: `${tokenType} ${token}`}
-  const url = `${process.env.DASHBOARD_API}/surveys?pageid=${pageid}&shortcode=${shortcode}&timestamp=${timestamp}`
+  const url = `${process.env.FORMCENTRAL_URL}/surveys?pageid=${pageid}&shortcode=${shortcode}&timestamp=${timestamp}`
 
   const res = await r2(url, { headers }).response
 
