@@ -1,0 +1,8 @@
+ARG APP_NAME
+FROM ${APP_NAME}_base
+
+RUN apk add --no-cache \
+    bash \
+    readline-dev
+
+RUN go get -u github.com/nathany/looper

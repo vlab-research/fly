@@ -1,11 +1,21 @@
 version: '3'
 
 services:
+  build_base_image:
+    image: ${APP_NAME}_base
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    command: sh -c 'exit 0'
   main:
     depends_on:
       - cockroachdb
-    build: .
-    image: formcentral
+    image: ${APP_NAME}_dev
+    build:
+      args:
+        - APP_NAME=${APP_NAME}
+      context: .
+      dockerfile: Dockerfile.dev
     environment:
       CHATBASE_DATABASE: chatroach
       CHATBASE_HOST: cockroachdb
@@ -13,14 +23,16 @@ services:
       CHATBASE_USER: root
     command: |
       bash -c '
-        go get -u github.com/nathany/looper
         tools/wait-for-it.sh cockroachdb:26257 -t 60
+        cat /migrations/* > /tmp/merged-latest.sql
+        echo "Running tests..."
         go test || true
         looper
       '
     volumes:
       - ./:/app
-      - ../tools:/app/tools    
+      - ../devops/sql:/migrations
+      - ../tools:/app/tools
   cockroachdb:
     image: cockroachdb/cockroach:v20.1.4
     command: start --insecure
