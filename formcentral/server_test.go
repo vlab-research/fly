@@ -342,7 +342,7 @@ func TestGetSurveysByPageID(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
-	c.SetParamNames("pageid", "code", "timestamp")
+	c.SetParamNames("pageid", "shortcode", "timestamp")
 	c.SetParamValues("page-test", "1234", nowFmt)
 	s := &Server{pool}
 	err := s.GetSurveysByPageID(c)

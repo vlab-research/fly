@@ -74,9 +74,9 @@ func (s *Server) CreateTranslator(c echo.Context) error {
 
 func (s *Server) GetSurveysByPageID(c echo.Context) error {
 	pageid := c.Param("pageid")
-	code := c.Param("code")
+	shortcode := c.Param("shortcode")
 	timestamp := c.Param("timestamp")
-	surveys, _ := getSurveysByPageID(s.pool, pageid, code, timestamp)
+	surveys, _ := getSurveysByPageID(s.pool, pageid, shortcode, timestamp)
 	return c.JSON(http.StatusOK, surveys)
 }
 
