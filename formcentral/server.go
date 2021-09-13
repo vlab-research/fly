@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"encoding/json"
 
 	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -76,12 +77,26 @@ func (s *Server) GetSurveysByParams(c echo.Context) error {
 	pageid := c.Param("pageid")
 	shortcode := c.Param("shortcode")
 	timestamp := c.Param("timestamp")
-	surveys, _ := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
 
-	if len(surveys) == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "Survey not found")
+	if pageid != "" && shortcode != "" && timestamp != "" {
+		surveys, _ := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
+		if len(surveys) == 0 {
+			return echo.NewHTTPError(http.StatusNotFound, "Survey not found")
+		}
+		return c.JSON(http.StatusOK, surveys[0])
 	}
-	return c.JSON(http.StatusOK, surveys[0])
+
+	userParam := c.Param("user")
+	type Payload struct {
+		User struct {
+			Email string `json:"email"`
+		}
+	}
+	payload := Payload{}
+	json.Unmarshal([]byte(userParam), &payload)
+
+	surveys, _ := getSurveysByEmail(s.pool, payload.User.Email)
+	return c.JSON(http.StatusOK, surveys)
 }
 
 type Config struct {
