@@ -30,6 +30,16 @@ const (
 
 	insertSql = `INSERT INTO surveys(userid, created, id, form_json, shortcode) VALUES ('owner', NOW(), $1, $2, 1234);`
 
+	credentialsSql := `
+		DROP TABLE IF EXISTS credentials;
+		CREATE TABLE credentials(
+			userid VARCHAR NOT NULL,
+			facebook_page_id VARCHAR NOT NULL
+		)
+	`
+
+ 	insertCredentialsSql := `INSERT INTO credentials(userid, facebook_page_id) VALUES ('user-test', 'page-test');`
+
 	formA = `{"fields": [
           {"title": "What is your gender? ",
            "ref": "eng_foo",
@@ -321,21 +331,36 @@ func TestGetSurveys(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
 	mustExec(t, pool, surveySql)
+ 	mustExec(t, pool, credentialsSql)
+ 	mustExec(t, pool, insertCredentialsSql)
+
+
+	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	s := &Server{pool}
+	err := s.GetSurveys(c)
+	assert.Nil(t, err)
+	
+	res := rec.Result()
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	respSurveys := []Survey{}
+	json.Unmarshal(body, &respSurveys)
+
+	form := trans.FormJson {
+		Title: "",
+		Fields: nil,
+		ThankYouScreens: nil,
+	}
+
 
 func TestGetSurveyByParams(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
 	mustExec(t, pool, surveySql)
-
- 	credentialsSql := `
-		DROP TABLE IF EXISTS credentials;
-		CREATE TABLE credentials(
-			userid VARCHAR NOT NULL,
-			facebook_page_id VARCHAR NOT NULL
-		)`
  	mustExec(t, pool, credentialsSql)
-
- 	insertCredentialsSql := `INSERT INTO credentials(userid, facebook_page_id) VALUES ('user-test', 'page-test');`
  	mustExec(t, pool, insertCredentialsSql)
 
  	now := time.Time{}
@@ -350,7 +375,7 @@ func TestGetSurveyByParams(t *testing.T) {
 	c.SetParamNames("pageid", "shortcode", "timestamp")
 	c.SetParamValues("page-test", "1234", nowFmt)
 	s := &Server{pool}
-	err := s.GetSurveysByParams(c)
+	err := s.GetSurveys(c)
 	assert.Nil(t, err)
 	
 	res := rec.Result()
@@ -390,6 +415,6 @@ func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
 	c.SetParamValues("page-test", "1234", "timestamp-test")
 	s := &Server{pool}
 
-	err := s.GetSurveysByParams(c)
+	err := s.GetSurveys(c)
 	assert.Equal(t, err.(*echo.HTTPError).Code, 404)
 }
