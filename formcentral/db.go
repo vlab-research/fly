@@ -65,7 +65,7 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, 
 	return src, dest, err
 }
 
-func getSurveysByPageID(pool *pgxpool.Pool, pageid string, code string, created string) ([]Survey, error) {
+func getSurveysByParams(pool *pgxpool.Pool, pageid string, code string, created string) ([]Survey, error) {
    query := `
       SELECT id, userid, form_json, shortcode, translation_conf, created
       FROM surveys
@@ -88,3 +88,4 @@ func getSurveysByPageID(pool *pgxpool.Pool, pageid string, code string, created 
 
    return surveys, err
 }
+

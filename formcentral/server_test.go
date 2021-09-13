@@ -317,6 +317,11 @@ func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
 	assert.Equal(t, err.(*echo.HTTPError).Code, 500)
 }
 
+func TestGetSurveys(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	mustExec(t, pool, surveySql)
+
 func TestGetSurveyByParams(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
@@ -338,7 +343,7 @@ func TestGetSurveyByParams(t *testing.T) {
  	insertSurveySql := `INSERT INTO surveys(id, userid, shortcode, created) VALUES ('25d88630-8b7b-4f2b-8630-4e5f9085e888', 'user-test', 1234, $1);`
  	mustExec(t, pool, insertSurveySql, nowFmt)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
@@ -370,4 +375,21 @@ func TestGetSurveyByParams(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, respSurvey, survey)
+}
+
+func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	mustExec(t, pool, surveySql)
+
+	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	c.SetParamNames("pageid", "shortcode", "timestamp")
+	c.SetParamValues("page-test", "1234", "timestamp-test")
+	s := &Server{pool}
+
+	err := s.GetSurveysByParams(c)
+	assert.Equal(t, err.(*echo.HTTPError).Code, 404)
 }

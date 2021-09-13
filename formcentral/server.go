@@ -72,12 +72,16 @@ func (s *Server) CreateTranslator(c echo.Context) error {
 	return c.JSON(http.StatusOK, translator)
 }
 
-func (s *Server) GetSurveysByPageID(c echo.Context) error {
+func (s *Server) GetSurveysByParams(c echo.Context) error {
 	pageid := c.Param("pageid")
 	shortcode := c.Param("shortcode")
 	timestamp := c.Param("timestamp")
-	surveys, _ := getSurveysByPageID(s.pool, pageid, shortcode, timestamp)
-	return c.JSON(http.StatusOK, surveys)
+	surveys, _ := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
+
+	if len(surveys) == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "Survey not found")
+	}
+	return c.JSON(http.StatusOK, surveys[0])
 }
 
 type Config struct {
@@ -109,7 +113,7 @@ func main() {
 
 	e := echo.New()
 	e.GET("/health", server.Health)
-	e.GET("/surveys", server.GetSurveysByPageID)
+	e.GET("/surveys", server.GetSurveysByParams)
 	e.GET("/translators/:surveyid", server.GetTranslator)
 	e.POST("/translators", server.CreateTranslator)
 
