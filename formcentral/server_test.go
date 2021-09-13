@@ -317,7 +317,7 @@ func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
 	assert.Equal(t, err.(*echo.HTTPError).Code, 500)
 }
 
-func TestGetSurveysByPageID(t *testing.T) {
+func TestGetSurveyByParams(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
 	mustExec(t, pool, surveySql)
@@ -345,15 +345,14 @@ func TestGetSurveysByPageID(t *testing.T) {
 	c.SetParamNames("pageid", "shortcode", "timestamp")
 	c.SetParamValues("page-test", "1234", nowFmt)
 	s := &Server{pool}
-	err := s.GetSurveysByPageID(c)
+	err := s.GetSurveysByParams(c)
 	assert.Nil(t, err)
 	
 	res := rec.Result()
 	body, _ := io.ReadAll(res.Body)
 	res.Body.Close()
-
-	respSurveys := []Survey{}
-	json.Unmarshal(body, &respSurveys)
+	respSurvey := Survey{}
+	json.Unmarshal(body, &respSurvey)
 
 	form := trans.FormJson {
 		Title: "",
@@ -368,9 +367,7 @@ func TestGetSurveysByPageID(t *testing.T) {
 		Translation_conf: form,
 		Created: now,
 	}
-	testSurveys := []Survey{}
-	testSurveys = append(testSurveys, survey)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, respSurveys, testSurveys)
+	assert.Equal(t, respSurvey, survey)
 }
