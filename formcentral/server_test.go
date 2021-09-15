@@ -332,17 +332,21 @@ func TestGetSurveyByParams(t *testing.T) {
  	mustExec(t, pool, credentialsSql)
  	mustExec(t, pool, insertCredentialsSql)
 
- 	now := time.Time{}
- 	nowFmt := now.Format(time.RFC3339)
+ 	before := time.Time{}
+ 	beforeFmt := before.Format(time.RFC3339)
  	insertSurveySql := `
  		INSERT INTO surveys(
  			id, userid, form_json, shortcode, translation_conf, created
 		)
 		VALUES (
-			'00000000-0000-0000-0000-000000000000', 'user-test', '{}', 1234, '{}', $1
+			$1, 'user-test', '{}', 1234, '{}', $2
 		);
  	`
- 	mustExec(t, pool, insertSurveySql, nowFmt)
+ 	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000000", beforeFmt)
+
+ 	now := time.Now()
+ 	nowFmt := now.Format(time.RFC3339)
+ 	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000001", nowFmt)
 
 	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -360,22 +364,12 @@ func TestGetSurveyByParams(t *testing.T) {
 	respSurvey := Survey{}
 	json.Unmarshal(body, &respSurvey)
 
-	form := trans.FormJson {
-		Title: "",
-		Fields: nil,
-		ThankYouScreens: nil,
-	}
 	survey := Survey {
-		ID: "00000000-0000-0000-0000-000000000000",
-		Userid: "user-test",
-		Form_json: form,
-		Shortcode: 1234,
-		Translation_conf: "{}",
-		Created: now,
+		ID: "00000000-0000-0000-0000-000000000001",
 	}
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, respSurvey, survey)
+	assert.Equal(t, respSurvey.ID, survey.ID)
 }
 
 func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
