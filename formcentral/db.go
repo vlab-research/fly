@@ -15,10 +15,6 @@ type Survey struct {
    Form_json        trans.FormJson `json:"form_json"`
    Shortcode        int            `json:"shortcode"`
    Translation_conf trans.FormJson `json:"translation_conf"`
-   Title            string         `json:"title"`
-   Survey_name      string         `json:"survey_name"`
-   Metadata         string         `json:"metadata"`
-   Formid           string         `json:"formid"`
    Created          time.Time      `json:"created"`
 }
 
@@ -84,29 +80,6 @@ func getSurveysByParams(pool *pgxpool.Pool, pageid string, code string, created 
    for rows.Next() {
       s := Survey{}
       err := rows.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Shortcode, &s.Translation_conf, &s.Created)
-      if err != nil {
-         fmt.Println(err)
-      }
-      surveys = append(surveys, s)
-   }
-
-   return surveys, err
-}
-
-func getSurveysByEmail(pool *pgxpool.Pool, email string) ([]Survey, error) {
-   query := `
-      SELECT s.id, s.userid, s.shortcode, s.title, s.survey_name, s.metadata, s.form_json, s.translation_conf, s.formid, s.created
-      FROM surveys s
-      LEFT JOIN users on s.userid = users.id
-      WHERE email=$1
-      ORDER BY created DESC
-   `;
-   rows, err := pool.Query(context.Background(), query, email)
-
-   surveys := []Survey{}
-   for rows.Next() {
-      s := Survey{}
-      err := rows.Scan(&s.ID, &s.Userid, &s.Shortcode, &s.Title, &s.Survey_name, &s.Metadata, &s.Form_json, &s.Translation_conf, &s.Formid, &s.Created)
       if err != nil {
          fmt.Println(err)
       }

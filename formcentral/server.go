@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"encoding/json"
 
 	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -73,30 +72,16 @@ func (s *Server) CreateTranslator(c echo.Context) error {
 	return c.JSON(http.StatusOK, translator)
 }
 
-func (s *Server) GetSurveysByParams(c echo.Context) error {
+func (s *Server) GetSurveyByParams(c echo.Context) error {
 	pageid := c.Param("pageid")
 	shortcode := c.Param("shortcode")
 	timestamp := c.Param("timestamp")
 
-	if pageid != "" && shortcode != "" && timestamp != "" {
-		surveys, _ := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
-		if len(surveys) == 0 {
-			return echo.NewHTTPError(http.StatusNotFound, "Survey not found")
-		}
-		return c.JSON(http.StatusOK, surveys[0])
+	surveys, _ := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
+	if len(surveys) == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "Survey not found")
 	}
-
-	userParam := c.Param("user")
-	type Payload struct {
-		User struct {
-			Email string `json:"email"`
-		}
-	}
-	payload := Payload{}
-	json.Unmarshal([]byte(userParam), &payload)
-
-	surveys, _ := getSurveysByEmail(s.pool, payload.User.Email)
-	return c.JSON(http.StatusOK, surveys)
+	return c.JSON(http.StatusOK, surveys[0])
 }
 
 type Config struct {
@@ -128,7 +113,7 @@ func main() {
 
 	e := echo.New()
 	e.GET("/health", server.Health)
-	e.GET("/surveys", server.GetSurveysByParams)
+	e.GET("/surveys", server.GetSurveyByParams)
 	e.GET("/translators/:surveyid", server.GetTranslator)
 	e.POST("/translators", server.CreateTranslator)
 

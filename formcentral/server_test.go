@@ -21,35 +21,21 @@ const (
 		CREATE TABLE surveys(
 			id UUID NOT NULL UNIQUE,
 			userid VARCHAR NOT NULL,
-			form_json JSON,
+			form_json JSON NOT NULL,
 			shortcode INT NOT NULL,
 			translation_conf JSONB NOT NULL,
-			title VARCHAR NOT NULL,
-			survey_name VARCHAR NOT NULL,
-			metadata JSON NOT NULL,
-			formid VARCHAR NOT NULL,
 			created TIMESTAMPTZ NOT NULL
-		);
-  `
-
-	insertSql = `
-		INSERT INTO surveys(
-			id, userid, form_json, shortcode, translation_conf, 
-			title, survey_name, metadata, formid, created
-		)
-		VALUES (
-			$1, 'owner', $2, 1234, '{}', '', '', '{}', '', NOW()
 		);
 	`
 
+	insertSql = `
+		INSERT INTO surveys(id, userid, form_json, shortcode, translation_conf, created)
+		VALUES ($1, 'owner', $2, 1234, '{}', NOW());
+	`
+
 	insertWithTranslation = `
-		INSERT INTO surveys(
-			id, userid, form_json, shortcode, translation_conf, 
-			title, survey_name, metadata, formid, created
-		)
-		VALUES (
-			$1, 'owner', $2, 1234, $3, '', '', '{}', '', NOW()
-		);
+		INSERT INTO surveys(id, userid, form_json, shortcode, translation_conf, created)
+		VALUES ($1, 'owner', $2, 1234, $3, NOW());
 	`
 
 	credentialsSql = `
@@ -339,87 +325,6 @@ func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
 	assert.Equal(t, err.(*echo.HTTPError).Code, 500)
 }
 
-func TestGetSurveys(t *testing.T) {
-	pool := testPool()
-	defer pool.Close()
-	mustExec(t, pool, surveySql)
- 	mustExec(t, pool, credentialsSql)
- 	mustExec(t, pool, insertCredentialsSql)
-
- 	userSql := `
- 		DROP TABLE IF EXISTS users;
-		CREATE TABLE users(
-			id VARCHAR NOT NULL,
-			token VARCHAR NOT NULL,
-			email VARCHAR NOT NULL UNIQUE
-		);
- 	`
- 	mustExec(t, pool, userSql)
- 	
- 	userid := "00000000-0000-0000-0000-000000000555"
- 	insertUser := `INSERT INTO users (id, token, email) VALUES ($1, 'token-test', 'test@email.com');`
- 	mustExec(t, pool, insertUser, userid)
-
- 	now := time.Time{}
- 	nowFmt := now.Format(time.RFC3339)
- 	insertSurveySql := `
- 		INSERT INTO surveys(
- 			id, userid, form_json, shortcode, translation_conf, 
-			title, survey_name, metadata, formid, created
-		)
-		VALUES (
-			$1, $2, '{}', $3, '{}', '', '', '{}', '', $4
-		);
- 	`
- 	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000000", userid, 1234, nowFmt)
- 	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000001", userid, 9876, nowFmt)
-
-	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-	c.SetParamNames("user")
-	c.SetParamValues(`{"user": {"email": "test@email.com"}}`)
-	s := &Server{pool}
-	err := s.GetSurveysByParams(c)
-	assert.Nil(t, err)
-	
-	res := rec.Result()
-	body, _ := io.ReadAll(res.Body)
-	res.Body.Close()
-	respSurveys := []Survey{}
-	json.Unmarshal(body, &respSurveys)
-
-	form := trans.FormJson {
-		Title: "",
-		Fields: nil,
-		ThankYouScreens: nil,
-	}
-	surveyA := Survey {
-		ID: "00000000-0000-0000-0000-000000000000",
-		Userid: userid,
-		Form_json: form,
-		Shortcode: 1234,
-		Translation_conf: form,
-		Metadata: "{}",
-		Created: now,
-	}
-	surveyB := Survey {
-		ID: "00000000-0000-0000-0000-000000000001",
-		Userid: userid,
-		Form_json: form,
-		Shortcode: 9876,
-		Translation_conf: form,
-		Metadata: "{}",
-		Created: now,
-	}
-	testSurveys := []Survey{}
-	testSurveys = append(testSurveys, surveyA, surveyB)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, respSurveys, testSurveys)
-}
-
 func TestGetSurveyByParams(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
@@ -431,12 +336,10 @@ func TestGetSurveyByParams(t *testing.T) {
  	nowFmt := now.Format(time.RFC3339)
  	insertSurveySql := `
  		INSERT INTO surveys(
- 			id, userid, form_json, shortcode, translation_conf, 
-			title, survey_name, metadata, formid, created
+ 			id, userid, form_json, shortcode, translation_conf, created
 		)
 		VALUES (
-			'00000000-0000-0000-0000-000000000000', 'user-test', 
-			'{}', 1234, '{}', '', '', '{}', '', $1
+			'00000000-0000-0000-0000-000000000000', 'user-test', '{}', 1234, '{}', $1
 		);
  	`
  	mustExec(t, pool, insertSurveySql, nowFmt)
@@ -448,7 +351,7 @@ func TestGetSurveyByParams(t *testing.T) {
 	c.SetParamNames("pageid", "shortcode", "timestamp")
 	c.SetParamValues("page-test", "1234", nowFmt)
 	s := &Server{pool}
-	err := s.GetSurveysByParams(c)
+	err := s.GetSurveyByParams(c)
 	assert.Nil(t, err)
 	
 	res := rec.Result()
@@ -488,6 +391,6 @@ func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
 	c.SetParamValues("page-test", "1234", "timestamp-test")
 	s := &Server{pool}
 
-	err := s.GetSurveysByParams(c)
+	err := s.GetSurveyByParams(c)
 	assert.Equal(t, err.(*echo.HTTPError).Code, 404)
 }
