@@ -5,10 +5,11 @@ import (
 )
 
 type Config struct {
-	Db       string `env:"CHATBASE_DATABASE,required"`
-	User     string `env:"CHATBASE_USER,required"`
-	Host     string `env:"CHATBASE_HOST,required"`
-	Port     string `env:"CHATBASE_PORT,required"`
+	DbName string `env:"CHATBASE_DATABASE,required"`
+	DbUser string `env:"CHATBASE_USER,required"`
+	DbHost string `env:"CHATBASE_HOST,required"`
+	DbPort string `env:"CHATBASE_PORT,required"`
+	Port   int    `default:"80"`
 }
 
 func getConfig() Config {
