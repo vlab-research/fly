@@ -1,6 +1,7 @@
 FROM golang:alpine
 
 RUN apk add --no-cache \
+    bash \
     gcc \
     libc-dev \
     readline-dev
@@ -11,4 +12,3 @@ WORKDIR /app
 COPY go.mod .
 COPY go.sum .
 RUN go mod download
-RUN go get -u github.com/nathany/looper

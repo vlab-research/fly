@@ -1,19 +1,11 @@
 version: '3'
 
 services:
-  build_base_image:
-    image: ${APP_NAME}_base
-    build:
-      context: .
-      dockerfile: Dockerfile.base
-    command: sh -c 'exit 0'
   main:
     depends_on:
-      - cockroachdb
+      - system
     image: ${APP_NAME}_dev
     build:
-      args:
-        - APP_NAME=${APP_NAME}
       context: .
       dockerfile: Dockerfile.dev
     environment:
@@ -22,17 +14,32 @@ services:
       CHATBASE_PORT: 26257
       CHATBASE_USER: root
     command: |
-      bash -c '
-        tools/wait-for-it.sh cockroachdb:26257 -t 60
-        cat /migrations/* > /tmp/merged-latest.sql
+      sh -c '
         echo "Running tests..."
         go test || true
         looper
       '
     volumes:
       - ./:/app
+  system:
+    depends_on:
+      - cockroachdb
+    build:
+      context: ../system
+    environment:
+      CHATBASE_DATABASE: chatroach
+      CHATBASE_HOST: cockroachdb
+      CHATBASE_PORT: 26257
+      CHATBASE_USER: root
+    command: |
+      sh -c '
+        /tools/wait-for-it.sh cockroachdb:26257 -t 60
+        cat /migrations/* > /tmp/merged-latest.sql
+      '
+    volumes:
+      - ../devops:/tools
       - ../devops/sql:/migrations
-      - ../tools:/app/tools
+      - ../system:/app
   cockroachdb:
     image: cockroachdb/cockroach:v20.1.4
     command: start --insecure
