@@ -77,10 +77,21 @@ func (s *Server) GetSurveyByParams(c echo.Context) error {
 	shortcode := c.Param("shortcode")
 	timestamp := c.Param("timestamp")
 
-	surveys, _ := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
+	if pageid == "" || shortcode == "" || timestamp == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Missing Parameter(s)"))
+	}
+
+	surveys, err := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
+
+	if err != nil {
+		msg := err.Error()
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Could not execute query to DB. Failed with the following error: %v", msg))
+	}
+
 	if len(surveys) == 0 {
 		return echo.NewHTTPError(http.StatusNotFound, "Survey not found")
 	}
+
 	return c.JSON(http.StatusOK, surveys[0])
 }
 

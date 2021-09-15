@@ -394,3 +394,37 @@ func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
 	err := s.GetSurveyByParams(c)
 	assert.Equal(t, err.(*echo.HTTPError).Code, 404)
 }
+
+func TestGetSurveyByParamsReturns400IfMissingParameters(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	mustExec(t, pool, surveySql)
+
+	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	c.SetParamNames("shortcode")
+	c.SetParamValues("1234")
+	s := &Server{pool}
+
+	err := s.GetSurveyByParams(c)
+	assert.Equal(t, err.(*echo.HTTPError).Code, 400)
+}
+
+func TestGetSurveyByParamsReturns500OnServerError(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	mustExec(t, pool, `DROP TABLE IF EXISTS surveys;`)
+
+	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	c.SetParamNames("pageid", "shortcode", "timestamp")
+	c.SetParamValues("page-test", "1234", "timestamp-test")
+	s := &Server{pool}
+
+	err := s.GetSurveyByParams(c)
+	assert.Equal(t, err.(*echo.HTTPError).Code, 500)
+}
