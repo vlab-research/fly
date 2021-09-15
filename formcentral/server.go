@@ -35,13 +35,12 @@ func (s *Server) GetTranslator(c echo.Context) error {
 	return c.JSON(http.StatusOK, translator)
 }
 
-type TranslatorRequest struct {
-	Form        *trans.FormJson `json:"form"`
-	Destination string          `json:"destination"`
-	Self        bool            `json:"self"`
-}
-
 func (s *Server) CreateTranslator(c echo.Context) error {
+	type TranslatorRequest struct {
+		Form        *trans.FormJson `json:"form"`
+		Destination string          `json:"destination"`
+		Self        bool            `json:"self"`
+	}
 	req := new(TranslatorRequest)
 	if err := c.Bind(req); err != nil {
 		return err
