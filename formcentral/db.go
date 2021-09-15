@@ -80,9 +80,7 @@ func getSurveysByParams(pool *pgxpool.Pool, pageid string, code string, created 
    for rows.Next() {
       s := Survey{}
       err := rows.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Shortcode, &s.Translation_conf, &s.Created)
-      if err != nil {
-         fmt.Println(err)
-      }
+      handle(err)
       surveys = append(surveys, s)
    }
 
