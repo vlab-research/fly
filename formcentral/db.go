@@ -14,7 +14,7 @@ type Survey struct {
    Userid           string         `json:"userid"`
    Form_json        trans.FormJson `json:"form_json"`
    Shortcode        int            `json:"shortcode"`
-   Translation_conf trans.FormJson `json:"translation_conf"`
+   Translation_conf string         `json:"translation_conf"`
    Created          time.Time      `json:"created"`
 }
 

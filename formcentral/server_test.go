@@ -370,7 +370,7 @@ func TestGetSurveyByParams(t *testing.T) {
 		Userid: "user-test",
 		Form_json: form,
 		Shortcode: 1234,
-		Translation_conf: form,
+		Translation_conf: "{}",
 		Created: now,
 	}
 
