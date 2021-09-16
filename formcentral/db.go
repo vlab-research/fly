@@ -8,9 +8,8 @@ import (
 	"github.com/vlab-research/trans"
 )
 
-func getPool() *pgxpool.Pool {
-	config := getConfig()
-	conn := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", config.User, config.Host, config.Port, config.Db)
+func getPool(cfg *Config) *pgxpool.Pool {
+	conn := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
 	dbConfig, err := pgxpool.ParseConfig(conn)
 	handle(err)
 
