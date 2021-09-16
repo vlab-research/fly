@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"os"
 
 	"github.com/labstack/echo/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -107,18 +106,7 @@ const (
 )
 
 func before(t *testing.T) {
-	pool := getPool()
-	defer pool.Close()
-
-	config := getConfig()
-	query := fmt.Sprintf(`DROP DATABASE IF EXISTS %s`, config.Db)
-	mustExec(t, pool, query)
-	mustExec(t, pool, `DROP USER IF EXISTS chatroach;`)
-	mustExec(t, pool, `DROP USER IF EXISTS chatreader;`)
-	mustExec(t, pool, `DROP USER IF EXISTS adopt;`)
-
-	sql, _ := os.ReadFile("/tmp/merged-latest.sql")
-	mustExec(t, pool, string(sql))
+	http.Get("http://system/resetdb")
 }
 
 func request(pool *pgxpool.Pool, method string, uri string, params string) (*httptest.ResponseRecorder, echo.Context, *Server) {
@@ -134,7 +122,8 @@ func request(pool *pgxpool.Pool, method string, uri string, params string) (*htt
 func TestTranslatorReturns404IfDestinationNotFound(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 	
 	params := fmt.Sprintf(`{"destination": "foo", "form": %v}`, formA)
@@ -147,7 +136,8 @@ func TestTranslatorReturns404IfDestinationNotFound(t *testing.T) {
 func TestTranslatorReturns400IfNotTranslatable(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	form := `
@@ -189,7 +179,8 @@ func TestTranslatorReturns400IfNotTranslatable(t *testing.T) {
 func TestTranslatorReturnsTranslator(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	mustExec(t, pool, insertSurvey, surveyid, userid, formB)
@@ -210,7 +201,8 @@ func TestTranslatorReturnsTranslator(t *testing.T) {
 func TestTranslatorWorksWithSelf(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	params := fmt.Sprintf(`{"self": true, "form": %v}`, formA)
@@ -229,7 +221,8 @@ func TestTranslatorWorksWithSelf(t *testing.T) {
 func TestGetTranslatorGetsFromID(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", userid, formB)
@@ -253,7 +246,8 @@ func TestGetTranslatorGetsFromID(t *testing.T) {
 func TestGetTranslatorGetsSelf(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", formB)
@@ -277,7 +271,8 @@ func TestGetTranslatorGetsSelf(t *testing.T) {
 func TestGetTranslatorReturns404OnRawTranslationConf(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", formB)
@@ -294,7 +289,8 @@ func TestGetTranslatorReturns404OnRawTranslationConf(t *testing.T) {
 func TestGetTranslatorReturns404OnMissingSourceForm(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	_, c, s := request(pool, http.MethodGet, "/translator/foo", "")
@@ -308,7 +304,8 @@ func TestGetTranslatorReturns404OnMissingSourceForm(t *testing.T) {
 func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
 	before(t)
 
-	pool := getPool()
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	defer pool.Close()
 
 	smallForm := `
