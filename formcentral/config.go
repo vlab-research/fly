@@ -13,8 +13,8 @@ type Config struct {
 }
 
 func getConfig() Config {
-	config := Config{}
-	err := env.Parse(&config)
+	cfg := Config{}
+	err := env.Parse(&cfg)
 	handle(err)
-	return config
+	return cfg
 }

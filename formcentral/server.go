@@ -74,8 +74,8 @@ func handle(err error) {
 }
 
 func main() {
-	config := getConfig()
-	pool := getPool(config)
+	cfg := getConfig()
+	pool := getPool(&cfg)
 	server := &Server{pool}
 
 	e := echo.New()
@@ -83,6 +83,6 @@ func main() {
 	e.GET("/translators/:surveyid", server.GetTranslator)
 	e.POST("/translators", server.CreateTranslator)
 
-	address := fmt.Sprintf(`:%d`, config.Port)
+	address := fmt.Sprintf(`:%d`, cfg.Port)
 	e.Logger.Fatal(e.Start(address))
 }
