@@ -10,13 +10,13 @@ import (
 
 func getPool(cfg *Config) *pgxpool.Pool {
 	conn := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
-	dbConfig, err := pgxpool.ParseConfig(conn)
+	config, err := pgxpool.ParseConfig(conn)
 	handle(err)
 
-	dbConfig.MaxConns = int32(32)
+	config.MaxConns = int32(32)
 
 	ctx := context.Background()
-	pool, err := pgxpool.ConnectConfig(ctx, dbConfig)
+	pool, err := pgxpool.ConnectConfig(ctx, config)
 	handle(err)
 
 	return pool
