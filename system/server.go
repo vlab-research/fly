@@ -14,6 +14,8 @@ type Server struct {
 }
 
 func (s *Server) ResetDb(c echo.Context) error {
+	resetDb(s.pool, s.config.SqlFilepath)
+	return c.String(http.StatusOK, "ok")
 }
 
 func handle(err error) {
