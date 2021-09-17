@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/vlab-research/trans"
 )
@@ -65,7 +66,7 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, 
 	return src, dest, err
 }
 
-func getSurveysByParams(pool *pgxpool.Pool, pageid string, code string, created string) ([]Survey, error) {
+func getSurveyByParams(pool *pgxpool.Pool, pageid string, code string, created string) (*Survey, error) {
    query := `
       SELECT id, userid, form_json, shortcode, translation_conf, created
       FROM surveys
@@ -73,16 +74,15 @@ func getSurveysByParams(pool *pgxpool.Pool, pageid string, code string, created 
       AND shortcode=$2
       AND created<=$3
       ORDER BY created DESC
+      LIMIT 1
    `
-   rows, err := pool.Query(context.Background(), query, pageid, code, created)
+   s := &Survey{}
+   row := pool.QueryRow(context.Background(), query, pageid, code, created)
+   err := row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Shortcode, &s.Translation_conf, &s.Created)
 
-   surveys := []Survey{}
-   for rows.Next() {
-      s := Survey{}
-      err := rows.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Shortcode, &s.Translation_conf, &s.Created)
-      handle(err)
-      surveys = append(surveys, s)
+   if err == pgx.ErrNoRows {
+   	return nil, nil
    }
 
-   return surveys, err
+   return s, err
 }

@@ -81,18 +81,18 @@ func (s *Server) GetSurveyByParams(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Missing Parameter(s)"))
 	}
 
-	surveys, err := getSurveysByParams(s.pool, pageid, shortcode, timestamp)
+	survey, err := getSurveyByParams(s.pool, pageid, shortcode, timestamp)
 
 	if err != nil {
 		msg := err.Error()
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Could not execute query to DB. Failed with the following error: %v", msg))
 	}
 
-	if len(surveys) == 0 {
+	if survey == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Survey not found")
 	}
 
-	return c.JSON(http.StatusOK, surveys[0])
+	return c.JSON(http.StatusOK, survey)
 }
 
 type Config struct {

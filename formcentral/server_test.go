@@ -377,12 +377,14 @@ func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
 	defer pool.Close()
 	mustExec(t, pool, surveySql)
 
+	ts := time.Time{}
+ 	tsFmt := ts.Format(time.RFC3339)
 	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
 	c.SetParamNames("pageid", "shortcode", "timestamp")
-	c.SetParamValues("page-test", "1234", "timestamp-test")
+	c.SetParamValues("page-test", "1234", tsFmt)
 	s := &Server{pool}
 
 	err := s.GetSurveyByParams(c)
