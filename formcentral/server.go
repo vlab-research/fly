@@ -73,9 +73,9 @@ func (s *Server) CreateTranslator(c echo.Context) error {
 }
 
 func (s *Server) GetSurveyByParams(c echo.Context) error {
-	pageid := c.Param("pageid")
-	shortcode := c.Param("shortcode")
-	timestamp := c.Param("timestamp")
+	pageid := c.QueryParam("pageid")
+	shortcode := c.QueryParam("shortcode")
+	timestamp := c.QueryParam("timestamp")
 
 	if pageid == "" || shortcode == "" || timestamp == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Missing Parameter(s)"))
