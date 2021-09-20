@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
+	"strconv"
 
 	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -81,7 +83,13 @@ func (s *Server) GetSurveyByParams(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Missing Parameter(s)"))
 	}
 
-	survey, err := getSurveyByParams(s.pool, pageid, shortcode, timestamp)
+	timestampInt, err := strconv.ParseInt(timestamp, 10, 0)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Could not parse 'timestamp'"))
+	}
+
+	timestampFmt := time.Unix(timestampInt, 0)
+	survey, err := getSurveyByParams(s.pool, pageid, shortcode, timestampFmt)
 
 	if err != nil {
 		msg := err.Error()
