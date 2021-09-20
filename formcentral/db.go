@@ -66,7 +66,7 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, 
 	return src, dest, err
 }
 
-func getSurveyByParams(pool *pgxpool.Pool, pageid string, code string, created string) (*Survey, error) {
+func getSurveyByParams(pool *pgxpool.Pool, pageid string, shortcode string, created time.Time) (*Survey, error) {
    query := `
       SELECT id, userid, form_json, shortcode, translation_conf, created
       FROM surveys
@@ -77,8 +77,8 @@ func getSurveyByParams(pool *pgxpool.Pool, pageid string, code string, created s
       LIMIT 1
    `
    s := &Survey{}
-   row := pool.QueryRow(context.Background(), query, pageid, code, created)
    err := row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Shortcode, &s.Translation_conf, &s.Created)
+   row := pool.QueryRow(context.Background(), query, pageid, shortcode, created)
 
    if err == pgx.ErrNoRows {
    	return nil, nil
