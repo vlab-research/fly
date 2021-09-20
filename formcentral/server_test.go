@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 	"io"
+	"net/url"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -22,20 +23,22 @@ const (
 			id UUID NOT NULL UNIQUE,
 			userid VARCHAR NOT NULL,
 			form_json JSON NOT NULL,
-			shortcode INT NOT NULL,
+			form VARCHAR NOT NULL,
+			shortcode VARCHAR NOT NULL,
 			translation_conf JSONB NOT NULL,
+			messages VARCHAR NOT NULL,
 			created TIMESTAMPTZ NOT NULL
 		);
 	`
 
 	insertSql = `
-		INSERT INTO surveys(id, userid, form_json, shortcode, translation_conf, created)
-		VALUES ($1, 'owner', $2, 1234, '{}', NOW());
+		INSERT INTO surveys(id, userid, form_json, form, shortcode, translation_conf, messages, created)
+		VALUES ($1, 'owner', $2, '{}', 'a1234', '{}', '', NOW());
 	`
 
 	insertWithTranslation = `
-		INSERT INTO surveys(id, userid, form_json, shortcode, translation_conf, created)
-		VALUES ($1, 'owner', $2, 1234, $3, NOW());
+		INSERT INTO surveys(id, userid, form_json, form, shortcode, translation_conf, messages, created)
+		VALUES ($1, 'owner', $2, '{}', 'a1234', $3, '', NOW());
 	`
 
 	credentialsSql = `
@@ -335,12 +338,8 @@ func TestGetSurveyByParams(t *testing.T) {
  	before := time.Time{}
  	beforeFmt := before.Format(time.RFC3339)
  	insertSurveySql := `
- 		INSERT INTO surveys(
- 			id, userid, form_json, shortcode, translation_conf, created
-		)
-		VALUES (
-			$1, 'user-test', '{}', 1234, '{}', $2
-		);
+ 		INSERT INTO surveys(id, userid, form_json, form, shortcode, translation_conf, messages, created)
+		VALUES ($1, 'user-test', '{}', '{}', 'a1234', '{}', '', $2);
  	`
  	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000000", beforeFmt)
 
@@ -348,12 +347,14 @@ func TestGetSurveyByParams(t *testing.T) {
  	nowFmt := now.Format(time.RFC3339)
  	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000001", nowFmt)
 
-	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	q := make(url.Values)
+	q.Set("pageid", "page-test")
+	q.Set("shortcode", "a1234")
+	q.Set("timestamp", fmt.Sprintf("%v", now.Unix()))
+	req := httptest.NewRequest(http.MethodGet, "/surveys/?" + q.Encode(), nil)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
-	c.SetParamNames("pageid", "shortcode", "timestamp")
-	c.SetParamValues("page-test", "1234", nowFmt)
 	s := &Server{pool}
 	err := s.GetSurveyByParams(c)
 	assert.Nil(t, err)
@@ -361,15 +362,15 @@ func TestGetSurveyByParams(t *testing.T) {
 	res := rec.Result()
 	body, _ := io.ReadAll(res.Body)
 	res.Body.Close()
-	respSurvey := Survey{}
-	json.Unmarshal(body, &respSurvey)
+	resSurvey := Survey{}
+	json.Unmarshal(body, &resSurvey)
 
 	survey := Survey {
 		ID: "00000000-0000-0000-0000-000000000001",
 	}
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, respSurvey.ID, survey.ID)
+	assert.Equal(t, resSurvey.ID, survey.ID)
 }
 
 func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
@@ -378,13 +379,14 @@ func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
 	mustExec(t, pool, surveySql)
 
 	ts := time.Time{}
- 	tsFmt := ts.Format(time.RFC3339)
-	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	q := make(url.Values)
+	q.Set("pageid", "page-test")
+	q.Set("shortcode", "a1234")
+	q.Set("timestamp", fmt.Sprintf("%v", ts.Unix()))
+	req := httptest.NewRequest(http.MethodGet, "/surveys/?" + q.Encode(), nil)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
-	c.SetParamNames("pageid", "shortcode", "timestamp")
-	c.SetParamValues("page-test", "1234", tsFmt)
 	s := &Server{pool}
 
 	err := s.GetSurveyByParams(c)
@@ -396,12 +398,12 @@ func TestGetSurveyByParamsReturns400IfMissingParameters(t *testing.T) {
 	defer pool.Close()
 	mustExec(t, pool, surveySql)
 
-	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	q := make(url.Values)
+	q.Set("shortcode", "1234")
+	req := httptest.NewRequest(http.MethodGet, "/surveys/?" + q.Encode(), nil)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
-	c.SetParamNames("shortcode")
-	c.SetParamValues("1234")
 	s := &Server{pool}
 
 	err := s.GetSurveyByParams(c)
@@ -411,14 +413,15 @@ func TestGetSurveyByParamsReturns400IfMissingParameters(t *testing.T) {
 func TestGetSurveyByParamsReturns500OnServerError(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
-	mustExec(t, pool, `DROP TABLE IF EXISTS surveys;`)
 
-	req := httptest.NewRequest(http.MethodGet, "/surveys", nil)
+	q := make(url.Values)
+	q.Set("pageid", "page-test")
+	q.Set("shortcode", "a1234")
+	q.Set("timestamp", "timestamp-test") // malformed timestamp
+	req := httptest.NewRequest(http.MethodGet, "/surveys/?" + q.Encode(), nil)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
-	c.SetParamNames("pageid", "shortcode", "timestamp")
-	c.SetParamValues("page-test", "1234", "timestamp-test")
 	s := &Server{pool}
 
 	err := s.GetSurveyByParams(c)

@@ -14,8 +14,10 @@ type Survey struct {
    ID               string         `json:"id"`
    Userid           string         `json:"userid"`
    Form_json        trans.FormJson `json:"form_json"`
-   Shortcode        int            `json:"shortcode"`
+   Form             string         `json:"form"`
+   Shortcode        string         `json:"shortcode"`
    Translation_conf string         `json:"translation_conf"`
+   Messages         string         `json:"messages"`
    Created          time.Time      `json:"created"`
 }
 
@@ -68,7 +70,7 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, 
 
 func getSurveyByParams(pool *pgxpool.Pool, pageid string, shortcode string, created time.Time) (*Survey, error) {
    query := `
-      SELECT id, userid, form_json, shortcode, translation_conf, created
+      SELECT id, userid, form_json, form, shortcode, translation_conf, messages, created
       FROM surveys
       WHERE userid=(SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1)
       AND shortcode=$2
@@ -77,8 +79,8 @@ func getSurveyByParams(pool *pgxpool.Pool, pageid string, shortcode string, crea
       LIMIT 1
    `
    s := &Survey{}
-   err := row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Shortcode, &s.Translation_conf, &s.Created)
    row := pool.QueryRow(context.Background(), query, pageid, shortcode, created)
+   err := row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Form, &s.Shortcode, &s.Translation_conf, &s.Messages, &s.Created)
 
    if err == pgx.ErrNoRows {
    	return nil, nil
