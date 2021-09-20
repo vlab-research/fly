@@ -31,7 +31,6 @@ func (s *Server) GetTranslator(c echo.Context) error {
 	}
 
 	translator, err := trans.MakeTranslatorByShape(src, dest)
-
 	if err != nil {
 		msg := err.Error()
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Could not create translation mapping. Failed with the following error: %v", msg))
