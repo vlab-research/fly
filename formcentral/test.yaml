@@ -13,6 +13,7 @@ services:
       CHATBASE_HOST: cockroachdb
       CHATBASE_PORT: 26257
       CHATBASE_USER: root
+      PORT: 80
     command: |
       sh -c '
         echo "Running tests..."
@@ -23,7 +24,7 @@ services:
       - ./:/app
   system:
     depends_on:
-      - cockroachdb
+      - initdb
     build:
       context: ../system
     environment:
@@ -31,15 +32,27 @@ services:
       CHATBASE_HOST: cockroachdb
       CHATBASE_PORT: 26257
       CHATBASE_USER: root
+      PORT: 80
+    command: |
+      sh -c '
+      '
+    ports:
+      - 80:80
+    volumes:
+      - ../system:/app
+  initdb:
+    image: cockroachdb/cockroach:v20.1.4
+    depends_on:
+      - cockroachdb
     command: |
       sh -c '
         /tools/wait-for-it.sh cockroachdb:26257 -t 60
         cat /migrations/* > /tmp/merged-latest.sql
+        cat /tmp/merged-latest.sql | ./cockroach sql --insecure --host cockroachdb
       '
     volumes:
       - ../devops:/tools
       - ../devops/sql:/migrations
-      - ../system:/app
   cockroachdb:
     image: cockroachdb/cockroach:v20.1.4
     command: start --insecure

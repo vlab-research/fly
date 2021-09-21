@@ -13,7 +13,11 @@ type Server struct {
 }
 
 func (s *Server) ResetDb(c echo.Context) error {
-	resetDb(s.pool)
+	err := resetDb(s.pool)
+	if err != nil {
+		msg := err.Error()
+		return echo.NewHTTPError(http.StatusInternalServerError, msg))
+	}
 	return c.String(http.StatusOK, "ok")
 }
 

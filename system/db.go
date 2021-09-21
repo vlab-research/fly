@@ -22,4 +22,15 @@ func getPool(cfg *Config) *pgxpool.Pool {
 }
 
 func resetDb(pool *pgxpool.Pool) error {
+	if err != nil {
+		return err
+	}
+
+			return err
+		}
+	}
+
+	if err != nil {
+			return err
+		}
 }
