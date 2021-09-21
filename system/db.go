@@ -4,20 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
-
-
-func createDb(pool *pgxpool.Pool, sqlFilepath string) {
-	sql, err := os.ReadFile(sqlFilepath)
-	handle(err)
-	exec(pool, string(sql))
-}
-
-func exec(pool *pgxpool.Pool, sql string) {
-	pool.Exec(context.Background(), sql)
-}
 
 func getPool(cfg *Config) *pgxpool.Pool {
 	conn := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
@@ -31,5 +21,5 @@ func getPool(cfg *Config) *pgxpool.Pool {
 	return pool
 }
 
-func resetDb(pool *pgxpool.Pool, sqlFilepath string) {
+func resetDb(pool *pgxpool.Pool) error {
 }
