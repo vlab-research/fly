@@ -13,6 +13,7 @@ services:
       CHATBASE_HOST: cockroachdb
       CHATBASE_PORT: 26257
       CHATBASE_USER: root
+      CHATBASE_MAX_CONNECTIONS: 1
       PORT: 80
     command: |
       sh -c '
