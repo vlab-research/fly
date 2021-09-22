@@ -38,9 +38,7 @@ func getTableNames(pool *pgxpool.Pool) ([]string, error) {
 	return tablenames, nil
 }
 
-func resetDb(pool *pgxpool.Pool) error {
-	tablenames, err := getTableNames(pool)
+func resetDb(pool *pgxpool.Pool, tablenames []string) {
 	query := fmt.Sprintf("TRUNCATE %s;", strings.Join(tablenames[:], ","))
-	pool.QueryRow(context.Background(), query)
-	return err
+	pool.Exec(context.Background(), query)
 }

@@ -9,15 +9,12 @@ import (
 )
 
 type Server struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	tablenames []string
 }
 
 func (s *Server) ResetDb(c echo.Context) error {
-	err := resetDb(s.pool)
-	if err != nil {
-		msg := err.Error()
-		return echo.NewHTTPError(http.StatusInternalServerError, msg)
-	}
+	resetDb(s.pool, s.tablenames)
 	return c.String(http.StatusOK, "ok")
 }
 
@@ -30,7 +27,9 @@ func handle(err error) {
 func main() {
 	cfg := getConfig()
 	pool := getPool(&cfg)
-	server := &Server{pool}
+	tablenames, err := getTableNames(pool)
+	handle(err)
+	server := &Server{pool, tablenames}
 
 	e := echo.New()
 	e.GET("/resetdb", server.ResetDb)

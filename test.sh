@@ -6,12 +6,11 @@ if [ "${APP_NAME}" = "" ]
 	else
 		FILE_PATH="${APP_NAME}/test.yaml"
 fi
+
 docker-compose -f ${FILE_PATH} down --remove-orphans
 
 docker-compose -f ${FILE_PATH} build initdb
 docker-compose -f ${FILE_PATH} run initdb
 
 docker-compose -f ${FILE_PATH} build main
-docker-compose -f ${FILE_PATH} run \
-	--name ${APP_NAME} \
-	main
+docker-compose -f ${FILE_PATH} run main

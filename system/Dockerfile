@@ -1,7 +1,7 @@
 FROM golang:alpine
 
 RUN mkdir /app
-COPY . /app
+COPY go.mod /app
 WORKDIR /app
 
 RUN go mod download
