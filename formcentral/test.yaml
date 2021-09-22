@@ -44,7 +44,7 @@ services:
     image: cockroachdb/cockroach:v20.1.4
     depends_on:
       - cockroachdb
-    command: |
+    entrypoint: |
       sh -c '
         /tools/wait-for-it.sh cockroachdb:26257 -t 60
         cat /migrations/* > /tmp/merged-latest.sql
