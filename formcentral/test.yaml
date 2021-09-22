@@ -24,9 +24,8 @@ services:
     volumes:
       - ./:/app
   system:
-    depends_on:
-      - initdb
-    image: golang:alpine
+    build:
+      context: ../system
     environment:
       CHATBASE_DATABASE: chatroach
       CHATBASE_HOST: cockroachdb
