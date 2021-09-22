@@ -20,10 +20,10 @@ func getPool(cfg *Config) *pgxpool.Pool {
 	return pool
 }
 
-func resetDb(pool *pgxpool.Pool) error {
+func getTableNames(pool *pgxpool.Pool) ([]string, error) {
 	rows, err := pool.Query(context.Background(), "SHOW TABLES;")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -31,17 +31,16 @@ func resetDb(pool *pgxpool.Pool) error {
 	for rows.Next() {
 		var tablename string
 		if err := rows.Scan(&tablename); err != nil {
-			return err
+			return nil, err
 		}
 		tablenames = append(tablenames, tablename)
 	}
-	err := rows.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
+	return tablenames, nil
+}
 
+func resetDb(pool *pgxpool.Pool) error {
+	tablenames, err := getTableNames(pool)
 	query := fmt.Sprintf("TRUNCATE %s;", strings.Join(tablenames[:], ","))
 	pool.QueryRow(context.Background(), query)
-
-	return nil
+	return err
 }
