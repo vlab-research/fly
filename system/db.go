@@ -35,6 +35,10 @@ func resetDb(pool *pgxpool.Pool) error {
 		}
 		tablenames = append(tablenames, tablename)
 	}
+	err := rows.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	query := fmt.Sprintf("TRUNCATE %s;", strings.Join(tablenames[:], ","))
 	pool.QueryRow(context.Background(), query)
