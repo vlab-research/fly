@@ -17,13 +17,14 @@ import (
 const (
 	surveyid = "25d88631-8b7b-4f2b-8630-4e5f9085e888"
 	userid = "f6807e0f-600b-40ee-9363-455fcc23a000"
+	insertUser = `INSERT INTO users(id, email) VALUES ($1, 'test@test.com');`
 	insertSurvey = `
-		INSERT INTO surveys(id, userid, form_json, formid, form, shortcode, title, created)
-		VALUES ($1, $2, $3, 'test-form-id', 'test-form', 'test-sc', 'test-title', NOW());
+		INSERT INTO surveys(id, userid, form, formid, shortcode, title, created)
+		VALUES ($1, $2, $3, 'test-form-id', 'test-sc', 'test-title', NOW());
 	`
 	insertWithTranslation = `
-		INSERT INTO surveys(id, userid, form_json, translation_conf, formid, form, shortcode, title, created)
-		VALUES ($1, $2, $3, $4, 'test-form-id', 'test-form', 'test-sc', 'test-title', NOW());
+		INSERT INTO surveys(id, userid, form, translation_conf, formid, shortcode, title, created)
+		VALUES ($1, $2, $3, $4, 'test-form-id', 'test-sc', 'test-title', NOW());
 	`
 	formA = `
 		{
@@ -140,6 +141,7 @@ func TestTranslatorReturns400IfNotTranslatable(t *testing.T) {
 	pool := getPool(&cfg)
 	defer pool.Close()
 
+	mustExec(t, pool, insertUser, userid)
 	form := `
 		{
 			"title": "mytitle", 
@@ -225,6 +227,7 @@ func TestGetTranslatorGetsFromID(t *testing.T) {
 	pool := getPool(&cfg)
 	defer pool.Close()
 
+	mustExec(t, pool, insertUser, userid)
 	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", userid, formB)
 	mustExec(t, pool, insertWithTranslation, surveyid, userid, formA, `{"destination": "f6807e0f-600b-40ee-9363-455fcc23aad4"}`)
 
@@ -250,8 +253,9 @@ func TestGetTranslatorGetsSelf(t *testing.T) {
 	pool := getPool(&cfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", formB)
-	mustExec(t, pool, insertWithTranslation, userid, surveyid, formA, `{"self": true}`)
+	mustExec(t, pool, insertUser, userid)
+	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", userid, formB)
+	mustExec(t, pool, insertWithTranslation, surveyid, userid, formA, `{"self": true}`)
 
 	rec, c, s := request(pool, http.MethodGet, "/translator/foo", "")
 	c.SetParamNames("surveyid")
@@ -275,8 +279,9 @@ func TestGetTranslatorReturns404OnRawTranslationConf(t *testing.T) {
 	pool := getPool(&cfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", formB)
-	mustExec(t, pool, insertWithTranslation, userid, surveyid, formA, `{}`)
+	mustExec(t, pool, insertUser, userid)
+	mustExec(t, pool, insertSurvey, "f6807e0f-600b-40ee-9363-455fcc23aad4", userid, formB)
+	mustExec(t, pool, insertWithTranslation, surveyid, userid, formA, `{}`)
 
 	_, c, s := request(pool, http.MethodGet, "/translator/foo", "")
 	c.SetParamNames("surveyid")
@@ -308,6 +313,7 @@ func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
 	pool := getPool(&cfg)
 	defer pool.Close()
 
+	mustExec(t, pool, insertUser, userid)
 	smallForm := `
 		{
 			"title": "mytitle",
