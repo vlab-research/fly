@@ -34,9 +34,7 @@ services:
       CHATBASE_PORT: 26257
       CHATBASE_USER: root
       PORT: 80
-    command: |
-      sh -c '
-      '
+    command: go run .
     ports:
       - 80:80
     volumes:
