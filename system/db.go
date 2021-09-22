@@ -9,8 +9,8 @@ import (
 )
 
 func getPool(cfg *Config) *pgxpool.Pool {
-	conn := fmt.Sprintf("postgresql://%s@%s:%d/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
-	config, err := pgxpool.ParseConfig(conn)
+	con := fmt.Sprintf("postgresql://%s@%s:%d/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
+	config, err := pgxpool.ParseConfig(con)
 	handle(err)
 
 	ctx := context.Background()
@@ -27,18 +27,18 @@ func getTableNames(pool *pgxpool.Pool) ([]string, error) {
 	}
 	defer rows.Close()
 
-	tablenames := []string{}
+	tableNames := []string{}
 	for rows.Next() {
-		var tablename string
-		if err := rows.Scan(&tablename); err != nil {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
 			return nil, err
 		}
-		tablenames = append(tablenames, tablename)
+		tableNames = append(tableNames, tableName)
 	}
-	return tablenames, nil
+	return tableNames, nil
 }
 
-func resetDb(pool *pgxpool.Pool, tablenames []string) {
-	query := fmt.Sprintf("TRUNCATE %s;", strings.Join(tablenames[:], ","))
+func resetDb(pool *pgxpool.Pool, tableNames []string) {
+	query := fmt.Sprintf("TRUNCATE %s;", strings.Join(tableNames[:], ","))
 	pool.Exec(context.Background(), query)
 }
