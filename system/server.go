@@ -16,7 +16,7 @@ func (s *Server) ResetDb(c echo.Context) error {
 	err := resetDb(s.pool)
 	if err != nil {
 		msg := err.Error()
-		return echo.NewHTTPError(http.StatusInternalServerError, msg))
+		return echo.NewHTTPError(http.StatusInternalServerError, msg)
 	}
 	return c.String(http.StatusOK, "ok")
 }

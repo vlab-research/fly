@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 func getPool(cfg *Config) *pgxpool.Pool {
-	conn := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
+	conn := fmt.Sprintf("postgresql://%s@%s:%d/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
 	config, err := pgxpool.ParseConfig(conn)
 	handle(err)
 
@@ -38,8 +37,7 @@ func resetDb(pool *pgxpool.Pool) error {
 	}
 
 	query := fmt.Sprintf("TRUNCATE %s;", strings.Join(tablenames[:], ","))
-	err = pool.QueryRow(context.Background(), query)
-	if err != nil {
-		return err
-	}
+	pool.QueryRow(context.Background(), query)
+
+	return nil
 }
