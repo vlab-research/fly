@@ -22,15 +22,24 @@ func getPool(cfg *Config) *pgxpool.Pool {
 }
 
 func resetDb(pool *pgxpool.Pool) error {
+	rows, err := pool.Query(context.Background(), "SHOW TABLES;")
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
+	tablenames := []string{}
+	for rows.Next() {
+		var tablename string
+		if err := rows.Scan(&tablename); err != nil {
 			return err
 		}
+		tablenames = append(tablenames, tablename)
 	}
 
+	query := fmt.Sprintf("TRUNCATE %s;", strings.Join(tablenames[:], ","))
+	err = pool.QueryRow(context.Background(), query)
 	if err != nil {
-			return err
-		}
+		return err
+	}
 }
