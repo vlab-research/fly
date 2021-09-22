@@ -9,8 +9,8 @@ import (
 )
 
 func getPool(cfg *Config) *pgxpool.Pool {
-	conn := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
-	config, err := pgxpool.ParseConfig(conn)
+	con := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
+	config, err := pgxpool.ParseConfig(con)
 	handle(err)
 
 	config.MaxConns = int32(32)
