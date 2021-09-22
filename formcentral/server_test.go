@@ -185,9 +185,10 @@ func TestTranslatorReturnsTranslator(t *testing.T) {
 	pool := getPool(&cfg)
 	defer pool.Close()
 
+	mustExec(t, pool, insertUser, userid)
 	mustExec(t, pool, insertSurvey, surveyid, userid, formB)
 
-	params := fmt.Sprintf(`{"destination": surveyid, "form": %v}`, formA)
+	params := fmt.Sprintf(`{"destination": "%v", "form": %v}`, surveyid, formA)
 	rec, c, s := request(pool, http.MethodPost, "/translator", params)
 	err := s.CreateTranslator(c)
 
