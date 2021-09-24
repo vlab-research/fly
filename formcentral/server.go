@@ -7,7 +7,6 @@ import (
 	"time"
 	"strconv"
 
-	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/vlab-research/trans"
@@ -39,20 +38,18 @@ func (s *Server) GetTranslator(c echo.Context) error {
 	return c.JSON(http.StatusOK, translator)
 }
 
-type TranslatorRequest struct {
-	Form        *trans.FormJson `json:"form"`
-	Destination string          `json:"destination"`
-	Self        bool            `json:"self"`
-}
-
 func (s *Server) CreateTranslator(c echo.Context) error {
+	type TranslatorRequest struct {
+		Form        *trans.FormJson `json:"form"`
+		Destination string          `json:"destination"`
+		Self        bool            `json:"self"`
+	}
 	req := new(TranslatorRequest)
-	var dest *trans.FormJson
-
 	if err := c.Bind(req); err != nil {
 		return err
 	}
 
+	var dest *trans.FormJson
 	if req.Self {
 		dest = req.Form
 	} else {
@@ -102,21 +99,6 @@ func (s *Server) GetSurveyByParams(c echo.Context) error {
 	return c.JSON(http.StatusOK, survey)
 }
 
-type Config struct {
-	Db       string `env:"CHATBASE_DATABASE,required"`
-	User     string `env:"CHATBASE_USER,required"`
-	Password string `env:"CHATBASE_PASSWORD,required"`
-	Host     string `env:"CHATBASE_HOST,required"`
-	Port     string `env:"CHATBASE_PORT,required"`
-}
-
-func getConfig() Config {
-	cfg := Config{}
-	err := env.Parse(&cfg)
-	handle(err)
-	return cfg
-}
-
 func handle(err error) {
 	if err != nil {
 		log.Fatal(err)
@@ -126,7 +108,6 @@ func handle(err error) {
 func main() {
 	cfg := getConfig()
 	pool := getPool(&cfg)
-
 	server := &Server{pool}
 
 	e := echo.New()
@@ -135,5 +116,6 @@ func main() {
 	e.GET("/translators/:surveyid", server.GetTranslator)
 	e.POST("/translators", server.CreateTranslator)
 
-	e.Logger.Fatal(e.Start(":1323"))
+	address := fmt.Sprintf(`:%d`, cfg.Port)
+	e.Logger.Fatal(e.Start(address))
 }
