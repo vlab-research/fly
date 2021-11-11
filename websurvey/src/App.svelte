@@ -1,31 +1,21 @@
 <script>
-	import MultipleChoice from "./components/fields/MultipleChoice.svelte";
-	import ShortText from "./components/fields/ShortText.svelte";
-	import typeformData from "./typeformData.js";
-
-	const { fields } = typeformData;
-	const { length } = fields;
+	import { Router, Route, Link } from "svelte-routing";
+	import Home from "./routes/home.svelte";
+	import Field from "./routes/field.svelte";
+	export let url = "";
 </script>
 
-<main>
-	<form>
+<div>
+	<Router {url}>
+		<nav>
+			<Link to="/">Home</Link>
+			<Link to="field">Question</Link>
+		</nav>
 		<div>
-			{#each fields as field, index (field.id)}
-				<h2>
-					<label for="question-0">Question
-						{index + 1}
-						out of
-						{length}</label>
-				</h2>
-				<!-- Fields -->
-				{#if field.type === 'short_text'}
-					<ShortText {field} />
-				{:else if (field.type = 'multiple_choice')}
-					<MultipleChoice {field} />
-				{:else}
-					<p>You've reached the end of the survey!</p>
-				{/if}
-			{/each}
+			<Route path="/">
+				<Home />
+			</Route>
+			<Route path="field" component={Field} />
 		</div>
-	</form>
-</main>
+	</Router>
+</div>
