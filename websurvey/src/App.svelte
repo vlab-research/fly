@@ -5,13 +5,15 @@
 	export let url = "";
 </script>
 
-<Router {url}>
-	<nav>
-		<Link to="/">Home</Link>
-		<Link to="field">Question</Link>
-	</nav>
-	<Route path="/">
-		<Home />
-	</Route>
-	<Route path="field" component={Field} />
-</Router>
+<main>
+	<Router {url}>
+		<nav>
+			<Link to="/">Home</Link>
+			<Link to="field">Question</Link>
+		</nav>
+		<Route path="/">
+			<Home />
+		</Route>
+		<Route path="field" component={Field} />
+	</Router>
+</main>
