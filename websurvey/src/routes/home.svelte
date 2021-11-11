@@ -14,7 +14,9 @@
             <!-- First field -->
             {#each firstField as field, index (field.id)}
                 <h2 class="label-wrapper">
-                    <label for="question-{index}">Question 1 out of
+                    <label for="question-{index}">Question
+                        {index + 1}
+                        out of
                         {length}</label>
                 </h2>
                 {#if field.type === 'short_text'}

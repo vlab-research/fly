@@ -1,18 +1,21 @@
 <script>
     export let field = {};
+    export let index;
 
-    const { title, id, properties } = field;
+    const { title, properties } = field;
     const { choices } = properties;
+
+    let yes = false;
 </script>
 
 <!-- Question -->
 <div>
-    <label for="field-{id}" class="field-label">{title}</label>
+    <label class="field-label" for="field-{title}">{title}</label>
     {#each choices as choice, index (choice.id)}
         <div class="c-cb">
-            <input type="checkbox" checked={false} />
+            <input id="property-{choice}" type="checkbox" bind:checked={yes} />
             <label
-                for="field-{choice.id}"
+                for="property-{choice}"
                 class="field-label">{choice.label}</label>
         </div>
     {/each}

@@ -1,17 +1,18 @@
 <script>
     export let field = {};
+    export let index;
 
-    const { title, id } = field;
+    const { title } = field;
     let response = "";
 </script>
 
 <!-- Question -->
 <div>
-    <label for="field-{id}" class="field-label">{title}</label>
+    <label for="field-{title}" class="field-label">{title}</label>
     <input
         bind:value={response}
         type="text"
-        id="question-0"
+        id="field-{title}"
         autocomplete="off"
         class="input input__lg" />
     <button class="btn">OK</button>
