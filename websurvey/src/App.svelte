@@ -1,4 +1,6 @@
 <script>
+	import MultipleChoice from "./components/fields/MultipleChoice.svelte";
+	import ShortText from "./components/fields/ShortText.svelte";
 	import typeformData from "./typeformData.js";
 
 	const { fields } = typeformData;
@@ -8,14 +10,21 @@
 <main>
 	<form>
 		<div>
-			<!-- Fields -->
 			{#each fields as field, index (field.id)}
-				<label for="question-0">Question
-					{index + 1}
-					out of
-					{length}</label>
-				<li>{field.title}</li>
-				<input />
+				<h2>
+					<label for="question-0">Question
+						{index + 1}
+						out of
+						{length}</label>
+				</h2>
+				<!-- Fields -->
+				{#if field.type === 'short_text'}
+					<ShortText {field} />
+				{:else if (field.type = 'multiple_choice')}
+					<MultipleChoice {field} />
+				{:else}
+					<p>You've reached the end of the survey!</p>
+				{/if}
 			{/each}
 		</div>
 	</form>
