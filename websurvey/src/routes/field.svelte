@@ -20,9 +20,9 @@
                         {length}</label>
                 </h2>
                 {#if field.type === 'short_text'}
-                    <ShortText {field} {index} />
+                    <ShortText {field} />
                 {:else if (field.type = 'multiple_choice')}
-                    <MultipleChoice {field} {index} />
+                    <MultipleChoice {field} />
                 {:else}
                     <p>You've reached the end of the survey!</p>
                 {/if}
