@@ -1,7 +1,7 @@
 <script>
 	import { Router, Route, Link } from "svelte-routing";
 	import Home from "./routes/home.svelte";
-	import Field from "./routes/field.svelte";
+	import Form from "./routes/form.svelte";
 	export let url = "";
 </script>
 
@@ -9,11 +9,11 @@
 	<Router {url}>
 		<nav>
 			<Link to="/">Home</Link>
-			<Link to="field">Question</Link>
+			<Link to="/:id">Question</Link>
 		</nav>
 		<Route path="/">
 			<Home />
 		</Route>
-		<Route path="field" component={Field} />
+		<Route path="/:id" component={Form} />
 	</Router>
 </main>
