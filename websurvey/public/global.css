@@ -240,14 +240,14 @@ body {
   clear: left;
 }
 .c-cb > label::before,
-.c-cb > input[type="checkbox"] {
+.c-cb > input[type="radio"] {
   box-sizing: border-box;
   top: -2px;
   left: -2px;
-  width: 44px;
+  width: 240px;
   height: 44px;
 }
-.c-cb > input[type="checkbox"] {
+.c-cb > input[type="radio"] {
   -webkit-font-smoothing: antialiased;
   cursor: pointer;
   position: absolute;
@@ -271,7 +271,7 @@ body {
   border: 2px solid currentColor;
   background: transparent;
 }
-.c-cb > input[type="checkbox"]:focus + label::before {
+.c-cb > input[type="radio"]:focus + label::before {
   border-width: 4px;
   outline: 3px dashed #228bec;
 }
@@ -290,6 +290,6 @@ body {
   opacity: 0;
   background: transparent;
 }
-.c-cb > input[type="checkbox"]:checked + label::after {
+.c-cb > input[type="radio"]:checked + label::after {
   opacity: 1;
 }
