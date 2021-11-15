@@ -1,11 +1,12 @@
 <script>
-    export let field = {};
+    import Button from "./Button.svelte";
+    export let field;
+
     const { title, id, properties } = field;
     const { choices } = properties;
     let selectedChoice;
 </script>
 
-<!-- Question -->
 <div>
     <label for="field-{id}" class="field-label">{title}</label>
     {#each choices as choice, index (choice.id)}
@@ -20,6 +21,4 @@
                 class="field-label">{choice.label}</label>
         </div>
     {/each}
-
-    <button class="btn">OK</button>
 </div>
