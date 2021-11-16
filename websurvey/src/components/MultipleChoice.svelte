@@ -1,5 +1,4 @@
 <script>
-    import Button from "./Button.svelte";
     export let field;
 
     const { title, id, properties } = field;
