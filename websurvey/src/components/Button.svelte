@@ -1,17 +1,15 @@
-<script>
+<!--<script>
     import { createEventDispatcher } from "svelte";
     const dispatch = createEventDispatcher();
     export let view;
-</script>
-
-{#if view === 'homepage'}
+</script>{#if view === 'homepage'}
     <button
         class="btn"
         on:click|once={() => dispatch('homepageClick', 'homepage button clicked')}
-        view><slot />Let's go!</button>
+        view>Let's go!</button>
 {:else if view === 'survey'}
     <button
         class="btn"
         on:click|once={() => dispatch('surveyClick', 'survey button clicked')}
-        view><slot />OK</button>
-{:else}<button type="submit">Submit</button>{/if}
+        view>OK</button>
+{:else}<button type="submit">Submit</button>{/if} -->
