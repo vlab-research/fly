@@ -17,7 +17,8 @@
     //TODO set new index on form submit
     let currentIndex = fields.findIndex((field) => field?.id === currentId);
 
-    let ref = fields[currentIndex].ref;
+    export let ref;
+    ref = fields[currentIndex].ref;
 </script>
 
 <div class="surveyapp stack-large">
