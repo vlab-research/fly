@@ -2,6 +2,7 @@
 	import { Router, Route, Link } from "svelte-routing";
 	import Home from "./routes/Home.svelte";
 	import Form from "./routes/Form.svelte";
+
 	export let url = "";
 </script>
 
@@ -9,13 +10,13 @@
 	<Router {url}>
 		<nav>
 			<Link to="/">Home</Link>
-			<Link to="/survey/:id">Question</Link>
+			<Link to="/survey/:ref">Question</Link>
 		</nav>
 		<Route path="/">
 			<Home />
 		</Route>
-		<Route path="/survey/:id" let:params>
-			<Form id={params.id} />
+		<Route path="/survey/:ref" let:params>
+			<Form ref={`${params.ref}`} />
 		</Route>
 	</Router>
 </main>
