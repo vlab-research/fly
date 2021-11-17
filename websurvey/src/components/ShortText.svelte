@@ -1,7 +1,7 @@
 <script>
     export let field;
     const { title, id } = field;
-    let response = "";
+    let response;
 </script>
 
 <div>
@@ -11,5 +11,6 @@
         type="text"
         id="field-{id}"
         autocomplete="off"
-        class="input input__lg" />
+        class="input input__lg"
+        placeholder={title} />
 </div>

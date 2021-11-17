@@ -29,7 +29,7 @@
 			<Link to="/{ref}">Question</Link>
 		</nav>
 		<Route path="/">
-			<Home />
+			<Home {ref} />
 		</Route>
 		<Route path="/{ref}" let:params>
 			<Form {...params} {currentIndex} />
