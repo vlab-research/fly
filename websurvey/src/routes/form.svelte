@@ -1,24 +1,12 @@
 <script>
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
-    import Button from "../components/Button.svelte";
     import typeformData from "../typeformData.js";
+
+    export let currentIndex;
 
     const { fields } = typeformData;
     const { length } = fields;
-
-    const getCurrentId = (index) => {
-        let id = fields[index].id;
-        return id;
-    };
-
-    let currentId = getCurrentId(0);
-
-    //TODO set new index on form submit
-    let currentIndex = fields.findIndex((field) => field?.id === currentId);
-
-    export let ref;
-    ref = fields[currentIndex].ref;
 </script>
 
 <div class="surveyapp stack-large">
