@@ -7,10 +7,17 @@
 
     const { fields } = typeformData;
     const { length } = fields;
+
+    const handleSubmit = () => {
+        if (currentIndex < fields.length - 1) {
+            currentIndex += 1;
+        }
+        return currentIndex;
+    };
 </script>
 
 <div class="surveyapp stack-large">
-    <form>
+    <form on:submit|preventDefault={handleSubmit}>
         <div class="stack-small">
             <!-- Question -->
             {#each fields as field, index (field.id)}
@@ -30,7 +37,6 @@
                     {/if}
                 {/if}
             {/each}
-
             <button class="btn">OK</button>
         </div>
     </form>
