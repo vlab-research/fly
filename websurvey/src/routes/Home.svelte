@@ -1,7 +1,9 @@
 <script>
     import { navigate } from "svelte-routing";
 
-    export let ref;
+    export let getCurrentRef;
+
+    const ref = getCurrentRef(0);
 
     const handleSubmit = () => {
         navigate(`/${ref}`, { replace: true });
