@@ -12,9 +12,15 @@
 	let ref;
 	let currentIndex = 0;
 
+	const setInitialRef = (index) => {
+		ref = fields[index].ref;
+		console.log(
+			`The starting index is ${index} and the starting ref is ${ref}`
+		);
+	};
+
 	const setCurrentRef = (index) => {
 		ref = fields[index].ref;
-		return ref;
 	};
 
 	const indexUpdate = (e) => {
@@ -25,26 +31,16 @@
 			`The current index is ${currentIndex} and the current ref is ${ref}`
 		);
 	};
-
-	const setInitialRef = (index) => {
-		ref = fields[index].ref;
-		console.log(
-			`The starting index is ${index} and the starting ref is ${ref}`
-		);
-	};
 </script>
 
 <main>
 	<Router {url}>
 		<nav>
 			<Link to="/">Home</Link>
-			<Link to="/{ref}">Question</Link>
 		</nav>
 		<Route path="/">
 			<Home {setInitialRef} />
 		</Route>
-		<Route path="/{ref}" let:params>
-			<Form {...params} on:indexUpdate={indexUpdate} {currentIndex} />
-		</Route>
 	</Router>
+	<Form on:indexUpdate={indexUpdate} {currentIndex} {ref} />
 </main>

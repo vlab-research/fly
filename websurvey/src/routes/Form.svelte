@@ -1,10 +1,13 @@
 <script>
     import { createEventDispatcher } from "svelte";
+    import { navigate } from "svelte-routing";
+
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
     import typeformData from "../typeformData.js";
 
     export let currentIndex;
+    export let ref;
 
     let dispatch = createEventDispatcher();
 
@@ -14,6 +17,7 @@
     const handleSubmit = () => {
         if (currentIndex < fields.length - 1) {
             currentIndex += 1;
+            navigate(`/${ref}`, { replace: true });
         }
         currentIndex;
         dispatch("indexUpdate", currentIndex);
