@@ -10,17 +10,20 @@
 	const { fields } = typeformData;
 
 	let ref;
+	let currentIndex = 0;
 
-	const getCurrentRef = (index) => {
+	$: console.log(`The current index is: ${currentIndex}`);
+
+	const setCurrentRef = (index) => {
 		ref = fields[index].ref;
 	};
 
 	const indexUpdate = (e) => {
-		const currentIndex = e.detail;
+		currentIndex = e.detail;
 
-		getCurrentRef(currentIndex);
+		setCurrentRef(currentIndex);
 		console.log(
-			`The new index is ${currentIndex} and the new ref is ${ref}`
+			`The current index is ${currentIndex} and the current ref is ${ref}`
 		);
 	};
 
@@ -42,7 +45,7 @@
 			<Home {setInitialRef} />
 		</Route>
 		<Route path="/{ref}" let:params>
-			<Form {...params} on:indexUpdate={indexUpdate} />
+			<Form {...params} on:indexUpdate={indexUpdate} {currentIndex} />
 		</Route>
 	</Router>
 </main>

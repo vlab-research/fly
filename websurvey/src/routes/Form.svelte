@@ -4,21 +4,12 @@
     import ShortText from "../components/ShortText.svelte";
     import typeformData from "../typeformData.js";
 
+    export let currentIndex;
+
     let dispatch = createEventDispatcher();
 
     const { fields } = typeformData;
     const { length } = fields;
-
-    const getCurrentId = (index) => {
-        const id = fields[index].id;
-        return id;
-    };
-
-    let currentId = getCurrentId(0);
-
-    let currentIndex = fields.findIndex((field) => field?.id === currentId);
-
-    currentId = getCurrentId(currentIndex);
 
     const handleSubmit = () => {
         if (currentIndex < fields.length - 1) {
