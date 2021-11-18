@@ -12,16 +12,15 @@
 	let ref;
 	let currentIndex = 0;
 
-	$: console.log(`The current index is: ${currentIndex}`);
-
 	const setCurrentRef = (index) => {
 		ref = fields[index].ref;
+		return ref;
 	};
 
 	const indexUpdate = (e) => {
 		currentIndex = e.detail;
-
 		setCurrentRef(currentIndex);
+
 		console.log(
 			`The current index is ${currentIndex} and the current ref is ${ref}`
 		);
