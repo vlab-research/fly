@@ -9,22 +9,27 @@
 
 	const { fields } = typeformData;
 
-	const getCurrentId = (index) => {
-		let id = fields[index].id;
-		return id;
-	};
-
-	//TODO set new index on form submit
-	let currentId = getCurrentId(0);
-
-	let currentIndex = fields.findIndex((field) => field?.id === currentId);
+	let ref;
 
 	const getCurrentRef = (index) => {
-		let ref = fields[index].ref;
-		return ref;
+		ref = fields[index].ref;
 	};
 
-	const ref = getCurrentRef(currentIndex);
+	const indexUpdate = (e) => {
+		const currentIndex = e.detail;
+
+		getCurrentRef(currentIndex);
+		console.log(
+			`The new index is ${currentIndex} and the new ref is ${ref}`
+		);
+	};
+
+	const setInitialRef = (index) => {
+		ref = fields[index].ref;
+		console.log(
+			`The starting index is ${index} and the starting ref is ${ref}`
+		);
+	};
 </script>
 
 <main>
@@ -34,10 +39,10 @@
 			<Link to="/{ref}">Question</Link>
 		</nav>
 		<Route path="/">
-			<Home {getCurrentRef} />
+			<Home {setInitialRef} />
 		</Route>
 		<Route path="/{ref}" let:params>
-			<Form {...params} {currentIndex} />
+			<Form {...params} on:indexUpdate={indexUpdate} />
 		</Route>
 	</Router>
 </main>
