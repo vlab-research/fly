@@ -1,4 +1,5 @@
 <script>
+    import { createEventDispatcher } from "svelte";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
     import typeformData from "../typeformData.js";
@@ -10,15 +11,18 @@
 
     let index = 0;
 
-    ref = fields[index].ref;
-
-    index = fields.findIndex((field) => field.ref === ref);
-
     let field = fields[index];
+
+    const handleSubmit = () => {
+        if (index < fields.length - 1) index++;
+        field = fields[index];
+        ref = field.ref;
+        console.log(field, ref);
+    };
 </script>
 
 <div class="surveyapp stack-large">
-    <form>
+    <form on:submit|preventDefault={handleSubmit}>
         <div class="stack-small">
             <!-- Question -->
             {#if field}
