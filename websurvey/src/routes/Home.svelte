@@ -1,17 +1,9 @@
 <script>
     import { navigate } from "svelte-routing";
-
-    export let setInitialRef;
-
-    const ref = setInitialRef(0);
-
-    const handleSubmit = () => {
-        navigate(`/${ref}`, { replace: true });
-    };
 </script>
 
 <div class="surveyapp stack-large">
-    <form on:submit|preventDefault={handleSubmit}>
+    <form>
         <div class="stack-small">
             <h1 class="h1">Hey! Welcome to our fun survey</h1>
             <button type="submit" class="btn">Let's go</button>
