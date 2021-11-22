@@ -18,8 +18,8 @@
 
 <main>
 	<Router {url}>
-		<Route path="/" let:params>
-			<Home ref={params.ref} {fields} />
+		<Route path="/">
+			<Home {ref} {fields} on:updateRef={updateRef} />
 		</Route>
 		<Route path="/:ref" let:params>
 			<Form ref={params.ref} {fields} on:updateRef={updateRef} />

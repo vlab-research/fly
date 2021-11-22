@@ -3,18 +3,13 @@
     import { createEventDispatcher } from "svelte";
 
     export let fields;
-
     export let ref;
 
     let dispatch = createEventDispatcher();
 
-    let index = fields.findIndex((field) => field.ref === ref);
-
-    let field = fields[index];
-
     const handleSubmit = () => {
-        index += 1;
-        field = fields[index];
+        const index = 0;
+        const field = fields[index];
         ref = field.ref;
         navigate(`/${ref}`, { replace: true });
         dispatch("updateRef", ref);
