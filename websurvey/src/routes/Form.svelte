@@ -13,7 +13,7 @@
 
     let index = fields.findIndex((field) => field.ref === ref);
 
-    let field = fields[index];
+    $: field = fields[index];
 
     const handleSubmit = () => {
         if (index < fields.length - 1) index++;
