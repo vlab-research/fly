@@ -12,35 +12,29 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-type ReloadlyProvider struct {
+type GiftCardsProvider struct {
 	pool *pgxpool.Pool
 	svc  *reloadly.Service
 }
 
-func NewReloadlyProvider(pool *pgxpool.Pool) (Provider, error) {
+func NewGiftCardsProvider(pool *pgxpool.Pool) (Provider, error) {
 	cfg := getConfig()
-	svc := reloadly.NewTopups()
+	svc := reloadly.NewGiftCards()
 	if cfg.Sandbox {
 		svc.Sandbox()
 	}
-	return &ReloadlyProvider{pool, svc}, nil
+	return &GiftCardsProvider{pool, svc}, nil
 }
 
-func (p *ReloadlyProvider) formatError(res *Result, err error, details *json.RawMessage) (*Result, error) {
+func (p *GiftCardsProvider) formatError(res *Result, err error, details *json.RawMessage) (*Result, error) {
 	res.Success = false
 
 	// TODO: catch 500 errors and "try again later" errors
 	// for retrying...
-	// PHONE_RECENTLY_RECHARGED
-	// TRANSACTION_CANNOT_BE_PROCESSED_AT_THE_MOMENT
-	// PROVIDER_INTERNAL_ERROR
-	// SERVICE_TO_OPERATOR_TEMPORARILY_UNAVAILABLE
-
-	// what to do if fallback is not provider you checked
-	// has correct option types?
-
-	// IMPOSSIBLE_AMOUNT
-	// Add special message in typeform logic to deal with this???
+	// CARD_IS_NOT_READY
+	// PENDING_OR_IN_PROGRESS
+	// ORDER_IS_NOT_READY
+	// IMPORT_CARD_ERROR
 	if e, ok := err.(reloadly.APIError); ok {
 		res.Error = &PaymentError{e.Message, e.ErrorCode, details}
 		return res, nil
@@ -50,7 +44,7 @@ func (p *ReloadlyProvider) formatError(res *Result, err error, details *json.Raw
 		return res, nil
 	}
 	if e, ok := err.(validator.ValidationErrors); ok {
-		res.Error = &PaymentError{e.Error(), "INVALID_PAYMENT_DETAILS", details}
+		res.Error = &PaymentError{e.Error(), "INVALID_GIFT_CARD_DETAILS", details}
 		return res, nil
 	}
 
@@ -59,7 +53,7 @@ func (p *ReloadlyProvider) formatError(res *Result, err error, details *json.Raw
 	return res, err
 }
 
-func (p *ReloadlyProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, error) {
+func (p *GiftCardsProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, error) {
 	query := `SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1`
 	row := p.pool.QueryRow(context.Background(), query, event.Pageid)
 	var u User
@@ -72,7 +66,7 @@ func (p *ReloadlyProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, 
 	return &u, err
 }
 
-func (p *ReloadlyProvider) Auth(user *User) error {
+func (p *GiftCardsProvider) Auth(user *User) error {
 	crds, err := p.getCredentials(user.Id)
 	if err != nil {
 		return err
@@ -93,7 +87,7 @@ func (p *ReloadlyProvider) Auth(user *User) error {
 	return p.svc.Auth(auth.Id, auth.Secret)
 }
 
-func (p *ReloadlyProvider) getCredentials(userid string) (*Credentials, error) {
+func (p *GiftCardsProvider) getCredentials(userid string) (*Credentials, error) {
 	query := `SELECT details FROM credentials WHERE entity='reloadly' AND userid=$1 LIMIT 1`
 	row := p.pool.QueryRow(context.Background(), query, userid)
 	var c Credentials
@@ -106,31 +100,30 @@ func (p *ReloadlyProvider) getCredentials(userid string) (*Credentials, error) {
 	return &c, err
 }
 
-func (p *ReloadlyProvider) Payout(event *PaymentEvent) (*Result, error) {
-	job := new(reloadly.TopupJob)
-	err := json.Unmarshal(*event.Details, &job)
+func (p *GiftCardsProvider) Payout(event *PaymentEvent) (*Result, error) {
+	order := new(reloadly.GiftCardOrder)
+	err := json.Unmarshal(*event.Details, &order)
 	if err != nil {
 		return nil, err
 	}
 
 	result := &Result{}
-	result.Type = "payment:reloadly"
-	result.ID = job.ID
+	result.Type = "payment:reloadly-giftcard"
+	result.ID = order.ID
 
 	validate := validator.New()
-	err = validate.Struct(job)
+	err = validate.Struct(order)
 	if err != nil {
 		return p.formatError(result, err, event.Details)
 	}
 
-	worker := reloadly.TopupWorker(*p.svc)
-	r, err := worker.DoJob(job)
+	t, err := p.svc.GiftCards().Order(*order)
 	if err != nil {
 		return p.formatError(result, err, event.Details)
 	}
 
 	result.Success = true
-	result.Timestamp = time.Time(*r.TransactionDate)
+	result.Timestamp = time.Time(*t.TransactionCreatedTime)
 	result.PaymentDetails = event.Details
 	return result, nil
 }
