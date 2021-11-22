@@ -28,21 +28,23 @@
     <form on:submit|preventDefault={handleSubmit}>
         <div class="stack-small">
             <!-- Question -->
-            {#if field}
-                <h2 class="label-wrapper">
-                    <label for="question-{index + 1}">Question
-                        {index + 1}
-                        out of
-                        {length}</label>
-                </h2>
-                {#if field.type === 'short_text'}
-                    <ShortText {field} />
-                {:else if field.type === 'multiple_choice'}
-                    <MultipleChoice {field} />
-                {:else}
-                    <p>You've reached the end of the survey!</p>
+            {#each fields as currentField}
+                {#if field === currentField}
+                    <h2 class="label-wrapper">
+                        <label for="question-{index + 1}">Question
+                            {index + 1}
+                            out of
+                            {length}</label>
+                    </h2>
+                    {#if field.type === 'short_text'}
+                        <ShortText {field} />
+                    {:else if field.type === 'multiple_choice'}
+                        <MultipleChoice {field} />
+                    {:else}
+                        <p>You've reached the end of the survey!</p>
+                    {/if}
                 {/if}
-            {/if}
+            {/each}
             <button class="btn">OK</button>
         </div>
     </form>
