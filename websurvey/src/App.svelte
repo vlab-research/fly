@@ -8,7 +8,7 @@
 
 	const { fields } = typeformData;
 
-	let ref = fields[0].ref;
+	let ref;
 
 	const updateRef = (e) => {
 		const updatedRef = e.detail;
@@ -18,15 +18,11 @@
 
 <main>
 	<Router {url}>
-		<nav>
-			<Link to="/">Home</Link>
-			<Link to="/{ref}">Question</Link>
-		</nav>
-		<Route path="/">
-			<Home />
+		<Route path="/" let:params>
+			<Home ref={params.ref} {fields} />
 		</Route>
 		<Route path="/:ref" let:params>
-			<Form ref={params.ref} on:updateRef={updateRef} />
+			<Form ref={params.ref} {fields} on:updateRef={updateRef} />
 		</Route>
 	</Router>
 </main>

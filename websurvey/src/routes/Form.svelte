@@ -3,13 +3,12 @@
     import { createEventDispatcher } from "svelte";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
-    import typeformData from "../typeformData.js";
+
+    export let ref;
+    export let fields;
 
     let dispatch = createEventDispatcher();
 
-    export let ref;
-
-    const { fields } = typeformData;
     const { length } = fields;
 
     let index = fields.findIndex((field) => field.ref === ref);
