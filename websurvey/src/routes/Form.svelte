@@ -6,6 +6,7 @@
 
     export let ref;
     export let fields;
+    export let thankyou_screens;
 
     let dispatch = createEventDispatcher();
 
@@ -15,11 +16,18 @@
 
     $: field = fields[index];
 
+    let defaultThankyou = thankyou_screens[0];
+
     const handleSubmit = () => {
-        if (index < fields.length - 1) index++;
-        field = fields[index];
-        ref = field.ref;
-        navigate(`/${ref}`, { replace: true });
+        index++;
+        if (index < length) {
+            field = fields[index];
+            ref = field.ref;
+            navigate(`/${ref}`, { replace: true });
+        } else if (index === length) {
+            ref = defaultThankyou.ref;
+            navigate(`/${ref}`, { replace: true });
+        }
         dispatch("updateRef", ref);
     };
 </script>
@@ -40,8 +48,6 @@
                         <ShortText {field} />
                     {:else if field.type === 'multiple_choice'}
                         <MultipleChoice {field} />
-                    {:else}
-                        <p>You've reached the end of the survey!</p>
                     {/if}
                 {/if}
             {/each}

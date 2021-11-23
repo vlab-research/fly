@@ -32,8 +32,8 @@ export default {
   thankyou_screens: [
     {
       id: "oBB8D27w4zil",
-      ref: "01FKK5KXV1AT4AG5XFCZYNGTTN",
-      title: "",
+      ref: "thankyou",
+      title: "Thanks for completing our survey! ",
       properties: {
         show_button: true,
         share_icons: true,
@@ -83,7 +83,7 @@ export default {
       },
     },
     {
-      id: "8ryQFvgTH3gu",
+      id: "CpPS6viLtXJp",
       title: "What's your age?",
       ref: "whats_your_age",
       properties: {},
