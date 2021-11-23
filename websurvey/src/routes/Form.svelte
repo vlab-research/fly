@@ -4,9 +4,7 @@
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
 
-    export let ref;
-    export let fields;
-    export let thankyou_screens;
+    export let ref, fields, thankyou_screens;
 
     let dispatch = createEventDispatcher();
 
