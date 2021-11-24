@@ -1,26 +1,45 @@
 <script>
     import { navigate } from "svelte-routing";
-    import { createEventDispatcher } from "svelte";
 
-    export let fields;
-    export let ref;
+    import MultipleChoice from "../components/MultipleChoice.svelte";
+    import ShortText from "../components/ShortText.svelte";
 
-    let dispatch = createEventDispatcher();
+    import getIndex from "../utils/getIndex.js";
 
-    const handleSubmit = () => {
-        const index = 0;
-        const field = fields[index];
-        ref = field.ref;
-        navigate(`/${ref}`, { replace: true });
-        dispatch("updateRef", ref);
+    export let ref, fields;
+
+    const setFirstRef = (index) => {
+        return fields[index].ref;
     };
+
+    ref = setFirstRef(0);
+
+    navigate(`/${ref}`, { replace: true });
+
+    let index = getIndex(fields, ref);
+
+    let field = fields[index];
 </script>
 
 <div class="surveyapp stack-large">
-    <form on:submit|preventDefault={handleSubmit}>
+    <div class="stack-small" />
+    <form>
         <div class="stack-small">
-            <h1 class="h1">Hey! Welcome to our fun survey</h1>
-            <button type="submit" class="btn">Let's go</button>
+            <!-- Question -->
+            {#if field}
+                <h2 class="label-wrapper">
+                    <label for="question-{index + 1}">Question
+                        {index + 1}
+                        out of
+                        {fields.length}</label>
+                </h2>
+                {#if field.type === 'short_text'}
+                    <ShortText {field} />
+                {:else if field.type === 'multiple_choice'}
+                    <MultipleChoice {field} />
+                {/if}
+            {/if}
+            <button class="btn">OK</button>
         </div>
     </form>
 </div>
