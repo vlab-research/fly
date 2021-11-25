@@ -10,13 +10,12 @@
 
 	const { fields, thankyou_screens } = typeformData;
 
-	let ref;
 </script>
 
 <main>
 	<Router {url}>
 		<Route path="/">
-			<Home {ref} {fields} />
+			<Home {fields} />
 		</Route>
 		<Route path="/:ref" let:params>
 			<Form ref={params.ref} {fields} />
