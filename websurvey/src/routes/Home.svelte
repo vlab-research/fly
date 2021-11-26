@@ -1,5 +1,7 @@
 <script>
+    import { onMount } from "svelte";
     import { navigate } from "svelte-routing";
+
     export let ref, typeformData;
 
     const { fields } = typeformData;
@@ -10,7 +12,9 @@
 
     ref = setFirstRef(0);
 
-    setTimeout(() => navigate(`/${ref}`, { replace: true }), 0);
+    onMount(() => {
+        navigate(`/${ref}`, { replace: true });
+    });
 </script>
 
 <div class="surveyapp stack-large">loading</div>
