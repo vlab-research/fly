@@ -2,9 +2,7 @@
     import { navigate } from "svelte-routing";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
-    import isLast from "../utils/functions/isLast.js";
-    import getIndex from "../utils/functions/getIndex.js";
-    import getNextRef from "../utils/functions/getNextRef.js";
+    import { isLast, getIndex, getNextRef } from "../utils/helpers.js";
 
     export let ref, fields, thankyou_screens;
 
