@@ -3,6 +3,8 @@
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
     import isLast from "../utils/functions/isLast.js";
+    import getIndex from "../utils/functions/getIndex.js";
+    import getNextRef from "../utils/functions/getNextRef.js";
 
     export let ref, fields, thankyou_screens;
 
@@ -11,13 +13,13 @@
     let index, field;
 
     $: {
-        index = fields.findIndex((field) => field.ref === ref);
+        index = getIndex(fields, ref);
         field = fields[index];
     }
 
     const handleSubmit = () => {
         if (index < fields.length - 1) {
-            const newRef = fields[index + 1].ref;
+            const newRef = getNextRef(fields, ref);
             navigate(`/${newRef}`, { replace: true });
         } else if (isLast(fields, ref)) {
             navigate(`/${thankyouScreen.ref}`, { replace: true });
