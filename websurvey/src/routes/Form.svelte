@@ -4,7 +4,9 @@
     import ShortText from "../components/ShortText.svelte";
     import { isLast, getIndex, getNextRef } from "../utils/helpers.js";
 
-    export let ref, fields, thankyou_screens;
+    export let ref, typeformData;
+
+    const { fields, thankyou_screens } = typeformData;
 
     let thankyouScreen = thankyou_screens[0];
 
