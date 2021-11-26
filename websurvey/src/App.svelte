@@ -16,7 +16,7 @@
 			<Home {fields} />
 		</Route>
 		<Route path="/:ref" let:params>
-			<Form ref={params.ref} {fields} />
+			<Form ref={params.ref} {fields} {thankyou_screens} />
 		</Route>
 		<Route path="/thankyou">
 			<Thankyou {thankyou_screens} />

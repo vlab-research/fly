@@ -1,9 +1,12 @@
 <script>
+    import { navigate } from "svelte-routing";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
-    import { navigate } from "svelte-routing";
+    import isLast from "../utils/functions/isLast.js";
 
-    export let ref, fields;
+    export let ref, fields, thankyou_screens;
+
+    let thankyouScreen = thankyou_screens[0];
 
     let index, field;
 
@@ -16,7 +19,10 @@
         if (index < fields.length - 1) {
             const newRef = fields[index + 1].ref;
             navigate(`/${newRef}`, { replace: true });
+        } else if (isLast(fields, ref)) {
+            navigate(`/${thankyouScreen.ref}`, { replace: true });
         }
+        return;
     };
 </script>
 
