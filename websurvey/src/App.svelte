@@ -3,7 +3,7 @@
 	import Home from "./routes/Home.svelte";
 	import Form from "./routes/Form.svelte";
 	import Thankyou from "./routes/Thankyou.svelte";
-	import typeformData from "./typeformData.js";
+	import typeformData from "../mocks/typeformData.json";
 
 	export let url = "";
 </script>
