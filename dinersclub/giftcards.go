@@ -3,18 +3,14 @@ package main
 import (
 	"encoding/json"
 	"time"
-	"context"
-	"fmt"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/vlab-research/go-reloadly/reloadly"
-	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 type GiftCardsProvider struct {
-	pool *pgxpool.Pool
-	svc  *reloadly.Service
+	ReloadlyProvider
 }
 
 func NewGiftCardsProvider(pool *pgxpool.Pool) (Provider, error) {
@@ -23,7 +19,8 @@ func NewGiftCardsProvider(pool *pgxpool.Pool) (Provider, error) {
 	if cfg.Sandbox {
 		svc.Sandbox()
 	}
-	return &GiftCardsProvider{pool, svc}, nil
+	p := ReloadlyProvider{pool, svc}
+	return &GiftCardsProvider{p}, nil
 }
 
 func (p *GiftCardsProvider) formatError(res *Result, err error, details *json.RawMessage) (*Result, error) {
@@ -51,53 +48,6 @@ func (p *GiftCardsProvider) formatError(res *Result, err error, details *json.Ra
 	// any other type of error should be considered a
 	// system error and should be retried/logged.
 	return res, err
-}
-
-func (p *GiftCardsProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, error) {
-	query := `SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1`
-	row := p.pool.QueryRow(context.Background(), query, event.Pageid)
-	var u User
-	err := row.Scan(&u.Id)
-
-	if err == pgx.ErrNoRows {
-		return nil, nil
-	}
-
-	return &u, err
-}
-
-func (p *GiftCardsProvider) Auth(user *User) error {
-	crds, err := p.getCredentials(user.Id)
-	if err != nil {
-		return err
-	}
-	if crds == nil {
-		return fmt.Errorf(`No reloadly credentials were found for user: %s`, user.Id)
-	}
-
-	auth := struct {
-		Id     string `json:"id"`
-		Secret string `json:"secret"`
-	}{}
-	err = json.Unmarshal(*crds.Details, &auth)
-	if err != nil {
-		return err
-	}
-
-	return p.svc.Auth(auth.Id, auth.Secret)
-}
-
-func (p *GiftCardsProvider) getCredentials(userid string) (*Credentials, error) {
-	query := `SELECT details FROM credentials WHERE entity='reloadly' AND userid=$1 LIMIT 1`
-	row := p.pool.QueryRow(context.Background(), query, userid)
-	var c Credentials
-	err := row.Scan(&c.Details)
-
-	if err == pgx.ErrNoRows {
-		return nil, nil
-	}
-
-	return &c, err
 }
 
 func (p *GiftCardsProvider) Payout(event *PaymentEvent) (*Result, error) {

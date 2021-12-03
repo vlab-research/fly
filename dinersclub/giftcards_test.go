@@ -25,7 +25,8 @@ func TestGiftCardsResultsOnErrorIfBadDetails(t *testing.T) {
 	svc := &reloadly.Service{
 		Client: &http.Client{},
 	}
-	provider := &GiftCardsProvider{pool, svc}
+	rp := ReloadlyProvider{pool, svc}
+	provider := &GiftCardsProvider{rp}
 	res, err := provider.Payout(pe)
 
 	assert.Nil(t, err)
@@ -50,7 +51,8 @@ func TestGiftCardsReportsAPIErrorsInResult(t *testing.T) {
 	svc := &reloadly.Service{
 		Client: TestClient(404, `{"errorCode": "FOOBAR", "message": "Sorry"}`, nil),
 	}
-	provider := &GiftCardsProvider{pool, svc}
+	rp := ReloadlyProvider{pool, svc}
+	provider := &GiftCardsProvider{rp}
 	res, err := provider.Payout(pe)
 
 	assert.Nil(t, err)
@@ -98,7 +100,8 @@ func TestGiftCardsReportsSuccessResult(t *testing.T) {
 	svc := &reloadly.Service{
 		Client: TestClient(200, `{"transactionId":1,"amount":0.1,"discount":10,"currencyCode":"INR","fee":1,"recipientEmail":"test@test.com","customIdentifier":"test-card","status":"SUCCESSFUL","transactionCreatedTime":"2021-11-15 16:55:30"}`, nil),
 	}
-	provider := &GiftCardsProvider{pool, svc}
+	rp := ReloadlyProvider{pool, svc}
+	provider := &GiftCardsProvider{rp}
 
 	user, err := provider.GetUserFromPaymentEvent(pe)
 	assert.Nil(t, err)
