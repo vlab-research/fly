@@ -29,7 +29,7 @@ func TestReloadlyResultsOnErrorIfBadDetails(t *testing.T) {
 	svc := &reloadly.Service{
 		Client: &http.Client{},
 	}
-	provider := &ReloadlyProvider{pool, svc}
+	provider := &ReloadlyProvider{pool, svc, "INVALID_PAYMENT_DETAILS"}
 	res, err := provider.Payout(pe)
 
 	assert.Nil(t, err)
@@ -54,7 +54,7 @@ func TestReloadlyReportsAPIErrorsInResult(t *testing.T) {
 	svc := &reloadly.Service{
 		Client: TestClient(404, `{"errorCode": "FOOBAR", "message": "Sorry"}`, nil),
 	}
-	provider := &ReloadlyProvider{pool, svc}
+	provider := &ReloadlyProvider{pool, svc, ""}
 	res, err := provider.Payout(pe)
 
 	assert.Nil(t, err)
@@ -102,7 +102,7 @@ func TestReloadlyReportsSuccessResult(t *testing.T) {
 	svc := &reloadly.Service{
 		Client: TestClient(200, `{"suggestedAmountsMap":{"2.5": 2.5},"transactionDate":"2020-09-19 12:53:22","transactionId": 567}`, nil),
 	}
-	provider := &ReloadlyProvider{pool, svc}
+	provider := &ReloadlyProvider{pool, svc, ""}
 
 	user, err := provider.GetUserFromPaymentEvent(pe)
 	assert.Nil(t, err)
@@ -127,7 +127,7 @@ func TestReloadlyResultsOnMissingUser(t *testing.T) {
 	defer pool.Close()
 
 	svc := &reloadly.Service{}
-	provider := &ReloadlyProvider{pool, svc}
+	provider := &ReloadlyProvider{pool, svc, ""}
 	pe := &PaymentEvent{
 		Pageid: "page",
 	}
@@ -155,7 +155,7 @@ func TestReloadlyResultsOnMissingCredentials(t *testing.T) {
 	mustExec(t, pool, insertFbPageSql)
 
 	svc := &reloadly.Service{}
-	provider := &ReloadlyProvider{pool, svc}
+	provider := &ReloadlyProvider{pool, svc, ""}
 	pe := &PaymentEvent{
 		Pageid: "page",
 	}

@@ -19,35 +19,8 @@ func NewGiftCardsProvider(pool *pgxpool.Pool) (Provider, error) {
 	if cfg.Sandbox {
 		svc.Sandbox()
 	}
-	p := ReloadlyProvider{pool, svc}
+	p := ReloadlyProvider{pool, svc, "INVALID_GIFT_CARD_DETAILS"}
 	return &GiftCardsProvider{p}, nil
-}
-
-func (p *GiftCardsProvider) formatError(res *Result, err error, details *json.RawMessage) (*Result, error) {
-	res.Success = false
-
-	// TODO: catch 500 errors and "try again later" errors
-	// for retrying...
-	// CARD_IS_NOT_READY
-	// PENDING_OR_IN_PROGRESS
-	// ORDER_IS_NOT_READY
-	// IMPORT_CARD_ERROR
-	if e, ok := err.(reloadly.APIError); ok {
-		res.Error = &PaymentError{e.Message, e.ErrorCode, details}
-		return res, nil
-	}
-	if e, ok := err.(reloadly.ReloadlyError); ok {
-		res.Error = &PaymentError{e.Message, e.ErrorCode, details}
-		return res, nil
-	}
-	if e, ok := err.(validator.ValidationErrors); ok {
-		res.Error = &PaymentError{e.Error(), "INVALID_GIFT_CARD_DETAILS", details}
-		return res, nil
-	}
-
-	// any other type of error should be considered a
-	// system error and should be retried/logged.
-	return res, err
 }
 
 func (p *GiftCardsProvider) Payout(event *PaymentEvent) (*Result, error) {
