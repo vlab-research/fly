@@ -3,21 +3,21 @@
 	import Home from "./routes/Home.svelte";
 	import Form from "./routes/Form.svelte";
 	import Thankyou from "./routes/Thankyou.svelte";
-	import typeformData from "../mocks/typeformData.json";
+	import form from "../mocks/sample.json";
 
 	export let url = "";
 </script>
 
 <main>
 	<Router {url}>
-		<Route path="/" let:params>
-			<Home ref={params.ref} {typeformData} />
+		<Route path="/">
+			<Home {form} />
 		</Route>
 		<Route path="/:ref" let:params>
-			<Form ref={params.ref} {typeformData} />
+			<Form ref={params.ref} {form} />
 		</Route>
 		<Route path="/thankyou">
-			<Thankyou {typeformData} />
+			<Thankyou {form} />
 		</Route>
 	</Router>
 </main>

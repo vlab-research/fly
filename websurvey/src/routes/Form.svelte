@@ -2,27 +2,28 @@
     import { navigate } from "svelte-routing";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
-    import { isLast, getIndex, getNextRef } from "../utils/helpers.js";
+    import {
+        isLast,
+        getNextRef,
+        getThankyouScreen,
+    } from "../../lib/typewheels/form.js";
 
-    export let ref, typeformData;
-
-    const { fields, thankyou_screens } = typeformData;
-
-    let thankyouScreen = thankyou_screens[0];
+    export let ref, form;
 
     let index, field;
 
     $: {
-        index = getIndex(fields, ref);
-        field = fields[index];
+        index = form.fields.map(({ ref }) => ref).indexOf(ref);
+        field = form.fields[index];
     }
 
     const handleSubmit = () => {
-        if (index < fields.length - 1) {
-            const newRef = getNextRef(fields, ref);
+        if (index < form.fields.length - 1) {
+            const newRef = getNextRef(form, ref);
             navigate(`/${newRef}`, { replace: true });
-        } else if (isLast(fields, ref)) {
-            navigate(`/${thankyouScreen.ref}`, { replace: true });
+        } else if (isLast(form, ref)) {
+            const thankyouRef = getThankyouScreen(form, 0).ref;
+            navigate(`/${thankyouRef}`, { replace: true });
         }
         return;
     };
@@ -36,7 +37,7 @@
                 <label for="question-{index + 1}">Question
                     {index + 1}
                     out of
-                    {fields.length}</label>
+                    {form.fields.length}</label>
             </h2>
             {#if field.type === 'short_text'}
                 <ShortText {field} />
