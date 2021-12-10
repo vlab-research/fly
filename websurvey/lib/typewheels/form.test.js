@@ -44,17 +44,17 @@ describe("isLast", () => {
 });
 
 describe("setFirstRef", () => {
-  it("sets the first ref", () => {
+  it("sets the first field ref", () => {
     const ctx = form;
     const value = f.setFirstRef(ctx, 0);
     value.should.equal("whats_your_name");
   });
 });
 
-describe("getNextRef", () => {
-  it("gets the next ref", () => {
+describe("getNext", () => {
+  it("gets the next field object in the form", () => {
     const ctx = form;
-    const value = f.getNextRef(ctx, "whats_your_name");
-    value.should.equal("whats_your_age");
+    const value = f.getNext(ctx, "whats_your_name");
+    value.should.equal(form.fields[1]);
   });
 });

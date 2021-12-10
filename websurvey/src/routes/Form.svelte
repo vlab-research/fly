@@ -4,7 +4,7 @@
     import ShortText from "../components/ShortText.svelte";
     import {
         isLast,
-        getNextRef,
+        getNext,
         getThankyouScreen,
     } from "../../lib/typewheels/form.js";
 
@@ -19,7 +19,7 @@
 
     const handleSubmit = () => {
         if (index < form.fields.length - 1) {
-            const newRef = getNextRef(form, ref);
+            const newRef = getNext(form, ref).ref;
             navigate(`/${newRef}`, { replace: true });
         } else if (isLast(form, ref)) {
             const thankyouScreen = getThankyouScreen(form, "thankyou");
