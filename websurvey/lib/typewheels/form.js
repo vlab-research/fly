@@ -15,16 +15,16 @@ function getField(form, ref) {
   return field;
 }
 
-// should the second arg be ref instead of idx?
-function getThankyouScreen(form, idx) {
+function getThankyouScreen(form, ref) {
   if (!form.thankyou_screens.length) {
     throw new FieldError(`This form has no thankyou screens: ${form.id}`);
   }
 
+  const idx = form.thankyou_screens.map(({ ref }) => ref).indexOf(ref);
   const thankyouScreen = form.thankyou_screens[idx];
 
-  if (idx > form.thankyou_screens.length) {
-    throw new FieldError(`Could not find the requested thankyouscreen, at index ${idx},
+  if (!thankyouScreen) {
+    throw new FieldError(`Could not find the requested thankyouscreen, ${ref},
                           in our form: ${form.id}!`);
   }
 

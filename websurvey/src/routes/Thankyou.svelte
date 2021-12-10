@@ -2,7 +2,7 @@
     import { getThankyouScreen } from "../../lib/typewheels/form";
     export let form;
 
-    const thankyouScreen = getThankyouScreen(form, 0);
+    const thankyouScreen = getThankyouScreen(form, "thankyou");
     const { title } = thankyouScreen;
 </script>
 

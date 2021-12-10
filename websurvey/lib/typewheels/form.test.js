@@ -23,14 +23,14 @@ describe("getField", () => {
 describe("getThankyouScreen", () => {
   it("gets thankyou screen", () => {
     const ctx = form;
-    const value = f.getThankyouScreen(ctx, 0);
+    const value = f.getThankyouScreen(ctx, "thankyou");
     value.should.equal(form.thankyou_screens[0]);
   });
 
   it("throws with a useful message when thankyou screen not found in form", () => {
     const ctx = form;
-    const fn = f.getThankyouScreen(ctx, 3);
-    fn.should.throw(/3/); // thankyou screen
+    const fn = f.getThankyouScreen(ctx, "baz");
+    fn.should.throw(/baz/); // thankyou screen
     fn.should.throw(/DjlXLX2s/); // form
   });
 });

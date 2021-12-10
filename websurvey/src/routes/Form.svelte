@@ -22,8 +22,8 @@
             const newRef = getNextRef(form, ref);
             navigate(`/${newRef}`, { replace: true });
         } else if (isLast(form, ref)) {
-            const thankyouRef = getThankyouScreen(form, 0).ref;
-            navigate(`/${thankyouRef}`, { replace: true });
+            const thankyouScreen = getThankyouScreen(form, "thankyou");
+            navigate(`/${thankyouScreen.ref}`, { replace: true });
         }
         return;
     };
