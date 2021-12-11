@@ -14,7 +14,7 @@ exports.postOne = async (req, res) => {
       return res
         .status(400)
         .send(
-          `Missing shit!: formid: ${formid}, shortcode: ${shortcode}`,
+          `Value missing: formid: ${formid}, shortcode: ${shortcode}`,
         );
     }
 

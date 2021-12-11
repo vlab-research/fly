@@ -69,11 +69,11 @@ const config = {
     secret: envVars.AUTH0_DASHBOARD_SECRET
   },
   DATABASE_CONFIG: {
-    user: isTest() ? 'root' : envVars.DB_USER || 'postgres',
-    host: isTest() ? 'localhost' : envVars.DB_HOST || 'localhost',
-    database: isTest() ? 'chatroach' : envVars.DB_DATABASE || 'postgres',
-    password: isTest() ? undefined : envVars.DB_PASSWORD || undefined,
-    port: isTest() ? 5433 : envVars.DB_PORT || 5432,
+    user: envVars.DB_USER,
+    host: envVars.DB_HOST,
+    database: envVars.DB_DATABASE,
+    password: envVars.DB_PASSWORD,
+    port: envVars.DB_PORT,
   },
 };
 
