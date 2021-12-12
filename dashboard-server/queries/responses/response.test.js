@@ -87,10 +87,10 @@ describe('Response queries', () => {
 
       responses[0].first_response.should.equal('{ "text": "first" }');
       responses[0].last_response.should.equal('{ "text": "last" }');
-      responses[0].surveyid.should.equal(survey2.id);
+      responses[0].surveyid.should.equal(survey1.id);
       responses[1].first_response.should.equal('{ "text": "first" }');
       responses[1].last_response.should.equal('{ "text": "last" }');
-      responses[1].surveyid.should.equal(survey1.id);
+      responses[1].surveyid.should.equal(survey2.id);
     });
   });
 });
