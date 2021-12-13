@@ -4,10 +4,12 @@
   "description": "Using Typeform to create Facebook Bots",
   "main": "index.js",
   "scripts": {
-    "_test": "mocha -w --colors lib/**/*.test.js",
     "start": "node lib/index.js",
     "dev": "nodemon lib/index.js",
+    "_test": "mocha -w --colors lib/**/*.test.js",
     "test": "nyc npm run _test",
+    "_test-ci": "mocha --colors lib/**/*.test.js",
+    "test-ci": "nyc npm run _test-ci",
     "report": "nyc report",
     "lint": "eslint ."
   },
