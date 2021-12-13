@@ -1,4 +1,4 @@
-// const nock = require('nock')
+const nock = require('nock')
 const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
@@ -6,7 +6,10 @@ const {Machine} = require('./transition')
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 const {MachineIOError} = require('../errors')
 
-// const BASE_URL = "https://graph.facebook.com"
+nock(process.env.FORMCENTRAL_URL)
+.get('/metadata?surveyid=foo')
+.reply(404)
+.persist();
 
 describe('machine.run', () => {
   it('returns STATE_TRANSITION error if transition throws', async () => {
@@ -228,6 +231,26 @@ describe('Machine integrated', () => {
     const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', "{foo--:;{-bar}")
     report.user.should.equal('bar')
     report.error.tag.should.equal('CORRUPTED_MESSAGE')
+    report.publish.should.be.true
+  })
+
+  it('survey is closed', async () => {
+    nock(process.env.FORMCENTRAL_URL)
+    .get('/metadata?surveyid=bar')
+    .reply(200, {'surveyid': 'bar', 'off_date': 1242123799219})
+
+    const m = new Machine()
+    m.getPageToken = () => Promise.resolve('bartoken')
+    m.getForm = () => Promise.resolve([{ logic: [],
+                                         fields: [{type: 'short_text', title: 'bar', ref: 'bar'}]}, 'bar'])
+    m.sendMessage = () => Promise.resolve({})
+
+    const report = await m.run({ state: 'START', qa: [], forms: [] }, 'foo', referral)
+    report.user.should.equal('foo')
+    should.not.exist(report.error)
+    report.timestamp.should.equal(referral.timestamp)
+    report.actions[0].should.eql({ message: { 'metadata': '{}', text: 'Sorry, the survey is closed.'},
+                                   recipient: { id: 'foo' }})
     report.publish.should.be.true
   })
 })

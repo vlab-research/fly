@@ -4,6 +4,8 @@ services:
   main:
     image: ${APP_NAME}_dev
     build: .
+    environment:
+      FORMCENTRAL_URL: http://formcentral
     command: |
       sh -c '
         echo "Running tests..."

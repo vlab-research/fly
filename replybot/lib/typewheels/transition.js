@@ -7,6 +7,7 @@ const {MachineIOError, iowrap} = require('../errors')
 const _ = require('lodash')
 const util = require('util')
 const Cacheman = require('cacheman')
+const {getSurveyMetadata} = require('./metadata')
 
 
 function getPayment(userid, pageid, timestamp, event) {
@@ -63,8 +64,9 @@ class Machine {
                                           pageId, shortcode, startTime)
 
     const user = await this.getUser(userId, pageToken)
+    const surveyMetadata = await getSurveyMetadata(surveyId)
 
-    const actions = act({form, user}, state, output)
+    const actions = act({form, user, surveyMetadata, timestamp}, state, output)
     const responses = responseVals(newState, upd, form, surveyId, pageId, userId, timestamp)
 
     return { actions, responses, pageToken, timestamp }

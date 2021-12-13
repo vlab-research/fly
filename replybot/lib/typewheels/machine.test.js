@@ -1,4 +1,3 @@
-const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const fs = require('fs')
@@ -10,6 +9,8 @@ const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
 const _echo = md => ({...echo, message: { ...echo.message, metadata: md.ref ? md : {ref: md} }})
+const ts = null;
+const metadata = null;
 
 describe('getWatermark', () => {
   it('should work with both marks', () => {
@@ -612,7 +613,7 @@ describe('getState', () => {
 
     const state = getState(log)
     const output = exec(state, externalEvent)
-    const action = act({form, user:{}}, state, output)[0]
+    const action = act({form, user:{}, metadata, ts}, state, output)[0]
     output.action.should.equal('SWITCH_FORM')
     output.form.should.equal('BAR')
     action.recipient.one_time_notif_token.should.equal('FOOBAR')
@@ -626,13 +627,13 @@ describe('Machine', () => {
 
   it('gets the correct start field even with no referral', () => {
     const output = exec(_initialState(), text)
-    const action = act({user, form, log:[text]}, _initialState(), output)[0]
+    const action = act({user, form, log:[text], metadata, ts}, _initialState(), output)[0]
     action.message.attachment.payload.text.should.equal(form.fields[0].title)
   })
 
   it('sends the first message when it gets a referral', () => {
     const output = exec(_initialState(), referral)
-    const action = act({user, form, log:[referral]}, _initialState(), output)[0]
+    const action = act({user, form, log:[referral], metadata, ts}, _initialState(), output)[0]
     action.message.attachment.payload.text.should.equal(form.fields[0].title)
   })
 
@@ -642,7 +643,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'bar', ref: 'bar'}]}
 
     const log = [referral, echo, delivery, multipleChoice]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
   })
 
@@ -652,7 +653,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'bar', ref: 'bar'}]}
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     JSON.parse(action.message.metadata).repeat.should.be.true
   })
 
@@ -664,7 +665,7 @@ describe('Machine', () => {
                             {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
 
     const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     JSON.parse(action.message.metadata).repeat.should.be.true
   })
 
@@ -765,8 +766,39 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'bar', ref: 'bar'}]}
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+  })
+
+  it('Survey is closed', () => {
+    const form = { logic: [],
+                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
+                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+
+    const log = [referral, echo, delivery, text]
+    const metadata = {
+      off_date: new Date()
+    }
+    const ts = new Date()
+    ts.setDate(metadata.off_date.getDate() + 1)
+    const action = getMessage(log, form, user, metadata, ts)[0]
+    action.message.should.deep.equal({ text: 'Sorry, the survey is closed.', metadata: '{"ref":"foo"}' })
+  })
+
+  it('Survey is closed with custom message', () => {
+    const form = { logic: [],
+                   custom_messages: {'label.off': 'Lo siento, la encuesta esta cerrada.'},
+                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
+                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+
+    const log = [referral, echo, delivery, text]
+    const metadata = {
+      off_date: new Date()
+    }
+    const ts = new Date()
+    ts.setDate(metadata.off_date.getDate() + 1)
+    const action = getMessage(log, form, user, metadata, ts)[0]
+    action.message.should.deep.equal({ text: 'Lo siento, la encuesta esta cerrada.', metadata: '{"ref":"foo"}' })
   })
 
   it('Responds to opening text without referral', () => {
@@ -776,7 +808,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'qux', ref: 'qux'}]}
 
     const log = [text]
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(2)
     actions.forEach((a,i) => a.message.text.should.equal(form.fields[i].title))
   })
@@ -787,7 +819,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: '{{hidden:foo}}', ref: 'qux'}]}
 
     const log = [referral, echo, text]
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(1)
     actions[0].message.text.should.equal('bar')
   })
@@ -799,7 +831,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'qux', ref: 'qux'}]}
 
     const log = [text]
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(2)
     actions.forEach((a,i) => a.message.text.should.equal(form.fields[i].title))
   })
@@ -812,7 +844,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'qux', ref: 'qux'}]}
 
     const log = [referral]
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(3)
     actions.forEach((a,i) => a.message.text.should.equal(form.fields[i].title))
   })
@@ -824,7 +856,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'qux', ref: 'qux'}]}
 
     const log = [referral]
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(2)
     actions[0].message.attachment.payload.buttons[0].url.should.equal('foo.com')
     actions[1].message.text.should.equal('foo')
@@ -836,7 +868,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'foo', ref: 'foo'}]}
 
     const log = [referral, statementEcho, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     should.not.exist(action)
   })
 
@@ -846,7 +878,7 @@ describe('Machine', () => {
                             {type: 'statement', title: 'bar', ref: 'bar'}]}
 
     const log = [referral, echo, delivery, {...text, message: {text: 0}}]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.text.should.equal('bar')
   })
 
@@ -859,7 +891,7 @@ describe('Machine', () => {
                             {type: 'statement', title: 'foo', ref: 'foo'}]}
 
     const log = [referral, statementEcho, delivery, echo2]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     should.not.exist(action)
   })
 
@@ -869,7 +901,7 @@ describe('Machine', () => {
                             {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
 
     const log = [referral, tyEcho, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     JSON.parse(action.message.metadata).repeat.should.be.true
   })
 
@@ -880,7 +912,7 @@ describe('Machine', () => {
 
 
     const log = [referral, delivery, {...echo, timestamp: delivery.delivery.watermark}, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.text.should.equal('baz')
   })
 
@@ -891,7 +923,7 @@ describe('Machine', () => {
 
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.text.should.equal('baz')
   })
 
@@ -913,7 +945,7 @@ describe('Machine', () => {
                             {type: 'number', title: 'baz', ref: 'baz'}]}
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
   })
 
@@ -937,7 +969,7 @@ describe('Machine', () => {
                             {type: 'number', title: 'baz', ref: 'baz'}]}
 
     const log = [referral, echo, multipleChoice]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
   })
 
@@ -964,7 +996,7 @@ describe('Machine', () => {
 
     const log = [referral, _echo({ref: 'foo', type: 'wait', wait: { type: 'external', value: { type: 'payment:reloadly'}}}), event]
 
-    const action = getMessage(log, form, user)[1]
+    const action = getMessage(log, form, user, metadata, ts)[1]
     action.message.should.deep.equal({ text: 'qux', metadata: '{"ref":"qux"}' })
   })
 
@@ -976,7 +1008,7 @@ describe('Machine', () => {
                    fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
 
     // repeat ref foo with sorry message...
     action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
@@ -992,7 +1024,7 @@ describe('Machine', () => {
                    fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
 
     // repeat ref foo with sorry message...
     action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
@@ -1009,7 +1041,7 @@ describe('Machine', () => {
                    fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
 
     // repeat ref foo with sorry message...
     action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
@@ -1025,7 +1057,7 @@ describe('Machine', () => {
     const wait = { type: 'timeout', value: '1 minute', response: 'baz' }
     const log = [referral]
 
-    const action = getMessage(log, form, user)
+    const action = getMessage(log, form, user, metadata, ts)
     action.length.should.equal(1)
   })
 
@@ -1037,7 +1069,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, text]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(2)
 
     // repeat ref foo with sorry message...
@@ -1056,7 +1088,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, text]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
 
     actions.length.should.equal(2)
 
@@ -1083,7 +1115,7 @@ describe('Machine', () => {
 
     const log = [referral, optin, {...echo, timestamp: d, message: {...echo.message, metadata: { wait, ref: 'foo' }}}, externalEvent]
 
-    const action = getMessage(log, form, user)
+    const action = getMessage(log, form, user, metadata, ts)
     action.length.should.equal(1)
     action[0].recipient.one_time_notif_token.should.equal('FOOBAR')
     action[0].message.text.should.equal('bar')
@@ -1097,7 +1129,7 @@ describe('Machine', () => {
                              { description: 'type: stitch\nstitch:\n    form: BAR'}}]}
 
     const log = [referral]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     JSON.parse(action.message.metadata)['type'].should.equal('stitch')
     JSON.parse(action.message.metadata)['stitch']['form'].should.equal('BAR')
   })
@@ -1110,7 +1142,7 @@ describe('Machine', () => {
                    fields: [{type: 'statement', title: 'foo', ref: 'foo'}]}
 
     const log = [payloadReferral]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
 
     action.message.text.should.equal('foo')
   })
@@ -1123,7 +1155,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
 
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
   })
 
@@ -1146,7 +1178,7 @@ describe('Machine', () => {
     const wait = { type: 'timeout', value: '1 minute'}
     const log = [referral, {...echo, message: {...echo.message, metadata: { wait, ref: 'foo' }}}, referral]
 
-    should.not.exist(getMessage(log, form, user)[0])
+    should.not.exist(getMessage(log, form, user, metadata, ts)[0])
   })
 
 
@@ -1155,7 +1187,7 @@ describe('Machine', () => {
                    fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
                             {type: 'short_text', title: 'bar', ref: 'bar'}]}
 
-    const messages = getMessage([referral, delivery, echo, referral], form, user)
+    const messages = getMessage([referral, delivery, echo, referral], form, user, metadata, ts)
     JSON.parse(messages[0].message.metadata).repeat.should.be.true
     messages[1].message.text.should.equal('foo')
   })
@@ -1176,7 +1208,7 @@ describe('Machine', () => {
                    fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
                             {type: 'short_text', title: 'bar', ref: 'bar'}]}
     const log = [referral, delivery, echo, qr, qr]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     should.not.exist(action)
   })
 
@@ -1188,7 +1220,7 @@ describe('Machine', () => {
 
     const response = {...qr, message: { quick_reply: { payload: { value:"quux",ref:"foo" }}}}
     const log = [referral, echo, delivery, response]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.text.should.equal('bar')
   })
 
@@ -1199,7 +1231,7 @@ describe('Machine', () => {
 
     const response = {...qr, message: { quick_reply: { payload: { value:0, ref:"foo" }}}}
     const log = [referral, echo, delivery, response]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.text.should.equal('bar')
   })
 
@@ -1210,7 +1242,7 @@ describe('Machine', () => {
 
     const response = {...qr, message: { quick_reply: { payload: "foo@gmail.com" }}}
     const log = [referral, echo, delivery, response]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.text.should.equal('bar')
   })
 
@@ -1226,7 +1258,7 @@ describe('Machine', () => {
 
     const log = [referral, del1, echo, delivery, response]
 
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     JSON.parse(action.message.metadata).repeat.should.be.true
   })
 
@@ -1240,7 +1272,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, optin]
 
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     action.message.text.should.equal('bar')
   })
 
@@ -1252,7 +1284,7 @@ describe('Machine', () => {
 
     const log = [referral, _echo('bar'), optin]
 
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
     JSON.parse(action.message.metadata).repeat.should.be.true
   })
 
@@ -1264,7 +1296,7 @@ describe('Machine', () => {
     const fu = synthetic({ type: 'follow_up', value: 'foo'})
     const log = [referral, echo, fu]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(2)
     actions[0].message.text.should.equal(followUpMessage({}))
     actions[1].message.text.should.equal('foo')
@@ -1278,7 +1310,7 @@ describe('Machine', () => {
     const fu = synthetic({ type: 'follow_up', value: 'foo'})
     const log = [referral, echo, text, fu]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(0)
   })
 
@@ -1291,7 +1323,7 @@ describe('Machine', () => {
     const fu = synthetic({ type: 'follow_up', value: 'foo'})
     const log = [referral, _echo('foo'), text, _echo('bar'), fu]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(0)
   })
 
@@ -1301,7 +1333,7 @@ describe('Machine', () => {
                             {type: 'short_text', title: 'bar', ref: 'bar'}]}
 
     const log = [referral, synthetic({type: 'redo'})]
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions[0].message.text.should.equal('foo')
     actions[1].message.text.should.equal('bar')
 
@@ -1318,7 +1350,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, text, report, synthetic({type: 'redo'})]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions[0].message.text.should.equal('bar')
 
     const state = getState(log)
@@ -1345,7 +1377,7 @@ describe('Machine', () => {
                  text
                 ]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(1)
 
     const state = getState(log)
@@ -1362,7 +1394,7 @@ describe('Machine', () => {
 
     const log = [referral, statementEcho, synthetic({type: 'redo'})]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions[0].message.text.should.equal('foo')
     actions[1].message.text.should.equal('bar')
   })
@@ -1384,7 +1416,7 @@ describe('Machine', () => {
 
     const log = [referral, optin, _echo({wait, ref: 'foo'}), externalEvent, synthetic({type:'redo'})]
 
-    const action = getMessage(log, form, user)
+    const action = getMessage(log, form, user, metadata, ts)
 
     action.length.should.equal(1)
     action[0].recipient.one_time_notif_token.should.equal('FOOBAR')
@@ -1398,7 +1430,7 @@ describe('Machine', () => {
                    fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
 
     const log = [referral, echo, text, synthetic({type: 'redo'})]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
 
     action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
     action.message.text.should.contain('Sorry')
@@ -1424,7 +1456,7 @@ describe('Machine', () => {
     const metadata = { "type":"stitch", "stitch": {"form":"BAR"}, "ref":"foo" }
     const log = [referral, _echo(metadata), synthetic({type: 'redo'})]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(2)
     actions[0].message.text.should.equal('foo')
     actions[1].message.text.should.equal('bar')
@@ -1439,7 +1471,7 @@ describe('Machine', () => {
     const pr = _.set(syntheticPR, 'event.value.response', {error: {code: 2022}})
     const log = [referral, echo, pr, synthetic({type: 'redo'})]
 
-    const actions = getMessage(log, form, user)
+    const actions = getMessage(log, form, user, metadata, ts)
     actions.length.should.equal(2)
     actions[0].message.text.should.equal('foo')
     actions[1].message.text.should.equal('bar')
@@ -1459,7 +1491,7 @@ describe('Machine', () => {
     const echoBar = _.set(echo, 'message.metadata.ref', 'bar')
 
     const log = [referral, statementEcho, echoBar, synthetic({type: 'redo'})]
-    const action = getMessage(log, form, user)[0]
+    const action = getMessage(log, form, user, metadata, ts)[0]
 
     should.not.exist(action)
   })
