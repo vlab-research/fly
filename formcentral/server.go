@@ -99,6 +99,22 @@ func (s *Server) GetSurveyByParams(c echo.Context) error {
 	return c.JSON(http.StatusOK, survey)
 }
 
+func (s *Server) GetMetadata(c echo.Context) error {
+	surveyid := c.QueryParam("surveyid")
+	m, err := getSurveyMetadata(s.pool, surveyid)
+
+	if err != nil {
+		msg := err.Error()
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Could not execute query to DB. Failed with the following error: %v", msg))
+	}
+
+	if m == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Metadata not found")
+	}
+
+	return c.JSON(http.StatusOK, m)
+}
+
 func handle(err error) {
 	if err != nil {
 		log.Fatal(err)
@@ -115,6 +131,7 @@ func main() {
 	e.GET("/surveys", server.GetSurveyByParams)
 	e.GET("/translators/:surveyid", server.GetTranslator)
 	e.POST("/translators", server.CreateTranslator)
+	e.POST("/metadata", server.GetMetadata)
 
 	address := fmt.Sprintf(`:%d`, cfg.Port)
 	e.Logger.Fatal(e.Start(address))
