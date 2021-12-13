@@ -5,7 +5,6 @@ const jwks = require('jwks-rsa');
 
 const envVarsSchema = joi
   .object({
-    NODE_ENV: joi.string().allow(['development', 'production', 'test']),
     API_VERSION: joi.number(),
     AUTH0_HOST: joi.string(),
     DB_USER: joi.string(),
@@ -31,12 +30,7 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
-const isTest = () => envVars.NODE_ENV === 'test';
-
 const config = {
-  ENV: envVars.NODE_ENV,
-  IS_DEVELOPMENT: envVars.NODE_ENV === 'development',
-  IS_TEST: isTest(),
   FORMCENTRAL: {
     url: envVars.FORMCENTRAL_URL,
   },

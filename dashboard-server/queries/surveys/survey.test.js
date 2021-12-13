@@ -48,6 +48,7 @@ describe('Survey queries', () => {
         translation_conf: '{}',
       };
       const newSurvey = await Survey.create(survey);
+
       newSurvey.formid.should.equal('S8yR4');
       newSurvey.form.should.equal('{"form": "form detail"}');
       newSurvey.shortcode.should.equal('123');
