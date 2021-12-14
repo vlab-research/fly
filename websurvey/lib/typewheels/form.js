@@ -61,6 +61,20 @@ function getNextField(form, qa, ref) {
   return getNext(form, ref);
 }
 
+function getChoiceValue(form, ref, choice) {
+  const val = form.fields
+    .find(f => f.ref === ref)
+    .properties.choices.find(c => c.ref === choice.ref).label;
+
+  if (!val) {
+    throw new TypeError(
+      `Could not find value for choice: ${choice} in question ${ref}`
+    );
+  }
+
+  return val;
+}
+
 function jump(form, qa, logic) {
   const { ref, actions } = logic;
 
@@ -70,8 +84,70 @@ function jump(form, qa, logic) {
     }
   }
 
+  const funs = {
+    and: (a, b) => a && b,
+    or: (a, b) => a || b,
+    greater_than: (a, b) => a > b,
+    lower_than: (a, b) => a < b,
+    greater_equal_than: (a, b) => a >= b,
+    lower_equal_than: (a, b) => a <= b,
+    is: (a, b) => a === b,
+    equal: (a, b) => a === b,
+    is_not: (a, b) => a !== b,
+    not_equal: (a, b) => a !== b, // focus on this one for now
+  };
+
+  function getCondition(ctx, qa, ref, { op, vars }) {
+    if (op === "always") return true;
+
+    const f = funs[op];
+
+    if (!f) {
+      throw new TypeError(`Cannot find operation: ${op}\nquestion: ${ref}`);
+    }
+
+    //TODO remove this comment
+    // this passes each var (v) to the getVar fn which returns
+    // an arr of values which is then reduced to a single element
+    // once the selected function has been run on each element of that arr
+    // in our case "whats_your_name" not_equal ""
+    return vars.map(v => getVar(ctx, qa, ref, v, vars)).reduce(f);
+  }
+
   // Default to next field if none found
   return getNext(form, ref).ref;
+}
+
+function getFieldValue(qa, ref) {
+  // .pop() returns the last valid answer
+  const match = qa.filter(([q, __]) => q === ref).pop();
+
+  // return null if there are no matches,
+  // or if there are no answers,
+  const ans = match && match[1];
+  return ans ? ans : null;
+}
+
+function getVar(ctx, qa, ref, vars, v) {
+  // ops can be nested in a var
+  if (v.op) {
+    return getCondition(ctx, qa, ref, v);
+  }
+
+  const { type, value } = v;
+
+  if (type == "constant") {
+    return value;
+  }
+
+  if (type == "choice") {
+    const field = vars.find(v => v.type === "field").value;
+    return getChoiceValue(ctx, field, value);
+  }
+
+  if (type == "field") {
+    return getFieldValue(qa, value);
+  }
 }
 
 module.exports = {
@@ -81,4 +157,8 @@ module.exports = {
   getThankyouScreen,
   getNextField,
   getNext,
+  jump,
+  getFieldValue,
+  getChoiceValue,
+  getVar,
 };
