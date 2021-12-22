@@ -1,3 +1,5 @@
+const yaml = require("js-yaml");
+
 class FieldError extends Error {}
 
 function getField(form, ref) {
@@ -75,51 +77,49 @@ function getChoiceValue(form, ref, choice) {
   return val;
 }
 
-function jump(form, qa, logic) {
+const funs = {
+  and: (a, b) => a && b,
+  or: (a, b) => a || b,
+  greater_than: (a, b) => a > b,
+  lower_than: (a, b) => a < b,
+  greater_equal_than: (a, b) => a >= b,
+  lower_equal_than: (a, b) => a <= b,
+  is: (a, b) => a === b,
+  equal: (a, b) => a === b,
+  is_not: (a, b) => a !== b,
+  not_equal: (a, b) => a !== b,
+};
+
+function getCondition(ctx, qa, ref, { op, vars }) {
+  if (op === "always") return true;
+
+  const f = funs[op];
+
+  if (!f) {
+    throw new TypeError(`Cannot find operation: ${op}\nquestion: ${ref}`);
+  }
+
+  const fn = (a, b) => f(yaml.load(a), yaml.load(b));
+
+  return vars.map(v => getVar(ctx, qa, ref, vars, v)).reduce(fn);
+}
+
+function jump(ctx, qa, logic) {
   const { ref, actions } = logic;
 
   for (let { condition, details } of actions) {
-    if (getCondition(form, qa, ref, condition)) {
+    // if fn returns true
+    if (getCondition(ctx, qa, ref, condition)) {
       return details.to.value;
     }
   }
 
-  const funs = {
-    and: (a, b) => a && b,
-    or: (a, b) => a || b,
-    greater_than: (a, b) => a > b,
-    lower_than: (a, b) => a < b,
-    greater_equal_than: (a, b) => a >= b,
-    lower_equal_than: (a, b) => a <= b,
-    is: (a, b) => a === b,
-    equal: (a, b) => a === b,
-    is_not: (a, b) => a !== b,
-    not_equal: (a, b) => a !== b, // focus on this one for now
-  };
-
-  function getCondition(ctx, qa, ref, { op, vars }) {
-    if (op === "always") return true;
-
-    const f = funs[op];
-
-    if (!f) {
-      throw new TypeError(`Cannot find operation: ${op}\nquestion: ${ref}`);
-    }
-
-    //TODO remove this comment
-    // this passes each var (v) to the getVar fn which returns
-    // an arr of values which is then reduced to a single element
-    // once the selected function has been run on each element of that arr
-    // in our case "whats_your_name" not_equal ""
-    return vars.map(v => getVar(ctx, qa, ref, v, vars)).reduce(f);
-  }
-
   // Default to next field if none found
-  return getNext(form, ref).ref;
+  return getNext(ctx.form, ref).ref;
 }
 
 function getFieldValue(qa, ref) {
-  // .pop() returns the last valid answer
+  // returns the last valid answer
   const match = qa.filter(([q, __]) => q === ref).pop();
 
   // return null if there are no matches,
@@ -136,16 +136,16 @@ function getVar(ctx, qa, ref, vars, v) {
 
   const { type, value } = v;
 
-  if (type == "constant") {
+  if (type === "constant") {
     return value;
   }
 
-  if (type == "choice") {
+  if (type === "choice") {
     const field = vars.find(v => v.type === "field").value;
     return getChoiceValue(ctx, field, value);
   }
 
-  if (type == "field") {
+  if (type === "field") {
     return getFieldValue(qa, value);
   }
 }
@@ -161,4 +161,5 @@ module.exports = {
   getFieldValue,
   getChoiceValue,
   getVar,
+  getCondition,
 };

@@ -61,9 +61,9 @@ describe("getNext", () => {
 
 describe("getFieldValue", () => {
   it("gets the value of a text field", () => {
-    const qa = [["foo", "foo"]];
+    const qa = [["foo", "baz"]];
     const value = f.getFieldValue(qa, "foo");
-    value.should.equal("foo");
+    value.should.equal("baz");
   });
 
   // TODO: should this throw?
@@ -89,15 +89,165 @@ describe("getChoiceValue", () => {
 describe("getVar", () => {
   it("gets the value depending on the var type", () => {
     const ctx = form;
-    const qa = [["baz", "10"]];
+    const qa = [["whats_your_name", "baz"]];
     const ref = "whats_your_name";
     const vars = ctx.logic[0].actions[0].condition.vars;
-    const v = vars[1];
-
+    const v = vars[0];
+    const v2 = vars[1];
     const value = f.getVar(ctx, qa, ref, vars, v);
-    value.should.equal("");
+    const value2 = f.getVar(ctx, qa, ref, vars, v2);
+    value.should.equal("baz");
+    value2.should.equal("");
   });
 });
+
+describe("getCondition", () => {
+  const cond = {
+    op: "always",
+    vars: [
+      { type: "field", value: "baz" },
+      { type: "constant", value: 10 },
+    ],
+  };
+
+  it("works with always true", () => {
+    f.getCondition({ form }, [], "", cond).should.be.true;
+  });
+
+  it("works with string equals and not equals, is and is not", () => {
+    const cond = {
+      op: "not_equal",
+      vars: [
+        { type: "field", value: "whats_your_name" },
+        { type: "constant", value: "baz" },
+      ],
+    };
+
+    const qa = [["whats_your_name", ""]];
+    const qa2 = [["whats_your_name", "baz"]];
+
+    f.getCondition({ form }, qa, "whats_your_name", cond).should.be.true;
+    f.getCondition({ form }, qa, "whats_your_name", { ...cond, op: "is_not" })
+      .should.be.true;
+    f.getCondition({ form }, qa, "whats_your_name", { ...cond, op: "is" })
+      .should.be.false;
+    f.getCondition({ form }, qa, "whats_your_name", { ...cond, op: "equal" })
+      .should.be.false;
+    f.getCondition({ form }, qa2, "whats_your_name", cond).should.be.false;
+    f.getCondition({ form }, qa2, "whats_your_name", { ...cond, op: "equal" })
+      .should.be.true;
+  });
+
+  it("works with number equals and not equals is and is not - casts types from strings", () => {
+    const cond = {
+      op: "is",
+      vars: [
+        { type: "field", value: "baz" },
+        { type: "constant", value: 10 },
+      ],
+    };
+
+    const qa = [["baz", "10"]];
+
+    f.getCondition({ form }, qa, "", cond).should.be.true;
+    f.getCondition({ form }, qa, "", { ...cond, op: "equal" }).should.be.true;
+    f.getCondition({ form }, qa, "", { ...cond, op: "is_not" }).should.be.false;
+    f.getCondition({ form }, qa, "", { ...cond, op: "not_equal" }).should.be
+      .false;
+  });
+
+  it("works with number not equals - type casting!", () => {
+    const cond = {
+      op: "is",
+      vars: [
+        { type: "field", value: "baz" },
+        { type: "constant", value: 10 },
+      ],
+    };
+
+    const qa = [["baz", "11"]];
+
+    f.getCondition({ form }, qa, "", cond).should.be.false;
+  });
+
+  it("works with lower_equal_than operator on numbers", () => {
+    const cond = {
+      op: "lower_equal_than",
+      vars: [
+        { type: "field", value: "baz" },
+        { type: "constant", value: 10 },
+      ],
+    };
+
+    const qa = [["baz", "10"]];
+
+    f.getCondition({ form }, qa, "", cond).should.be.true;
+    f.getCondition({ form }, qa, "", { ...cond, op: "greater_equal_than" })
+      .should.be.true;
+  });
+
+  it('works with "and" and "or" operators', () => {
+    const cond = {
+      op: "and",
+      vars: [
+        {
+          op: "is",
+          vars: [
+            {
+              type: "field",
+              value: "baz",
+            },
+            {
+              type: "constant",
+              value: true,
+            },
+          ],
+        },
+        {
+          op: "is",
+          vars: [
+            {
+              type: "field",
+              value: "qux",
+            },
+            {
+              type: "constant",
+              value: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    const qa = [
+      ["baz", true],
+      ["qux", true],
+    ];
+    const qa2 = [
+      ["baz", true],
+      ["qux", false],
+    ];
+
+    f.getCondition({ form }, qa, "", cond).should.be.true;
+    f.getCondition({ form }, qa, "", { ...cond, op: "or" }).should.be.true;
+    f.getCondition({ form }, qa2, "", cond).should.be.false;
+    f.getCondition({ form }, qa2, "", { ...cond, op: "or" }).should.be.true;
+  });
+});
+
+// describe("jump", () => {
+//   it("makes jump when required and makes no jump when not", () => {
+//     const logic = form.logic[0];
+//     const qaGood = [["whats_your_name", "baz"]];
+//     const qaBad = [["whats_your_name", ""]];
+
+//     const yes = f.jump({ form }, qaGood, logic);
+//     yes.should.equal("how_is_your_day");
+
+//     const no = f.jump({ form }, qaBad, logic);
+//     no.should.equal("whats_your_age");
+//   });
+// });
 
 // TODO integrate logic
 // describe("getNextField", () => {
@@ -105,19 +255,5 @@ describe("getVar", () => {
 //     const ctx = form;
 //     const value = f.getNextField(ctx, "whats_your_name");
 //     value.should.equal("hows_your_day");
-//   });
-// });
-
-// describe("jump", () => {
-//   it("makes jump when required and makes no jump when not", () => {
-//     const logic = form.logic[0];
-//     const qaGood = [["378caa71-fc4f-4041-8315-02b6f33616b9", "18"]];
-//     const qaBad = [["378caa71-fc4f-4041-8315-02b6f33616b9", "10"]];
-
-//     const yes = f.jump({ form }, qaGood, logic);
-//     yes.should.equal("0ebfe765-0275-48b2-ad2d-3aacb5bc6755");
-
-//     const no = f.jump({ form }, qaBad, logic);
-//     no.should.equal("3edb7fcc-748c-461c-bacd-593c043c5518");
 //   });
 // });
