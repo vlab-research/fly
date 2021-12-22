@@ -14,7 +14,7 @@ describe("getField", () => {
 
   it("throws with a useful message when field not found in form", () => {
     const ctx = form;
-    const fn = f.getField(ctx, "baz");
+    const fn = () => f.getField(ctx, "baz");
     fn.should.throw(/baz/); // field
     fn.should.throw(/DjlXLX2s/); // form
   });
@@ -29,7 +29,7 @@ describe("getThankyouScreen", () => {
 
   it("throws with a useful message when thankyou screen not found in form", () => {
     const ctx = form;
-    const fn = f.getThankyouScreen(ctx, "baz");
+    const fn = () => f.getThankyouScreen(ctx, "baz");
     fn.should.throw(/baz/); // thankyou screen
     fn.should.throw(/DjlXLX2s/); // form
   });
