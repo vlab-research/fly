@@ -23,6 +23,7 @@
   "dependencies": {
     "chai": "^4.3.4",
     "sirv-cli": "^1.0.0",
-    "svelte-routing": "^1.6.0"
+    "svelte-routing": "^1.6.0",
+    "yaml": "^1.10.2"
   }
 }
