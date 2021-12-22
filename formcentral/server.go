@@ -131,7 +131,7 @@ func main() {
 	e.GET("/surveys", server.GetSurveyByParams)
 	e.GET("/translators/:surveyid", server.GetTranslator)
 	e.POST("/translators", server.CreateTranslator)
-	e.POST("/metadata", server.GetMetadata)
+	e.GET("/metadata", server.GetMetadata)
 
 	address := fmt.Sprintf(`:%d`, cfg.Port)
 	e.Logger.Fatal(e.Start(address))

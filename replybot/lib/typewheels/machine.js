@@ -150,8 +150,14 @@ function tokenWrap(state, nxt, output) {
 }
 
 
+function exec (state, nxt, surveyMetadata) {
+  if (surveyMetadata && surveyMetadata.off_date < nxt.timestamp) {
+    return { 
+      action: 'RESPOND',
+      isOff: true,
+    }
+  }
 
-function exec (state, nxt) {
   switch(categorizeEvent(nxt)) {
 
   case 'REFERRAL': {
@@ -520,9 +526,8 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   return [...previous, q]
 }
 
-function _response (ctx, qa, {question, validation, response, token, followUp}) {
-
-  if (ctx.surveyMetadata && ctx.surveyMetadata.off_date < ctx.timestamp) {
+function _response (ctx, qa, {question, validation, response, token, followUp, isOff}) {
+  if (isOff) {
     return {
       text: offMessage(ctx.form.custom_messages),
       metadata: JSON.stringify({ ref: question })
@@ -584,10 +589,10 @@ function getState(log) {
   return log.reduce((s,e) => apply(s, exec(s,e)), _initialState())
 }
 
-function getMessage(log, form, user, surveyMetadata, timestamp) {
+function getMessage(log, form, user, surveyMetadata) {
   const event = log.slice(-1)[0]
   const state = getState(log.slice(0,-1))
-  return act({form, user, surveyMetadata, timestamp}, state, exec(state, event))
+  return act({form, user}, state, exec(state, event, surveyMetadata))
 }
 
 module.exports = {

@@ -95,7 +95,7 @@ type Metadata struct {
 }
 
 func getSurveyMetadata(pool *pgxpool.Pool, surveyid string) (*Metadata, error) {
-   query := `SELECT off_date FROM surveys_metadata WHERE surveyid=$1`
+   query := `SELECT off_date FROM survey_metadata WHERE surveyid=$1`
    m := &Metadata{Surveyid:surveyid}
    row := pool.QueryRow(context.Background(), query, surveyid)
    err := row.Scan(&m.OffDate)

@@ -478,7 +478,7 @@ func TestGetMetadata(t *testing.T) {
 
 	now := time.Now()
 	nowFmt := now.Format(time.RFC3339)
-	insertMetadata := `INSERT INTO surveys_metadata(surveyid, off_date) VALUES ($1, $2);`
+	insertMetadata := `INSERT INTO survey_metadata(surveyid, off_date) VALUES ($1, $2);`
 	mustExec(t, pool, insertMetadata, "00000000-0000-0000-5555-000000000000", nowFmt)
 
 	q := make(url.Values)
