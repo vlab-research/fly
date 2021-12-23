@@ -235,30 +235,30 @@ describe("getCondition", () => {
   });
 });
 
-// describe("jump", () => {
-//   it("makes jump when required and makes no jump when not", () => {
-//     const logic = form.logic[0];
-//     const qaGood = [["whats_your_name", "baz"]];
-//     const qaBad = [["whats_your_name", " "]];
+describe("jump", () => {
+  it("makes jump when required and makes no jump when not", () => {
+    const logic = form.logic[0];
+    const qaGood = [["whats_your_name", "baz"]];
+    const qaBad = [["whats_your_name", " "]];
 
-//     const yes = f.jump({ form }, qaGood, logic);
-//     yes.should.equal("how_is_your_day");
+    const yes = f.jump({ form }, qaGood, logic);
+    yes.should.equal("how_is_your_day");
 
-//     const no = f.jump({ form }, qaBad, logic);
-//     no.should.equal("whats_your_age");
-//   });
-// });
+    const no = f.jump({ form }, qaBad, logic);
+    no.should.equal("whats_your_age");
+  });
+});
 
-// describe("getNextField", () => {
-//   it("gets the next field in the form including any logic", () => {
-//     const ctx = form;
+describe("getNextField", () => {
+  it("gets the next field in the form including any logic", () => {
+    const ctx = form;
 
-//     const qa = [["whats_your_name", "baz"]];
-//     const nextFieldWithJump = f.getNextField(ctx, qa, "whats_your_name");
-//     nextFieldWithJump.should.equal(ctx.fields[2]);
+    const qa = [["whats_your_name", "baz"]];
+    const nextFieldWithJump = f.getNextField(ctx, qa, "whats_your_name");
+    nextFieldWithJump.should.equal(ctx.fields[2]);
 
-//     const qa2 = [["whats_your_name", " "]];
-//     const nextFieldWithoutJump = f.getNextField(ctx, qa2, "whats_your_name");
-//     nextFieldWithoutJump.should.equal(ctx.fields[1]);
-//   });
-// });
+    const qa2 = [["whats_your_name", " "]];
+    const nextFieldWithoutJump = f.getNextField(ctx, qa2, "whats_your_name");
+    nextFieldWithoutJump.should.equal(ctx.fields[1]);
+  });
+});
