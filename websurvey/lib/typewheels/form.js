@@ -110,12 +110,11 @@ function jump(ctx, qa, logic) {
   for (let { condition, details } of actions) {
     // if fn returns true
     if (getCondition(ctx, qa, ref, condition)) {
-      console.log("res2: " + getCondition(ctx, qa, ref, condition));
       return details.to.value;
     }
-    // Default to next field if none found
-    return getNext(ctx.form, ref).ref;
   }
+  // Default to next field if none found
+  return getNext(ctx.form, ref).ref;
 }
 
 function getFieldValue(qa, ref) {
