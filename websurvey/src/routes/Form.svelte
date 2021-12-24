@@ -10,14 +10,20 @@
 
     export let ref, form;
 
-    let index, field;
+    let index,
+        field,
+        fieldValue = " ",
+        qa;
 
-    //TODO field value needs to update on input change
-    let qa = [[ref, "baz"]];
+    //TODO how do we want to store the field values?
+    const addFieldValue = (event) => {
+        fieldValue = event.detail;
+    };
 
     $: {
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
+        qa = [[ref, fieldValue]];
     }
 
     const handleSubmit = () => {
@@ -43,7 +49,10 @@
                     {form.fields.length}</label>
             </h2>
             {#if field.type === 'short_text'}
-                <ShortText {field} />
+                <ShortText
+                    {field}
+                    bind:fieldValue
+                    on:add-field-value={addFieldValue} />
             {:else if field.type === 'multiple_choice'}
                 <MultipleChoice {field} />
             {/if}
