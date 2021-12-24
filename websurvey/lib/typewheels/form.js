@@ -108,13 +108,13 @@ function jump(ctx, qa, logic) {
   const { ref, actions } = logic;
 
   for (let { condition, details } of actions) {
-    // if fn returns true
     if (getCondition(ctx, qa, ref, condition)) {
       return details.to.value;
     }
   }
+
   // Default to next field if none found
-  return getNext(ctx.form, ref).ref;
+  return getNext(ctx, ref).ref;
 }
 
 function getFieldValue(qa, ref) {
