@@ -4,13 +4,16 @@
     import ShortText from "../components/ShortText.svelte";
     import {
         isLast,
-        getNext,
+        getNextField,
         getThankyouScreen,
     } from "../../lib/typewheels/form.js";
 
     export let ref, form;
 
     let index, field;
+
+    //TODO field value needs to update on input change
+    let qa = [[ref, "baz"]];
 
     $: {
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
@@ -19,7 +22,7 @@
 
     const handleSubmit = () => {
         if (index < form.fields.length - 1) {
-            const newRef = getNext(form, ref).ref;
+            const newRef = getNextField(form, qa, ref).ref;
             navigate(`/${newRef}`, { replace: true });
         } else if (isLast(form, ref)) {
             const thankyouScreen = getThankyouScreen(form, "thankyou");
