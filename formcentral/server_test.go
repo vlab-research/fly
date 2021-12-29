@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	surveyid     = "00000000-0000-0000-0000-000000000000"
-	userid       = "55555555-5555-5555-5555-555555555555"
-	insertUser   = `INSERT INTO users(id, email) VALUES ($1, 'test@test.com');`
+	surveyid = "00000000-0000-0000-0000-000000000000"
+	userid = "55555555-5555-5555-5555-555555555555"
+	insertUser = `INSERT INTO users(id, email) VALUES ($1, 'test@test.com');`
 	insertSurvey = `
 		INSERT INTO surveys(id, userid, form, formid, shortcode, title, created)
 		VALUES ($1, $2, $3, 'test-form-id', 'test-sc', 'test-title', NOW());

@@ -3,7 +3,6 @@ FROM golang:alpine
 RUN apk add --no-cache \
     gcc \
     libc-dev \
-    librdkafka-dev=1.8.2-r0 \
     readline-dev
 
 RUN mkdir /app

@@ -1,0 +1,21 @@
+version: '3'
+
+services:
+  main:
+    image: ${APP_NAME}_dev
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: |
+      sh -c '
+        echo "Running tests..."
+        go mod tidy
+        if [ "${IS_CI}" = "" ]
+        then
+          go test || true
+          looper
+        fi
+        go test
+      '
+    volumes:
+      - ./:/app

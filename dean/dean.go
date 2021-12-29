@@ -41,25 +41,6 @@ func handle(err error) {
 	}
 }
 
-type Config struct {
-	Db                 string        `env:"CHATBASE_DATABASE,required"`
-	User               string        `env:"CHATBASE_USER,required"`
-	Password           string        `env:"CHATBASE_PASSWORD,required"`
-	Host               string        `env:"CHATBASE_HOST,required"`
-	Port               string        `env:"CHATBASE_PORT,required"`
-	Botserver          string        `env:"BOTSERVER_URL,required"`
-	Codes              []string      `env:"DEAN_FB_CODES,required" envSeparator:","`
-	ErrorTags          []string      `env:"DEAN_ERROR_TAGS,required" envSeparator:","`
-	ErrorInterval      string        `env:"DEAN_ERROR_INTERVAL,required"`
-	BlockedInterval    string        `env:"DEAN_BLOCKED_INTERVAL,required"`
-	RespondingInterval string        `env:"DEAN_RESPONDING_INTERVAL,required"`
-	RespondingGrace    string        `env:"DEAN_RESPONDING_GRACE,required"`
-	Queries            string        `env:"DEAN_QUERIES,required"`
-	SendDelay          time.Duration `env:"DEAN_SEND_DELAY,required"`
-	FollowUpMin        string        `env:"DEAN_FOLLOWUP_MIN,required"`
-	FollowUpMax        string        `env:"DEAN_FOLLOWUP_MAX,required"`
-}
-
 func send(cfg *Config, client *http.Client, e *ExternalEvent) error {
 
 	body, err := json.Marshal(e)
@@ -96,8 +77,8 @@ func process(cfg *Config, ch <-chan *ExternalEvent) {
 }
 
 func getConn(cfg *Config) *pgxpool.Pool {
-	conString := fmt.Sprintf("postgresql://%s@%s:%s/%s?sslmode=disable", cfg.User, cfg.Host, cfg.Port, cfg.Db)
-	config, err := pgxpool.ParseConfig(conString)
+	con := fmt.Sprintf("postgresql://%s@%s:%d/%s?sslmode=disable", cfg.DbUser, cfg.DbHost, cfg.DbPort, cfg.DbName)
+	config, err := pgxpool.ParseConfig(con)
 	handle(err)
 
 	ctx := context.Background()

@@ -68,15 +68,16 @@ func TestPrepWhenOneBadYouGetAnError(t *testing.T) {
 }
 
 func TestWriteBatchSucceeds(t *testing.T) {
-
-	pool := testPool()
+	cfg := getConfig()
+	pool := getPool(cfg)
 	defer pool.Close()
 
-	sql := `drop table if exists test;
-            create table if not exists test(
-              foo varchar
-           );`
-
+	sql := `
+		DROP TABLE IF EXISTS test;
+		CREATE TABLE IF NOT EXISTS test(
+			foo varchar
+		);
+	`
 	mustExec(t, pool, sql)
 
 	msgs := []*kafka.Message{
@@ -89,7 +90,7 @@ func TestWriteBatchSucceeds(t *testing.T) {
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
-	rows, err := pool.Query(context.Background(), "select * from test")
+	rows, err := pool.Query(context.Background(), "SELECT * FROM test")
 	handle(err)
 
 	results := []string{}
@@ -105,14 +106,16 @@ func TestWriteBatchSucceeds(t *testing.T) {
 }
 
 func TestWriteBatchWithFailedLocallyWritesNothing(t *testing.T) {
-	pool := testPool()
+	cfg := getConfig()
+	pool := getPool(cfg)
 	defer pool.Close()
 
-	sql := `drop table if exists test;
-            create table if not exists test(
-              foo varchar
-           );`
-
+	sql := `
+		DROP TABLE IF EXISTS test;
+		CREATE TABLE IF NOT EXISTS test(
+			foo varchar
+		);
+	`
 	mustExec(t, pool, sql)
 
 	msgs := []*kafka.Message{
@@ -125,7 +128,7 @@ func TestWriteBatchWithFailedLocallyWritesNothing(t *testing.T) {
 	err := writer.Write(msgs)
 	assert.NotNil(t, err)
 
-	rows, err := pool.Query(context.Background(), "select * from test")
+	rows, err := pool.Query(context.Background(), "SELECT * FROM test")
 	handle(err)
 
 	results := []string{}

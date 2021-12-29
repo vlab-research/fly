@@ -1,12 +1,12 @@
 FROM node:10-stretch
 
-WORKDIR /usr/src/app
+RUN mkdir /app
+WORKDIR /app
 
-COPY package.json .
-RUN npm i
+COPY package.json /app
+RUN npm install
 
-COPY . .
-
+COPY . /app
 EXPOSE 3000
 
-CMD [ "npm", "start"]
+CMD [ "npm", "start" ]

@@ -1,11 +1,12 @@
 FROM node:10-stretch
 
-WORKDIR /usr/src/app
+RUN mkdir /app
+WORKDIR /app
 
 RUN npm install node-rdkafka
-COPY package.json /usr/src/app
+COPY package.json /app
 RUN npm install
 
-COPY . /usr/src/app
+COPY . /app
 
-CMD [ "npm", "start"]
+CMD [ "npm", "start" ]
