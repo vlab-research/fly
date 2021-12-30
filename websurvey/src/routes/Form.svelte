@@ -1,32 +1,30 @@
 <script>
     import { navigate } from "svelte-routing";
-    import { createEventDispatcher } from "svelte";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
+    import { isLast, getIndex, getNextRef } from "../utils/helpers.js";
 
-    export let ref, fields, thankyou_screens;
+    export let ref, typeformData;
 
-    let dispatch = createEventDispatcher();
+    const { fields, thankyou_screens } = typeformData;
 
-    const { length } = fields;
+    let thankyouScreen = thankyou_screens[0];
 
-    let index = fields.findIndex((field) => field.ref === ref);
+    let index, field;
 
-    $: field = fields[index];
-
-    let defaultThankyou = thankyou_screens[0];
+    $: {
+        index = getIndex(fields, ref);
+        field = fields[index];
+    }
 
     const handleSubmit = () => {
-        index++;
-        if (index < length) {
-            field = fields[index];
-            ref = field.ref;
-            navigate(`/${ref}`, { replace: true });
-        } else if (index === length) {
-            ref = defaultThankyou.ref;
-            navigate(`/${ref}`, { replace: true });
+        if (index < fields.length - 1) {
+            const newRef = getNextRef(fields, ref);
+            navigate(`/${newRef}`, { replace: true });
+        } else if (isLast(fields, ref)) {
+            navigate(`/${thankyouScreen.ref}`, { replace: true });
         }
-        dispatch("updateRef", ref);
+        return;
     };
 </script>
 
@@ -34,21 +32,17 @@
     <form on:submit|preventDefault={handleSubmit}>
         <div class="stack-small">
             <!-- Question -->
-            {#each fields as currentField}
-                {#if field === currentField}
-                    <h2 class="label-wrapper">
-                        <label for="question-{index + 1}">Question
-                            {index + 1}
-                            out of
-                            {length}</label>
-                    </h2>
-                    {#if field.type === 'short_text'}
-                        <ShortText {field} />
-                    {:else if field.type === 'multiple_choice'}
-                        <MultipleChoice {field} />
-                    {/if}
-                {/if}
-            {/each}
+            <h2 class="label-wrapper">
+                <label for="question-{index + 1}">Question
+                    {index + 1}
+                    out of
+                    {fields.length}</label>
+            </h2>
+            {#if field.type === 'short_text'}
+                <ShortText {field} />
+            {:else if field.type === 'multiple_choice'}
+                <MultipleChoice {field} />
+            {/if}
             <button class="btn">OK</button>
         </div>
     </form>

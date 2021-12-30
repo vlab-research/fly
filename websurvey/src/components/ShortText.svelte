@@ -1,17 +1,16 @@
 <script>
     export let field;
 
-    const { title, id } = field;
     let response;
 </script>
 
 <div>
-    <label for="field-{id}" class="field-label">{title}</label>
+    <label for="field-{field.id}" class="field-label">{field.title}</label>
     <input
         bind:value={response}
         type="text"
-        id="field-{id}"
+        id="field-{field.id}"
         autocomplete="off"
         class="input input__lg"
-        placeholder={title} />
+        placeholder={field.title} />
 </div>

@@ -1,9 +1,8 @@
 <script>
-    export let thankyou_screens;
+    export let typeformData;
 
-    const defaultThankyou = thankyou_screens[0];
-
-    const { title } = defaultThankyou;
+    const { thankyou_screens } = typeformData;
+    const { title } = thankyou_screens[0];
 </script>
 
 <div class="surveyapp stack-large">

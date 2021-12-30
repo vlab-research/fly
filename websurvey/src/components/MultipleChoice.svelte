@@ -1,13 +1,13 @@
 <script>
     export let field;
 
-    const { title, id, properties } = field;
+    const { properties } = field;
     const { choices } = properties;
     let selectedChoice;
 </script>
 
 <div>
-    <label for="field-{id}" class="field-label">{title}</label>
+    <label for="field-{field.id}" class="field-label">{field.title}</label>
     {#each choices as choice, index (choice.id)}
         <div class="c-cb">
             <input

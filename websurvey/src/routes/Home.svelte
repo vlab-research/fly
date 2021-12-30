@@ -1,26 +1,20 @@
 <script>
+    import { onMount } from "svelte";
     import { navigate } from "svelte-routing";
-    import { createEventDispatcher } from "svelte";
 
-    export let fields;
-    export let ref;
+    export let ref, typeformData;
 
-    let dispatch = createEventDispatcher();
+    const { fields } = typeformData;
 
-    const handleSubmit = () => {
-        const index = 0;
-        const field = fields[index];
-        ref = field.ref;
-        navigate(`/${ref}`, { replace: true });
-        dispatch("updateRef", ref);
+    const setFirstRef = (index) => {
+        return fields[index].ref;
     };
+
+    ref = setFirstRef(0);
+
+    onMount(() => {
+        navigate(`/${ref}`, { replace: true });
+    });
 </script>
 
-<div class="surveyapp stack-large">
-    <form on:submit|preventDefault={handleSubmit}>
-        <div class="stack-small">
-            <h1 class="h1">Hey! Welcome to our fun survey</h1>
-            <button type="submit" class="btn">Let's go</button>
-        </div>
-    </form>
-</div>
+<div class="surveyapp stack-large">loading</div>
