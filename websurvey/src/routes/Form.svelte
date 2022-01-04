@@ -24,6 +24,7 @@
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
         qa = [[ref, fieldValue]];
+        console.log(qa);
     }
 
     const handleSubmit = () => {
@@ -48,13 +49,16 @@
                     out of
                     {form.fields.length}</label>
             </h2>
-            {#if field.type === 'short_text'}
+            {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
                     {field}
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else if field.type === 'multiple_choice'}
-                <MultipleChoice {field} />
+                <MultipleChoice
+                    {field}
+                    bind:fieldValue
+                    on:add-field-value={addFieldValue} />
             {/if}
             <button class="btn">OK</button>
         </div>
