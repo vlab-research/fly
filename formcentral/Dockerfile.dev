@@ -3,6 +3,7 @@ FROM golang:alpine
 RUN apk add --no-cache \
     gcc \
     libc-dev \
+    npm \
     readline-dev
 
 RUN mkdir /app
@@ -10,4 +11,4 @@ COPY go.mod /app
 WORKDIR /app
 
 RUN go mod download
-RUN go get -u github.com/nathany/looper
+RUN npm install -g nodemon
