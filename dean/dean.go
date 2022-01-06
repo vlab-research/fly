@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -105,10 +104,7 @@ func getQueries(cfg *Config, pool *pgxpool.Pool) []<-chan *ExternalEvent {
 }
 
 func main() {
-	cfg := &Config{}
-	err := env.Parse(cfg)
-	handle(err)
-
+	cfg := getConfig()
 	pool := getConn(cfg)
 	defer pool.Close()
 
