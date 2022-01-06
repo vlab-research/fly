@@ -2,26 +2,23 @@ package main
 
 import (
 	"testing"
+	"net/http"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 )
 
+func before() {
+	http.Get("http://system/resetdb")
+}
+
 func TestMessageWriterWritesGoodData(t *testing.T) {
-	pool := testPool()
+	before()
+
+	cfg := getConfig()
+	pool := getPool(cfg)
 	defer pool.Close()
-
-	sql := `drop table if exists messages;
-            create table if not exists messages(
-			  userid VARCHAR NOT NULL,
-			  timestamp TIMESTAMPTZ NOT NULL,
-			  content VARCHAR NOT NULL,
-              hsh INT AS (fnv64a(content)) STORED NOT NULL,
-			  PRIMARY KEY (hsh, userid)
-           );`
-
-	mustExec(t, pool, sql)
 
 	msgs := []*kafka.Message{
 		&kafka.Message{Value: []byte(`{ "foo": "bar "}`), Key: []byte("foo"), Timestamp: time.Now()},
@@ -34,24 +31,14 @@ func TestMessageWriterWritesGoodData(t *testing.T) {
 
 	res := getCol(pool, "messages", "content")
 	assert.Equal(t, len(res), 2)
-
-	mustExec(t, pool, "drop table messages")
 }
 
 func TestMessageWriterDoesNotThrowOnDuplicateMessage(t *testing.T) {
-	pool := testPool()
+	before()
+
+	cfg := getConfig()
+	pool := getPool(cfg)
 	defer pool.Close()
-
-	sql := `drop table if exists messages;
-            create table if not exists messages(
-			  userid VARCHAR NOT NULL,
-			  timestamp TIMESTAMPTZ NOT NULL,
-			  content VARCHAR NOT NULL,
-              hsh INT AS (fnv64a(content)) STORED NOT NULL,
-			  PRIMARY KEY (hsh, userid)
-           );`
-
-	mustExec(t, pool, sql)
 
 	msgs := []*kafka.Message{
 		&kafka.Message{Value: []byte(`{ "foo": "bar "}`), Key: []byte("foo"), Timestamp: time.Now()},
@@ -64,6 +51,4 @@ func TestMessageWriterDoesNotThrowOnDuplicateMessage(t *testing.T) {
 
 	res := getCol(pool, "messages", "content")
 	assert.Equal(t, len(res), 1)
-
-	mustExec(t, pool, "drop table messages")
 }

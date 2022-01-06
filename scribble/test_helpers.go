@@ -33,7 +33,8 @@ func rowStrings(rows pgx.Rows) []*string {
 }
 
 func getCol(pool *pgxpool.Pool, table string, col string) []*string {
-	rows, err := pool.Query(context.Background(), fmt.Sprintf("select %v from %v", col, table))
+	q := fmt.Sprintf("SELECT %v FROM %v", col, table)
+	rows, err := pool.Query(context.Background(), q)
 	if err != nil {
 		panic(err)
 	}
@@ -47,15 +48,4 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 		t.Fatalf("Exec unexpectedly failed with %v: %v", sql, err)
 	}
 	return
-}
-
-func testPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/test")
-	handle(err)
-
-	ctx := context.Background()
-	pool, err := pgxpool.ConnectConfig(ctx, config)
-	handle(err)
-
-	return pool
 }

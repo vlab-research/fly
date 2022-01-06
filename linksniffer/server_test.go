@@ -9,17 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
-
-type MockEventer struct {
-	mock.Mock
-}
-
-func (m *MockEventer) Send(id string, url string) error {
-	args := m.Called(id, url)
-	return args.Error(0)
-}
 
 func TestGetEvent_forwardHttps(t *testing.T) {
 	e := echo.New()

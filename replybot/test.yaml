@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  main:
+    image: ${APP_NAME}_dev
+    build: .
+    command: |
+      sh -c '
+        echo "Running tests..."
+        npm install
+        if [ "${ARG}" = "--is-ci" ]
+        then
+          npm run test-ci
+          exit
+        fi
+        npm test
+      '
+    volumes:
+      - ./:/app

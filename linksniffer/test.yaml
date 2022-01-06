@@ -1,0 +1,32 @@
+version: '3'
+
+services:
+  main:
+    image: ${APP_NAME}_dev
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: |
+      sh -c '
+        echo "Running tests..."
+        go mod tidy
+
+        if [ -z "${ARG}" ]
+        then
+          nodemon \
+            --ext "*" \
+            --exec "go test -cover"
+        fi
+
+        if [ "${ARG}" = "--is-ci" ]
+        then
+          go test -cover
+          exit
+        fi
+
+        nodemon \
+          --ext "*" \
+          --exec "go test -cover -run ${ARG}"
+      '
+    volumes:
+      - ./:/app

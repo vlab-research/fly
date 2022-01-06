@@ -9,27 +9,21 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     environment:
-      CACHE_TTL: 1h
-      CACHE_NUM_COUNTERS: 10000
-      CACHE_MAX_COST: 10000
-      CACHE_BUFFER_ITEMS: 64
-      RELOADLY_SANDBOX: 'true'
-      BOTSERVER_URL: ''
       CHATBASE_DATABASE: chatroach
       CHATBASE_HOST: cockroachdb
       CHATBASE_PORT: 26257
       CHATBASE_USER: root
-      CHATBASE_MAX_CONNECTIONS: 1
-      KAFKA_BROKERS: ''
-      KAFKA_POLL_TIMEOUT: ''
-      KAFKA_TOPIC: ''
-      KAFKA_GROUP: ''
-      DINERSCLUB_BATCH_SIZE: 1
-      DINERSCLUB_RETRY_BOTSERVER: 1s
-      DINERSCLUB_RETRY_PROVIDER: 1s
-      DINERSCLUB_POOL_SIZE: 1
-      DINERSCLUB_PROVIDERS: 'fake,reloadly'
-      BACK_OFF_RANDOM_FACTOR: 0
+      BOTSERVER_URL: ""
+      DEAN_FB_CODES: ""
+      DEAN_ERROR_TAGS: ""
+      DEAN_ERROR_INTERVAL: ""
+      DEAN_BLOCKED_INTERVAL: ""
+      DEAN_RESPONDING_INTERVAL: ""
+      DEAN_RESPONDING_GRACE: ""
+      DEAN_QUERIES: ""
+      DEAN_SEND_DELAY: ""
+      DEAN_FOLLOWUP_MIN: ""
+      DEAN_FOLLOWUP_MAX: ""
     command: |
       sh -c '
         echo "Running tests..."
@@ -39,18 +33,18 @@ services:
         then
           nodemon \
             --ext "*" \
-            --exec "go test -cover -tags dynamic"
+            --exec "go test -cover"
         fi
 
         if [ "${ARG}" = "--is-ci" ]
         then
-          go test -cover -tags dynamic
+          go test -cover
           exit
         fi
 
         nodemon \
           --ext "*" \
-          --exec "go test -cover -tags dynamic -run ${ARG}"
+          --exec "go test -cover -run ${ARG}"
       '
     volumes:
       - ./:/app
