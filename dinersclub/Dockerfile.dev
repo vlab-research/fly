@@ -4,11 +4,11 @@ RUN apk add --no-cache \
     gcc \
     libc-dev \
     librdkafka-dev=1.8.2-r0 \
-    readline-dev
+    npm
 
 RUN mkdir /app
 COPY go.mod /app
 WORKDIR /app
 
 RUN go mod download
-RUN go get -u github.com/nathany/looper
+RUN npm install -g nodemon

@@ -19,12 +19,23 @@ services:
       sh -c '
         echo "Running tests..."
         go mod tidy
-        if [ "${IS_CI}" = "" ]
+
+        if [ -z "${ARG}" ]
         then
-          go test -cover || true
-          looper
+          nodemon \
+            --ext "*" \
+            --exec "go test -cover"
         fi
-        go test -cover
+
+        if [ "${ARG}" = "--is-ci" ]
+        then
+          go test -cover
+          exit
+        fi
+
+        nodemon \
+          --ext "*" \
+          --exec "go test -cover -run ${ARG}"
       '
     volumes:
       - ./:/app

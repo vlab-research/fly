@@ -14,11 +14,12 @@ services:
     command: |
       sh -c '
         npm install
-        if [ "${IS_CI}" = "" ]
+        if [ "${ARG}" = "--is-ci" ]
         then
-          npm run test -- --watch
+          npm test
+          exit
         fi
-        npm test
+        npm run test -- --watch
       '
     volumes:
       - ./:/app

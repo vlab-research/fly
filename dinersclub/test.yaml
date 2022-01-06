@@ -34,12 +34,23 @@ services:
       sh -c '
         echo "Running tests..."
         go mod tidy
-        if [ "${IS_CI}" = "" ]
+
+        if [ -z "${ARG}" ]
         then
-          go test -cover -tags dynamic || true
-          looper -tags dynamic
+          nodemon \
+            --ext "*" \
+            --exec "go test -cover -tags dynamic"
         fi
-        go test -cover -tags dynamic
+
+        if [ "${ARG}" = "--is-ci" ]
+        then
+          go test -cover -tags dynamic
+          exit
+        fi
+
+        nodemon \
+          --ext "*" \
+          --exec "go test -cover -tags dynamic -run ${ARG}"
       '
     volumes:
       - ./:/app

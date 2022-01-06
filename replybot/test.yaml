@@ -8,11 +8,12 @@ services:
       sh -c '
         echo "Running tests..."
         npm install
-        if [ "${IS_CI}" = "" ]
+        if [ "${ARG}" = "--is-ci" ]
         then
-          npm test
+          npm run test-ci
+          exit
         fi
-        npm run test-ci
+        npm test
       '
     volumes:
       - ./:/app
