@@ -36,10 +36,10 @@ services:
         go mod tidy
         if [ "${IS_CI}" = "" ]
         then
-          go test -tags dynamic || true
+          go test -cover -tags dynamic || true
           looper -tags dynamic
         fi
-        go test -tags dynamic
+        go test -cover -tags dynamic
       '
     volumes:
       - ./:/app

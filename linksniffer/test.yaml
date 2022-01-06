@@ -12,10 +12,10 @@ services:
         go mod tidy
         if [ "${IS_CI}" = "" ]
         then
-          go test || true
+          go test -cover || true
           looper
         fi
-        go test
+        go test -cover
       '
     volumes:
       - ./:/app
