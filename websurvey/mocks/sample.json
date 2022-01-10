@@ -80,14 +80,14 @@
       }
     },
     {
-      "id": "CpPS6viLtXJp",
+      "id": "8ObRJNjtp0Pe",
       "title": "What's your age?",
       "ref": "whats_your_age",
       "properties": {},
       "validations": {
         "required": false
       },
-      "type": "short_text"
+      "type": "number"
     },
     {
       "id": "0gQBt2ecOSRK",
@@ -95,7 +95,7 @@
       "ref": "how_is_your_day",
       "properties": {
         "randomize": false,
-        "allow_multiple_selection": true,
+        "allow_multiple_selection": false,
         "allow_other_choice": false,
         "vertical_alignment": true,
         "choices": [
