@@ -24,7 +24,6 @@
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
         qa = [[ref, fieldValue]];
-        console.log(qa);
     }
 
     const handleSubmit = () => {
