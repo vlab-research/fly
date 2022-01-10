@@ -2,9 +2,9 @@ const mocha = require("mocha");
 const chai = require("chai");
 const should = chai.should();
 const r = require("./responseStore");
+const fs = require("fs");
+const form = JSON.parse(fs.readFileSync("./mocks/sample.json"));
 
-///////////////////////////////////////////////
-// TESTS -----------------------------------
 describe("Test Fly Survey Integration Testing", () => {
   it("returns a snapshot of the current field and field value", () => {
     const responseStore = new r.ResponseStore();

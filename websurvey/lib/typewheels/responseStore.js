@@ -1,3 +1,5 @@
+const form = require("../../mocks/sample.json");
+
 class ResponseStore {
   constructor(qa = []) {
     this.qa = qa;
