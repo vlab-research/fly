@@ -85,7 +85,7 @@
       "ref": "whats_your_age",
       "properties": {},
       "validations": {
-        "required": false
+        "required": true
       },
       "type": "number"
     },

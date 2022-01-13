@@ -13,7 +13,8 @@
 
     let index,
         field,
-        fieldValue = " ";
+        fieldValue = " ",
+        required;
 
     const addFieldValue = (event) => {
         fieldValue = event.detail;
@@ -22,6 +23,7 @@
     $: {
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
+        required = field.validations.required;
     }
 
     const responseStore = new ResponseStore();
@@ -29,7 +31,11 @@
     const handleSubmit = () => {
         const snapshot = responseStore.snapshot(ref, fieldValue);
         const qa = responseStore.getQa(snapshot);
-        const isValid = responseStore.validateFieldValue(field, fieldValue);
+        const isValid = responseStore.validateFieldValue(
+            field,
+            fieldValue,
+            required
+        );
 
         if (index < form.fields.length - 1 && isValid) {
             const newRef = getNextField(form, qa, ref).ref;

@@ -16,9 +16,9 @@ class ResponseStore {
     return this.qa;
   }
 
-  validateFieldValue(field, fieldValue) {
+  validateFieldValue(field, fieldValue, isRequired) {
     const res = v.validator(field)(fieldValue);
-    if (!res.valid) {
+    if (!res.valid || (isRequired && fieldValue === " ")) {
       alert(res.message);
     }
     return res.valid;
