@@ -17,8 +17,10 @@ class ResponseStore {
   }
 
   validateFieldValue(field, fieldValue) {
-    const res = v.validator(field, fieldValue);
-    console.log(res.valid);
+    const res = v.validator(field)(fieldValue);
+    if (!res.valid) {
+      alert(res.message);
+    }
     return res.valid;
   }
 }

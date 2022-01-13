@@ -8,20 +8,12 @@ function validationMessages(messages = {}) {
   return { ...defaultMessages, ...messages };
 }
 
-function validateString(field, messages) {
-  return r => ({
-    message: messages["label.error.mustEnter"],
-    valid: typeof r === "string",
-  });
-}
-
 function isNumber(num) {
   if (typeof num === "string") {
     num = num.replace(/,/g, "");
     num = num.replace(/\./g, "");
     num = num.trim();
-    console.log(!!num && num * 0 === 0);
-    return !!num && num * 0 === 0;
+    return !!num && num * 0 === 0; // false
   }
   // This assumes that if it's not a string, it's a number.
   return true;
@@ -34,9 +26,25 @@ function validateNumber(field, messages) {
   });
 }
 
+// included to prevent numbers being submitted where strings are required
+function isString(str) {
+  if (typeof str === "string" && !isNumber(str)) {
+    return true;
+  }
+  return false;
+}
+
+function validateString(field, messages) {
+  return r => ({
+    message: messages["label.error.mustEnter"],
+    valid: isString(r),
+  });
+}
+
 const lookup = {
   short_text: validateString,
   number: validateNumber,
+  multiple_choice: validateString, // TODO replace with a validator that checks that at least one value is selected
 };
 
 function validator(field, messages = {}) {
@@ -51,4 +59,4 @@ function validator(field, messages = {}) {
   return fn(field, messages);
 }
 
-module.exports = { validator, isNumber };
+module.exports = { validator, isNumber, isString };

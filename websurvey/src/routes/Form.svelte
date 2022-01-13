@@ -27,12 +27,16 @@
     const responseStore = new ResponseStore();
 
     const handleSubmit = () => {
-        let snapshot = responseStore.snapshot(ref, fieldValue);
-        let qa = responseStore.getQa(snapshot);
-        if (index < form.fields.length - 1) {
+        const snapshot = responseStore.snapshot(ref, fieldValue);
+        const qa = responseStore.getQa(snapshot);
+        const isValid = responseStore.validateFieldValue(field, fieldValue);
+
+        if (index < form.fields.length - 1 && isValid) {
             const newRef = getNextField(form, qa, ref).ref;
             navigate(`/${newRef}`, { replace: true });
-        } else if (isLast(form, ref)) {
+        }
+
+        if (isLast(form, ref)) {
             const thankyouScreen = getThankyouScreen(form, "thankyou");
             navigate(`/${thankyouScreen.ref}`, { replace: true });
         }
