@@ -20,8 +20,9 @@ class ResponseStore {
     const res = v.validator(field)(fieldValue);
     if (!res.valid || (isRequired && fieldValue === " ")) {
       alert(res.message);
+      return false;
     }
-    return res.valid;
+    return true;
   }
 }
 
