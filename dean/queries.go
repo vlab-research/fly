@@ -73,6 +73,14 @@ func getFollowUp(rows pgx.Rows) *ExternalEvent {
 	return &ExternalEvent{userid, pageid, &Event{"follow_up", &value}}
 }
 
+func getTimeOff(rows pgx.Rows) *ExternalEvent {
+	var userid, pageid string
+	err := rows.Scan(&userid, &pageid)
+	handle(err)
+
+	return &ExternalEvent{userid, pageid, &Event{"time_off", nil}}
+}
+
 func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `
 		SELECT userid, pageid
@@ -130,32 +138,54 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `
 		WITH x AS (
-		  WITH t AS (
-		    SELECT state_json->>'question' as question, states.userid, states.pageid, surveys.shortcode, has_followup, surveys.created
-		    FROM states
-		    INNER JOIN credentials c ON pageid = facebook_page_id
-		    INNER JOIN surveys ON states.current_form = surveys.shortcode
-		    	AND c.userid = surveys.userid
-		    WHERE
-		      surveys.created <= form_start_time AND
-		      current_state = 'QOUT'  AND
-		      previous_is_followup = FALSE AND
-		      previous_with_token = FALSE AND
-		      (NOW() - updated) > ($1)::INTERVAL AND
-		      (NOW() - updated) < ($2)::INTERVAL
-		  )
-		  SELECT *, ROW_NUMBER() OVER (
-		    PARTITION BY userid, pageid, shortcode ORDER BY created DESC
-		  ) FROM t
+			WITH t AS (
+				SELECT state_json->>'question' as question, states.userid, states.pageid, surveys.shortcode, has_followup, surveys.created
+				FROM states
+				INNER JOIN credentials c ON
+					pageid = facebook_page_id
+				INNER JOIN surveys ON
+					states.current_form = surveys.shortcode AND
+					c.userid = surveys.userid
+				WHERE
+					surveys.created <= form_start_time AND
+					current_state = 'QOUT'  AND
+					previous_is_followup = FALSE AND
+					previous_with_token = FALSE AND
+					(NOW() - updated) > ($1)::INTERVAL AND
+					(NOW() - updated) < ($2)::INTERVAL
+			)
+			SELECT *, ROW_NUMBER() OVER (
+				PARTITION BY userid, pageid, shortcode
+				ORDER BY created DESC
+			) FROM t
 		)
 		SELECT question, userid, pageid
 		FROM x
 		WHERE
-		  row_number = 1 AND
-		  has_followup = TRUE
+			row_number = 1 AND
+			has_followup = TRUE
 	`
 	return get(conn, getFollowUp, query, cfg.FollowUpMin, cfg.FollowUpMax)
 }
 
-	return get(conn, getFollowUp, query, cfg.FollowUpMin, cfg.FollowUpMax)
+func OffTime(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
+	query := `
+		WITH x AS (
+			SELECT
+				responses.pageid, responses.userid, states.current_state
+			FROM responses
+			INNER JOIN surveys_metadata ON
+				surveys_metadata.surveyid = responses.surveyid
+			INNER JOIN states ON
+				states.pageid = responses.pageid AND
+				states.userid = responses.userid
+			WHERE off_date < NOW()
+		)
+		SELECT userid, pageid
+		FROM x
+		WHERE
+			current_state = 'QOUT' OR
+			current_state = 'BLOCKED'
+	`
+	return get(conn, getTimeOff, query)
 }

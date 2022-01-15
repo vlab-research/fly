@@ -6,23 +6,49 @@ import (
 	"testing"
 	"time"
 	"net/http"
+	"regexp"
 
 	"github.com/stretchr/testify/assert"
 )
 
 const (
 	pageInsertSql = `
-		INSERT INTO credentials(entity, key, userid, details)
-		VALUES ('facebook_page', ($1)->>'id', '00000000-0000-0000-0000-000000000000', $1)`
+		INSERT INTO credentials (entity, key, userid, details)
+		VALUES ('facebook_page', ($1)->>'id', '00000000-0000-0000-0000-000000000000', $1)
+	`
 	surveyInsertSql = `
-		INSERT INTO surveys(userid, shortcode, created, messages, formid, form, title)
-		VALUES ('00000000-0000-0000-0000-000000000000', $1, $2, $3, 'test-id', '{}', 'test-title');`
-	insertQuery = `
-		INSERT INTO states(userid, pageid, updated, current_state, state_json)
-		VALUES ($1, $2, $3, $4, $5)`
-	insertUserSql = `
-		INSERT INTO users(id, email) 
-		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+		INSERT INTO surveys (userid, shortcode, created, messages, formid, form, title)
+		VALUES ('00000000-0000-0000-0000-000000000000', $1, $2, $3, 'test-id', '{}', 'test-title')
+	`
+	surveyInsertSql2 = `
+		INSERT INTO surveys (
+			id, userid, form, formid, shortcode, translation_conf, messages, title, created
+		) VALUES (
+			'33333333-3333-3333-3333-333333333333', '00000000-0000-0000-0000-000000000000',
+			'{}', '', 'a1234', '{}', '{}', '', $1
+		)
+	`
+	stateInsertSql = `
+		INSERT INTO states (userid, pageid, updated, current_state, state_json)
+		VALUES ($1, $2, $3, $4, $5)
+	`
+	userInsertSql = `
+		INSERT INTO users (id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com')
+	`
+	metadataInsertSql = `
+		INSERT INTO surveys_metadata (surveyid, off_date)
+		VALUES ('33333333-3333-3333-3333-333333333333', $1)
+	`
+	responseInsertSql = `
+		INSERT INTO responses (
+			parent_shortcode, surveyid, shortcode, flowid,
+			userid, question_ref, question_idx, question_text,
+			response, seed, timestamp, pageid
+		) VALUES (
+			'', '33333333-3333-3333-3333-333333333333', '', 0,
+			$1, '', 0, '', '', 0, $2, 'pageid-test'
+		)
 	`
 )
 
@@ -48,8 +74,17 @@ func makeMs(mins time.Duration) int64 {
 }
 
 func makeStateJson(startTime time.Time, form, previousOutput string) string {
-	base := `{"state": "QOUT", "md": { "startTime": %v }, "forms": ["%v"], "question": "foo", "previousOutput": %v }`
-
+	base := `
+		{
+			"state": "QOUT",
+			"md": {
+				"startTime": %v
+			},
+			"forms": [ "%v" ],
+			"question": "foo",
+			"previousOutput": %v
+		}
+	`
 	return fmt.Sprintf(base, startTime.Unix()*1000, form, previousOutput)
 }
 
@@ -60,22 +95,23 @@ func TestGetRespondingsGetsOnlyThoseInGivenInterval(t *testing.T) {
 	pool := getConn(dbCfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, userInsertSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "11111111-1111-1111-1111-111111111111"}`)
 
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"foo",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-2*time.Hour),
 		"RESPONDING",
-		`{"state": "RESPONDING"}`)
-
-	mustExec(t, pool, insertQuery,
+		`{"state": "RESPONDING"}`,
+	)
+	mustExec(t, pool, stateInsertSql,
 		"baz",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-6*time.Hour),
 		"RESPONDING",
-		`{"state": "RESPONDING"}`)
+		`{"state": "RESPONDING"}`,
+	)
 
 	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour"}
 	ch := Respondings(cfg, pool)
@@ -92,22 +128,23 @@ func TestGetRespondingsOnlyGetsThoseOutsideOfGracePeriod(t *testing.T) {
 	pool := getConn(dbCfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, userInsertSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "11111111-1111-1111-1111-111111111111"}`)
 
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"foo",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
 		"RESPONDING",
-		`{"state": "RESPONDING"}`)
-
-	mustExec(t, pool, insertQuery,
+		`{"state": "RESPONDING"}`,
+	)
+	mustExec(t, pool, stateInsertSql,
 		"baz",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-90*time.Minute),
 		"RESPONDING",
-		`{"state": "RESPONDING"}`)
+		`{"state": "RESPONDING"}`,
+	)
 
 	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour"}
 	ch := Respondings(cfg, pool)
@@ -124,27 +161,30 @@ func TestGetBlockedOnlyGetsThoseWithCodesInsideWindow(t *testing.T) {
 	pool := getConn(dbCfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, userInsertSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "11111111-1111-1111-1111-111111111111"}`)
 
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"foo",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
 		"BLOCKED",
-		`{"state": "BLOCKED", "error": {"code": 2020}}`)
-	mustExec(t, pool, insertQuery,
+		`{"state": "BLOCKED", "error": {"code": 2020}}`,
+	)
+	mustExec(t, pool, stateInsertSql,
 		"baz",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
 		"BLOCKED",
-		`{"state": "BLOCKED", "error": {"code": 9999}}`)
-	mustExec(t, pool, insertQuery,
+		`{"state": "BLOCKED", "error": {"code": 9999}}`,
+	)
+	mustExec(t, pool, stateInsertSql,
 		"qux",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-90*time.Minute),
 		"BLOCKED",
-		`{"state": "BLOCKED", "error": {"code": 2020}}`)
+		`{"state": "BLOCKED", "error": {"code": 2020}}`,
+	)
 
 	cfg := &Config{BlockedInterval: "1 hour", Codes: []string{"2020", "-1"}}
 	ch := Blocked(cfg, pool)
@@ -161,23 +201,24 @@ func TestGetBlockedOnlyGetsThoseWithNextRetryPassed(t *testing.T) {
 	pool := getConn(dbCfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, userInsertSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "11111111-1111-1111-1111-111111111111"}`)
 
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"foo",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
 		"BLOCKED",
-		fmt.Sprintf(`{"state": "BLOCKED", "error": {"code": 2020}, "retries": [%d]}`, makeMs(-2*time.Minute)))
-	mustExec(t, pool, insertQuery,
+		fmt.Sprintf(`{"state": "BLOCKED", "error": {"code": 2020}, "retries": [%d]}`, makeMs(-2*time.Minute)),
+	)
+	mustExec(t, pool, stateInsertSql,
 		"bar",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
 		"BLOCKED",
-		fmt.Sprintf(`{"state": "BLOCKED", "error": {"code": 2020}, "retries": [%d]}`, makeMs(-1*time.Minute)))
-
-	mustExec(t, pool, insertQuery,
+		fmt.Sprintf(`{"state": "BLOCKED", "error": {"code": 2020}, "retries": [%d]}`, makeMs(-1*time.Minute)),
+	)
+	mustExec(t, pool, stateInsertSql,
 		"baz",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
@@ -185,7 +226,8 @@ func TestGetBlockedOnlyGetsThoseWithNextRetryPassed(t *testing.T) {
 		fmt.Sprintf(`{"state": "BLOCKED", "error": {"code": 2020}, "retries": [%d, %d, %d]}`,
 			makeMs(-12*time.Minute),
 			makeMs(-10*time.Minute),
-			makeMs(-6*time.Minute)))
+			makeMs(-6*time.Minute)),
+	)
 
 	cfg := &Config{BlockedInterval: "1 hour", Codes: []string{"2020", "-1"}}
 	ch := Blocked(cfg, pool)
@@ -202,21 +244,23 @@ func TestGetErroredGetsByTag(t *testing.T) {
 	pool := getConn(dbCfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, userInsertSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "11111111-1111-1111-1111-111111111111"}`)
 
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"foo",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
 		"ERROR",
-		`{"state": "ERROR", "error": {"tag": "NETWORK"}}`)
-	mustExec(t, pool, insertQuery,
+		`{"state": "ERROR", "error": {"tag": "NETWORK"}}`,
+	)
+	mustExec(t, pool, stateInsertSql,
 		"baz",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().Add(-30*time.Minute),
 		"ERROR",
-		`{"state": "ERROR", "error": {"tag": "NOTNET"}}`)
+		`{"state": "ERROR", "error": {"tag": "NOTNET"}}`,
+	)
 
 	cfg := &Config{ErrorInterval: "1 hour", ErrorTags: []string{"NETWORK"}}
 	ch := Errored(cfg, pool)
@@ -233,12 +277,12 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 	pool := getConn(dbCfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, userInsertSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "11111111-1111-1111-1111-111111111111"}`)
 
 	ts := time.Now().UTC().Add(-30 * time.Minute)
 	ms := ts.Unix() * 1000
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"foo",
 		"11111111-1111-1111-1111-111111111111",
 		ts,
@@ -254,8 +298,7 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 			}
 		`, ms),
 	)
-
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"baz",
 		"11111111-1111-1111-1111-111111111111",
 		ts,
@@ -278,7 +321,6 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "foo", events[0].User)
-
 	assert.Equal(t, "timeout", events[0].Event.Type)
 
 	ev, _ := json.Marshal(events[0].Event)
@@ -292,7 +334,7 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 	pool := getConn(dbCfg)
 	defer pool.Close()
 
-	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, userInsertSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "11111111-1111-1111-1111-111111111111"}`)
 	mustExec(t, pool, pageInsertSql, `{"id": "22222222-2222-2222-2222-222222222222"}`)
 	mustExec(t, pool, pageInsertSql, `{"id": "33333333-3333-3333-3333-333333333333"}`)
@@ -301,47 +343,48 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 	mustExec(t, pool, surveyInsertSql, "with_followup", time.Now().UTC().Add(-20*time.Hour), `{"label.other": "not a follow up"}`)
 	mustExec(t, pool, surveyInsertSql, "without_followup", time.Now().UTC().Add(-20*time.Hour), `{"label.other": "not a follow up"}`)
 
-	mustExec(t, pool, insertQuery,
+	mustExec(t, pool, stateInsertSql,
 		"foo",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().UTC().Add(-30*time.Minute),
 		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-30*time.Hour), "with_followup", `{"followUp": null}`))
-
-	mustExec(t, pool, insertQuery,
+		makeStateJson(time.Now().UTC().Add(-30*time.Hour), "with_followup", `{"followUp": null}`),
+	)
+	mustExec(t, pool, stateInsertSql,
 		"quux",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().UTC().Add(-30*time.Minute),
 		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-10*time.Hour), "with_followup", `{"followUp": null}`))
-
-	mustExec(t, pool, insertQuery,
+		makeStateJson(time.Now().UTC().Add(-10*time.Hour), "with_followup", `{"followUp": null}`),
+	)
+	mustExec(t, pool, stateInsertSql,
 		"baz",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().UTC().Add(-30*time.Minute),
 		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "without_followup", `{"followUp": null}`))
-
-	mustExec(t, pool, insertQuery,
+		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "without_followup", `{"followUp": null}`),
+	)
+	mustExec(t, pool, stateInsertSql,
 		"bar",
 		"22222222-2222-2222-2222-222222222222",
 		time.Now().UTC().Add(-30*time.Minute),
 		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{"followUp": true}`))
-
-	mustExec(t, pool, insertQuery,
+		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{"followUp": true}`),
+	)
+	mustExec(t, pool, stateInsertSql,
 		"bar",
 		"33333333-3333-3333-3333-333333333333",
 		time.Now().UTC().Add(-30*time.Minute),
 		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{"token": "token"}`))
-
-	mustExec(t, pool, insertQuery,
+		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{"token": "token"}`),
+	)
+	mustExec(t, pool, stateInsertSql,
 		"qux",
 		"11111111-1111-1111-1111-111111111111",
 		time.Now().UTC().Add(-90*time.Minute),
 		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{}`))
+		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{}`),
+	)
 
 	cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes"}
 	ch := FollowUps(cfg, pool)
@@ -353,4 +396,176 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), `{"type":"follow_up","value":"foo"}`)
+}
+
+func TestOffTime(t *testing.T) {
+	before()
+
+	dbCfg := getConfig()
+	pool := getConn(dbCfg)
+	defer pool.Close()
+
+	mustExec(t, pool, userInsertSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "pageid-test"}`)
+
+	now := time.Now().Format(time.RFC3339)
+	mustExec(t, pool, surveyInsertSql2, now)
+	mustExec(t, pool, responseInsertSql, "00000000-0000-0000-0000-000000000000", now)
+	mustExec(t, pool, responseInsertSql, "55555555-5555-5555-5555-555555555555", now)
+
+	past := time.Now().Add(-30*time.Minute).Format(time.RFC3339)
+	mustExec(t, pool, metadataInsertSql, past)
+
+	mustExec(t, pool, stateInsertSql,
+		"00000000-0000-0000-0000-000000000000",
+		"pageid-test",
+		time.Now().Add(-30*time.Minute),
+		"BLOCKED",
+		`{"state": "BLOCKED", "error": {"code": 2020}}`,
+	)
+	mustExec(t, pool, stateInsertSql,
+		"55555555-5555-5555-5555-555555555555",
+		"pageid-test",
+		time.Now().UTC().Add(-90*time.Minute),
+		"QOUT",
+		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{}`),
+	)
+
+	cfg := &Config{}
+	ch := OffTime(cfg, pool)
+	events := getEvents(ch)
+
+	ev, _ := json.Marshal(events)
+	expected := `
+		[
+			{
+				"user": "00000000-0000-0000-0000-000000000000",
+				"page": "pageid-test",
+				"event": {
+					"type": "time_off"
+				}
+			},
+			{
+				"user": "55555555-5555-5555-5555-555555555555",
+				"page": "pageid-test",
+				"event": {
+					"type": "time_off"
+				}
+			}
+		]
+	`
+	m := regexp.MustCompile(`\s+`)
+	ex := m.ReplaceAllString(expected, "")
+
+	assert.Equal(t, string(ev), ex)
+}
+
+func TestNoOffTimeSet(t *testing.T) {
+	before()
+
+	dbCfg := getConfig()
+	pool := getConn(dbCfg)
+	defer pool.Close()
+
+	mustExec(t, pool, userInsertSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "pageid-test"}`)
+
+	now := time.Now().Format(time.RFC3339)
+	mustExec(t, pool, surveyInsertSql2, now)
+	mustExec(t, pool, responseInsertSql, "00000000-0000-0000-0000-000000000000", now)
+	mustExec(t, pool, stateInsertSql,
+		"00000000-0000-0000-0000-000000000000",
+		"pageid-test",
+		time.Now().Add(-30*time.Minute),
+		"BLOCKED",
+		`{"state": "BLOCKED", "error": {"code": 2020}}`,
+	)
+
+	cfg := &Config{}
+	ch := OffTime(cfg, pool)
+	events := getEvents(ch)
+
+	ev, _ := json.Marshal(events)
+	assert.Equal(t, string(ev), `[]`)
+}
+
+func TestOffTimeInTheFuture(t *testing.T) {
+	before()
+
+	dbCfg := getConfig()
+	pool := getConn(dbCfg)
+	defer pool.Close()
+
+	mustExec(t, pool, userInsertSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "pageid-test"}`)
+
+	now := time.Now().Format(time.RFC3339)
+	mustExec(t, pool, surveyInsertSql2, now)
+	mustExec(t, pool, responseInsertSql, "00000000-0000-0000-0000-000000000000", now)
+
+	future := time.Now().Add(30*time.Minute).Format(time.RFC3339)
+	mustExec(t, pool, metadataInsertSql, future)
+
+	mustExec(t, pool, stateInsertSql,
+		"00000000-0000-0000-0000-000000000000",
+		"pageid-test",
+		time.Now().Add(-30*time.Minute),
+		"BLOCKED",
+		`{"state": "BLOCKED", "error": {"code": 2020}}`,
+	)
+
+	cfg := &Config{}
+	ch := OffTime(cfg, pool)
+	events := getEvents(ch)
+
+	ev, _ := json.Marshal(events)
+	assert.Equal(t, string(ev), `[]`)
+}
+
+func TestOffTimeInTheFutureNoResponsesNorStates(t *testing.T) {
+	before()
+
+	dbCfg := getConfig()
+	pool := getConn(dbCfg)
+	defer pool.Close()
+
+	mustExec(t, pool, userInsertSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "pageid-test"}`)
+
+	now := time.Now().Format(time.RFC3339)
+	mustExec(t, pool, surveyInsertSql2, now)
+
+	future := time.Now().Add(30*time.Minute).Format(time.RFC3339)
+	mustExec(t, pool, metadataInsertSql, future)
+
+	cfg := &Config{}
+	ch := OffTime(cfg, pool)
+	events := getEvents(ch)
+
+	ev, _ := json.Marshal(events)
+	assert.Equal(t, string(ev), `[]`)
+}
+
+func TestOffTimeInThePastNoResponsesNorStates(t *testing.T) {
+	before()
+
+	dbCfg := getConfig()
+	pool := getConn(dbCfg)
+	defer pool.Close()
+
+	mustExec(t, pool, userInsertSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "pageid-test"}`)
+
+	now := time.Now().Format(time.RFC3339)
+	mustExec(t, pool, surveyInsertSql2, now)
+
+	past := time.Now().Add(-30*time.Minute).Format(time.RFC3339)
+	mustExec(t, pool, metadataInsertSql, past)
+
+	cfg := &Config{}
+	ch := OffTime(cfg, pool)
+	events := getEvents(ch)
+
+	ev, _ := json.Marshal(events)
+	assert.Equal(t, string(ev), `[]`)
 }
