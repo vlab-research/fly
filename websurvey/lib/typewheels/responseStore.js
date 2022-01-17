@@ -18,10 +18,12 @@ class ResponseStore {
 
   validateFieldValue(field, fieldValue, isRequired) {
     const res = v.validator(field)(fieldValue);
-    if (!res.valid || (isRequired && fieldValue === " ")) {
-      alert(res.message);
+
+    if (!res.valid || (isRequired && !fieldValue.replace(/\s/g, "").length)) {
+      // alert(res.message); TODO put this biz logic into the validator and have it decide which message to show in an obj
       return false;
     }
+
     return true;
   }
 }
