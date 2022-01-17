@@ -769,6 +769,23 @@ describe('Machine', () => {
     action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
   })
 
+  it('Survey is closed', () => {
+    const fu = synthetic({ type: 'time_off'})
+    const log = [[], [], fu]
+    const form = {}
+    console.log(getMessage(log, form, user))
+    const action = getMessage(log, form, user)[0]
+    action.message.should.deep.equal({ text: 'Sorry, the survey is closed.', metadata: '{}' })
+  })
+
+  it('Survey is closed with custom message', () => {
+    const fu = synthetic({ type: 'time_off'})
+    const log = [[], [], fu]
+    const form = { custom_messages: {'label.off': 'Lo siento, la encuesta esta cerrada.'} }
+    const action = getMessage(log, form, user)[0]
+    action.message.should.deep.equal({ text: 'Lo siento, la encuesta esta cerrada.', metadata: '{}' })
+  })
+
   it('Responds to opening text without referral', () => {
     const form = { logic: [],
                    fields: [{type: 'statement', title: 'bar', ref: 'bar'},
