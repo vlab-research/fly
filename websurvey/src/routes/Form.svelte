@@ -7,14 +7,15 @@
         getNextField,
         getThankyouScreen,
     } from "../../lib/typewheels/form.js";
+    import { validateFieldValue } from "../../lib/typewheels/validator.js";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
     export let ref, form;
 
     let index,
         field,
-        fieldValue = " ";
-    // required;
+        fieldValue = " ",
+        required;
 
     const addFieldValue = (event) => {
         fieldValue = event.detail;
@@ -31,11 +32,7 @@
     const handleSubmit = () => {
         const snapshot = responseStore.snapshot(ref, fieldValue);
         const qa = responseStore.getQa(snapshot);
-        // const isValid = responseStore.validateFieldValue(
-        //     field,
-        //     fieldValue,
-        //     required
-        // );
+        const isValid = validateFieldValue(field, fieldValue, required);
 
         if (index < form.fields.length - 1 && isValid) {
             const newRef = getNextField(form, qa, ref).ref;
