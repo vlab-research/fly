@@ -170,22 +170,28 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
 func OffTime(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `
-		WITH x AS (
+		WITH y AS (
+			WITH x AS (
+				SELECT
+					current_state, pageid, userid
+					FROM states
+					WHERE
+						current_state = 'QOUT' OR
+						current_state = 'BLOCKED'
+			)
 			SELECT
-				responses.pageid, responses.userid, states.current_state
-			FROM responses
+				responses.pageid, responses.surveyid, responses.userid,
+				surveys_metadata.off_date, current_state
+			FROM x
+			INNER JOIN responses ON
+				responses.pageid = x.pageid AND
+				responses.userid = x.userid
 			INNER JOIN surveys_metadata ON
 				surveys_metadata.surveyid = responses.surveyid
-			INNER JOIN states ON
-				states.pageid = responses.pageid AND
-				states.userid = responses.userid
-			WHERE off_date < NOW()
+			WHERE surveys_metadata.off_date < NOW()
 		)
 		SELECT userid, pageid
-		FROM x
-		WHERE
-			current_state = 'QOUT' OR
-			current_state = 'BLOCKED'
+		FROM y;
 	`
 	return get(conn, getTimeOff, query)
 }
