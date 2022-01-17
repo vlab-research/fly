@@ -74,4 +74,59 @@ describe("validator", () => {
     res = v.isString(no);
     res.should.equal(false);
   });
+
+  it("evaluates to true if the user correctly submits an answer", () => {
+    let field = {
+      type: "short_text",
+      title: "foo",
+      ref: "foo",
+    };
+    let fieldValue = "baz";
+    const isRequired = false;
+
+    let res = v.validateFieldValue(field, fieldValue, isRequired);
+    res.should.equal(true);
+
+    field = {
+      type: "number",
+      title: "foo",
+      ref: "foo",
+    };
+
+    fieldValue = 10;
+
+    res = v.validateFieldValue(field, fieldValue, isRequired);
+    res.should.equal(true);
+
+    res = v.validateFieldValue(field, fieldValue, isRequired);
+    res.should.equal(true);
+  });
+
+  it("evaluates to false if the user submits an empty answer to a required question", () => {
+    const field = {
+      type: "short_text",
+      title: "foo",
+      ref: "foo",
+    };
+    const fieldValue = " ";
+    const isRequired = true;
+
+    let res = v.validateFieldValue(field, fieldValue, isRequired);
+
+    res.should.equal(false);
+  });
+
+  it("evaluates to true if the user submits an empty answer to a non-required question", () => {
+    const field = {
+      type: "short_text",
+      title: "foo",
+      ref: "foo",
+    };
+    const fieldValue = " ";
+    const isRequired = false;
+
+    let res = v.validateFieldValue(field, fieldValue, isRequired);
+
+    res.should.equal(true);
+  });
 });

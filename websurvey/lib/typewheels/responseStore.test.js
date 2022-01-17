@@ -32,45 +32,4 @@ describe("Test Fly Survey Integration Testing", () => {
       ["what's_your_age", 10],
     ]);
   });
-
-  it("evaluates to true if the user correctly submits an answer", () => {
-    const responseStore = new r.ResponseStore();
-
-    let field = {
-      type: "short_text",
-      title: "foo",
-      ref: "foo",
-    };
-    let fieldValue = "baz";
-    const isRequired = false;
-
-    let res = responseStore.validateFieldValue(field, fieldValue, isRequired);
-    res.should.equal(true);
-
-    field = {
-      type: "number",
-      title: "foo",
-      ref: "foo",
-    };
-
-    fieldValue = 10;
-
-    res = responseStore.validateFieldValue(field, fieldValue, isRequired);
-    res.should.equal(true);
-  });
-
-  it("evaluates to false if the user submits an empty answer to a required question", () => {
-    const responseStore = new r.ResponseStore();
-
-    let field = {
-      type: "short_text",
-      title: "foo",
-      ref: "foo",
-    };
-    let fieldValue = " ";
-    const isRequired = true;
-
-    let res = responseStore.validateFieldValue(field, fieldValue, isRequired);
-    res.should.equal(false);
-  });
 });

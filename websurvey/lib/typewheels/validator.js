@@ -34,6 +34,13 @@ function isString(str) {
   return false;
 }
 
+function isEmptyString(str) {
+  if (!str.replace(/\s/g, "").length) {
+    return true;
+  }
+  return false;
+}
+
 function validateString(field, messages) {
   return r => ({
     message: messages["label.error.mustEnter"],
@@ -44,7 +51,7 @@ function validateString(field, messages) {
 const lookup = {
   short_text: validateString,
   number: validateNumber,
-  multiple_choice: validateString, // TODO replace with a validator that checks that at least one value is selected
+  multiple_choice: validateString,
 };
 
 function validator(field, messages = {}) {
@@ -59,4 +66,21 @@ function validator(field, messages = {}) {
   return fn(field, messages);
 }
 
-module.exports = { validator, isNumber, isString };
+function validateFieldValue(field, fieldValue, isRequired) {
+  const res = validator(field)(fieldValue);
+
+  if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
+    // alert(res.message); // TODO move this alert message to form component
+    return false;
+  }
+
+  return true;
+}
+
+module.exports = {
+  validator,
+  isNumber,
+  isString,
+  isEmptyString,
+  validateFieldValue,
+};
