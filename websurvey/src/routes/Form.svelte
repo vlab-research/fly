@@ -7,7 +7,10 @@
         getNextField,
         getThankyouScreen,
     } from "../../lib/typewheels/form.js";
-    import { validateFieldValue } from "../../lib/typewheels/validator.js";
+    import {
+        validateFieldValue,
+        validator,
+    } from "../../lib/typewheels/validator.js";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
     export let ref, form;
@@ -33,10 +36,15 @@
         const snapshot = responseStore.snapshot(ref, fieldValue);
         const qa = responseStore.getQa(snapshot);
         const isValid = validateFieldValue(field, fieldValue, required);
+        const res = validator(field)(fieldValue);
 
-        if (index < form.fields.length - 1 && isValid) {
-            const newRef = getNextField(form, qa, ref).ref;
-            navigate(`/${newRef}`, { replace: true });
+        if (index < form.fields.length - 1) {
+            if (isValid) {
+                const newRef = getNextField(form, qa, ref).ref;
+                navigate(`/${newRef}`, { replace: true });
+            } else {
+                alert(res.message);
+            }
         }
 
         if (isLast(form, ref)) {

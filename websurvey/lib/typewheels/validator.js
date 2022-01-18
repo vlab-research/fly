@@ -70,10 +70,8 @@ function validateFieldValue(field, fieldValue, isRequired) {
   const res = validator(field)(fieldValue);
 
   if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
-    // alert(res.message); // TODO move this alert message to form component
     return false;
   }
-
   return true;
 }
 
