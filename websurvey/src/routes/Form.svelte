@@ -35,8 +35,8 @@
     const handleSubmit = () => {
         const snapshot = responseStore.snapshot(ref, fieldValue);
         const qa = responseStore.getQa(snapshot);
-        const isValid = validateFieldValue(field, fieldValue, required);
-        const res = validator(field)(fieldValue);
+        const isValid = validateFieldValue(field, fieldValue, required); // TODO abstract this logic out of the component
+        const res = validator(field)(fieldValue); // and this?
 
         if (index < form.fields.length - 1) {
             if (isValid) {
@@ -48,10 +48,13 @@
         }
 
         if (isLast(form, ref)) {
-            const thankyouScreen = getThankyouScreen(form, "thankyou");
-            navigate(`/${thankyouScreen.ref}`, { replace: true });
+            if (isValid) {
+                const thankyouScreen = getThankyouScreen(form, "thankyou");
+                navigate(`/${thankyouScreen.ref}`, { replace: true });
+            } else {
+                alert(res.message);
+            }
         }
-        return;
     };
 </script>
 
