@@ -76,6 +76,8 @@ describe("validator", () => {
   });
 
   it("evaluates to true if the user correctly submits an answer", () => {
+    const fieldValidator = new v.FieldValidator();
+
     let field = {
       type: "short_text",
       title: "foo",
@@ -84,7 +86,7 @@ describe("validator", () => {
     let fieldValue = "baz";
     const isRequired = false;
 
-    let res = v.validateFieldValue(field, fieldValue, isRequired);
+    let res = fieldValidator.validate(field, fieldValue, isRequired);
     res.should.equal(true);
 
     field = {
@@ -95,14 +97,16 @@ describe("validator", () => {
 
     fieldValue = 10;
 
-    res = v.validateFieldValue(field, fieldValue, isRequired);
+    res = fieldValidator.validate(field, fieldValue, isRequired);
     res.should.equal(true);
 
-    res = v.validateFieldValue(field, fieldValue, isRequired);
+    res = fieldValidator.validate(field, fieldValue, isRequired);
     res.should.equal(true);
   });
 
   it("evaluates to false if the user submits an empty answer to a required question", () => {
+    const fieldValidator = new v.FieldValidator();
+
     const field = {
       type: "short_text",
       title: "foo",
@@ -111,12 +115,14 @@ describe("validator", () => {
     const fieldValue = " ";
     const isRequired = true;
 
-    let res = v.validateFieldValue(field, fieldValue, isRequired);
+    let res = fieldValidator.validate(field, fieldValue, isRequired);
 
     res.should.equal(false);
   });
 
   it("evaluates to true if the user submits an empty answer to a non-required question", () => {
+    const fieldValidator = new v.FieldValidator();
+
     const field = {
       type: "short_text",
       title: "foo",
@@ -125,7 +131,7 @@ describe("validator", () => {
     const fieldValue = " ";
     const isRequired = false;
 
-    let res = v.validateFieldValue(field, fieldValue, isRequired);
+    let res = fieldValidator.validate(field, fieldValue, isRequired);
 
     res.should.equal(true);
   });

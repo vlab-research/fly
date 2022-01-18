@@ -8,8 +8,8 @@
         getThankyouScreen,
     } from "../../lib/typewheels/form.js";
     import {
-        validateFieldValue,
         validator,
+        FieldValidator,
     } from "../../lib/typewheels/validator.js";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
@@ -31,12 +31,13 @@
     }
 
     const responseStore = new ResponseStore();
+    const fieldValidator = new FieldValidator();
 
     const handleSubmit = () => {
         const snapshot = responseStore.snapshot(ref, fieldValue);
         const qa = responseStore.getQa(snapshot);
-        const isValid = validateFieldValue(field, fieldValue, required); // TODO abstract this logic out of the component
-        const res = validator(field)(fieldValue); // and this?
+        const isValid = fieldValidator.validate(field, fieldValue, required);
+        const res = validator(field)(fieldValue); // TODO abstract from UI layer?
 
         if (index < form.fields.length - 1) {
             if (isValid) {

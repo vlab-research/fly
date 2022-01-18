@@ -66,13 +66,17 @@ function validator(field, messages = {}) {
   return fn(field, messages);
 }
 
-function validateFieldValue(field, fieldValue, isRequired) {
-  const res = validator(field)(fieldValue);
+class FieldValidator {
+  constructor() {}
 
-  if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
-    return false;
+  validate(field, fieldValue, isRequired) {
+    const res = validator(field)(fieldValue);
+
+    if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
+      return false;
+    }
+    return true;
   }
-  return true;
 }
 
 module.exports = {
@@ -80,5 +84,5 @@ module.exports = {
   isNumber,
   isString,
   isEmptyString,
-  validateFieldValue,
+  FieldValidator,
 };
