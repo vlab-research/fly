@@ -9,7 +9,7 @@
     } from "../../lib/typewheels/form.js";
     import {
         validator,
-        FieldValidator,
+        validateFieldValue,
     } from "../../lib/typewheels/validator.js";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
@@ -31,31 +31,37 @@
     }
 
     const responseStore = new ResponseStore();
-    const fieldValidator = new FieldValidator();
 
     const handleSubmit = () => {
         const snapshot = responseStore.snapshot(ref, fieldValue);
         const qa = responseStore.getQa(snapshot);
-        const isValid = fieldValidator.validate(field, fieldValue, required);
-        const res = validator(field)(fieldValue); // TODO abstract from UI layer?
+        const nextAction = responseStore.nextAction(
+            form,
+            field,
+            fieldValue,
+            qa,
+            ref,
+            required
+        );
 
-        if (index < form.fields.length - 1) {
-            if (isValid) {
-                const newRef = getNextField(form, qa, ref).ref;
-                navigate(`/${newRef}`, { replace: true });
-            } else {
-                alert(res.message);
+        try {
+            if (nextAction.action === "error") {
+                throw new SyntaxError(nextAction.error.message);
             }
+            navigate(`/${nextAction.ref}`, { replace: true });
+        } catch (e) {
+            alert(e.message);
         }
 
-        if (isLast(form, ref)) {
-            if (isValid) {
-                const thankyouScreen = getThankyouScreen(form, "thankyou");
-                navigate(`/${thankyouScreen.ref}`, { replace: true });
-            } else {
-                alert(res.message);
-            }
-        }
+        // TODO move this to the backend
+        // if (isLast(form, ref)) {
+        //     if (isValid) {
+        //         const thankyouScreen = getThankyouScreen(form, "thankyou");
+        //         navigate(`/${thankyouScreen.ref}`, { replace: true });
+        //     } else {
+        //         alert(res.message);
+        //     }
+        // }
     };
 </script>
 
