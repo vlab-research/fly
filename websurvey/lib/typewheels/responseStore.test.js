@@ -35,35 +35,6 @@ describe("Unit Tests For Response Store", () => {
     ]);
   });
 
-  it("returns an error if an empty answer is submitted to a required question", () => {
-    const responseStore = new r.ResponseStore();
-
-    const field = {
-      type: "short_text",
-      title: "whats_your_name",
-      ref: "whats_your_name",
-    };
-
-    let fieldValue = " ";
-
-    let qa = [["whats_your_name", " "]];
-
-    const ref = "whats_your_name";
-
-    let required = true;
-
-    const value = responseStore.nextAction(
-      form,
-      field,
-      fieldValue,
-      qa,
-      ref,
-      required
-    );
-
-    value.action.should.equal("error");
-  });
-
   it("instructs the form to throw an error if an answer evaluates to invalid", () => {
     const responseStore = new r.ResponseStore();
 
