@@ -2,15 +2,6 @@
     import { navigate } from "svelte-routing";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
-    import {
-        isLast,
-        getNextField,
-        getThankyouScreen,
-    } from "../../lib/typewheels/form.js";
-    import {
-        validator,
-        validateFieldValue,
-    } from "../../lib/typewheels/validator.js";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
     export let ref, form;
