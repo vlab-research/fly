@@ -48,6 +48,15 @@ function validateString(field, messages) {
   });
 }
 
+function validateFieldValue(field, fieldValue, isRequired) {
+  const res = validator(field)(fieldValue);
+
+  if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
+    return false;
+  }
+  return true;
+}
+
 const lookup = {
   short_text: validateString,
   number: validateNumber,
@@ -66,23 +75,10 @@ function validator(field, messages = {}) {
   return fn(field, messages);
 }
 
-class FieldValidator {
-  constructor() {}
-
-  validate(field, fieldValue, isRequired) {
-    const res = validator(field)(fieldValue);
-
-    if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
-      return false;
-    }
-    return true;
-  }
-}
-
 module.exports = {
   validator,
   isNumber,
   isString,
   isEmptyString,
-  FieldValidator,
+  validateFieldValue,
 };
