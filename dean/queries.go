@@ -176,8 +176,10 @@ func OffTime(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 					current_state, pageid, userid
 					FROM states
 					WHERE
+						current_state = 'BLOCKED' OR
+						current_state = 'ERROR' OR
 						current_state = 'QOUT' OR
-						current_state = 'BLOCKED'
+						current_state = 'WAIT_EXTERNAL_EVENT'
 			)
 			SELECT
 				responses.pageid, responses.surveyid, responses.userid,
