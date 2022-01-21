@@ -49,6 +49,12 @@ function validateString(field, messages) {
 }
 
 function validateFieldValue(field, fieldValue, isRequired) {
+  if (!field.validations) {
+    throw new TypeError(
+      `There are no validations to be made for the field of type ${field.type}`
+    );
+  }
+
   const res = validator(field)(fieldValue);
 
   if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
@@ -67,11 +73,13 @@ function validator(field, messages = {}) {
   messages = validationMessages(messages);
 
   const fn = lookup[field.type];
+
   if (!fn) {
     throw new TypeError(
       `There is no translator for the question of type ${field.type}`
     );
   }
+
   return fn(field, messages);
 }
 

@@ -3,7 +3,9 @@ const chai = require("chai");
 const should = chai.should();
 const v = require("./validator");
 const f = require("./form");
-const { validateFieldValue } = require("./validator");
+const fs = require("fs");
+const sample = JSON.parse(fs.readFileSync("mocks/sample.json"));
+const form = f.translateForm(sample);
 
 describe("validator", () => {
   it("should validate numbers", () => {
@@ -11,6 +13,7 @@ describe("validator", () => {
       type: "number",
       title: "foo",
       ref: "foo",
+      validations: { required: false },
     };
 
     let res = v.validator(field)("918888000000");
@@ -38,6 +41,19 @@ describe("validator", () => {
     res.valid.should.equal(false);
   });
 
+  it("should validate field value as type string", () => {
+    const field = {
+      type: "short_text",
+      title: "foo",
+      ref: "foo",
+      validations: { required: false },
+    };
+    const res = v.validator(field)("baz");
+    typeof res.valid.should.equal(true);
+  });
+});
+
+describe("isNumber", () => {
   it("should return a boolean based on whether field value is a number", () => {
     const qa = [["whats_your_age", 10]];
     const qa2 = [["whats_your_age", "foo"]];
@@ -51,17 +67,9 @@ describe("validator", () => {
     res = v.isNumber(no);
     res.should.equal(false);
   });
+});
 
-  it("should validate field value as type string", () => {
-    const field = {
-      type: "short_text",
-      title: "foo",
-      ref: "foo",
-    };
-    const res = v.validator(field)("baz");
-    typeof res.valid.should.equal(true);
-  });
-
+describe("isString", () => {
   it("should return a boolean based on whether a field value is a string", () => {
     const qa = [["whats_your_name", "baz"]];
     const qa2 = [["whats_your_name", "10"]];
@@ -75,31 +83,36 @@ describe("validator", () => {
     res = v.isString(no);
     res.should.equal(false);
   });
+});
 
+describe("validateFieldValue", () => {
   it("evaluates to true if the user correctly submits an answer", () => {
     let field = {
       type: "short_text",
       title: "foo",
       ref: "foo",
+      validations: { required: false },
     };
     let fieldValue = "baz";
-    const isRequired = false;
 
-    let res = validateFieldValue(field, fieldValue, isRequired);
+    const required = field.validations.required;
+
+    let res = v.validateFieldValue(field, fieldValue, required);
     res.should.equal(true);
 
     field = {
       type: "number",
       title: "foo",
       ref: "foo",
+      validations: { required: false },
     };
 
     fieldValue = 10;
 
-    res = validateFieldValue(field, fieldValue, isRequired);
+    res = v.validateFieldValue(field, fieldValue, required);
     res.should.equal(true);
 
-    res = validateFieldValue(field, fieldValue, isRequired);
+    res = v.validateFieldValue(field, fieldValue, required);
     res.should.equal(true);
   });
 
@@ -108,11 +121,12 @@ describe("validator", () => {
       type: "short_text",
       title: "foo",
       ref: "foo",
+      validations: { required: true },
     };
     const fieldValue = " ";
-    const isRequired = true;
+    const required = field.validations.required;
 
-    let res = validateFieldValue(field, fieldValue, isRequired);
+    let res = v.validateFieldValue(field, fieldValue, required);
 
     res.should.equal(false);
   });
@@ -122,12 +136,24 @@ describe("validator", () => {
       type: "short_text",
       title: "foo",
       ref: "foo",
+      validations: { required: false },
     };
     const fieldValue = " ";
-    const isRequired = false;
+    const required = field.validations.required;
 
-    let res = validateFieldValue(field, fieldValue, isRequired);
+    let res = v.validateFieldValue(field, fieldValue, required);
 
     res.should.equal(true);
+  });
+
+  it("throws with a useful message when trying to validate a thankyou screen", () => {
+    const field = {
+      type: "thankyou_screen",
+      title: "thanks!",
+      ref: "thankyou",
+    };
+
+    const fn = () => v.validateFieldValue(field);
+    fn.should.throw(/thankyou_screen/); // field type
   });
 });

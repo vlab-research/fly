@@ -17,36 +17,37 @@ function getField(form, ref) {
   return field;
 }
 
-function getThankyouScreen(form, ref) {
-  if (!form.thankyou_screens.length) {
-    throw new FieldError(`This form has no thankyou screens: ${form.id}`);
-  }
+// function getThankyouScreen(form, ref) {
+//   const thankyouObj = form.fields.length - 1;
+//   if (!form.fields[thankyouObj].thankyou_screens.length) {
+//     throw new FieldError(`This form has no thankyou screens: ${form.id}`);
+//   }
 
-  const idx = form.thankyou_screens.map(({ ref }) => ref).indexOf(ref);
-  const thankyouScreen = form.thankyou_screens[idx];
+//   const idx = form.fields[thankyouObj].thankyou_screens
+//     .map(({ ref }) => ref)
+//     .indexOf(ref);
+//   const thankyouScreen = form.fields[thankyouObj].thankyou_screens[idx];
 
-  if (!thankyouScreen) {
-    throw new FieldError(`Could not find the requested thankyouscreen, ${ref},
-                          in our form: ${form.id}!`);
-  }
+//   if (!thankyouScreen) {
+//     throw new FieldError(`Could not find the requested thankyouscreen, ${ref},
+//                           in our form: ${form.id}!`);
+//   }
 
-  return thankyouScreen;
-}
+//   return thankyouScreen;
+// }
 
-function isLast(form, ref) {
-  const idx = form.fields.map(({ ref }) => ref).indexOf(ref);
-  return idx === form.fields.length - 1;
-}
+// function isLast(form, field) {
+//   const idx = form.fields.indexOf(field);
+//   console.log("current idx: " + idx);
+
+//   return idx === form.fields.length - 2; // thankyou screens
+// }
 
 function setFirstRef(form, idx) {
   return form.fields[idx].ref;
 }
 
 function getNext(form, ref) {
-  if (isLast(form, ref)) {
-    return null;
-  }
-
   const idx = form.fields.map(({ ref }) => ref).indexOf(ref);
   return form.fields[idx + 1];
 }
@@ -59,7 +60,6 @@ function getNextField(form, qa, ref) {
     const field = getField(form, nxt);
     return field;
   }
-
   return getNext(form, ref);
 }
 
@@ -149,11 +149,28 @@ function getVar(ctx, qa, ref, vars, v) {
   }
 }
 
+function translateForm(form) {
+  const f = { ...form };
+  f.fields = [
+    ...f.fields,
+    ...f.thankyou_screens.map(s => ({
+      ...s,
+      type: "thankyou_screen",
+    })),
+  ];
+
+  return f;
+}
+
+function filterFields(form) {
+  return form.fields.filter(field => field.type !== "thankyou_screen");
+}
+
 module.exports = {
-  isLast,
+  // isLast,
   getField,
   setFirstRef,
-  getThankyouScreen,
+  // getThankyouScreen,
   getNextField,
   getNext,
   jump,
@@ -161,4 +178,6 @@ module.exports = {
   getChoiceValue,
   getVar,
   getCondition,
+  translateForm,
+  filterFields,
 };

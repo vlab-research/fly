@@ -5,7 +5,7 @@ const r = require("./responseStore");
 const fs = require("fs");
 const form = JSON.parse(fs.readFileSync("mocks/sample.json"));
 
-describe("Unit Tests For Response Store", () => {
+describe("snapshot", () => {
   it("returns a snapshot of the current field and field value", () => {
     const responseStore = new r.ResponseStore();
     const ref = "what's_your_name";
@@ -14,7 +14,9 @@ describe("Unit Tests For Response Store", () => {
     const snapshot = responseStore.snapshot(ref, fieldValue);
     snapshot.should.eql([ref, fieldValue]);
   });
+});
 
+describe("getQa", () => {
   it("returns all snapshots", () => {
     const responseStore = new r.ResponseStore();
 
@@ -34,7 +36,9 @@ describe("Unit Tests For Response Store", () => {
       ["what's_your_age", 10],
     ]);
   });
+});
 
+describe("next", () => {
   it("instructs the form to throw an error if an answer evaluates to invalid", () => {
     const responseStore = new r.ResponseStore();
 
@@ -42,6 +46,9 @@ describe("Unit Tests For Response Store", () => {
       type: "short_text",
       title: "whats_your_name",
       ref: "whats_your_name",
+      validations: {
+        required: true,
+      },
     };
 
     const fieldValue = " ";
@@ -50,9 +57,9 @@ describe("Unit Tests For Response Store", () => {
 
     const ref = "whats_your_name";
 
-    const required = true;
+    const required = field.validations.required;
 
-    const value = responseStore.nextAction(
+    const value = responseStore.next(
       form,
       field,
       fieldValue,
@@ -71,6 +78,9 @@ describe("Unit Tests For Response Store", () => {
       type: "short_text",
       title: "whats_your_name",
       ref: "whats_your_name",
+      validations: {
+        required: true,
+      },
     };
 
     const fieldValue = "foo";
@@ -79,9 +89,9 @@ describe("Unit Tests For Response Store", () => {
 
     const ref = "whats_your_name";
 
-    let required = true;
+    let required = form.validations.required;
 
-    const value = responseStore.nextAction(
+    const value = responseStore.next(
       form,
       field,
       fieldValue,
@@ -92,7 +102,7 @@ describe("Unit Tests For Response Store", () => {
 
     value.action.should.equal("navigate");
 
-    required = false;
+    required = !form.validations.required;
 
     responseStore.nextAction(form, field, fieldValue, qa, ref, required);
 

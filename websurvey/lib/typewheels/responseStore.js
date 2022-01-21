@@ -1,6 +1,5 @@
 const v = require("./validator");
 const f = require("./form");
-const form = require("./form");
 
 class ResponseStore {
   constructor(qa = []) {
@@ -17,21 +16,19 @@ class ResponseStore {
     return this.qa;
   }
 
-  nextAction(form, field, fieldValue, qa, ref, required) {
+  next(form, qa, ref, field, fieldValue, required) {
     const isValid = v.validateFieldValue(field, fieldValue, required);
-    if (form.fields.indexOf(field) < form.fields.length - 1) {
-      if (isValid) {
-        return {
-          ref: f.getNextField(form, qa, ref).ref,
-          action: "navigate",
-        };
-      } else {
-        return {
-          ref: f.getField(form, ref).ref,
-          action: "error",
-          error: v.validator(field)(fieldValue),
-        };
-      }
+    if (isValid) {
+      return {
+        ref: f.getNextField(form, qa, ref, field).ref,
+        action: "navigate",
+      };
+    } else {
+      return {
+        ref: f.getField(form, ref).ref,
+        action: "error",
+        error: v.validator(field)(fieldValue),
+      };
     }
   }
 }

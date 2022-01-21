@@ -29,6 +29,7 @@
       }
     }
   },
+
   "thankyou_screens": [
     {
       "id": "oBB8D27w4zil",
@@ -39,8 +40,10 @@
         "share_icons": true,
         "button_mode": "reload",
         "button_text": "reload"
-      }
+      },
+      "type": "thankyou_screen"
     },
+
     {
       "id": "DefaultTyScreen",
       "ref": "default_tys",
@@ -54,7 +57,8 @@
       "attachment": {
         "type": "image",
         "href": "https://images.typeform.com/images/2dpnUBBkz2VN"
-      }
+      },
+      "type": "thankyou_screen"
     }
   ],
   "fields": [
@@ -117,7 +121,7 @@
         ]
       },
       "validations": {
-        "required": false
+        "required": true
       },
       "type": "multiple_choice"
     }
