@@ -61,10 +61,10 @@ describe("next", () => {
 
     const value = responseStore.next(
       form,
-      field,
-      fieldValue,
       qa,
       ref,
+      field,
+      fieldValue,
       required
     );
 
@@ -87,25 +87,37 @@ describe("next", () => {
 
     const qa = [["whats_your_name", "foo"]];
 
-    const ref = "whats_your_name";
+    const ref = field.ref;
 
-    let required = form.validations.required;
+    const required = field.validations.required;
 
-    const value = responseStore.next(
-      form,
-      field,
-      fieldValue,
-      qa,
-      ref,
-      required
-    );
+    const res = responseStore.next(form, qa, ref, field, fieldValue, required);
 
-    value.action.should.equal("navigate");
+    res.action.should.equal("navigate");
+  });
 
-    required = !form.validations.required;
+  it("instructs the form to go to the next field if an answer evaluates to invalid but is not required", () => {
+    const responseStore = new r.ResponseStore();
 
-    responseStore.nextAction(form, field, fieldValue, qa, ref, required);
+    const field = {
+      type: "short_text",
+      title: "whats_your_name",
+      ref: "whats_your_name",
+      validations: {
+        required: false,
+      },
+    };
 
-    value.action.should.equal("navigate");
+    const fieldValue = "foo";
+
+    const qa = [["whats_your_name", " "]];
+
+    const ref = field.ref;
+
+    const required = field.validations.required;
+
+    const res = responseStore.next(form, qa, ref, field, fieldValue, required);
+
+    res.action.should.equal("navigate");
   });
 });
