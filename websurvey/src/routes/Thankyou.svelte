@@ -1,6 +1,5 @@
 <script>
     export let field;
-    console.log(field);
 </script>
 
 <div class="surveyapp stack-large">

@@ -10,8 +10,6 @@
 
     form = translateForm(form);
 
-    console.log(form);
-
     let index,
         field,
         fieldValue = " ",
@@ -25,8 +23,6 @@
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
         required = field.validations ? field.validations.required : null;
-
-        console.log("current ref: " + ref);
     }
 
     const responseStore = new ResponseStore();
@@ -43,7 +39,6 @@
             required
         );
 
-        console.log("next action: " + next.action);
         if (form.fields.indexOf(field) < form.fields.length - 1) {
             try {
                 if (next.action === "error") {
@@ -60,15 +55,12 @@
 <div class="surveyapp stack-large">
     <form on:submit|preventDefault={handleSubmit}>
         <div class="stack-small">
-            <!-- Field -->
-
             <h2 class="label-wrapper">
                 <label for="question-{index + 1}">Question
                     {index + 1}
                     out of
                     {filterFields(form).length}</label>
             </h2>
-
             {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
                     {field}
@@ -82,7 +74,6 @@
             {:else}
                 <Thankyou {field} />
             {/if}
-
             <button class="btn">OK</button>
         </div>
     </form>

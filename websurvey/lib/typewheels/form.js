@@ -17,32 +17,6 @@ function getField(form, ref) {
   return field;
 }
 
-// function getThankyouScreen(form, ref) {
-//   const thankyouObj = form.fields.length - 1;
-//   if (!form.fields[thankyouObj].thankyou_screens.length) {
-//     throw new FieldError(`This form has no thankyou screens: ${form.id}`);
-//   }
-
-//   const idx = form.fields[thankyouObj].thankyou_screens
-//     .map(({ ref }) => ref)
-//     .indexOf(ref);
-//   const thankyouScreen = form.fields[thankyouObj].thankyou_screens[idx];
-
-//   if (!thankyouScreen) {
-//     throw new FieldError(`Could not find the requested thankyouscreen, ${ref},
-//                           in our form: ${form.id}!`);
-//   }
-
-//   return thankyouScreen;
-// }
-
-// function isLast(form, field) {
-//   const idx = form.fields.indexOf(field);
-//   console.log("current idx: " + idx);
-
-//   return idx === form.fields.length - 2; // thankyou screens
-// }
-
 function setFirstRef(form, idx) {
   return form.fields[idx].ref;
 }
@@ -167,10 +141,8 @@ function filterFields(form) {
 }
 
 module.exports = {
-  // isLast,
   getField,
   setFirstRef,
-  // getThankyouScreen,
   getNextField,
   getNext,
   jump,
