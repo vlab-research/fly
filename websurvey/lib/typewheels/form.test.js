@@ -21,40 +21,6 @@ describe("getField", () => {
   });
 });
 
-// describe("getThankyouScreen", () => {
-//   it("gets thankyou screen", () => {
-//     const ctx = form;
-//     const lastField = form.fields.length - 1;
-//     let value = f.getThankyouScreen(ctx, "thankyou");
-//     value.should.equal(form.fields[lastField].thankyou_screens[0]);
-
-//     value = f.getThankyouScreen(ctx, "default_tys");
-//     value.should.equal(form.fields[lastField].thankyou_screens[1]);
-//   });
-
-//   it("throws with a useful message when thankyou screen not found in form", () => {
-//     const ctx = form;
-//     const fn = () => f.getThankyouScreen(ctx, "baz");
-//     fn.should.throw(/baz/); // thankyou screen
-//     fn.should.throw(/DjlXLX2s/); // form
-//   });
-// });
-
-// describe("isLast", () => {
-//   it("checks if a field is last", () => {
-//     const ctx = form;
-//     const value = f.isLast(ctx, "how_is_your_day");
-//     value.should.equal(false);
-//   });
-
-//   it("returns true if the current field is the last question", () => {
-//     const ctx = form;
-//     const field = form.fields[2];
-//     const value = f.isLast(ctx, field);
-//     value.should.equal(true);
-//   });
-// });
-
 describe("setFirstRef", () => {
   it("sets the first field ref", () => {
     const ctx = form;
