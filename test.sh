@@ -8,7 +8,12 @@ then
 fi
 FILE_PATH="${APP_NAME}/test.yaml"
 
-docker-compose -f ${FILE_PATH} down --remove-orphans
+function cleanup {
+	docker-compose -f ${FILE_PATH} down --remove-orphans
+}
+
+trap cleanup EXIT
+cleanup
 
 docker-compose -f ${FILE_PATH} build initdb
 docker-compose -f ${FILE_PATH} run initdb
