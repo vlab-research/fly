@@ -2,8 +2,10 @@ const mocha = require("mocha");
 const chai = require("chai");
 const should = chai.should();
 const r = require("./responseStore");
+const f = require("./form");
 const fs = require("fs");
-const form = JSON.parse(fs.readFileSync("mocks/sample.json"));
+const sample = JSON.parse(fs.readFileSync("mocks/sample.json"));
+const form = f.translateForm(sample);
 
 describe("snapshot", () => {
   it("returns a snapshot of the current field and field value", () => {
@@ -52,13 +54,9 @@ describe("next", () => {
     };
 
     const fieldValue = " ";
-
     const qa = [["whats_your_name", " "]];
-
     const ref = "whats_your_name";
-
     const required = field.validations.required;
-
     const value = responseStore.next(
       form,
       qa,
@@ -84,13 +82,9 @@ describe("next", () => {
     };
 
     const fieldValue = "foo";
-
     const qa = [["whats_your_name", "foo"]];
-
     const ref = field.ref;
-
     const required = field.validations.required;
-
     const res = responseStore.next(form, qa, ref, field, fieldValue, required);
 
     res.action.should.equal("navigate");
@@ -109,15 +103,36 @@ describe("next", () => {
     };
 
     const fieldValue = "foo";
-
     const qa = [["whats_your_name", " "]];
-
     const ref = field.ref;
-
     const required = field.validations.required;
-
     const res = responseStore.next(form, qa, ref, field, fieldValue, required);
 
     res.action.should.equal("navigate");
+  });
+});
+
+describe("interpolationCheck", () => {
+  it("returns a non-interpolated title when the field requires no interpolation", () => {
+    const responseStore = new r.ResponseStore();
+    const qa = [["whats_your_name", " "]];
+    const field = {
+      title: "What's your name?",
+      ref: "whats_your_name",
+    };
+    const res = responseStore.interpolationCheck(field, qa);
+    res.should.equal("What's your name?");
+  });
+
+  it("returns true when the field requires interpolation", () => {
+    const responseStore = new r.ResponseStore();
+    const qa = [["whats_your_name", "baz"]];
+    const field = {
+      title:
+        "Nice to meet you, {{field:whats_your_name}}, how is your day going?",
+      ref: "how_is_your_day",
+    };
+    const res = responseStore.interpolationCheck(field, qa);
+    res.should.equal("Nice to meet you, baz, how is your day going?");
   });
 });

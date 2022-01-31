@@ -10,10 +10,14 @@
 
     form = translateForm(form);
 
+    const responseStore = new ResponseStore();
+
     let index,
         field,
-        fieldValue = " ",
-        required;
+        fieldValue = "",
+        required,
+        snapshot = responseStore.snapshot(ref, fieldValue),
+        qa = responseStore.getQa(snapshot);
 
     const addFieldValue = (event) => {
         fieldValue = event.detail;
@@ -23,13 +27,13 @@
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
         required = field.validations ? field.validations.required : null;
+        qa = responseStore.getQa(snapshot);
     }
 
-    const responseStore = new ResponseStore();
-
     const handleSubmit = () => {
-        const snapshot = responseStore.snapshot(ref, fieldValue);
-        const qa = responseStore.getQa(snapshot);
+        snapshot = responseStore.snapshot(ref, fieldValue);
+        qa = responseStore.getQa(snapshot);
+
         const next = responseStore.next(
             form,
             qa,
@@ -64,11 +68,13 @@
             {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
                     {field}
+                    {qa}
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else if field.type === 'multiple_choice'}
                 <MultipleChoice
                     {field}
+                    {qa}
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else}

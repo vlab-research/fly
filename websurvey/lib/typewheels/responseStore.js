@@ -31,6 +31,16 @@ class ResponseStore {
       };
     }
   }
+
+  interpolationCheck(field, qa) {
+    const title = field.title;
+    const dynamicValue = f.getDynamicValue(qa, title);
+
+    if (dynamicValue) {
+      return f.interpolateField(qa, field).title;
+    }
+    return title;
+  }
 }
 
 module.exports = { ResponseStore };

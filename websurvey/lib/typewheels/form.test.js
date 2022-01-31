@@ -21,40 +21,6 @@ describe("getField", () => {
   });
 });
 
-// describe("getThankyouScreen", () => {
-//   it("gets thankyou screen", () => {
-//     const ctx = form;
-//     const lastField = form.fields.length - 1;
-//     let value = f.getThankyouScreen(ctx, "thankyou");
-//     value.should.equal(form.fields[lastField].thankyou_screens[0]);
-
-//     value = f.getThankyouScreen(ctx, "default_tys");
-//     value.should.equal(form.fields[lastField].thankyou_screens[1]);
-//   });
-
-//   it("throws with a useful message when thankyou screen not found in form", () => {
-//     const ctx = form;
-//     const fn = () => f.getThankyouScreen(ctx, "baz");
-//     fn.should.throw(/baz/); // thankyou screen
-//     fn.should.throw(/DjlXLX2s/); // form
-//   });
-// });
-
-// describe("isLast", () => {
-//   it("checks if a field is last", () => {
-//     const ctx = form;
-//     const value = f.isLast(ctx, "how_is_your_day");
-//     value.should.equal(false);
-//   });
-
-//   it("returns true if the current field is the last question", () => {
-//     const ctx = form;
-//     const field = form.fields[2];
-//     const value = f.isLast(ctx, field);
-//     value.should.equal(true);
-//   });
-// });
-
 describe("setFirstRef", () => {
   it("sets the first field ref", () => {
     const ctx = form;
@@ -298,5 +264,58 @@ describe("translateForm", () => {
 
     const val = f.translateForm(sample).fields;
     val.length.should.equal(fields + thankyouScreens);
+  });
+});
+
+describe("_splitUrls", () => {
+  it("works with no url", () => {
+    const split = f._splitUrls("hello baz");
+    split.should.deep.equal([["text", "hello baz"]]);
+  });
+});
+
+describe("getDynamicValue", () => {
+  it("returns the field value of a previously answered question", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const title =
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
+    const i = f.getDynamicValue(qa, title);
+    i.should.equal("baz");
+  });
+
+  it("returns false if there is no dynamic value to interpolate", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const title = "How old are you?";
+    const i = f.getDynamicValue(qa, title);
+    i.should.equal(false);
+  });
+
+  it("throws if an invalid field value is found", () => {
+    const qa = [["whats_your_name", " "]];
+    const title =
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
+    const fn = () => f.getDynamicValue(qa, title);
+    fn.should.throw(
+      /Nice to meet you, {{field:whats_your_name}}, how is your day going/
+    ); // title
+  });
+});
+
+describe("_interpolate", () => {
+  it("interpolates a field with a dynamic value", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const title =
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
+    const i = f._interpolate(qa, title);
+    i.should.equal("Nice to meet you, baz, how is your day going?");
+  });
+});
+
+describe("interpolateField", () => {
+  const qa = [["whats_your_name", "baz"]];
+  const field = form.fields[2];
+  it("works with previously answered fields", () => {
+    const i = f.interpolateField(qa, field);
+    i.title.should.equal("Nice to meet you, baz, how is your day going?");
   });
 });

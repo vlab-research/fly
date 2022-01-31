@@ -1,13 +1,18 @@
 <script>
     import { createEventDispatcher } from "svelte";
+    import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
-    export let field, fieldValue;
+    export let field, fieldValue, qa;
+
+    const responseStore = new ResponseStore();
 
     const dispatch = createEventDispatcher();
+
+    const title = responseStore.interpolationCheck(field, qa);
 </script>
 
 <div>
-    <label for="field-{field.id}" class="field-label">{field.title}</label>
+    <label for="field-{field.id}" class="field-label">{title}</label>
     <input
         bind:value={fieldValue}
         on:input={dispatch('add-field-value', fieldValue)}
