@@ -7,15 +7,14 @@
         getNextField,
         getThankyouScreen,
     } from "../../lib/typewheels/form.js";
+    import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
     export let ref, form;
 
     let index,
         field,
-        fieldValue = " ",
-        qa;
+        fieldValue = " ";
 
-    //TODO how do we want to store the field values?
     const addFieldValue = (event) => {
         fieldValue = event.detail;
     };
@@ -23,10 +22,13 @@
     $: {
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
-        qa = [[ref, fieldValue]];
     }
 
+    const responseStore = new ResponseStore();
+
     const handleSubmit = () => {
+        let snapshot = responseStore.snapshot(ref, fieldValue);
+        let qa = responseStore.getQa(snapshot);
         if (index < form.fields.length - 1) {
             const newRef = getNextField(form, qa, ref).ref;
             navigate(`/${newRef}`, { replace: true });
