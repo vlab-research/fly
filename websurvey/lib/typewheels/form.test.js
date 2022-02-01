@@ -3,7 +3,8 @@ const chai = require("chai");
 const should = chai.should();
 const f = require("./form.js");
 const fs = require("fs");
-const form = JSON.parse(fs.readFileSync("mocks/sample.json"));
+const sample = JSON.parse(fs.readFileSync("mocks/sample.json"));
+const form = f.translateForm(sample);
 
 describe("getField", () => {
   it("gets a field", () => {
@@ -20,29 +21,6 @@ describe("getField", () => {
   });
 });
 
-describe("getThankyouScreen", () => {
-  it("gets thankyou screen", () => {
-    const ctx = form;
-    const value = f.getThankyouScreen(ctx, "thankyou");
-    value.should.equal(form.thankyou_screens[0]);
-  });
-
-  it("throws with a useful message when thankyou screen not found in form", () => {
-    const ctx = form;
-    const fn = () => f.getThankyouScreen(ctx, "baz");
-    fn.should.throw(/baz/); // thankyou screen
-    fn.should.throw(/DjlXLX2s/); // form
-  });
-});
-
-describe("isLast", () => {
-  it("checks if a field is last", () => {
-    const ctx = form;
-    const value = f.isLast(ctx, "how_is_your_day");
-    value.should.equal(true);
-  });
-});
-
 describe("setFirstRef", () => {
   it("sets the first field ref", () => {
     const ctx = form;
@@ -53,9 +31,13 @@ describe("setFirstRef", () => {
 
 describe("getNext", () => {
   it("gets the next field object in the form", () => {
-    const ctx = form;
-    const value = f.getNext(ctx, "whats_your_name");
+    const value = f.getNext(form, "whats_your_name");
     value.should.equal(form.fields[1]);
+  });
+
+  it("gets the first thankyou screen after the last question", () => {
+    const value = f.getNext(form, "how_is_your_day");
+    value.should.equal(form.fields[3]);
   });
 });
 
@@ -251,13 +233,36 @@ describe("jump", () => {
 
 describe("getNextField", () => {
   it("gets the next field in the form taking into account any logic jumps", () => {
-    const qaGood = [["whats_your_name", "baz"]];
-    const qaBad = [["whats_your_name", " "]];
+    const ref = "whats_your_name";
+    const qaGood = [[ref, "baz"]];
+    const qaBad = [[ref, " "]];
 
-    const yes = f.getNextField(form, qaGood, "whats_your_name");
+    const yes = f.getNextField(form, qaGood, ref);
     yes.should.equal(form.fields[2]);
 
-    const no = f.getNextField(form, qaBad, "whats_your_name");
+    const no = f.getNextField(form, qaBad, ref);
     no.should.equal(form.fields[1]);
+  });
+
+  it("gets the next field including any thankyou screens", () => {
+    const ref = "how_is_your_day";
+    const qaGood = [[ref, "Just OK..."]];
+    const qaBad = [[ref, " "]];
+
+    const yes = f.getNextField(form, qaGood, ref);
+    yes.should.equal(form.fields[3]);
+
+    const no = f.getNextField(form, qaBad, ref);
+    no.should.equal(form.fields[3]);
+  });
+});
+
+describe("translateForm", () => {
+  it("forms one array of fields and thankyou screens", () => {
+    const fields = sample.fields.length;
+    const thankyouScreens = sample.thankyou_screens.length;
+
+    const val = f.translateForm(sample).fields;
+    val.length.should.equal(fields + thankyouScreens);
   });
 });

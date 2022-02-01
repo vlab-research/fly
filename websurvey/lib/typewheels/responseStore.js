@@ -1,4 +1,5 @@
-const form = require("../../mocks/sample.json");
+const v = require("./validator");
+const f = require("./form");
 
 class ResponseStore {
   constructor(qa = []) {
@@ -13,6 +14,22 @@ class ResponseStore {
 
   getQa() {
     return this.qa;
+  }
+
+  next(form, qa, ref, field, fieldValue, required) {
+    const isValid = v.validateFieldValue(field, fieldValue, required);
+    if (isValid) {
+      return {
+        ref: f.getNextField(form, qa, ref, field).ref,
+        action: "navigate",
+      };
+    } else {
+      return {
+        ref: f.getField(form, ref).ref,
+        action: "error",
+        error: v.validator(field)(fieldValue),
+      };
+    }
   }
 }
 
