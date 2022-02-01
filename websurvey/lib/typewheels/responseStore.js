@@ -32,13 +32,8 @@ class ResponseStore {
     }
   }
 
-  interpolationCheck(field, qa) {
-    const title = field.title;
-    const dynamicValue = f.getDynamicValue(qa, title);
-
-    if (dynamicValue) {
-      return f.interpolateField(qa, field).title;
-    }
+  interpolate(field, qa) {
+    const title = f.interpolateField(qa, field).title;
     return title;
   }
 }

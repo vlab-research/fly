@@ -1,14 +1,9 @@
 <script>
     import { createEventDispatcher } from "svelte";
-    import { ResponseStore } from "../../lib/typewheels/responseStore.js";
 
-    export let field, fieldValue, qa;
-
-    const responseStore = new ResponseStore();
+    export let field, fieldValue, title;
 
     const dispatch = createEventDispatcher();
-
-    const title = responseStore.interpolationCheck(field, qa);
 </script>
 
 <div>

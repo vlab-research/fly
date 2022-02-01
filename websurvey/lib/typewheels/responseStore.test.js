@@ -111,28 +111,3 @@ describe("next", () => {
     res.action.should.equal("navigate");
   });
 });
-
-describe("interpolationCheck", () => {
-  it("returns a non-interpolated title when the field requires no interpolation", () => {
-    const responseStore = new r.ResponseStore();
-    const qa = [["whats_your_name", " "]];
-    const field = {
-      title: "What's your name?",
-      ref: "whats_your_name",
-    };
-    const res = responseStore.interpolationCheck(field, qa);
-    res.should.equal("What's your name?");
-  });
-
-  it("returns true when the field requires interpolation", () => {
-    const responseStore = new r.ResponseStore();
-    const qa = [["whats_your_name", "baz"]];
-    const field = {
-      title:
-        "Nice to meet you, {{field:whats_your_name}}, how is your day going?",
-      ref: "how_is_your_day",
-    };
-    const res = responseStore.interpolationCheck(field, qa);
-    res.should.equal("Nice to meet you, baz, how is your day going?");
-  });
-});

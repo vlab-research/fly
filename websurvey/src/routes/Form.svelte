@@ -17,7 +17,8 @@
         fieldValue = "",
         required,
         snapshot = responseStore.snapshot(ref, fieldValue),
-        qa = responseStore.getQa(snapshot);
+        qa = responseStore.getQa(snapshot),
+        title;
 
     const addFieldValue = (event) => {
         fieldValue = event.detail;
@@ -28,6 +29,7 @@
         field = form.fields[index];
         required = field.validations ? field.validations.required : null;
         qa = responseStore.getQa(snapshot);
+        title = responseStore.interpolate(field, qa);
     }
 
     const handleSubmit = () => {
@@ -68,17 +70,17 @@
             {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
                     {field}
-                    {qa}
+                    {title}
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else if field.type === 'multiple_choice'}
                 <MultipleChoice
                     {field}
-                    {qa}
+                    {title}
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else}
-                <Thankyou {field} />
+                <Thankyou {field} {title} />
             {/if}
             <button class="btn">OK</button>
         </div>
