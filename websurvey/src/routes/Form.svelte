@@ -2,26 +2,36 @@
     import { navigate } from "svelte-routing";
     import MultipleChoice from "../components/MultipleChoice.svelte";
     import ShortText from "../components/ShortText.svelte";
-    import { isLast, getIndex, getNextRef } from "../utils/helpers.js";
+    import {
+        isLast,
+        getNextField,
+        getThankyouScreen,
+    } from "../../lib/typewheels/form.js";
 
-    export let ref, typeformData;
+    export let ref, form;
 
-    const { fields, thankyou_screens } = typeformData;
+    let index,
+        field,
+        fieldValue = " ",
+        qa;
 
-    let thankyouScreen = thankyou_screens[0];
-
-    let index, field;
+    //TODO how do we want to store the field values?
+    const addFieldValue = (event) => {
+        fieldValue = event.detail;
+    };
 
     $: {
-        index = getIndex(fields, ref);
-        field = fields[index];
+        index = form.fields.map(({ ref }) => ref).indexOf(ref);
+        field = form.fields[index];
+        qa = [[ref, fieldValue]];
     }
 
     const handleSubmit = () => {
-        if (index < fields.length - 1) {
-            const newRef = getNextRef(fields, ref);
+        if (index < form.fields.length - 1) {
+            const newRef = getNextField(form, qa, ref).ref;
             navigate(`/${newRef}`, { replace: true });
-        } else if (isLast(fields, ref)) {
+        } else if (isLast(form, ref)) {
+            const thankyouScreen = getThankyouScreen(form, "thankyou");
             navigate(`/${thankyouScreen.ref}`, { replace: true });
         }
         return;
@@ -36,12 +46,18 @@
                 <label for="question-{index + 1}">Question
                     {index + 1}
                     out of
-                    {fields.length}</label>
+                    {form.fields.length}</label>
             </h2>
-            {#if field.type === 'short_text'}
-                <ShortText {field} />
+            {#if field.type === 'short_text' || field.type === 'number'}
+                <ShortText
+                    {field}
+                    bind:fieldValue
+                    on:add-field-value={addFieldValue} />
             {:else if field.type === 'multiple_choice'}
-                <MultipleChoice {field} />
+                <MultipleChoice
+                    {field}
+                    bind:fieldValue
+                    on:add-field-value={addFieldValue} />
             {/if}
             <button class="btn">OK</button>
         </div>

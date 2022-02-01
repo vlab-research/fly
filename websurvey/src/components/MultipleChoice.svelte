@@ -1,9 +1,11 @@
 <script>
-    export let field;
+    import { createEventDispatcher } from "svelte";
+    export let field, fieldValue;
 
     const { properties } = field;
     const { choices } = properties;
-    let selectedChoice;
+
+    const dispatch = createEventDispatcher();
 </script>
 
 <div>
@@ -13,10 +15,11 @@
             <input
                 type="radio"
                 name="choices"
-                value={choice.id}
-                bind:group={selectedChoice} />
+                value={choice.label}
+                bind:group={fieldValue}
+                on:input={dispatch('add-field-value', fieldValue)} />
             <label
-                for="choice-{choice.id}"
+                for="choice-{choice.label}"
                 class="field-label">{choice.label}</label>
         </div>
     {/each}

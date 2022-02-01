@@ -1,13 +1,16 @@
 <script>
-    export let field;
+    import { createEventDispatcher } from "svelte";
 
-    let response;
+    export let field, fieldValue;
+
+    const dispatch = createEventDispatcher();
 </script>
 
 <div>
     <label for="field-{field.id}" class="field-label">{field.title}</label>
     <input
-        bind:value={response}
+        bind:value={fieldValue}
+        on:input={dispatch('add-field-value', fieldValue)}
         type="text"
         id="field-{field.id}"
         autocomplete="off"

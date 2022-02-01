@@ -1,8 +1,9 @@
 <script>
-    export let typeformData;
+    import { getThankyouScreen } from "../../lib/typewheels/form";
+    export let form;
 
-    const { thankyou_screens } = typeformData;
-    const { title } = thankyou_screens[0];
+    const thankyouScreen = getThankyouScreen(form, "thankyou");
+    const { title } = thankyouScreen;
 </script>
 
 <div class="surveyapp stack-large">

@@ -1,16 +1,13 @@
 <script>
     import { onMount } from "svelte";
     import { navigate } from "svelte-routing";
+    export let form;
 
-    export let ref, typeformData;
+    import { setFirstRef } from "../../lib/typewheels/form.js";
 
-    const { fields } = typeformData;
+    let ref;
 
-    const setFirstRef = (index) => {
-        return fields[index].ref;
-    };
-
-    ref = setFirstRef(0);
+    ref = setFirstRef(form, 0);
 
     onMount(() => {
         navigate(`/${ref}`, { replace: true });
