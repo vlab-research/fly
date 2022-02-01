@@ -181,7 +181,7 @@ function _interpolate(qa, title) {
 }
 
 function interpolateField(qa, field) {
-  const keys = ["title"];
+  const keys = ["title", "properties.description"];
   const out = { ...field };
 
   keys.forEach(k => _.set(out, k, _interpolate(qa, _.get(out, k))));
