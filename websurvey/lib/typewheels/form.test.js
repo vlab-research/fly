@@ -313,9 +313,27 @@ describe("_interpolate", () => {
 
 describe("interpolateField", () => {
   const qa = [["whats_your_name", "baz"]];
-  const field = form.fields[2];
+  const field = {
+    type: "multiple_choice",
+    title:
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?",
+    ref: "how_is_your_day",
+  };
+
   it("works with previously answered fields", () => {
     const i = f.interpolateField(qa, field);
     i.title.should.equal("Nice to meet you, baz, how is your day going?");
+  });
+
+  it("works when there is no dynamic value", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const field = {
+      type: "multiple_choice",
+      title: "Nice to meet you, how is your day going?",
+      ref: "how_is_your_day",
+    };
+
+    const i = f.interpolateField(qa, field);
+    i.title.should.equal("Nice to meet you, how is your day going?");
   });
 });
