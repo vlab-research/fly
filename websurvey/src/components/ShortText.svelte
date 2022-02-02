@@ -1,13 +1,13 @@
 <script>
     import { createEventDispatcher } from "svelte";
 
-    export let field, fieldValue;
+    export let field, fieldValue, title;
 
     const dispatch = createEventDispatcher();
 </script>
 
 <div>
-    <label for="field-{field.id}" class="field-label">{field.title}</label>
+    <label for="field-{field.id}" class="field-label">{title}</label>
     <input
         bind:value={fieldValue}
         on:input={dispatch('add-field-value', fieldValue)}

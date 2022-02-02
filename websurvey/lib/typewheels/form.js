@@ -1,4 +1,6 @@
 const yaml = require("js-yaml");
+const Mustache = require("mustache");
+const _ = require("lodash");
 
 class FieldError extends Error {}
 
@@ -140,6 +142,53 @@ function filterFields(form) {
   return form.fields.filter(field => field.type !== "thankyou_screen");
 }
 
+function _splitUrls(s) {
+  const re = RegExp(/https?:\/\/[^\s]+/gi);
+  const nonMatches = s.split(re).map(s => ["text", s]);
+  return nonMatches;
+}
+
+function getDynamicValue(qa, title) {
+  const regex = /:(.*)}}/;
+  const match = title.match(regex) ? title.match(regex) : false;
+  const ref = match ? match[1] : false;
+
+  const fieldValue = getFieldValue(qa, ref);
+
+  if (!match) {
+    return false;
+  }
+
+  if (!fieldValue || fieldValue === " ") {
+    throw new TypeError(
+      `Trying to interpolate a non-existent field value: ${title}`
+    );
+  }
+
+  return fieldValue;
+}
+
+function _interpolate(qa, title) {
+  const titledParsed = Mustache.parse(title);
+
+  title = titledParsed
+    .map(t =>
+      t[0] === "name" ? t[1].replace(t[1], getDynamicValue(qa, title)) : t[1]
+    )
+    .join("");
+
+  return title;
+}
+
+function interpolateField(qa, field) {
+  const keys = ["title", "properties.description"];
+  const out = { ...field };
+
+  keys.forEach(k => _.set(out, k, _interpolate(qa, _.get(out, k))));
+
+  return out;
+}
+
 module.exports = {
   getField,
   setFirstRef,
@@ -152,4 +201,8 @@ module.exports = {
   getCondition,
   translateForm,
   filterFields,
+  interpolateField,
+  _splitUrls,
+  _interpolate,
+  getDynamicValue,
 };

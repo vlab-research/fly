@@ -31,6 +31,11 @@ class ResponseStore {
       };
     }
   }
+
+  interpolate(field, qa) {
+    const res = f.interpolateField(qa, field);
+    return res;
+  }
 }
 
 module.exports = { ResponseStore };

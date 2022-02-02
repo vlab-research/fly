@@ -266,3 +266,74 @@ describe("translateForm", () => {
     val.length.should.equal(fields + thankyouScreens);
   });
 });
+
+describe("_splitUrls", () => {
+  it("works with no url", () => {
+    const split = f._splitUrls("hello baz");
+    split.should.deep.equal([["text", "hello baz"]]);
+  });
+});
+
+describe("getDynamicValue", () => {
+  it("returns the field value of a previously answered question", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const title =
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
+    const i = f.getDynamicValue(qa, title);
+    i.should.equal("baz");
+  });
+
+  it("returns false if there is no dynamic value to interpolate", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const title = "How old are you?";
+    const i = f.getDynamicValue(qa, title);
+    i.should.equal(false);
+  });
+
+  it("throws if an invalid field value is found", () => {
+    const qa = [["whats_your_name", " "]];
+    const title =
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
+    const fn = () => f.getDynamicValue(qa, title);
+    fn.should.throw(
+      /Nice to meet you, {{field:whats_your_name}}, how is your day going/
+    ); // title
+  });
+});
+
+describe("_interpolate", () => {
+  it("interpolates a field with a dynamic value", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const title =
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
+    const i = f._interpolate(qa, title);
+    i.should.equal("Nice to meet you, baz, how is your day going?");
+  });
+});
+
+describe("interpolateField", () => {
+  const qa = [["whats_your_name", "baz"]];
+  const field = {
+    type: "multiple_choice",
+    title:
+      "Nice to meet you, {{field:whats_your_name}}, how is your day going?",
+    ref: "how_is_your_day",
+  };
+
+  it("works with previously answered fields", () => {
+    const i = f.interpolateField(qa, field);
+    i.title.should.equal("Nice to meet you, baz, how is your day going?");
+  });
+
+  it("works when there is no dynamic value", () => {
+    const qa = [["whats_your_name", "baz"]];
+    const field = {
+      type: "multiple_choice",
+      title: "Nice to meet you, how is your day going?",
+      ref: "how_is_your_day",
+    };
+
+    const i = f.interpolateField(qa, field);
+    i.title.should.equal("Nice to meet you, how is your day going?");
+  });
+});
