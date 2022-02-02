@@ -21,11 +21,15 @@
     "svelte": "^3.0.0"
   },
   "dependencies": {
+    "autoprefixer": "^9.8.8",
     "chai": "^4.3.4",
     "lodash": "^4.17.21",
     "mustache": "^4.2.0",
+    "postcss": "^7.0.39",
     "sirv-cli": "^1.0.0",
+    "svelte-preprocess": "^4.10.2",
     "svelte-routing": "^1.6.0",
+    "tailwindcss": "npm:@tailwindcss/postcss7-compat@^2.2.17",
     "yaml": "^1.10.2"
   }
 }
