@@ -9,10 +9,12 @@
     const dispatch = createEventDispatcher();
 </script>
 
-<div>
-    <label for="field-{field.id}" class="field-label">{title}</label>
+<div class="space-y-0.5">
+    <label
+        for="field-{field.id}"
+        class="text-lg font-semibold text-slate">{title}</label>
     {#each choices as choice, index (choice.id)}
-        <div class="c-cb">
+        <div>
             <input
                 type="radio"
                 name="choices"

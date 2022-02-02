@@ -6,8 +6,10 @@
     const dispatch = createEventDispatcher();
 </script>
 
-<div>
-    <label for="field-{field.id}" class="field-label">{title}</label>
+<div class="space-y-0.5">
+    <label
+        for="field-{field.id}"
+        class="text-lg font-semibold text-slate">{title}</label>
     <input
         bind:value={fieldValue}
         on:input={dispatch('add-field-value', fieldValue)}
