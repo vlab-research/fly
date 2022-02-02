@@ -33,8 +33,8 @@ class ResponseStore {
   }
 
   interpolate(field, qa) {
-    const title = f.interpolateField(qa, field).title;
-    return title;
+    const res = f.interpolateField(qa, field);
+    return res;
   }
 }
 
