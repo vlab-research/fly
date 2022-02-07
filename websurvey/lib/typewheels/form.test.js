@@ -79,7 +79,7 @@ describe("getVar", () => {
     const value = f.getVar(ctx, qa, ref, vars, v);
     const value2 = f.getVar(ctx, qa, ref, vars, v2);
     value.should.equal("baz");
-    value2.should.equal(" ");
+    value2.should.equal("");
   });
 });
 
@@ -101,12 +101,12 @@ describe("getCondition", () => {
       op: "not_equal",
       vars: [
         { type: "field", value: "whats_your_name" },
-        { type: "constant", value: " " },
+        { type: "constant", value: "" },
       ],
     };
 
     const qa = [["whats_your_name", "baz"]];
-    const qa2 = [["whats_your_name", " "]];
+    const qa2 = [["whats_your_name", ""]];
 
     f.getCondition({ form }, qa, "whats_your_name", cond).should.be.true;
     f.getCondition({ form }, qa, "whats_your_name", { ...cond, op: "is_not" })
@@ -221,7 +221,7 @@ describe("jump", () => {
   it("makes jump when required and makes no jump when not", () => {
     const logic = form.logic[0];
     const qaGood = [["whats_your_name", "baz"]];
-    const qaBad = [["whats_your_name", " "]];
+    const qaBad = [["whats_your_name", ""]];
 
     const yes = f.jump(form, qaGood, logic);
     yes.should.equal("how_is_your_day");
@@ -235,7 +235,7 @@ describe("getNextField", () => {
   it("gets the next field in the form taking into account any logic jumps", () => {
     const ref = "whats_your_name";
     const qaGood = [[ref, "baz"]];
-    const qaBad = [[ref, " "]];
+    const qaBad = [[ref, ""]];
 
     const yes = f.getNextField(form, qaGood, ref);
     yes.should.equal(form.fields[2]);
@@ -247,7 +247,7 @@ describe("getNextField", () => {
   it("gets the next field including any thankyou screens", () => {
     const ref = "how_is_your_day";
     const qaGood = [[ref, "Just OK..."]];
-    const qaBad = [[ref, " "]];
+    const qaBad = [[ref, ""]];
 
     const yes = f.getNextField(form, qaGood, ref);
     yes.should.equal(form.fields[3]);
@@ -291,7 +291,7 @@ describe("getDynamicValue", () => {
   });
 
   it("throws if an invalid field value is found", () => {
-    const qa = [["whats_your_name", " "]];
+    const qa = [["whats_your_name", ""]];
     const title =
       "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
     const fn = () => f.getDynamicValue(qa, title);

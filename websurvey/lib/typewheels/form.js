@@ -159,7 +159,7 @@ function getDynamicValue(qa, title) {
     return false;
   }
 
-  if (!fieldValue || fieldValue === " ") {
+  if (!fieldValue || fieldValue === "") {
     throw new TypeError(
       `Trying to interpolate a non-existent field value: ${title}`
     );

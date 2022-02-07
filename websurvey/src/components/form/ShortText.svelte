@@ -9,7 +9,7 @@
 <div class="space-y-0.5">
     <label
         for="field-{field.id}"
-        class="text-lg font-semibold text-slate">{title}</label>
+        class="text-2xl font-bold tracking-tight text-slate sm:text-3xl ">{title}</label>
     <input
         bind:value={fieldValue}
         on:input={dispatch('add-field-value', fieldValue)}

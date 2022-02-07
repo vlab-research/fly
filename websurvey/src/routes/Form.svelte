@@ -60,10 +60,11 @@
     };
 </script>
 
-<div
-    class="p-6 max-w-sm mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
-    <form on:submit|preventDefault={handleSubmit}>
-        <div class="text-center space-y-4 sm:text-left">
+<div class="container bg-indigo-50">
+    <form
+        on:submit|preventDefault={handleSubmit}
+        class="p-6 max-w-lg mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
+        <div class="space-y-4">
             <ProgressBar {index} {form} />
             {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
@@ -80,7 +81,9 @@
             {:else}
                 <Thankyou {field} {title} />
             {/if}
-            <Button>OK</Button>
+            <div class="inline-flex rounded-md shadow">
+                <Button>OK</Button>
+            </div>
         </div>
     </form>
 </div>
