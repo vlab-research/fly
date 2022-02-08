@@ -80,7 +80,7 @@
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else}
-                <Thankyou {field} {title} />
+                <Thankyou {title} />
             {/if}
             <button class="btn">OK</button>
         </div>
