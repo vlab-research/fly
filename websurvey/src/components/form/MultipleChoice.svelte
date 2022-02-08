@@ -9,10 +9,10 @@
     const dispatch = createEventDispatcher();
 </script>
 
-<div class="space-y-0.5">
-    <label
-        for="field-{field.id}"
-        class="text-2xl font-bold tracking-tight text-slate sm:text-3xl">{title}</label>
+<label
+    for="field-{field.id}"
+    class="text-2xl font-bold tracking-tight text-slate sm:text-3xl mb-2">{title}</label>
+<div class="space-y-2.5 mb-2">
     {#each choices as choice, index (choice.id)}
         <div class="flex flex-row items-center">
             <input
@@ -20,10 +20,11 @@
                 name="choices"
                 value={choice.label}
                 bind={fieldValue}
-                on:input={dispatch('add-field-value', fieldValue)} />
+                on:input={dispatch('add-field-value', fieldValue)}
+                class="mr-2" />
             <label
                 for="choice-{choice.label}"
-                class="field-label">{choice.label}</label>
+                class="sm:text-xl">{choice.label}</label>
         </div>
     {/each}
 </div>
