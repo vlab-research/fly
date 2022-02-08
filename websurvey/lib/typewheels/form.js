@@ -62,8 +62,8 @@ const funs = {
   lower_equal_than: (a, b) => a <= b,
   is: (a, b) => a === b,
   equal: (a, b) => a === b,
-  is_not: (a, b) => a !== b,
-  not_equal: (a, b) => a !== b,
+  is_not: (a, b) => a != b,
+  not_equal: (a, b) => a != b,
 };
 
 function getCondition(ctx, qa, ref, { op, vars }) {
@@ -100,6 +100,7 @@ function getFieldValue(qa, ref) {
   // return null if there are no matches,
   // or if there are no answers,
   const ans = match && match[1];
+
   return ans ? ans : null;
 }
 
@@ -159,7 +160,7 @@ function getDynamicValue(qa, title) {
     return false;
   }
 
-  if (!fieldValue || fieldValue === " ") {
+  if (!fieldValue) {
     throw new TypeError(
       `Trying to interpolate a non-existent field value: ${title}`
     );
