@@ -1,7 +1,7 @@
 const util = require('util')
 const _ = require('lodash')
 const {getForm, getMetadata} = require('./utils')
-const {validator, defaultMessage, followUpMessage}= require('@vlab-research/translate-typeform')
+const {validator, defaultMessage, followUpMessage, offMessage}= require('@vlab-research/translate-typeform')
 const {translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const {waitConditionFulfilled} = require('./waiting')
 
@@ -81,6 +81,7 @@ function categorizeEvent(nxt) {
   }
 
   if (nxt.optin) return 'OPTIN'
+  if (_synth('time_off', nxt)) return 'TIMEOFF'
   if (_synth('unblock', nxt)) return 'UNBLOCK'
   if (_synth('follow_up', nxt)) return 'FOLLOW_UP'
   if (_synth('redo', nxt)) return 'REDO'
@@ -153,6 +154,10 @@ function tokenWrap(state, nxt, output) {
 
 function exec (state, nxt) {
   switch(categorizeEvent(nxt)) {
+
+  case 'TIMEOFF': {
+    return { action: 'TIMEOFF' }
+  }
 
   case 'REFERRAL': {
     const form = getForm(nxt)
@@ -461,6 +466,10 @@ function apply (state, output) {
 function act (ctx, state, output) {
   switch(output.action) {
 
+  case 'TIMEOFF': {
+    return respond({...ctx}, null, {isOff: true})
+  }
+
   case 'RESPOND': {
     const qa = apply(state, output).qa
     return respond({...ctx, md: {...state.md, ...output.md}}, qa, output)
@@ -520,7 +529,13 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   return [...previous, q]
 }
 
-function _response (ctx, qa, {question, validation, response, token, followUp}) {
+function _response (ctx, qa, {question, validation, response, token, followUp, isOff}) {
+  if (isOff) {
+    return {
+      text: offMessage(ctx.form.custom_messages),
+      metadata: JSON.stringify({ ref: question })
+    }
+  }
 
   // if we haven't asked anything, it must be the first question!
 

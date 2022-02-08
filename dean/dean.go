@@ -89,11 +89,12 @@ func getConn(cfg *Config) *pgxpool.Pool {
 
 func getQueries(cfg *Config, pool *pgxpool.Pool) []<-chan *ExternalEvent {
 	lookup := map[string]Query{
-		"respondings": Respondings,
 		"blocked":     Blocked,
 		"errored":     Errored,
-		"timeouts":    Timeouts,
 		"followups":   FollowUps,
+		"offtime":     OffTime,
+		"respondings": Respondings,
+		"timeouts":    Timeouts,
 	}
 	queries := strings.Split(cfg.Queries, ",")
 	chans := []<-chan *ExternalEvent{}
