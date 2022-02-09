@@ -57,6 +57,7 @@ services:
     networks:
       - fly
   system:
+    container_name: system
     build:
       context: ../system
     environment:

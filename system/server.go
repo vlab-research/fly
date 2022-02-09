@@ -13,14 +13,23 @@ type Server struct {
 	tableNames []string
 }
 
+func (s *Server) DBSchema(c echo.Context) error {
+	tables, err := getTables(s.pool, s.tableNames)
+	if err != nil {
+		return err
+	}
+	res := prettifyTables(tables)
+	return c.String(http.StatusOK, res)
+}
+
 type ResetParams struct {
 	Tables []string `query:"table"`
 }
 
 func (s *Server) ResetDb(c echo.Context) error {
-
 	params := new(ResetParams)
-	if err := c.Bind(params); err != nil {
+	err := c.Bind(params)
+	if err != nil {
 		return err
 	}
 
@@ -29,7 +38,7 @@ func (s *Server) ResetDb(c echo.Context) error {
 		params.Tables = s.tableNames
 	}
 
-	err := resetDb(s.pool, params.Tables)
+	err = resetDb(s.pool, params.Tables)
 	if err != nil {
 		return err
 	}
@@ -51,6 +60,7 @@ func main() {
 
 	e := echo.New()
 	e.GET("/resetdb", server.ResetDb)
+	e.GET("/dbschema", server.DBSchema)
 
 	address := fmt.Sprintf(`:%d`, cfg.Port)
 	e.Logger.Fatal(e.Start(address))
