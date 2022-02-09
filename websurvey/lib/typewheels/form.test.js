@@ -279,8 +279,8 @@ describe("jump", () => {
     const qaGood = [["whats_your_name", "baz"]];
     const qaBad = [["whats_your_name", ""]];
 
-    // const yes = f.jump(form, qaGood, logic);
-    // yes.should.equal("how_is_your_day");
+    const yes = f.jump(form, qaGood, logic);
+    yes.should.equal("how_is_your_day");
 
     const no = f.jump(form, qaBad, logic);
     no.should.equal("whats_your_age");
