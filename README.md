@@ -50,6 +50,12 @@ For tests written in `go`, you can add the name of the test that you want to run
 ./test.sh scribble TestCreateUserReturnsSuccess
 ```
 
+### Printing the DB schema
+
+For convenience, we include a script that prints the DB schema.
+
+To print the DB schema, run `./db-schema.sh` in your terminal. Once executed, you should see the table schemas printed on your screen.
+
 ### Testing inside Kubernetes
 
 Make sure you have KIND installed.
