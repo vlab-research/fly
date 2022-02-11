@@ -53,8 +53,8 @@ describe("next", () => {
       },
     };
 
-    const fieldValue = "";
-    const qa = [["whats_your_name", ""]];
+    const fieldValue = " ";
+    const qa = [["whats_your_name", " "]];
     const ref = "whats_your_name";
     const required = field.validations.required;
     const value = responseStore.next(
@@ -103,7 +103,7 @@ describe("next", () => {
     };
 
     const fieldValue = "foo";
-    const qa = [["whats_your_name", ""]];
+    const qa = [["whats_your_name", " "]];
     const ref = field.ref;
     const required = field.validations.required;
     const res = responseStore.next(form, qa, ref, field, fieldValue, required);
