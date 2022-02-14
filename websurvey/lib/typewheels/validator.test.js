@@ -117,7 +117,7 @@ describe("validateFieldValue", () => {
   });
 
   it("evaluates to false if the user submits an empty answer to a required question", () => {
-    let field = {
+    const field = {
       type: "short_text",
       title: "foo",
       ref: "foo",
