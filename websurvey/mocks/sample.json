@@ -67,7 +67,7 @@
       "ref": "whats_your_name",
       "properties": {},
       "validations": {
-        "required": true
+        "required": false
       },
       "type": "short_text",
       "attachment": {

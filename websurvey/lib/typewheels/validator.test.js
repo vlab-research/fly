@@ -117,13 +117,13 @@ describe("validateFieldValue", () => {
   });
 
   it("evaluates to false if the user submits an empty answer to a required question", () => {
-    const field = {
+    let field = {
       type: "short_text",
       title: "foo",
       ref: "foo",
       validations: { required: true },
     };
-    const fieldValue = " ";
+    const fieldValue = "";
     const required = field.validations.required;
 
     let res = v.validateFieldValue(field, fieldValue, required);
@@ -138,7 +138,7 @@ describe("validateFieldValue", () => {
       ref: "foo",
       validations: { required: false },
     };
-    const fieldValue = " ";
+    const fieldValue = "";
     const required = field.validations.required;
 
     let res = v.validateFieldValue(field, fieldValue, required);

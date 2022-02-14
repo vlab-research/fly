@@ -62,8 +62,8 @@ const funs = {
   lower_equal_than: (a, b) => a <= b,
   is: (a, b) => a === b,
   equal: (a, b) => a === b,
-  is_not: (a, b) => a != b,
-  not_equal: (a, b) => a != b,
+  is_not: (a, b) => a !== b,
+  not_equal: (a, b) => a !== b,
 };
 
 function getCondition(ctx, qa, ref, { op, vars }) {
@@ -113,6 +113,9 @@ function getVar(ctx, qa, ref, vars, v) {
   const { type, value } = v;
 
   if (type === "constant") {
+    if (value === "") {
+      return null;
+    }
     return value;
   }
 

@@ -88,7 +88,7 @@ describe("getVar", () => {
     const value = f.getVar(ctx, qa, ref, vars, v);
     const value2 = f.getVar(ctx, qa, ref, vars, v2);
     value.should.equal("baz");
-    value2.should.equal("");
+    should.not.exist(value2);
   });
 });
 
