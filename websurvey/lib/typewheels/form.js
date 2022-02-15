@@ -99,8 +99,13 @@ function getFieldValue(qa, ref) {
 
   // return null if there are no matches,
   // or if there are no answers,
-  const ans = match && match[1];
-  return ans ? ans : null;
+  // otherwise return match even if empty string
+
+  if (!match) {
+    return null;
+  } else {
+    return match[1];
+  }
 }
 
 function getVar(ctx, qa, ref, vars, v) {
@@ -159,7 +164,7 @@ function getDynamicValue(qa, title) {
     return false;
   }
 
-  if (!fieldValue || fieldValue === " ") {
+  if (!fieldValue) {
     throw new TypeError(
       `Trying to interpolate a non-existent field value: ${title}`
     );
