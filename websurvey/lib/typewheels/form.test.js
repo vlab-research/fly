@@ -54,6 +54,12 @@ describe("getFieldValue", () => {
     const value = f.getFieldValue(qa, "foo");
     should.not.exist(value);
   });
+
+  it("returns an empty string if the field exists but no answer is given", () => {
+    const qa = [["foo", ""]];
+    const value = f.getFieldValue(qa, "foo");
+    value.should.equal("");
+  });
 });
 
 describe("getChoiceValue", () => {
@@ -88,7 +94,7 @@ describe("getVar", () => {
     const value = f.getVar(ctx, qa, ref, vars, v);
     const value2 = f.getVar(ctx, qa, ref, vars, v2);
     value.should.equal("baz");
-    should.not.exist(value2);
+    value2.should.equal("");
   });
 });
 

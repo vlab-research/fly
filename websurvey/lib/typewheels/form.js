@@ -99,9 +99,13 @@ function getFieldValue(qa, ref) {
 
   // return null if there are no matches,
   // or if there are no answers,
-  const ans = match && match[1];
+  // otherwise return match even if empty string
 
-  return ans ? ans : null;
+  if (!match) {
+    return null;
+  } else {
+    return match[1];
+  }
 }
 
 function getVar(ctx, qa, ref, vars, v) {
@@ -113,9 +117,6 @@ function getVar(ctx, qa, ref, vars, v) {
   const { type, value } = v;
 
   if (type === "constant") {
-    if (value === "") {
-      return null;
-    }
     return value;
   }
 
