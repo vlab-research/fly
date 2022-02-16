@@ -2,8 +2,8 @@
     export let title;
 </script>
 
-<div class="surveyapp stack-large">
-    <div class="stack-small">
-        <h1 class="label-wrapper">{title}</h1>
-    </div>
+<div>
+    <h1 class="text-2xl font-bold tracking-tight text-slate sm:text-3xl">
+        {title}
+    </h1>
 </div>

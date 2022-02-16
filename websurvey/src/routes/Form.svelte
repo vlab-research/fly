@@ -1,10 +1,12 @@
 <script>
     import { navigate } from "svelte-routing";
-    import MultipleChoice from "../components/MultipleChoice.svelte";
-    import ShortText from "../components/ShortText.svelte";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
-    import { filterFields, translateForm } from "../../lib/typewheels/form.js";
+    import { translateForm } from "../../lib/typewheels/form.js";
+    import MultipleChoice from "../components/form/MultipleChoice.svelte";
+    import ShortText from "../components/form/ShortText.svelte";
     import Thankyou from "./Thankyou.svelte";
+    import Button from "../components/elements/Button.svelte";
+    import ProgressBar from "../components/elements/ProgressBar.svelte";
 
     export let form, ref;
 
@@ -58,15 +60,12 @@
     };
 </script>
 
-<div class="surveyapp stack-large">
-    <form on:submit|preventDefault={handleSubmit}>
-        <div class="stack-small">
-            <h2 class="label-wrapper">
-                <label for="question-{index + 1}">Question
-                    {index + 1}
-                    out of
-                    {filterFields(form).length}</label>
-            </h2>
+<div class="h-screen bg-indigo-50 ">
+    <form
+        on:submit|preventDefault={handleSubmit}
+        class="h-full p-6 max-w-lg mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
+        <div class="space-y-4">
+            <ProgressBar {index} {form} />
             {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
                     {field}
@@ -82,7 +81,8 @@
             {:else}
                 <Thankyou {title} />
             {/if}
-            <button class="btn">OK</button>
+
+            <Button>OK</Button>
         </div>
     </form>
 </div>
