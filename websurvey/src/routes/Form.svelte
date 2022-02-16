@@ -1,7 +1,7 @@
 <script>
     import { navigate } from "svelte-routing";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
-    import { translateForm } from "../../lib/typewheels/form.js";
+    import { translateForm, isAQuestion } from "../../lib/typewheels/form.js";
     import MultipleChoice from "../components/form/MultipleChoice.svelte";
     import ShortText from "../components/form/ShortText.svelte";
     import Thankyou from "./Thankyou.svelte";
@@ -65,7 +65,10 @@
         on:submit|preventDefault={handleSubmit}
         class="h-full p-6 max-w-lg mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
         <div class="space-y-4">
-            <ProgressBar {index} {form} />
+            {#if isAQuestion(form, field)}
+                <ProgressBar {index} {form} />
+            {/if}
+
             {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
                     {field}

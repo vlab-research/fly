@@ -1,5 +1,5 @@
 <script>
-    import { filterFields } from "..form/../../lib/typewheels/form.js";
+    import { filterFieldTypes } from "..form/../../lib/typewheels/form.js";
     export let index, form;
 </script>
 
@@ -8,6 +8,6 @@
         Question
         {index + 1}
         out of
-        {filterFields(form).length}
+        {filterFieldTypes(form).length}
     </h2>
 </div>

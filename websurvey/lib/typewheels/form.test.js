@@ -399,3 +399,47 @@ describe("interpolateField", () => {
     i.title.should.equal("Nice to meet you, how is your day going?");
   });
 });
+
+describe("filterFieldTypes", () => {
+  it("returns an array of question types only", () => {
+    const value = f.filterFieldTypes(form);
+    value.should.eql(["short_text", "number", "multiple_choice"]);
+  });
+});
+
+describe("isAQuestion", () => {
+  it("returns true if field is a question", () => {
+    const field = {
+      ref: "whats_your_name",
+      type: "short_text",
+    };
+    const value = f.isAQuestion(form, field);
+    value.should.be.true;
+  });
+
+  it("returns false if field is not question", () => {
+    const field = {
+      ref: "thankyou",
+      type: "thankyou_screen",
+    };
+    const value = f.isAQuestion(form, field);
+    value.should.be.false;
+  });
+});
+
+describe("isLast", () => {
+  it("returns true if field is last in the form", () => {
+    const ref = "thankyou";
+    const value = f.isLast(form, ref);
+    value.should.be.true;
+  });
+
+  it("returns false if field is not question", () => {
+    const field = {
+      ref: "thankyou",
+      type: "thankyou_screen",
+    };
+    const value = f.isAQuestion(form, field);
+    value.should.be.false;
+  });
+});

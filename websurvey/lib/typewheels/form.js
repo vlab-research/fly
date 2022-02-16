@@ -194,6 +194,32 @@ function interpolateField(qa, field) {
   return out;
 }
 
+function filterFieldTypes(form) {
+  const fields = form.fields.map(field => field.type);
+  const excludedTypes = ["thankyou_screen", "statement"];
+
+  const filterArray = (fields, excludedTypes) => {
+    const filtered = fields.filter(field => {
+      return excludedTypes.indexOf(field) === -1;
+    });
+    return filtered;
+  };
+  return filterArray(fields, excludedTypes);
+}
+
+function isAQuestion(form, field) {
+  const fields = filterFieldTypes(form);
+  return fields.includes(field.type);
+}
+
+function isLast(form, ref) {
+  const field = getField(form, ref);
+  if (field.type === "thankyou_screen") {
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   getField,
   setFirstRef,
@@ -210,4 +236,7 @@ module.exports = {
   _splitUrls,
   _interpolate,
   getDynamicValue,
+  filterFieldTypes,
+  isAQuestion,
+  isLast,
 };
