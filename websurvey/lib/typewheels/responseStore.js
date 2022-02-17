@@ -17,10 +17,17 @@ class ResponseStore {
   }
 
   next(form, qa, ref, field, fieldValue, required) {
+    try {
+      v.validateFieldValue(field, fieldValue, required);
+    } catch (e) {
+      alert(e.message);
+    }
+
     const isValid = v.validateFieldValue(field, fieldValue, required);
+
     if (isValid) {
       return {
-        ref: f.getNextField(form, qa, ref).ref,
+        ref: f.getNextField(form, qa, ref, field).ref,
         action: "navigate",
       };
     } else {
