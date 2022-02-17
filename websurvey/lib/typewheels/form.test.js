@@ -31,13 +31,15 @@ describe("setFirstRef", () => {
 
 describe("getNext", () => {
   it("gets the next field object in the form", () => {
-    const value = f.getNext(form, "whats_your_name");
-    value.should.equal(form.fields[1]);
+    const field = form.fields[0];
+    const nextField = form.fields[1];
+    const value = f.getNext(form, field.ref);
+    value.should.equal(nextField);
   });
 
   it("gets the first thankyou screen after the last question", () => {
-    const value = f.getNext(form, "how_is_your_day");
-    value.should.equal(form.fields[3]);
+    const value = f.getNext(form, "whats_your_age");
+    value.ref.should.equal("thankyou");
   });
 });
 
@@ -65,36 +67,36 @@ describe("getFieldValue", () => {
 describe("getChoiceValue", () => {
   it("gets the value of the selected multiple choice field", () => {
     const ctx = form;
-    const value = f.getChoiceValue(
-      ctx,
-      "how_is_your_day",
-      ctx.fields[2].properties.choices[0]
-    );
-    value.should.equal("Not so well...");
+    const ref = "how_is_your_day";
+    const choice = "67554758-9085-45b8-b658-46e5b9686361";
+
+    const value = f.getChoiceValue(ctx, ref, choice);
+    value.should.equal("Just OK...");
   });
 });
 
 describe("getVar", () => {
-  it("gets the value depending on the var type", () => {
+  it("gets the field value depending on the var type", () => {
     const ctx = form;
-    const qa = [["whats_your_name", "baz"]];
-    const ref = "whats_your_name";
+    const qa = [["how_is_your_day", "Terrific!"]];
+    const ref = "how_is_your_day";
     const vars = [
       {
         type: "field",
-        value: "whats_your_name",
+        value: "how_is_your_day",
       },
       {
-        type: "constant",
-        value: "",
+        type: "choice",
+        value: "c8c780a6-4210-4673-bf07-4130efde9151",
       },
     ];
     const v = vars[0];
+    let value = f.getVar(ctx, qa, ref, vars, v);
+    value.should.equal("Terrific!");
+
     const v2 = vars[1];
-    const value = f.getVar(ctx, qa, ref, vars, v);
-    const value2 = f.getVar(ctx, qa, ref, vars, v2);
-    value.should.equal("baz");
-    value2.should.equal("");
+    value = f.getVar(ctx, qa, ref, vars, v2);
+    value.should.equal("Terrific!");
   });
 });
 
@@ -253,69 +255,30 @@ describe("getCondition", () => {
 
 describe("jump", () => {
   it("makes jump when required and makes no jump when not", () => {
-    const logic = {
-      type: "field",
-      ref: "whats_your_name",
-      actions: [
-        {
-          action: "jump",
-          details: {
-            to: {
-              type: "field",
-              value: "how_is_your_day",
-            },
-          },
-          condition: {
-            op: "not_equal",
-            vars: [
-              {
-                type: "field",
-                value: "whats_your_name",
-              },
-              {
-                type: "constant",
-                value: "",
-              },
-            ],
-          },
-        },
-      ],
-    };
+    const logic = form.logic[0];
 
-    const qaGood = [["whats_your_name", "baz"]];
-    const qaBad = [["whats_your_name", ""]];
+    const qaGood = [["how_is_your_day", "Terrific!"]];
+    const qaBad = [["how_is_your_day", "Just OK..."]];
 
     const yes = f.jump(form, qaGood, logic);
-    yes.should.equal("how_is_your_day");
+    yes.should.equal("awesome");
 
     const no = f.jump(form, qaBad, logic);
-    no.should.equal("whats_your_age");
+    no.should.equal("oh_no");
   });
 });
 
 describe("getNextField", () => {
   it("gets the next field in the form taking into account any logic jumps", () => {
-    const ref = "whats_your_name";
-    const qaGood = [[ref, "baz"]];
-    const qaBad = [[ref, ""]];
-
-    const yes = f.getNextField(form, qaGood, ref);
-    yes.should.equal(form.fields[2]);
-
-    const no = f.getNextField(form, qaBad, ref);
-    no.should.equal(form.fields[1]);
-  });
-
-  it("gets the next field including any thankyou screens", () => {
     const ref = "how_is_your_day";
-    const qaGood = [[ref, "Just OK..."]];
-    const qaBad = [[ref, ""]];
+    const qaGood = [["how_is_your_day", "Terrific!"]];
+    const qaBad = [["how_is_your_day", "Just OK.."]];
 
     const yes = f.getNextField(form, qaGood, ref);
-    yes.should.equal(form.fields[3]);
+    yes.ref.should.equal("awesome");
 
     const no = f.getNextField(form, qaBad, ref);
-    no.should.equal(form.fields[3]);
+    no.ref.should.equal("oh_no");
   });
 });
 
@@ -403,7 +366,7 @@ describe("interpolateField", () => {
 describe("filterFieldTypes", () => {
   it("returns an array of question types only", () => {
     const value = f.filterFieldTypes(form);
-    value.should.eql(["short_text", "number", "multiple_choice"]);
+    value.should.eql(["short_text", "multiple_choice", "number"]);
   });
 });
 

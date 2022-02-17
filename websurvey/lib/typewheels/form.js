@@ -42,7 +42,7 @@ function getNextField(form, qa, ref) {
 function getChoiceValue(form, ref, choice) {
   const val = form.fields
     .find(f => f.ref === ref)
-    .properties.choices.find(c => c.ref === choice.ref).label;
+    .properties.choices.find(c => c.ref === choice).label;
 
   if (!val) {
     throw new TypeError(

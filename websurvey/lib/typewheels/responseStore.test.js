@@ -27,15 +27,16 @@ describe("getQa", () => {
 
     responseStore.snapshot(ref, fieldValue);
 
-    ref = "what's_your_age";
-    fieldValue = 10;
+    ref = "how_is_your_day";
+    fieldValue = "Terrific!";
 
     responseStore.snapshot(ref, fieldValue);
 
     const qa = responseStore.getQa();
+
     qa.should.eql([
       ["what's_your_name", "foo"],
-      ["what's_your_age", 10],
+      ["how_is_your_day", "Terrific!"],
     ]);
   });
 });

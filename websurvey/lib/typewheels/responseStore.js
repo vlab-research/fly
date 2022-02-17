@@ -20,7 +20,7 @@ class ResponseStore {
     const isValid = v.validateFieldValue(field, fieldValue, required);
     if (isValid) {
       return {
-        ref: f.getNextField(form, qa, ref, field).ref,
+        ref: f.getNextField(form, qa, ref).ref,
         action: "navigate",
       };
     } else {
