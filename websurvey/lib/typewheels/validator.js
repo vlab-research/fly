@@ -57,7 +57,7 @@ function validateFieldValue(field, fieldValue, isRequired) {
 
   const res = validator(field)(fieldValue);
 
-  if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
+  if (!res.valid) {
     return false;
   }
   return true;
