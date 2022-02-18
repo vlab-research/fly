@@ -220,6 +220,11 @@ function isLast(form, ref) {
   return false;
 }
 
+function setRequired() {
+  const input = document.getElementById(`field-${field.id}}`);
+  input.setAttribute("required", "required");
+}
+
 module.exports = {
   getField,
   setFirstRef,
@@ -239,4 +244,5 @@ module.exports = {
   filterFieldTypes,
   isAQuestion,
   isLast,
+  setRequired,
 };
