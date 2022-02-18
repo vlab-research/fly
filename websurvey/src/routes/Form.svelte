@@ -4,7 +4,7 @@
     import { translateForm, isAQuestion } from "../../lib/typewheels/form.js";
     import MultipleChoice from "../components/form/MultipleChoice.svelte";
     import ShortText from "../components/form/ShortText.svelte";
-    import Thankyou from "./Thankyou.svelte";
+    import Statement from "./Statement.svelte";
     import Button from "../components/elements/Button.svelte";
     import ProgressBar from "../components/elements/ProgressBar.svelte";
 
@@ -82,7 +82,7 @@
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else}
-                <Thankyou {title} />
+                <Statement {title} />
             {/if}
 
             <Button>OK</Button>
