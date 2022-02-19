@@ -1,7 +1,7 @@
 const util = require('util')
 const _ = require('lodash')
 const {getForm, getMetadata} = require('./utils')
-const {validator, defaultMessage, followUpMessage}= require('@vlab-research/translate-typeform')
+const {validator, defaultMessage, followUpMessage, offMessage}= require('@vlab-research/translate-typeform')
 const {translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const {waitConditionFulfilled} = require('./waiting')
 
@@ -150,8 +150,14 @@ function tokenWrap(state, nxt, output) {
 }
 
 
+function exec (state, nxt, surveyMetadata) {
+  if (surveyMetadata && surveyMetadata.off_date < nxt.timestamp) {
+    return { 
+      action: 'RESPOND',
+      isOff: true,
+    }
+  }
 
-function exec (state, nxt) {
   switch(categorizeEvent(nxt)) {
 
   case 'REFERRAL': {
@@ -520,7 +526,13 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   return [...previous, q]
 }
 
-function _response (ctx, qa, {question, validation, response, token, followUp}) {
+function _response (ctx, qa, {question, validation, response, token, followUp, isOff}) {
+  if (isOff) {
+    return {
+      text: offMessage(ctx.form.custom_messages),
+      metadata: JSON.stringify({ ref: question })
+    }
+  }
 
   // if we haven't asked anything, it must be the first question!
 
@@ -561,7 +573,6 @@ function _response (ctx, qa, {question, validation, response, token, followUp}) 
 
 function respond (ctx, qa, output) {
   const addRecipient = msg => ({ recipient: { id: ctx.user.id }, message: msg })
-
   return _gatherResponses(ctx, qa, _response(ctx, qa, output))
     .filter(r => !!r)
     .map(r => r.recipient ? r : addRecipient(r)) // ducktype has recipient
@@ -578,13 +589,11 @@ function getState(log) {
   return log.reduce((s,e) => apply(s, exec(s,e)), _initialState())
 }
 
-function getMessage(log, form, user) {
+function getMessage(log, form, user, surveyMetadata) {
   const event = log.slice(-1)[0]
   const state = getState(log.slice(0,-1))
-  return act({form, user}, state, exec(state, event))
+  return act({form, user}, state, exec(state, event, surveyMetadata))
 }
-
-
 
 module.exports = {
   makeEventMetadata,

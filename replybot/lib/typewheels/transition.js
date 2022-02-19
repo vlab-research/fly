@@ -2,11 +2,12 @@ const {exec, apply, act, update} = require('./machine')
 const {getForm} = require('./ourform')
 const {getUserInfo, sendMessage} = require('../messenger')
 const {responseVals} = require('../responses/responser')
-const {parseEvent, getPageFromEvent} = require('@vlab-research/utils')
+const utils = require('@vlab-research/utils')
 const {MachineIOError, iowrap} = require('../errors')
 const _ = require('lodash')
 const util = require('util')
 const Cacheman = require('cacheman')
+const {getSurveyMetadata} = require('./metadata')
 
 
 function getPayment(userid, pageid, timestamp, event) {
@@ -33,7 +34,9 @@ class Machine {
     this.getUser = (id, pageToken) => {
       return cache.wrap(`user:${id}`, () => getUserInfo(id, pageToken), ttl)
     }
-
+    this.getSurveyMetadata = (surveyId) => {
+      return cache.wrap(`surveyMetadata:${surveyId}`, () => getSurveyMetadata(surveyId), ttl)
+    }
     this.getPageToken = page => {
       return cache.wrap(`pagetoken:${page}`, () => tokenStore.get(page), ttl)
     }
@@ -41,29 +44,23 @@ class Machine {
     this.sendMessage = sendMessage
   }
 
-  transition(state, parsedEvent) {
-    const page = getPageFromEvent(parsedEvent)
-    const output = exec(state, parsedEvent)
+  transition(state, parsedEvent, surveyMetadata) {
+    const output = exec(state, parsedEvent, surveyMetadata)
     const newState = apply(state, output)
-    return {newState, output, page}
+    return {newState, output}
   }
 
   async actionsResponses(state, userId, timestamp, pageId, newState, output) {
     const upd = output && update(output)
-    const shortcode = newState.forms.slice(-1)[0]
 
     if (!newState.md) {
       throw new Error(`User without metadata: ${userId}. State: ${util.inspect(newState, null, 8)}`)
     }
-    const {startTime} = newState.md
 
     const pageToken = await iowrap('getPageToken', 'INTERNAL', this.getPageToken, pageId)
-
-    const [form, surveyId] = await iowrap('getForm', 'INTERNAL', this.getForm,
-                                          pageId, shortcode, startTime)
-
+    const [form, surveyId] = await this.getFormAndSurveyId(newState, pageId)
+    
     const user = await this.getUser(userId, pageToken)
-
     const actions = act({form, user}, state, output)
     const responses = responseVals(newState, upd, form, surveyId, pageId, userId, timestamp)
 
@@ -77,10 +74,15 @@ class Machine {
     }
   }
 
+  async getFormAndSurveyId(state, page) {
+    const shortcode = state.forms.slice(-1)[0]
+    return await iowrap('getForm', 'INTERNAL', this.getForm, 
+                        page, shortcode, state.md.startTime)
+  }
 
   async run(state, user, rawEvent) {
-    let newState, output, page, payment
-    const event = parseEvent(rawEvent)
+    let newState, output, page, payment, surveyId, surveyMetadata
+    const event = utils.parseEvent(rawEvent)
     const timestamp = event.timestamp
 
     if (!timestamp) {
@@ -88,10 +90,25 @@ class Machine {
     }
 
     try {
-      const t = this.transition(state, event)
+      page = utils.getPageFromEvent(event)
+      surveyId = (await this.getFormAndSurveyId(state, page))[1]
+      surveyMetadata = await this.getSurveyMetadata(surveyId)
+    } catch(e) {
+      return {
+        publish: true,
+        timestamp,
+        user,
+        page,
+        payment,
+        newState,
+        error: { ...e.details, tag: e.tag, message: e.message, stack: e.stack }
+      }
+    }
+
+    try {
+      const t = this.transition(state, event, surveyMetadata)
       newState = t.newState
       output = t.output
-      page = t.page
 
       payment = getPayment(user, page, timestamp, event)
 

@@ -1,6 +1,13 @@
 version: 2
 
 jobs:
+  test_dashboard_server:
+    machine:
+      image: ubuntu-1604:202007-01
+    steps:
+      - checkout
+      - run:
+          command: ./test.sh dashboard-server --is-ci
   test_dinersclub:
     machine:
       image: ubuntu-1604:202007-01
@@ -15,6 +22,13 @@ jobs:
       - checkout
       - run:
           command: ./test.sh formcentral --is-ci
+  test_replybot:
+    machine:
+      image: ubuntu-1604:202007-01
+    steps:
+      - checkout
+      - run:
+          command: ./test.sh replybot --is-ci
   test_e2e:
     machine:
       image: ubuntu-1604:202007-01
@@ -46,7 +60,9 @@ workflows:
   version: 2
   test:
     jobs:
+      - test_dashboard_server
       - test_dinersclub
       - test_formcentral
+      - test_replybot
       - test_e2e:
           context: secrets

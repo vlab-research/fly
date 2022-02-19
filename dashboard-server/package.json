@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "precommit": "npm run lint",
     "start": "node index.js",
-    "test": "NODE_ENV=test mocha --colors --timeout 5000 './{,!(node_modules)/**}/*.test.js'"
+    "test": "mocha --colors --timeout 5000 './{,!(node_modules)/**}/*.test.js'"
   },
   "repository": {
     "type": "git",

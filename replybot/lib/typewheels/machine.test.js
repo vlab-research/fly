@@ -1,4 +1,3 @@
-const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const fs = require('fs')
@@ -767,6 +766,26 @@ describe('Machine', () => {
     const log = [referral, echo, delivery, text]
     const action = getMessage(log, form, user)[0]
     action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+  })
+
+  it('Survey is closed', () => {
+    const log = [referral, echo, delivery, text]
+    const form = {}
+    const metadata = {
+      off_date: 1
+    }
+    const action = getMessage(log, form, user, metadata)[0]
+    action.message.should.deep.equal({ text: 'Sorry, the survey is closed.', metadata: '{}' })
+  })
+
+  it('Survey is closed with custom message', () => {
+    const log = [referral, echo, delivery, text]
+    const form = { custom_messages: {'label.off': 'Lo siento, la encuesta esta cerrada.'} }
+    const metadata = {
+      off_date: 1
+    }
+    const action = getMessage(log, form, user, metadata)[0]
+    action.message.should.deep.equal({ text: 'Lo siento, la encuesta esta cerrada.', metadata: '{}' })
   })
 
   it('Responds to opening text without referral', () => {

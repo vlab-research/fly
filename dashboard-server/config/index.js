@@ -5,7 +5,6 @@ const jwks = require('jwks-rsa');
 
 const envVarsSchema = joi
   .object({
-    NODE_ENV: joi.string().allow(['development', 'production', 'test']),
     API_VERSION: joi.number(),
     AUTH0_HOST: joi.string(),
     DB_USER: joi.string(),
@@ -31,12 +30,7 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
-const isTest = () => envVars.NODE_ENV === 'test';
-
 const config = {
-  ENV: envVars.NODE_ENV,
-  IS_DEVELOPMENT: envVars.NODE_ENV === 'development',
-  IS_TEST: isTest(),
   FORMCENTRAL: {
     url: envVars.FORMCENTRAL_URL,
   },
@@ -69,11 +63,11 @@ const config = {
     secret: envVars.AUTH0_DASHBOARD_SECRET
   },
   DATABASE_CONFIG: {
-    user: isTest() ? 'root' : envVars.DB_USER || 'postgres',
-    host: isTest() ? 'localhost' : envVars.DB_HOST || 'localhost',
-    database: isTest() ? 'chatroach' : envVars.DB_DATABASE || 'postgres',
-    password: isTest() ? undefined : envVars.DB_PASSWORD || undefined,
-    port: isTest() ? 5433 : envVars.DB_PORT || 5432,
+    user: envVars.DB_USER,
+    host: envVars.DB_HOST,
+    database: envVars.DB_DATABASE,
+    password: envVars.DB_PASSWORD,
+    port: envVars.DB_PORT,
   },
 };
 

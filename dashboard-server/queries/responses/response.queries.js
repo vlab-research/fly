@@ -13,7 +13,10 @@ async function all() {
        SELECT DISTINCT ON (1) userid, timestamp AS last_timestamp, response AS last_response, surveyid
        FROM   responses
        ORDER  BY 1,2 DESC
-       ) l USING (userid)`;
+       ) l
+    USING (userid)
+    ORDER BY first_timestamp DESC
+  `;
   const { rows } = await this.query(GET_ALL);
   return rows;
 }

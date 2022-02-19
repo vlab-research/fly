@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+  main:
+    image: ${APP_NAME}_dev
+    build: .
+    environment:
+      FORMCENTRAL_URL: http://formcentral
+    command: |
+      sh -c '
+        echo "Running tests..."
+        npm install
+        if [ "${IS_CI}" = "" ]
+        then
+          npm test
+        fi
+        npm run test-ci
+      '
+    volumes:
+      - ./:/app

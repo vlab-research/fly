@@ -461,3 +461,57 @@ func TestGetSurveyByParamsReturns500OnServerError(t *testing.T) {
 
 	assert.Equal(t, err.(*echo.HTTPError).Code, 500)
 }
+
+func TestGetMetadata(t *testing.T) {
+	before()
+
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	mustExec(t, pool, insertUser, userid)
+
+	b := time.Time{}
+	beforeFmt := b.Format(time.RFC3339)
+	insertSurveySql := `
+ 		INSERT INTO surveys(id, userid, form, formid, shortcode, translation_conf, messages, title, created)
+		VALUES ($1, $2, '{}', '', 'a1234', '{}', '{}', '', $3);
+ 	`
+	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-5555-000000000000", userid, beforeFmt)
+
+	now := time.Now()
+	nowFmt := now.Format(time.RFC3339)
+	insertMetadata := `INSERT INTO survey_metadata(surveyid, off_date) VALUES ($1, $2);`
+	mustExec(t, pool, insertMetadata, "00000000-0000-0000-5555-000000000000", nowFmt)
+
+	q := make(url.Values)
+	q.Set("surveyid", "00000000-0000-0000-5555-000000000000")
+	rec, c, s := request(pool, http.MethodGet, "/metadata/?"+q.Encode(), "")
+	err := s.GetMetadata(c)
+
+	assert.Nil(t, err)
+
+	res := rec.Result()
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	resMetadata := Metadata{}
+	json.Unmarshal(body, &resMetadata)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, resMetadata.OffDate.Year(), now.Year())
+}
+
+func TestGetMetadataNotFound(t *testing.T) {
+	before()
+
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	q := make(url.Values)
+	q.Set("surveyid", "00000000-0000-0000-2222-000000000000")
+	_, c, s := request(pool, http.MethodGet, "/metadata/?"+q.Encode(), "")
+	err := s.GetMetadata(c)
+
+	assert.Equal(t, err.(*echo.HTTPError).Code, http.StatusNotFound)
+}

@@ -88,3 +88,21 @@ func getSurveyByParams(pool *pgxpool.Pool, pageid string, shortcode string, crea
 
    return s, err
 }
+
+type Metadata struct {
+   Surveyid string    `json:"surveyid"`
+   OffDate  time.Time `json:"off_date"`
+}
+
+func getSurveyMetadata(pool *pgxpool.Pool, surveyid string) (*Metadata, error) {
+   query := `SELECT off_date FROM survey_metadata WHERE surveyid=$1`
+   m := &Metadata{Surveyid:surveyid}
+   row := pool.QueryRow(context.Background(), query, surveyid)
+   err := row.Scan(&m.OffDate)
+
+   if err == pgx.ErrNoRows {
+      return nil, nil
+   }
+
+   return m, err
+}
