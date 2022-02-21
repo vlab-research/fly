@@ -212,14 +212,6 @@ function isAQuestion(form, field) {
   return types.includes(field.type);
 }
 
-function isLast(form, ref) {
-  const field = getField(form, ref);
-  if (field.type === "thankyou_screen") {
-    return true;
-  }
-  return false;
-}
-
 function setRequired() {
   const input = document.getElementById(`field-${field.id}}`);
   input.setAttribute("required", "required");
@@ -247,7 +239,6 @@ module.exports = {
   getDynamicValue,
   filterFieldTypes,
   isAQuestion,
-  isLast,
   setRequired,
   getQuestionFields,
 };
