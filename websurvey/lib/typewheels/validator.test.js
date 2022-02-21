@@ -110,27 +110,3 @@ describe("validateFieldValue", () => {
     res.should.equal(false);
   });
 });
-
-it("evaluates to true if the user submits an empty answer to a non-required question", () => {
-  const field = {
-    type: "short_text",
-    title: "foo",
-    ref: "foo",
-  };
-  const fieldValue = "";
-
-  let res = v.validateFieldValue(field, fieldValue);
-
-  res.should.equal(true);
-});
-
-it("throws with a useful message when trying to validate a thankyou screen", () => {
-  const field = {
-    type: "thankyou_screen",
-    title: "thanks!",
-    ref: "thankyou",
-  };
-
-  const fn = () => v.validateFieldValue(field);
-  fn.should.throw(/thankyou_screen/); // field type
-});

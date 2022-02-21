@@ -195,21 +195,21 @@ function interpolateField(qa, field) {
 }
 
 function filterFieldTypes(form) {
-  const fields = form.fields.map(field => field.type);
+  const types = form.fields.map(field => field.type);
   const excludedTypes = ["thankyou_screen", "statement"];
 
-  const filterArray = (fields, excludedTypes) => {
-    const filtered = fields.filter(field => {
+  const filterArray = (types, excludedTypes) => {
+    const filtered = types.filter(field => {
       return excludedTypes.indexOf(field) === -1;
     });
     return filtered;
   };
-  return filterArray(fields, excludedTypes);
+  return filterArray(types, excludedTypes);
 }
 
 function isAQuestion(form, field) {
-  const fields = filterFieldTypes(form);
-  return fields.includes(field.type);
+  const types = filterFieldTypes(form);
+  return types.includes(field.type);
 }
 
 function isLast(form, ref) {
@@ -223,6 +223,10 @@ function isLast(form, ref) {
 function setRequired() {
   const input = document.getElementById(`field-${field.id}}`);
   input.setAttribute("required", "required");
+}
+
+function getQuestionFields(form) {
+  return form.fields.filter(field => isAQuestion(form, field));
 }
 
 module.exports = {
@@ -245,4 +249,5 @@ module.exports = {
   isAQuestion,
   isLast,
   setRequired,
+  getQuestionFields,
 };

@@ -364,14 +364,14 @@ describe("interpolateField", () => {
 });
 
 describe("filterFieldTypes", () => {
-  it("returns an array of question types only", () => {
+  it("returns a filtered array of question types only", () => {
     const value = f.filterFieldTypes(form);
     value.should.eql(["short_text", "multiple_choice", "number"]);
   });
 });
 
 describe("isAQuestion", () => {
-  it("returns true if field is a question", () => {
+  it("returns true if a field is a question", () => {
     const field = {
       ref: "whats_your_name",
       type: "short_text",
@@ -380,7 +380,7 @@ describe("isAQuestion", () => {
     value.should.be.true;
   });
 
-  it("returns false if field is not question", () => {
+  it("returns false if a field is not a question", () => {
     const field = {
       ref: "thankyou",
       type: "thankyou_screen",
@@ -404,5 +404,12 @@ describe("isLast", () => {
     };
     const value = f.isAQuestion(form, field);
     value.should.be.false;
+  });
+});
+
+describe("getQuestionFields", () => {
+  it("returns only the fields that are questions", () => {
+    const value = f.getQuestionFields(form);
+    value.length.should.equal(3);
   });
 });

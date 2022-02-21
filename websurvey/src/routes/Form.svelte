@@ -26,6 +26,10 @@
         fieldValue = event.detail;
     };
 
+    const resetFieldValue = () => {
+        fieldValue = "";
+    };
+
     $: {
         index = form.fields.map(({ ref }) => ref).indexOf(ref);
         field = form.fields[index];
@@ -53,8 +57,10 @@
                     throw new SyntaxError(next.error.message);
                 }
                 navigate(`/${next.ref}`, { replace: true });
+                resetFieldValue(fieldValue);
             } catch (e) {
                 alert(e.message);
+                resetFieldValue(fieldValue);
             }
         }
     };
@@ -66,7 +72,7 @@
         class="h-full p-6 max-w-lg mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
         <div class="space-y-4">
             {#if isAQuestion(form, field)}
-                <ProgressBar {index} {form} />
+                <ProgressBar {form} {field} />
             {/if}
 
             {#if field.type === 'short_text' || field.type === 'number'}

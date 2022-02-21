@@ -48,6 +48,15 @@ function validateString(field, messages) {
   });
 }
 
+function validateStatement(field, messages) {
+  // this could be made more generic, but enough for now.
+  const { responseMessage } = field.md ? field.md : {};
+  return __ => ({
+    message: responseMessage || "No response is necessary.",
+    valid: true,
+  });
+}
+
 function validateFieldValue(field, fieldValue) {
   const res = validator(field)(fieldValue);
 
@@ -61,6 +70,8 @@ const lookup = {
   short_text: validateString,
   number: validateNumber,
   multiple_choice: validateString,
+  statement: validateStatement,
+  thankyou_screen: validateStatement,
 };
 
 function validator(field, messages = {}) {
