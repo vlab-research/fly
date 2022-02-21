@@ -87,73 +87,50 @@ describe("isString", () => {
 
 describe("validateFieldValue", () => {
   it("evaluates to true if the user correctly submits an answer", () => {
-    let field = {
-      type: "short_text",
-      title: "foo",
-      ref: "foo",
-      validations: { required: false },
-    };
-    let fieldValue = "baz";
-
-    const required = field.validations.required;
-
-    let res = v.validateFieldValue(field, fieldValue, required);
-    res.should.equal(true);
-
-    field = {
-      type: "number",
-      title: "foo",
-      ref: "foo",
-      validations: { required: false },
-    };
-
-    fieldValue = 10;
-
-    res = v.validateFieldValue(field, fieldValue, required);
-    res.should.equal(true);
-
-    res = v.validateFieldValue(field, fieldValue, required);
-    res.should.equal(true);
-  });
-
-  it("evaluates to false if the user submits an empty answer to a required question", () => {
     const field = {
       type: "short_text",
       title: "foo",
       ref: "foo",
-      validations: { required: true },
     };
-    const fieldValue = "";
-    const required = field.validations.required;
+    const fieldValue = "baz";
 
-    let res = v.validateFieldValue(field, fieldValue, required);
+    let res = v.validateFieldValue(field, fieldValue);
+    res.should.equal(true);
+  });
 
+  it("evaluates to false if the user incorrectly submits an answer", () => {
+    const field = {
+      type: "short_text",
+      title: "foo",
+      ref: "foo",
+    };
+    const fieldValue = 10;
+
+    let res = v.validateFieldValue(field, fieldValue);
     res.should.equal(false);
   });
+});
 
-  it("evaluates to true if the user submits an empty answer to a non-required question", () => {
-    const field = {
-      type: "short_text",
-      title: "foo",
-      ref: "foo",
-      validations: { required: false },
-    };
-    const fieldValue = "";
-    const required = field.validations.required;
+it("evaluates to true if the user submits an empty answer to a non-required question", () => {
+  const field = {
+    type: "short_text",
+    title: "foo",
+    ref: "foo",
+  };
+  const fieldValue = "";
 
-    let res = v.validateFieldValue(field, fieldValue, required);
+  let res = v.validateFieldValue(field, fieldValue);
 
-    res.should.equal(true);
-  });
+  res.should.equal(true);
+});
 
-  it("throws with a useful message when trying to validate a thankyou screen", () => {
-    const field = {
-      type: "thankyou_screen",
-      title: "thanks!",
-      ref: "thankyou",
-    };
+it("throws with a useful message when trying to validate a thankyou screen", () => {
+  const field = {
+    type: "thankyou_screen",
+    title: "thanks!",
+    ref: "thankyou",
+  };
 
-    const fn = () => v.validateFieldValue(field);
-    fn.should.throw(/thankyou_screen/); // field type
-  });
+  const fn = () => v.validateFieldValue(field);
+  fn.should.throw(/thankyou_screen/); // field type
 });

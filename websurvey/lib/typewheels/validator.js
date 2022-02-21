@@ -48,13 +48,7 @@ function validateString(field, messages) {
   });
 }
 
-function validateFieldValue(field, fieldValue, isRequired) {
-  if (!field.validations) {
-    throw new TypeError(
-      `There are no validations to be made for the field of type ${field.type}`
-    );
-  }
-
+function validateFieldValue(field, fieldValue) {
   const res = validator(field)(fieldValue);
 
   if (!res.valid) {

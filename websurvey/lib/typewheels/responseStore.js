@@ -16,8 +16,8 @@ class ResponseStore {
     return this.qa;
   }
 
-  next(form, qa, ref, field, fieldValue, required) {
-    const isValid = v.validateFieldValue(field, fieldValue, required);
+  next(form, qa, ref, field, fieldValue) {
+    const isValid = v.validateFieldValue(field, fieldValue);
     if (isValid) {
       return {
         ref: f.getNextField(form, qa, ref, field).ref,
