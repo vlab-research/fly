@@ -2,7 +2,12 @@ name: test
 on:
   push:
     branches:
-      - main
+      - '**'
+      - '!main'
+env:
+  REGISTRY_URL: ghcr.io/${{ github.repository }}
+  REGISTRY_USERNAME: ${{ github.actor }}
+  REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 jobs:
   test_dashboard_server:
     runs-on: ubuntu-18.04
@@ -10,42 +15,105 @@ jobs:
       - uses: actions/checkout@v2
       - name: Run tests
         run: ./test.sh dashboard-server --is-ci
+  build_and_push_dashboard_server:
+    needs:
+      - test_dashboard_server
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build and push container image
+        run: ./build_and_push.sh dashboard-server
+
   test_dean:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - name: Run tests
         run: ./test.sh dean --is-ci
+  build_and_push_dean:
+    needs:
+      - test_dean
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build and push container image
+        run: ./build_and_push.sh dean
+
   test_dinersclub:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - name: Run tests
         run: ./test.sh dinersclub --is-ci
+  build_and_push_dinersclub:
+    needs:
+      - test_dinersclub
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build and push container image
+        run: ./build_and_push.sh dinersclub
+
   test_formcentral:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - name: Run tests
         run: ./test.sh formcentral --is-ci
+  build_and_push_formcentral:
+    needs:
+      - test_formcentral
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build and push container image
+        run: ./build_and_push.sh formcentral
+
   test_linksniffer:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - name: Run tests
         run: ./test.sh linksniffer --is-ci
+  build_and_push_linksniffer:
+    needs:
+      - test_linksniffer
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build and push container image
+        run: ./build_and_push.sh linksniffer
+
   test_replybot:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - name: Run tests
         run: ./test.sh replybot --is-ci
+  build_and_push_replybot:
+    needs:
+      - test_replybot
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build and push container image
+        run: ./build_and_push.sh replybot
+
   test_scribble:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - name: Run tests
         run: ./test.sh scribble --is-ci
+  build_and_push_scribble:
+    needs:
+      - test_scribble
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build and push container image
+        run: ./build_and_push.sh scribble
+
   test_e2e:
     runs-on: ubuntu-18.04
     steps:
