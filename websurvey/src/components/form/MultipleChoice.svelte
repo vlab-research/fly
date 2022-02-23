@@ -12,7 +12,7 @@
 
 <label
     for="field-{field.id}"
-    class="text-2xl font-bold tracking-tight text-slate sm:text-3xl mb-2">{title}</label>
+    class="text-2xl font-bold tracking-tight text-slate sm:text-2xl">{title}</label>
 <div class="space-y-2.5 mb-2">
     {#each choices as choice, index (choice.id)}
         <div class="flex flex-row items-center">
