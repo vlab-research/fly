@@ -1,10 +1,10 @@
 <script>
     import { navigate } from "svelte-routing";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
-    import { translateForm } from "../../lib/typewheels/form.js";
+    import { translateForm, isAQuestion } from "../../lib/typewheels/form.js";
     import MultipleChoice from "../components/form/MultipleChoice.svelte";
     import ShortText from "../components/form/ShortText.svelte";
-    import Thankyou from "./Thankyou.svelte";
+    import Statement from "./Statement.svelte";
     import Button from "../components/elements/Button.svelte";
     import ProgressBar from "../components/elements/ProgressBar.svelte";
 
@@ -24,6 +24,10 @@
 
     const addFieldValue = (event) => {
         fieldValue = event.detail;
+    };
+
+    const resetFieldValue = () => {
+        fieldValue = "";
     };
 
     $: {
@@ -53,8 +57,10 @@
                     throw new SyntaxError(next.error.message);
                 }
                 navigate(`/${next.ref}`, { replace: true });
+                resetFieldValue(fieldValue);
             } catch (e) {
                 alert(e.message);
+                resetFieldValue(fieldValue);
             }
         }
     };
@@ -65,7 +71,10 @@
         on:submit|preventDefault={handleSubmit}
         class="h-full p-6 max-w-lg mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
         <div class="space-y-4">
-            <ProgressBar {index} {form} />
+            {#if isAQuestion(form, field)}
+                <ProgressBar {form} {field} />
+            {/if}
+
             {#if field.type === 'short_text' || field.type === 'number'}
                 <ShortText
                     {field}
@@ -79,7 +88,7 @@
                     bind:fieldValue
                     on:add-field-value={addFieldValue} />
             {:else}
-                <Thankyou {title} />
+                <Statement {title} />
             {/if}
 
             <Button>OK</Button>

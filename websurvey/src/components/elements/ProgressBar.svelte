@@ -1,6 +1,24 @@
 <script>
-    import { filterFields } from "..form/../../lib/typewheels/form.js";
-    export let index, form;
+    import {
+        filterFieldTypes,
+        getQuestionFields,
+    } from "..form/../../lib/typewheels/form.js";
+
+    export let form, field;
+
+    let index;
+
+    const fields = getQuestionFields(form);
+
+    const getIndex = (fields) => {
+        const idx = fields.map(({ ref }) => ref).indexOf(field.ref);
+        return idx;
+    };
+
+    $: {
+        field = field;
+        index = getIndex(fields);
+    }
 </script>
 
 <div>
@@ -8,6 +26,6 @@
         Question
         {index + 1}
         out of
-        {filterFields(form).length}
+        {filterFieldTypes(form).length}
     </h2>
 </div>

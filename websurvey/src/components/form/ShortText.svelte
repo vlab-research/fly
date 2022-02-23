@@ -1,5 +1,6 @@
 <script>
     import { createEventDispatcher } from "svelte";
+    import { setRequired } from "../../../lib/typewheels/form.js";
 
     export let field, fieldValue, title;
 
@@ -14,6 +15,7 @@
         <input
             bind:value={fieldValue}
             on:input={dispatch('add-field-value', fieldValue)}
+            required={field.validations.required ? setRequired : null}
             type="text"
             id="field-{field.id}"
             autocomplete="off"

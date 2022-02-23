@@ -42,7 +42,7 @@ function getNextField(form, qa, ref) {
 function getChoiceValue(form, ref, choice) {
   const val = form.fields
     .find(f => f.ref === ref)
-    .properties.choices.find(c => c.ref === choice.ref).label;
+    .properties.choices.find(c => c.ref === choice).label;
 
   if (!val) {
     throw new TypeError(
@@ -194,6 +194,33 @@ function interpolateField(qa, field) {
   return out;
 }
 
+function filterFieldTypes(form) {
+  const types = form.fields.map(field => field.type);
+  const excludedTypes = ["thankyou_screen", "statement"];
+
+  const filterArray = (types, excludedTypes) => {
+    const filtered = types.filter(field => {
+      return excludedTypes.indexOf(field) === -1;
+    });
+    return filtered;
+  };
+  return filterArray(types, excludedTypes);
+}
+
+function isAQuestion(form, field) {
+  const types = filterFieldTypes(form);
+  return types.includes(field.type);
+}
+
+function setRequired() {
+  const input = document.getElementById(`field-${field.id}}`);
+  input.setAttribute("required", "required");
+}
+
+function getQuestionFields(form) {
+  return form.fields.filter(field => isAQuestion(form, field));
+}
+
 module.exports = {
   getField,
   setFirstRef,
@@ -210,4 +237,8 @@ module.exports = {
   _splitUrls,
   _interpolate,
   getDynamicValue,
+  filterFieldTypes,
+  isAQuestion,
+  setRequired,
+  getQuestionFields,
 };

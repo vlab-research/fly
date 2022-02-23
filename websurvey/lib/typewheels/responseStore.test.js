@@ -27,15 +27,16 @@ describe("getQa", () => {
 
     responseStore.snapshot(ref, fieldValue);
 
-    ref = "what's_your_age";
-    fieldValue = 10;
+    ref = "how_is_your_day";
+    fieldValue = "Terrific!";
 
     responseStore.snapshot(ref, fieldValue);
 
     const qa = responseStore.getQa();
+
     qa.should.eql([
       ["what's_your_name", "foo"],
-      ["what's_your_age", 10],
+      ["how_is_your_day", "Terrific!"],
     ]);
   });
 });
@@ -48,23 +49,12 @@ describe("next", () => {
       type: "short_text",
       title: "whats_your_name",
       ref: "whats_your_name",
-      validations: {
-        required: true,
-      },
     };
 
-    const fieldValue = "";
-    const qa = [["whats_your_name", ""]];
+    const fieldValue = 10;
+    const qa = [["whats_your_name", 10]];
     const ref = "whats_your_name";
-    const required = field.validations.required;
-    const value = responseStore.next(
-      form,
-      qa,
-      ref,
-      field,
-      fieldValue,
-      required
-    );
+    const value = responseStore.next(form, qa, ref, field, fieldValue);
 
     value.action.should.equal("error");
   });
@@ -76,37 +66,12 @@ describe("next", () => {
       type: "short_text",
       title: "whats_your_name",
       ref: "whats_your_name",
-      validations: {
-        required: true,
-      },
     };
 
     const fieldValue = "foo";
     const qa = [["whats_your_name", "foo"]];
     const ref = field.ref;
-    const required = field.validations.required;
-    const res = responseStore.next(form, qa, ref, field, fieldValue, required);
-
-    res.action.should.equal("navigate");
-  });
-
-  it("instructs the form to go to the next field if an answer evaluates to invalid but is not required", () => {
-    const responseStore = new r.ResponseStore();
-
-    const field = {
-      type: "short_text",
-      title: "whats_your_name",
-      ref: "whats_your_name",
-      validations: {
-        required: false,
-      },
-    };
-
-    const fieldValue = "foo";
-    const qa = [["whats_your_name", ""]];
-    const ref = field.ref;
-    const required = field.validations.required;
-    const res = responseStore.next(form, qa, ref, field, fieldValue, required);
+    const res = responseStore.next(form, qa, ref, field, fieldValue);
 
     res.action.should.equal("navigate");
   });

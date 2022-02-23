@@ -48,16 +48,19 @@ function validateString(field, messages) {
   });
 }
 
-function validateFieldValue(field, fieldValue, isRequired) {
-  if (!field.validations) {
-    throw new TypeError(
-      `There are no validations to be made for the field of type ${field.type}`
-    );
-  }
+function validateStatement(field, messages) {
+  // this could be made more generic, but enough for now.
+  const { responseMessage } = field.md ? field.md : {};
+  return __ => ({
+    message: responseMessage || "No response is necessary.",
+    valid: true,
+  });
+}
 
+function validateFieldValue(field, fieldValue) {
   const res = validator(field)(fieldValue);
 
-  if (!res.valid || (isRequired && isEmptyString(fieldValue))) {
+  if (!res.valid) {
     return false;
   }
   return true;
@@ -67,6 +70,8 @@ const lookup = {
   short_text: validateString,
   number: validateNumber,
   multiple_choice: validateString,
+  statement: validateStatement,
+  thankyou_screen: validateStatement,
 };
 
 function validator(field, messages = {}) {
