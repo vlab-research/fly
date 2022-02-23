@@ -1,0 +1,68 @@
+name: test
+on:
+  push:
+    branches:
+      - main
+jobs:
+  test_dashboard_server:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run tests
+        run: ./test.sh dashboard-server --is-ci
+  test_dean:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run tests
+        run: ./test.sh dean --is-ci
+  test_dinersclub:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run tests
+        run: ./test.sh dinersclub --is-ci
+  test_formcentral:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run tests
+        run: ./test.sh formcentral --is-ci
+  test_linksniffer:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run tests
+        run: ./test.sh linksniffer --is-ci
+  test_replybot:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run tests
+        run: ./test.sh replybot --is-ci
+  test_scribble:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run tests
+        run: ./test.sh scribble --is-ci
+  test_e2e:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Kubectl/Helm
+        run: |
+          curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.18.0/bin/linux/amd64/kubectl
+          chmod +x ./kubectl
+          sudo mv ./kubectl /usr/local/bin/kubectl
+          curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+          kubectl version --client
+          helm version
+      - name: Install kind
+        run: GO111MODULE="on" go get sigs.k8s.io/kind@v0.8.1
+      - name: Setup kind cluster
+        run: |
+          kind create cluster --name test --wait 5m
+          kubectl config use-context kind-test
+      - name: Run tests
+        run: cd devops && ./integration-test.sh
