@@ -72,6 +72,7 @@ const lookup = {
   multiple_choice: validateString,
   statement: validateStatement,
   thankyou_screen: validateStatement,
+  legal: validateStatement,
 };
 
 function validator(field, messages = {}) {
