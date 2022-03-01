@@ -593,6 +593,40 @@ describe("getCondition", () => {
 //   })
 // })
 
+describe("getChoiceValue", () => {
+  it("gets the value of the selected multiple choice field", () => {
+    const ref = "44659a5e-3640-460a-9614-bd3ae8311043";
+    const choice = "d3bc0725-4371-42ae-8bb4-0492eff445fb";
+    const value = f.getChoiceValue({ form }, ref, choice);
+    value.should.equal("Female");
+  });
+});
+
+describe("getVar", () => {
+  it("gets the field value depending on the var type", () => {
+    const ctx = form;
+    const qa = [["378caa71-fc4f-4041-8315-02b6f33616b9", 10]];
+    const ref = "44659a5e-3640-460a-9614-bd3ae8311043";
+    const vars = [
+      {
+        type: "field",
+        value: "378caa71-fc4f-4041-8315-02b6f33616b9",
+      },
+      {
+        type: "constant",
+        value: 15,
+      },
+    ];
+    const v = vars[0];
+    let value = f.getVar(ctx, qa, ref, v, vars);
+    value.should.equal(10);
+
+    const v2 = vars[1];
+    value = f.getVar(ctx, qa, ref, v2, vars);
+    value.should.equal(15);
+  });
+});
+
 describe("getDynamicValue", () => {
   const ctx = { log: [], user: {} };
   const qa = [["foo", "Continue"]];

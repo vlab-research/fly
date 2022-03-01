@@ -255,6 +255,10 @@ function getVar(ctx, qa, ref, v, vars) {
   if (type == "hidden") {
     return getFromMetadata(ctx, value);
   }
+
+  if (type == "legal") {
+    console.log(type);
+  }
 }
 
 function translateForm(form) {
@@ -315,6 +319,8 @@ module.exports = {
   _splitUrls,
   translateForm,
   getDynamicValue,
+  getChoiceValue,
+  getVar,
   setFirstRef,
   filterFieldTypes,
   isAQuestion,
