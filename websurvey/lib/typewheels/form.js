@@ -174,13 +174,18 @@ function jump(ctx, qa, logic) {
 }
 
 function getFieldValue(qa, ref) {
-  // last valid answer
+  // returns the last valid answer
   const match = qa.filter(([q, __]) => q === ref).pop();
 
   // return null if there are no matches,
   // or if there are no answers,
-  const ans = match && match[1];
-  return ans ? ans : null;
+  // otherwise return match even if empty string
+
+  if (!match) {
+    return null;
+  } else {
+    return match[1];
+  }
 }
 
 const funs = {
