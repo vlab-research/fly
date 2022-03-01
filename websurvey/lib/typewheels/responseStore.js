@@ -20,12 +20,12 @@ class ResponseStore {
     const isValid = v.validateFieldValue(field, fieldValue);
     if (isValid) {
       return {
-        ref: f.getNextField(form, qa, ref, field).ref,
+        ref: f.getNextField({ form }, qa, ref, field).ref,
         action: "navigate",
       };
     } else {
       return {
-        ref: f.getField(form, ref).ref,
+        ref: f.getField({ form }, ref).ref,
         action: "error",
         error: v.validator(field)(fieldValue),
       };

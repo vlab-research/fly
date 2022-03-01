@@ -46,14 +46,14 @@ describe("next", () => {
     const responseStore = new r.ResponseStore();
 
     const field = {
-      type: "short_text",
-      title: "whats_your_name",
-      ref: "whats_your_name",
+      type: "number",
+      title: "Welcome!\nHow old are you?",
+      ref: "378caa71-fc4f-4041-8315-02b6f33616b9",
     };
 
-    const fieldValue = 10;
-    const qa = [["whats_your_name", 10]];
-    const ref = "whats_your_name";
+    const fieldValue = "baz";
+    const qa = [["378caa71-fc4f-4041-8315-02b6f33616b9", "baz"]];
+    const ref = "378caa71-fc4f-4041-8315-02b6f33616b9";
     const value = responseStore.next(form, qa, ref, field, fieldValue);
 
     value.action.should.equal("error");
@@ -63,13 +63,13 @@ describe("next", () => {
     const responseStore = new r.ResponseStore();
 
     const field = {
-      type: "short_text",
-      title: "whats_your_name",
-      ref: "whats_your_name",
+      type: "number",
+      title: "Welcome!\nHow old are you?",
+      ref: "378caa71-fc4f-4041-8315-02b6f33616b9",
     };
 
-    const fieldValue = "foo";
-    const qa = [["whats_your_name", "foo"]];
+    const fieldValue = 10;
+    const qa = [["378caa71-fc4f-4041-8315-02b6f33616b9", 10]];
     const ref = field.ref;
     const res = responseStore.next(form, qa, ref, field, fieldValue);
 
