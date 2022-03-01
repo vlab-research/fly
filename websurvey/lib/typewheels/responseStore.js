@@ -32,14 +32,14 @@ class ResponseStore {
     }
   }
 
-  interpolate(field, qa) {
+  interpolate(ctx, field, qa) {
     try {
-      f.interpolateField(qa, field);
+      f.interpolateField(ctx, qa, field);
     } catch (e) {
       alert(e.message);
     }
 
-    return f.interpolateField(qa, field);
+    return f.interpolateField(ctx, qa, field);
   }
 }
 
