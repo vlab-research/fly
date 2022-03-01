@@ -35,7 +35,7 @@
         field = form.fields[index];
         required = field.validations ? field.validations.required : null;
         qa = responseStore.getQa(snapshot);
-        title = responseStore.interpolate(field, qa).title;
+        title = responseStore.interpolate(form, field, qa).title;
     }
 
     const handleSubmit = () => {
