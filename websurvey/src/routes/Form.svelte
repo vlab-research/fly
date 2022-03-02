@@ -64,6 +64,14 @@
             }
         }
     };
+
+    const lookup = [
+        { type: "short_text", component: ShortText },
+        { type: "number", component: ShortText },
+        { type: "multiple_choice", component: MultipleChoice },
+        { type: "statement", component: Statement },
+        { type: "thankyou_screen", component: Statement },
+    ];
 </script>
 
 <div class="h-screen bg-indigo-50 ">
@@ -74,22 +82,16 @@
             {#if isAQuestion(form, field)}
                 <ProgressBar {form} {field} />
             {/if}
-
-            {#if field.type === 'short_text' || field.type === 'number'}
-                <ShortText
-                    {field}
-                    {title}
-                    bind:fieldValue
-                    on:add-field-value={addFieldValue} />
-            {:else if field.type === 'multiple_choice'}
-                <MultipleChoice
-                    {field}
-                    {title}
-                    bind:fieldValue
-                    on:add-field-value={addFieldValue} />
-            {:else}
-                <Statement {title} />
-            {/if}
+            {#each lookup as option}
+                {#if option.type === field.type}
+                    <svelte:component
+                        this={option.component}
+                        {field}
+                        {title}
+                        bind:fieldValue
+                        on:add-field-value={addFieldValue} />
+                {/if}
+            {/each}
 
             <Button>OK</Button>
         </div>
