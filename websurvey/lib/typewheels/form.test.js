@@ -647,6 +647,7 @@ describe("filterFieldTypes", () => {
   it("returns a filtered array of question types only", () => {
     const value = f.filterFieldTypes(form);
     value.should.eql([
+      "multiple_choice",
       "number",
       "multiple_choice",
       "multiple_choice",
@@ -687,6 +688,6 @@ describe("isAQuestion", () => {
 describe("getQuestionFields", () => {
   it("returns only the fields that are questions", () => {
     const value = f.getQuestionFields(form);
-    value.length.should.equal(13);
+    value.length.should.equal(14);
   });
 });
