@@ -9,7 +9,7 @@
 
 <label
     for="field-{field.id}"
-    class="text-2xl font-bold tracking-tight text-slate sm:text-2xl ">{title}</label>
+    class="text-2xl font-bold tracking-tight text-slate sm:text-xl whitespace-pre-line">{title}</label>
 <div>
     <div class="mt-2 mb-2">
         <input
