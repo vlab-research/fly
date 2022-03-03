@@ -1,3 +1,5 @@
+const { translator } = require("./translate-fields");
+
 const defaultMessages = {
   "label.error.mustEnter":
     "Sorry, that answer is not valid. Please try to answer the question again.",
@@ -57,6 +59,23 @@ function validateStatement(field, messages) {
   });
 }
 
+function _validateMC(r, titles, messages) {
+  // Messenger will return us numbers in JSON,
+  // but typeform mostly uses strings, except for booleans.
+  // So we cast everything to strings, to compare with QR's
+  return {
+    message: messages["label.error.mustSelect"],
+    valid: titles.map(t => "" + t).indexOf("" + r) !== -1,
+  };
+}
+
+// function validateQR(field, messages) {
+//   const q = translator(field);
+//   const titles = q.quick_replies.map(r => r.title);
+
+//   return r => _validateMC(r, titles, messages);
+// }
+
 function validateFieldValue(field, fieldValue) {
   const res = validator(field)(fieldValue);
 
@@ -73,6 +92,8 @@ const lookup = {
   statement: validateStatement,
   thankyou_screen: validateStatement,
   legal: validateStatement,
+  rating: validateNumber,
+  opinion_scale: validateNumber,
 };
 
 function validator(field, messages = {}) {
