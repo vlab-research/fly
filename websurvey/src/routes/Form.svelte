@@ -4,7 +4,9 @@
     import { translateForm, isAQuestion } from "../../lib/typewheels/form.js";
     import MultipleChoice from "../components/form/MultipleChoice.svelte";
     import ShortText from "../components/form/ShortText.svelte";
-    import Statement from "./Statement.svelte";
+    import Statement from "../components/form/Statement.svelte";
+    import Rating from "../components/form/Rating.svelte";
+    import OpinionScale from "../components/form/OpinionScale.svelte";
     import Button from "../components/elements/Button.svelte";
     import ProgressBar from "../components/elements/ProgressBar.svelte";
 
@@ -71,6 +73,8 @@
         { type: "multiple_choice", component: MultipleChoice },
         { type: "statement", component: Statement },
         { type: "thankyou_screen", component: Statement },
+        { type: "rating", component: Rating },
+        { type: "opinion_scale", component: OpinionScale },
     ];
 </script>
 
