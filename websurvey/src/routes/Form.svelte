@@ -74,7 +74,7 @@
         { type: "statement", component: Statement },
         { type: "thankyou_screen", component: Statement },
         { type: "rating", component: Rating },
-        { type: "opinion_scale", component: OpinionScale },
+        { type: "opinion_scale", component: Rating },
     ];
 </script>
 
@@ -82,7 +82,7 @@
     <form
         on:submit|preventDefault={handleSubmit}
         class="h-full p-6 max-w-lg mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
-        <div class="space-y-4">
+        <div class="space-y-4 w-full">
             {#if isAQuestion(form, field)}
                 <ProgressBar {form} {field} />
             {/if}

@@ -19,7 +19,7 @@
             type="text"
             id="field-{field.id}"
             autocomplete="off"
-            class="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-2 pr-12 sm:text-xl border-gray-300 rounded-md pt-2 pb-2"
+            class="focus:ring-indigo-500 focus:border-indigo-500 block pl-2 pr-12 sm:text-xl border-gray-300 rounded-md pt-2 pb-2 w-3/4"
             placeholder={field.title} />
     </div>
 </div>
