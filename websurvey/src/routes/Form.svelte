@@ -6,7 +6,6 @@
     import ShortText from "../components/form/ShortText.svelte";
     import Statement from "../components/form/Statement.svelte";
     import Rating from "../components/form/Rating.svelte";
-    import OpinionScale from "../components/form/OpinionScale.svelte";
     import Button from "../components/elements/Button.svelte";
     import ProgressBar from "../components/elements/ProgressBar.svelte";
 
