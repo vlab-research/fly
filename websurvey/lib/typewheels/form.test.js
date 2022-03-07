@@ -661,6 +661,7 @@ describe("filterFieldTypes", () => {
       "rating",
       "multiple_choice",
       "rating",
+      "multiple_choice",
     ]);
   });
 });
@@ -688,6 +689,6 @@ describe("isAQuestion", () => {
 describe("getQuestionFields", () => {
   it("returns only the fields that are questions", () => {
     const value = f.getQuestionFields(form);
-    value.length.should.equal(14);
+    value.length.should.equal(15);
   });
 });

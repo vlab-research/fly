@@ -69,12 +69,12 @@ function _validateMC(r, titles, messages) {
   };
 }
 
-// function validateQR(field, messages) {
-//   const q = translator(field);
-//   const titles = q.quick_replies.map(r => r.title);
+function validateQR(field, messages) {
+  const q = translator(field);
+  const titles = q.quick_replies.map(r => r.title);
 
-//   return r => _validateMC(r, titles, messages);
-// }
+  return r => _validateMC(r, titles, messages);
+}
 
 function validateFieldValue(field, fieldValue) {
   const res = validator(field)(fieldValue);
@@ -88,12 +88,12 @@ function validateFieldValue(field, fieldValue) {
 const lookup = {
   short_text: validateString,
   number: validateNumber,
-  multiple_choice: validateString,
+  multiple_choice: validateQR,
   statement: validateStatement,
   thankyou_screen: validateStatement,
   legal: validateStatement,
-  rating: validateNumber,
-  opinion_scale: validateNumber,
+  rating: validateQR,
+  opinion_scale: validateQR,
 };
 
 function validator(field, messages = {}) {
@@ -102,9 +102,7 @@ function validator(field, messages = {}) {
   const fn = lookup[field.type];
 
   if (!fn) {
-    throw new TypeError(
-      `There is no translator for the question of type ${field.type}`
-    );
+    return true;
   }
 
   return fn(field, messages);

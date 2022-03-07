@@ -450,7 +450,25 @@
       "validations": {
         "required": true
       },
-      "type": "legal"
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "uXHGhA03Q54f",
+            "ref": "ec2cdf07-86fe-47e3-a856-b680758df57e",
+            "label": "Yes"
+          },
+          {
+            "id": "czULJlPu2ffD",
+            "ref": "c1d48854-6225-4085-a860-10ea27c4ffa6",
+            "label": "No"
+          }
+        ]
+      },
+      "type": "multiple_choice"
     },
     {
       "id": "AgR9MVYQdP9r",
