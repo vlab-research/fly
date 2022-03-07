@@ -21,6 +21,7 @@
     "svelte": "^3.0.0"
   },
   "dependencies": {
+    "@vlab-research/translate-typeform": "github:vlab-research/translate-typeform",
     "autoprefixer": "^9.8.8",
     "chai": "^4.3.4",
     "lodash": "^4.17.21",
