@@ -88,7 +88,7 @@
             {/if}
             {#each lookup as option}
                 {#if option.type === field.type}
-                    {#if field.type === 'statement'}
+                    {#if !isAQuestion(form, field)}
                         <svelte:component this={option.component} {title} />
                     {:else}
                         <svelte:component
