@@ -87,17 +87,6 @@ const translateYesNo = (data, ref) => {
   );
 };
 
-const translateLegal = (data, ref) => {
-  return _makeSimpleChoice(
-    data.title,
-    [
-      ["I Accept", true],
-      ["I don't Accept", false],
-    ],
-    ref
-  );
-};
-
 //email to quick reply (fb has qr button for sending email assoc with account)
 const translateEmail = data => {
   const response = translateShortText(data);
@@ -294,7 +283,6 @@ const lookup = {
   long_text: translateLongText,
   welcome_screen: translateWelcomeScreen,
   thankyou_screen: translateThankYouScreen,
-  legal: translateLegal,
   yes_no: translateYesNo,
   number: translateNumber,
   statement: translateStatement,
@@ -343,6 +331,5 @@ module.exports = {
   translateRatings,
   translatePictureChoice,
   translateDate,
-  translateLegal,
   makeUrl,
 };
