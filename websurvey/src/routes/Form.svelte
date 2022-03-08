@@ -74,6 +74,7 @@
         { type: "thankyou_screen", component: Statement },
         { type: "rating", component: Rating },
         { type: "opinion_scale", component: Rating },
+        { type: "email", component: ShortText },
     ];
 </script>
 
@@ -87,12 +88,16 @@
             {/if}
             {#each lookup as option}
                 {#if option.type === field.type}
-                    <svelte:component
-                        this={option.component}
-                        {field}
-                        {title}
-                        bind:fieldValue
-                        on:add-field-value={addFieldValue} />
+                    {#if field.type === 'statement'}
+                        <svelte:component this={option.component} {title} />
+                    {:else}
+                        <svelte:component
+                            this={option.component}
+                            {field}
+                            {title}
+                            bind:fieldValue
+                            on:add-field-value={addFieldValue} />
+                    {/if}
                 {/if}
             {/each}
 
