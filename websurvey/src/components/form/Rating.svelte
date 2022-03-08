@@ -13,7 +13,7 @@
     const arr = [];
 
     const count = () => {
-        for (let i = 0; i <= steps; i++) {
+        for (let i = 0; i < steps; i++) {
             arr.push(i);
         }
     };
