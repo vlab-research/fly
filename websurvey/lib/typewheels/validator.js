@@ -108,15 +108,17 @@ function validateFieldValue(field, fieldValue) {
 }
 
 const lookup = {
-  short_text: validateString,
   number: validateNumber,
-  multiple_choice: validateQR,
   statement: validateStatement,
   thankyou_screen: validateStatement,
+  multiple_choice: validateQR,
   rating: validateQR,
   opinion_scale: validateQR,
-  phone_number: validatePhone,
+  short_text: validateString,
+  long_text: validateString,
+  share: validateStatement,
   email: validateEmail,
+  phone_number: validatePhone,
 };
 
 function validationMessages(messages = {}) {
