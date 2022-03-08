@@ -471,6 +471,15 @@
       "type": "multiple_choice"
     },
     {
+      "id": "zGz4q4dPLUiC",
+      "title": "What's your email address?",
+      "ref": "378caa71-fc4f-4041-8315-02b6f33616b8",
+      "validations": {
+        "required": true
+      },
+      "type": "email"
+    },
+    {
       "id": "AgR9MVYQdP9r",
       "title": "Thank you for your time! We will get in touch soon! \nIn the coming days we will send you a short video that you can watch for free. ",
       "ref": "be74090e-2c4d-4f38-aabc-3e1673df7d7c",
