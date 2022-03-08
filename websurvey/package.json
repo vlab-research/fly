@@ -26,6 +26,7 @@
     "chai": "^4.3.4",
     "lodash": "^4.17.21",
     "mustache": "^4.2.0",
+    "phone": "^3.1.12",
     "postcss": "^7.0.39",
     "sirv-cli": "^1.0.0",
     "svelte-preprocess": "^4.10.2",
