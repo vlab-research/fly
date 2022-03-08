@@ -28,6 +28,7 @@ const translateThankYouScreen = data => {
 const makeMultipleChoice = (text, choices, ref) => {
   // let's try multiple elements??
   const response = { text };
+
   response.quick_replies = choices.map(choice => {
     const [title, value] = Array.isArray(choice)
       ? choice
@@ -309,6 +310,7 @@ const lookup = {
 
 function translator(question) {
   const fn = lookup[question.type];
+
   if (!fn) {
     throw new TypeError(
       `There is no translator for the question of type ${question.type}`
@@ -321,6 +323,7 @@ function translator(question) {
     ...question.md,
     ref: question.ref,
   });
+
   return response;
 }
 
