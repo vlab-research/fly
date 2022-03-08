@@ -24,11 +24,7 @@ function _validateMC(r, titles, messages) {
 
 function validateQR(field, messages) {
   const q = translator(field);
-  console.log(q);
-
   const titles = q.quick_replies.map(r => r.title);
-  console.log(titles);
-  console.log(r => _validateMC(r, titles, messages));
   return r => _validateMC(r, titles, messages);
 }
 
