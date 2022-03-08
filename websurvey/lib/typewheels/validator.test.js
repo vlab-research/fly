@@ -70,7 +70,7 @@ describe("isNumber", () => {
 });
 
 describe("validateFieldValue", () => {
-  it("evaluates to true if the user correctly submits an answer", () => {
+  it("evaluates to true if the user correctly submits a short text answer", () => {
     const field = {
       type: "short_text",
       title: "foo",
@@ -82,13 +82,37 @@ describe("validateFieldValue", () => {
     res.should.equal(true);
   });
 
-  it("evaluates to false if the user incorrectly submits an answer", () => {
+  it("evaluates to false if the user incorrectly submits a short text answer", () => {
     const field = {
       type: "short_text",
       title: "foo",
       ref: "foo",
     };
     const fieldValue = 10;
+
+    let res = v.validateFieldValue(field, fieldValue);
+    res.should.equal(false);
+  });
+
+  it("evaluates to true if the user correctly submits an email", () => {
+    const field = {
+      title: "What's your email address?",
+      ref: "email",
+      type: "email",
+    };
+    const fieldValue = "baz@gmail.com";
+
+    let res = v.validateFieldValue(field, fieldValue);
+    res.should.equal(true);
+  });
+
+  it("evaluates to false if the user incorrectly submits an email", () => {
+    const field = {
+      title: "What's your email address?",
+      ref: "email",
+      type: "email",
+    };
+    const fieldValue = "@gmail.com";
 
     let res = v.validateFieldValue(field, fieldValue);
     res.should.equal(false);

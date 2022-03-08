@@ -1,5 +1,6 @@
 const { translator } = require("./translate-fields");
 const phone = require("phone");
+const emailValidator = require("email-validator");
 
 const defaultMessages = {
   "label.error.mustEnter":
@@ -8,6 +9,7 @@ const defaultMessages = {
     "Sorry, please use the buttons provided to answer the question.",
   "label.error.range": "Sorry, please enter a valid number.",
   "label.error.phoneNumber": "Sorry, please enter a valid phone number.",
+  "label.error.emailAddress": "Sorry, please enter a valid email address.",
 };
 
 function _validateMC(r, titles, messages) {
@@ -69,6 +71,17 @@ function validateNumber(field, messages) {
   });
 }
 
+function _isEmail(mail) {
+  return emailValidator.validate(mail);
+}
+
+function validateEmail(field, messages) {
+  return r => ({
+    message: messages["label.error.emailAddress"],
+    valid: _isEmail(r),
+  });
+}
+
 function _isPhone(number, country, mobile) {
   return !!phone("" + number, country, !mobile)[0];
 }
@@ -103,6 +116,7 @@ const lookup = {
   rating: validateQR,
   opinion_scale: validateQR,
   phone_number: validatePhone,
+  email: validateEmail,
 };
 
 function validationMessages(messages = {}) {
