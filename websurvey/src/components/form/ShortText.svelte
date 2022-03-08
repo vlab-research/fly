@@ -1,10 +1,19 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { setRequired } from "../../../lib/typewheels/form.js";
+    import { onMount } from "svelte";
 
     export let field, fieldValue, title;
 
     const dispatch = createEventDispatcher();
+
+    let inputElement;
+
+    const inputType = field.type === "email" ? "email" : "text";
+
+    onMount(() => {
+        inputElement.type = inputType;
+    });
 </script>
 
 <label
@@ -20,6 +29,7 @@
             id="field-{field.id}"
             autocomplete="off"
             class="focus:ring-indigo-500 focus:border-indigo-500 block pl-2 pr-12 sm:text-xl border-gray-300 rounded-md pt-2 pb-2 w-3/4"
-            placeholder={field.title} />
+            placeholder={field.title}
+            bind:this={inputElement} />
     </div>
 </div>
