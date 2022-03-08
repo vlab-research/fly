@@ -3,7 +3,9 @@ const chai = require("chai");
 const should = chai.should();
 const fs = require("fs");
 const f = require("./form");
-const form = JSON.parse(fs.readFileSync("mocks/sample.json"));
+let form = JSON.parse(fs.readFileSync("mocks/sample.json"));
+
+form = f.translateForm(form);
 
 const PAGE_ID = "1051551461692797";
 const USER_ID = "1800244896727776";
@@ -691,5 +693,16 @@ describe("getQuestionFields", () => {
   it("returns only the fields that are questions", () => {
     const value = f.getQuestionFields(form);
     value.length.should.equal(16);
+  });
+});
+
+describe("_isLast", () => {
+  it("returns true if last field in the form", () => {
+    const field = {
+      ref: "default_tys",
+      title: "Done! Your information was sent perfectly.",
+    };
+    const value = f._isLast(form, field.ref);
+    value.should.be.true;
   });
 });

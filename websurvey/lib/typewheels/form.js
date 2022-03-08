@@ -126,8 +126,8 @@ function getField({ form, user }, ref, index = false) {
   return index ? [idx, field] : field;
 }
 
-function _isLast(form, field) {
-  const idx = form.fields.findIndex(({ ref }) => ref === field);
+function _isLast(form, ref) {
+  const idx = form.fields.map(({ ref }) => ref).indexOf(ref);
   return idx === form.fields.length - 1;
 }
 
@@ -327,4 +327,5 @@ module.exports = {
   isAQuestion,
   getQuestionFields,
   setRequired,
+  _isLast,
 };

@@ -1,7 +1,11 @@
 <script>
     import { navigate } from "svelte-routing";
     import { ResponseStore } from "../../lib/typewheels/responseStore.js";
-    import { translateForm, isAQuestion } from "../../lib/typewheels/form.js";
+    import {
+        translateForm,
+        isAQuestion,
+        _isLast,
+    } from "../../lib/typewheels/form.js";
     import MultipleChoice from "../components/form/MultipleChoice.svelte";
     import ShortText from "../components/form/ShortText.svelte";
     import Statement from "../components/form/Statement.svelte";
@@ -100,8 +104,9 @@
                     {/if}
                 {/if}
             {/each}
-
-            <Button>OK</Button>
+            {#if !_isLast(form, ref)}
+                <Button />
+            {/if}
         </div>
     </form>
 </div>
