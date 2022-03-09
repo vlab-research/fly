@@ -1,6 +1,6 @@
 const mocha = require("mocha");
 const chai = require("chai").should();
-const mocks = require("./mocks/sample.json");
+const mocks = require("../../mocks/sample.json");
 
 const translateFunctions = require("./translate-fields");
 
@@ -14,9 +14,9 @@ describe("should translate multiple choice questions", () => {
   it("should have a text property with the title of the questions", () => {
     translated.should.have.property("text", multipleChoiceQuestion.title);
   });
-  it("quick_replies should be an array with 3 elements in it", () => {
+  it("quick_replies should be an array with 2 elements in it", () => {
     translated.quick_replies.should.be.an("array");
-    translated.quick_replies.should.have.length(3);
+    translated.quick_replies.should.have.length(2);
   });
   it('quick_replies should have "content-type", "title", "payload" properties', () => {
     translated.quick_replies
@@ -31,9 +31,9 @@ describe("should translate multiple choice questions", () => {
     const values = translated.quick_replies
       .map(r => JSON.parse(r.payload))
       .map(r => r.value);
-    values.should.deep.equal(["Commander", "Astro-biologist", "Engineer"]);
+    values.should.deep.equal(["I accept", "I do not accept"]);
     const titles = translated.quick_replies.map(r => r.title);
-    titles.should.deep.equal(["Commander", "Astro-biologist", "Engineer"]);
+    titles.should.deep.equal(["I accept", "I do not accept"]);
   });
 });
 

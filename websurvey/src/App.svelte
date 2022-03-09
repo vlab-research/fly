@@ -3,7 +3,7 @@
 	import Home from "./routes/Home.svelte";
 	import Form from "./routes/Form.svelte";
 
-	import form from "../mocks/test-1.json";
+	import form from "../mocks/sample.json";
 
 	export let url = "";
 </script>
