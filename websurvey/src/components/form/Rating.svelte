@@ -34,6 +34,7 @@
                 <input
                     bind:group={fieldValue}
                     on:input={dispatch('add-field-value', fieldValue)}
+                    id="label-{e}"
                     required={field.validations.required ? setRequired : null}
                     type="radio"
                     name="steps"
