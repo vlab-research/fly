@@ -390,8 +390,9 @@
       "title": "Now imagine to pick 10 of your Facebook friends.\n \nAccording to you, how many of them think that a woman should be banned from entering the kitchen or household shrine during her periods? ",
       "ref": "80c3179a-7a7d-470c-91f8-1165020140c0",
       "properties": {
-        "steps": 11,
-        "shape": "user"
+        "steps": 10,
+        "shape": "user",
+        "start_at_one": true
       },
       "validations": {
         "required": true
@@ -436,7 +437,8 @@
       "ref": "f581b4dd-fcb4-46e7-b18e-7fe9f6ed2517",
       "properties": {
         "steps": 10,
-        "shape": "user"
+        "shape": "user",
+        "start_at_one": true
       },
       "validations": {
         "required": true

@@ -12,9 +12,13 @@
 
     const arr = [];
 
+    const startAtOne = field.properties.start_at_one;
+
     const count = () => {
-        for (let i = 0; i < steps; i++) {
+        let index = startAtOne ? 1 : 0;
+        for (let i = index; startAtOne ? i <= steps : i < steps; i++) {
             arr.push(i);
+            console.log(arr);
         }
     };
 
@@ -26,7 +30,7 @@
     class="text-2xl font-bold tracking-tight text-slate sm:text-xl whitespace-pre-line">{title}</label>
 <div class="space-y-2.5 mb-2">
     <div class="flex flex-row justify-between items-start mb-2">
-        {#each arr as e, index}
+        {#each arr as e, i}
             <div class="flex flex-col mr-4">
                 <input
                     bind:group={fieldValue}
@@ -36,7 +40,7 @@
                     name="steps"
                     value={e}
                     class="mr-2 mb-2" />
-                <label for="label-{e}" class="sm:text-xl mr-2">{index}</label>
+                <label for="label-{e}" class="sm:text-xl mr-2">{e}</label>
             </div>
         {/each}
     </div>
