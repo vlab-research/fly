@@ -16,14 +16,14 @@
             <input
                 bind:group={fieldValue}
                 on:input={dispatch('add-field-value', fieldValue)}
+                id="choice-{choice.label}"
                 required={field.validations.required ? setRequired : null}
                 type="radio"
                 name="choices"
                 value={choice.label}
                 class="mr-2" />
-            <label
-                for="choice-{choice.label}"
-                class="sm:text-xl">{choice.label}</label>
+            <label for="choice-{choice.label}" class="sm:text-xl">{choice.label}
+            </label>
         </div>
     {/each}
 </div>
