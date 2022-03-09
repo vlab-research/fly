@@ -1,11 +1,13 @@
 <script>
     import { createEventDispatcher } from "svelte";
-    import { setRequired } from "../../../lib/typewheels/form.js";
+    import { setRequired, ariaRequired } from "../../../lib/typewheels/form.js";
     import { onMount } from "svelte";
 
     export let field, fieldValue, title;
 
     const dispatch = createEventDispatcher();
+
+    const required = field.validations.required;
 
     let inputElement;
 
@@ -27,9 +29,10 @@
             bind:value={fieldValue}
             on:input={dispatch('add-field-value', fieldValue)}
             bind:this={inputElement}
-            required={field.validations.required ? setRequired : null}
-            type="text"
             id="field-{field.id}"
+            required={required ? setRequired : null}
+            aria-required={ariaRequired(required)}
+            type="text"
             class="focus:ring-indigo-500 focus:border-indigo-500 block pl-2 pr-12 sm:text-xl border-gray-300 rounded-md pt-2 pb-2 w-3/4"
             placeholder={field.title}
             autocomplete={autocompleteValue} />

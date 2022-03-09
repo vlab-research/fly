@@ -306,11 +306,16 @@ function setRequired() {
   input.setAttribute("required", "required");
 }
 
+function ariaRequired(required) {
+  return required ? true : false;
+}
+
 module.exports = {
   getCondition,
   getFieldValue,
   jump,
   getField,
+  _isLast,
   getNextField,
   translateField,
   interpolateField,
@@ -327,5 +332,5 @@ module.exports = {
   isAQuestion,
   getQuestionFields,
   setRequired,
-  _isLast,
+  ariaRequired,
 };

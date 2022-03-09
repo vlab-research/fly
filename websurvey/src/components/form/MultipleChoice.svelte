@@ -1,10 +1,12 @@
 <script>
     import { createEventDispatcher } from "svelte";
-    import { setRequired } from "../../../lib/typewheels/form.js";
+    import { setRequired, ariaRequired } from "../../../lib/typewheels/form.js";
 
     export let field, fieldValue, title;
 
     const dispatch = createEventDispatcher();
+
+    const required = field.validations.required;
 </script>
 
 <label
@@ -17,7 +19,8 @@
                 bind:group={fieldValue}
                 on:input={dispatch('add-field-value', fieldValue)}
                 id="choice-{choice.label}"
-                required={field.validations.required ? setRequired : null}
+                required={required ? setRequired : null}
+                aria-required={ariaRequired(required)}
                 type="radio"
                 name="choices"
                 value={choice.label}
