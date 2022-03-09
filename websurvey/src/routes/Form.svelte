@@ -56,7 +56,7 @@
             required
         );
 
-        if (form.fields.indexOf(field) < form.fields.length - 1) {
+        if (!_isLast(form, ref)) {
             try {
                 if (next.action === "error") {
                     throw new SyntaxError(next.error.message);
@@ -80,7 +80,17 @@
         { type: "opinion_scale", component: Rating },
         { type: "email", component: ShortText },
     ];
+
+    const enter = 13;
+
+    function handleKeydown(event) {
+        if (event.keyCode === enter) {
+            handleSubmit();
+        }
+    }
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <div class="h-screen bg-indigo-50 ">
     <form
