@@ -11,6 +11,8 @@
 
     const inputType = field.type === "email" ? "email" : "text";
 
+    const autocompleteValue = field.type === "email" ? "email" : "off";
+
     onMount(() => {
         inputElement.type = inputType;
     });
@@ -24,12 +26,12 @@
         <input
             bind:value={fieldValue}
             on:input={dispatch('add-field-value', fieldValue)}
+            bind:this={inputElement}
             required={field.validations.required ? setRequired : null}
             type="text"
             id="field-{field.id}"
-            autocomplete="off"
             class="focus:ring-indigo-500 focus:border-indigo-500 block pl-2 pr-12 sm:text-xl border-gray-300 rounded-md pt-2 pb-2 w-3/4"
             placeholder={field.title}
-            bind:this={inputElement} />
+            autocomplete={autocompleteValue} />
     </div>
 </div>
