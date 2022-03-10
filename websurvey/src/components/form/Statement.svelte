@@ -1,10 +1,6 @@
 <script>
-    export let title;
+    import Title from "../text/Title.svelte";
+    export let field;
 </script>
 
-<div>
-    <h1
-        class="text-xl sm: text-2xl font-bold tracking-tight text-slate whitespace-pre-line">
-        {title}
-    </h1>
-</div>
+<Title {field} />

@@ -1,8 +1,9 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { setRequired, ariaRequired } from "../../../lib/typewheels/form.js";
+    import Title from "../text/Title.svelte";
 
-    export let field, fieldValue, title;
+    export let field, fieldValue;
 
     const required = field.validations.required;
 
@@ -26,10 +27,8 @@
     count();
 </script>
 
-<label
-    for="field-{field.id}"
-    class="text-xl sm: text-2xl font-bold tracking-tight text-slate whitespace-pre-line">{title}</label>
-<div class="space-y-2.5 mb-2">
+<Title {field} />
+<div class="space-y-2.5 mb-2 w-full">
     <div class="flex flex-row justify-between items-start mb-2">
         {#each arr as e, i}
             <div class="flex flex-col mr-2 sm:mr-4">
@@ -42,8 +41,8 @@
                     type="radio"
                     name="steps"
                     value={e}
-                    class="mr-2 mb-2" />
-                <label for="label-{e}" class="sm:text-xl mr-2">{e}</label>
+                    class="mb-2" />
+                <label for="label-{e}" class="text-sm sm:text-xl">{e}</label>
             </div>
         {/each}
     </div>

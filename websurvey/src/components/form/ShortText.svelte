@@ -1,9 +1,9 @@
 <script>
-    import { createEventDispatcher } from "svelte";
+    import { createEventDispatcher, onMount } from "svelte";
     import { setRequired, ariaRequired } from "../../../lib/typewheels/form.js";
-    import { onMount } from "svelte";
+    import Title from "../text/Title.svelte";
 
-    export let field, fieldValue, title;
+    export let field, fieldValue;
 
     const dispatch = createEventDispatcher();
 
@@ -20,21 +20,17 @@
     });
 </script>
 
-<label
-    for="field-{field.id}"
-    class="text-xl sm: text-2xl font-bold tracking-tight text-slate whitespace-pre-line">{title}</label>
-<div>
-    <div class="mt-2 mb-2">
-        <input
-            bind:value={fieldValue}
-            on:input={dispatch('add-field-value', fieldValue)}
-            bind:this={inputElement}
-            id="field-{field.id}"
-            required={required ? setRequired : null}
-            aria-required={ariaRequired(required)}
-            type="text"
-            class="focus:ring-indigo-500 focus:border-indigo-500 block pl-2 pr-12 sm:text-xl border-gray-300 rounded-md pt-2 pb-2 w-3/4"
-            placeholder={field.title}
-            autocomplete={autocompleteValue} />
-    </div>
+<Title {field} />
+<div class="mt-2 mb-2">
+    <input
+        bind:value={fieldValue}
+        on:input={dispatch('add-field-value', fieldValue)}
+        bind:this={inputElement}
+        id="field-{field.id}"
+        required={required ? setRequired : null}
+        aria-required={ariaRequired(required)}
+        type="text"
+        class="max-w-screen-sm focus:ring-indigo-500 focus:border-indigo-500 block pl-2 pr-12 text-sm sm:text-xl border-gray-300 rounded-md pt-2 pb-2 w-3/4"
+        placeholder={field.title}
+        autocomplete={autocompleteValue} />
 </div>

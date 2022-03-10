@@ -80,38 +80,24 @@
         { type: "opinion_scale", component: Rating },
         { type: "email", component: ShortText },
     ];
-
-    const enter = 13;
-
-    function handleKeydown(event) {
-        if (event.keyCode === enter) {
-            handleSubmit();
-        }
-    }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
-
-<div class="h-screen bg-indigo-50 ">
+<div class="h-screen bg-indigo-50 sm:flex">
     <form
         on:submit|preventDefault={handleSubmit}
-        class="h-full p-6 mx-auto bg-white rounded-xl shadow-lg flex items-center space-x-4">
+        class="h-full flex p-6 bg-white rounded-xl items-center space-x-4 shadow md:w-5/12 md:max-w-7xl	sm:mx-auto">
         <div class="space-y-4 w-full">
             {#if isAQuestion(form, field)}
                 <ProgressBar {form} {field} />
             {/if}
             {#each lookup as option}
                 {#if option.type === field.type}
-                    {#if !isAQuestion(form, field)}
-                        <svelte:component this={option.component} {title} />
-                    {:else}
-                        <svelte:component
-                            this={option.component}
-                            {field}
-                            {title}
-                            bind:fieldValue
-                            on:add-field-value={addFieldValue} />
-                    {/if}
+                    <svelte:component
+                        this={option.component}
+                        {field}
+                        {title}
+                        bind:fieldValue
+                        on:add-field-value={addFieldValue} />
                 {/if}
             {/each}
             {#if !_isLast(form, ref)}
