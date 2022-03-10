@@ -22,7 +22,7 @@
 </script>
 
 <div>
-    <h2 class="text-xs font-medium text-blue-500">
+    <h2 class="text-xs sm:text-sm font-medium text-blue-500">
         Question
         {index + 1}
         out of

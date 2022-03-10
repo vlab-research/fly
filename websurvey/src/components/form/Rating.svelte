@@ -28,11 +28,11 @@
 
 <label
     for="field-{field.id}"
-    class="text-2xl font-bold tracking-tight text-slate sm:text-xl whitespace-pre-line">{title}</label>
+    class="text-xl sm: text-2xl font-bold tracking-tight text-slate whitespace-pre-line">{title}</label>
 <div class="space-y-2.5 mb-2">
     <div class="flex flex-row justify-between items-start mb-2">
         {#each arr as e, i}
-            <div class="flex flex-col mr-4">
+            <div class="flex flex-col mr-2 sm:mr-4">
                 <input
                     bind:group={fieldValue}
                     on:input={dispatch('add-field-value', fieldValue)}

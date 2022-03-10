@@ -11,7 +11,7 @@
 
 <label
     for="field-{field.id}"
-    class="text-2xl font-bold tracking-tight text-slate sm:text-xl whitespace-pre-line">{title}</label>
+    class="text-xl sm: text-2xl font-bold tracking-tight text-slate whitespace-pre-line">{title}</label>
 <div class="space-y-2.5 mb-2">
     {#each field.properties.choices as choice, index (choice.id)}
         <div class="flex flex-row items-center">
