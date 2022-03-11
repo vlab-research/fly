@@ -95,7 +95,6 @@
                     <svelte:component
                         this={option.component}
                         {field}
-                        {title}
                         bind:fieldValue
                         on:add-field-value={addFieldValue} />
                 {/if}
