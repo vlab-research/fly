@@ -61,7 +61,7 @@
                 if (next.action === "error") {
                     throw new SyntaxError(next.error.message);
                 }
-                navigate(`/${next.ref}`, { replace: true });
+                navigate(`/${next.ref}`, { replace: false });
                 resetFieldValue(fieldValue);
             } catch (e) {
                 alert(e.message);
