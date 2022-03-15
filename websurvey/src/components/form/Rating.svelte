@@ -1,6 +1,5 @@
 <script>
     import { createEventDispatcher } from "svelte";
-    import { setRequired, ariaRequired } from "../../../lib/typewheels/form.js";
     import Title from "../text/Title.svelte";
 
     export let field, fieldValue;
@@ -36,8 +35,7 @@
                     bind:group={fieldValue}
                     on:input={dispatch('add-field-value', fieldValue)}
                     id="label-{e}"
-                    required={required ? setRequired : null}
-                    aria-required={ariaRequired(required)}
+                    {required}
                     type="radio"
                     name="steps"
                     value={e}

@@ -21,11 +21,11 @@
     }
 </script>
 
-<div>
-    <h2 class="text-xs sm:text-sm font-medium text-blue-500">
+<div aria-live="assertive">
+    <h1 class="text-xs sm:text-sm font-medium text-blue-500">
         Question
         {index + 1}
         out of
         {filterFieldTypes(form).length}
-    </h2>
+    </h1>
 </div>

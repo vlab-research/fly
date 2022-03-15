@@ -301,15 +301,6 @@ function getQuestionFields(form) {
   return form.fields.filter(field => isAQuestion(form, field));
 }
 
-function setRequired() {
-  const input = document.getElementById(`field-${field.id}}`);
-  input.setAttribute("required", "required");
-}
-
-function ariaRequired(required) {
-  return required ? true : false;
-}
-
 module.exports = {
   getCondition,
   getFieldValue,
@@ -331,6 +322,4 @@ module.exports = {
   filterFieldTypes,
   isAQuestion,
   getQuestionFields,
-  setRequired,
-  ariaRequired,
 };
