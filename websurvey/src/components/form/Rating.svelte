@@ -40,7 +40,7 @@
                     name="steps"
                     value={e}
                     class="mb-2" />
-                <label for="label-{e}" class="text-sm sm:text-xl">{e}</label>
+                <label for="label-{e}" class="text-sm md:text-lg">{e}</label>
             </div>
         {/each}
     </div>

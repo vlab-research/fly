@@ -25,7 +25,7 @@
                 class="mr-2" />
             <label
                 for="choice-{choice.id}"
-                class="text-sm sm:text-xl">{choice.label}
+                class="text-sm md:text-lg">{choice.label}
             </label>
         </fieldset>
     {/each}
