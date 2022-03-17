@@ -1,53 +1,38 @@
 const mocha = require("mocha");
 const chai = require("chai");
 const should = chai.should();
-const f = require("./form.js");
 const fs = require("fs");
-const sample = JSON.parse(fs.readFileSync("mocks/sample.json"));
-const form = f.translateForm(sample);
+const f = require("./form");
+let form = JSON.parse(fs.readFileSync("mocks/sample.json"));
 
-describe("getField", () => {
-  it("gets a field", () => {
-    const ctx = form;
-    const value = f.getField(ctx, "whats_your_name");
-    value.should.equal(form.fields[0]);
-  });
+form = f.translateForm(form);
 
-  it("throws with a useful message when field not found in form", () => {
-    const ctx = form;
-    const fn = () => f.getField(ctx, "baz");
-    fn.should.throw(/baz/); // field
-    fn.should.throw(/DjlXLX2s/); // form
-  });
-});
+const PAGE_ID = "1051551461692797";
+const USER_ID = "1800244896727776";
 
-describe("setFirstRef", () => {
-  it("sets the first field ref", () => {
-    const ctx = form;
-    const value = f.setFirstRef(ctx, 0);
-    value.should.equal("whats_your_name");
-  });
-});
+const referral = {
+  recipient: { id: PAGE_ID },
+  timestamp: 1542123799219,
+  sender: { id: USER_ID },
+  referral: {
+    ref: "form.FOO.foo.bar",
+    source: "SHORTLINK",
+    type: "OPEN_THREAD",
+  },
+};
 
-describe("getNext", () => {
-  it("gets the next field object in the form", () => {
-    const field = form.fields[0];
-    const nextField = form.fields[1];
-    const value = f.getNext(form, field.ref);
-    value.should.equal(nextField);
-  });
-
-  it("gets the first thankyou screen after the last question", () => {
-    const value = f.getNext(form, "whats_your_age");
-    value.ref.should.equal("thankyou");
-  });
-});
+const text = {
+  sender: { id: USER_ID },
+  recipient: { id: PAGE_ID },
+  timestamp: 1542116363617,
+  message: { text: "foo" },
+};
 
 describe("getFieldValue", () => {
   it("gets the value of a text field", () => {
-    const qa = [["foo", "baz"]];
+    const qa = [["foo", "foo"]];
     const value = f.getFieldValue(qa, "foo");
-    value.should.equal("baz");
+    value.should.equal("foo");
   });
 
   // TODO: should this throw?
@@ -56,104 +41,307 @@ describe("getFieldValue", () => {
     const value = f.getFieldValue(qa, "foo");
     should.not.exist(value);
   });
+});
 
-  it("returns an empty string if the field exists but no answer is given", () => {
-    const qa = [["foo", ""]];
-    const value = f.getFieldValue(qa, "foo");
-    value.should.equal("");
+describe("getField", () => {
+  it("throws with a useful message when field not found in form", () => {
+    const ctx = { form, user: { name: "bar", id: "foo" } };
+    const fn = f.getField.bind(null, ctx, "baz");
+    fn.should.throw(/foo/); // user
+    fn.should.throw(/baz/); // field
+    fn.should.throw(/ODf5n7/); // form
+  });
+
+  it("gets the current field", () => {
+    const ctx = { form, user: { name: "bar", id: "foo" } };
+    const fn = f.getField(ctx, "378caa71-fc4f-4041-8315-02b6f33616b9", true);
+    fn.should.eql([
+      1,
+      {
+        id: "zGz4q4dPLUiB",
+        title: "Welcome!\nHow old are you?",
+        ref: "378caa71-fc4f-4041-8315-02b6f33616b9",
+        validations: { required: true },
+        type: "number",
+      },
+    ]);
   });
 });
 
-describe("getChoiceValue", () => {
-  it("gets the value of the selected multiple choice field", () => {
-    const ctx = form;
-    const ref = "how_is_your_day";
-    const choice = "67554758-9085-45b8-b658-46e5b9686361";
-
-    const value = f.getChoiceValue(ctx, ref, choice);
-    value.should.equal("Just OK...");
+describe("getNextField", () => {
+  it("gets the next field with any logic jumps", () => {
+    const ctx = { form };
+    const qa = [["378caa71-fc4f-4041-8315-02b6f33616b9", 21]];
+    const currentRef = "378caa71-fc4f-4041-8315-02b6f33616b9";
+    const fn = f.getNextField(ctx, qa, currentRef);
+    fn.should.eql({
+      id: "ePRsqS5Iwb9B",
+      title:
+        "We are going to ask you 12 questions about you and your everyday life. The survey will take just 5 minutes of your time. Please try to ansewer the questions carefully and truthfully.",
+      ref: "0ebfe765-0275-48b2-ad2d-3aacb5bc6755",
+      properties: {
+        hide_marks: false,
+        button_text: "Continue",
+      },
+      type: "statement",
+    });
   });
 });
 
-describe("getVar", () => {
-  it("gets the field value depending on the var type", () => {
-    const ctx = form;
-    const qa = [["how_is_your_day", "Terrific!"]];
-    const ref = "how_is_your_day";
-    const vars = [
-      {
-        type: "field",
-        value: "how_is_your_day",
-      },
-      {
-        type: "choice",
-        value: "c8c780a6-4210-4673-bf07-4130efde9151",
-      },
-    ];
-    const v = vars[0];
-    let value = f.getVar(ctx, qa, ref, vars, v);
-    value.should.equal("Terrific!");
+describe("getFromMetadata", () => {
+  it("works with unicode Facebook names", () => {
+    const name = "小飼弾";
+    const ctx = { user: { name } };
+    f.getFromMetadata(ctx, "name").should.equal(name);
+  });
 
-    const v2 = vars[1];
-    value = f.getVar(ctx, qa, ref, vars, v2);
-    value.should.equal("Terrific!");
+  it("works with false values", () => {
+    const ctx = { md: { event__foo_success: false } };
+    f.getFromMetadata(ctx, "event__foo_success").should.equal(false);
+  });
+
+  it("works with unicode Facebook names", () => {
+    const ctx = { md: { seed: 125 } };
+    f.getFromMetadata(ctx, "seed_5").should.equal(1);
+    f.getFromMetadata(ctx, "seed_1").should.equal(1);
+    f.getFromMetadata(ctx, "seed_4").should.equal(2);
+    f.getFromMetadata(ctx, "seed_3").should.equal(3);
+  });
+
+  it("works with unicode url values", () => {
+    const name = "小飼弾";
+
+    const md = {
+      form: "BAR",
+      foo: "小飼弾",
+      startTime: 1542123799219,
+      pageid: "1051551461692797",
+      seed: 2040794579,
+    };
+
+    const ctx = { md, user: { name: "Foo Bazzle" } };
+    f.getFromMetadata(ctx, "foo").should.equal(name);
+  });
+});
+
+describe("_splitUrls", () => {
+  it("groups by url", () => {
+    const split = f._splitUrls(
+      "hello https://foo.com?key={{bar}} baz http://hello.us"
+    );
+    split.should.deep.equal([
+      ["text", "hello "],
+      ["url", "https://foo.com?key={{bar}}"],
+      ["text", " baz "],
+      ["url", "http://hello.us"],
+    ]);
+  });
+
+  it("works with url at beginning", () => {
+    const split = f._splitUrls("https://foo.com?key={{bar}} baz");
+    split.should.deep.equal([
+      ["url", "https://foo.com?key={{bar}}"],
+      ["text", " baz"],
+    ]);
+  });
+
+  it("works with only url", () => {
+    const split = f._splitUrls("https://foo.com?key={{bar}}");
+    split.should.deep.equal([["url", "https://foo.com?key={{bar}}"]]);
+  });
+
+  it("works with text at end", () => {
+    const split = f._splitUrls("hello https://foo.com?key={{bar}} baz");
+    split.should.deep.equal([
+      ["text", "hello "],
+      ["url", "https://foo.com?key={{bar}}"],
+      ["text", " baz"],
+    ]);
+  });
+
+  it("works with no url", () => {
+    const split = f._splitUrls("hello baz");
+    split.should.deep.equal([["text", "hello baz"]]);
+  });
+});
+
+describe("interpolateField", () => {
+  it("works with hidden fields from user", () => {
+    const ctx = { log: [referral, text], user: { name: "Foo Bazzle" } };
+    const i = f.interpolateField(ctx, [], { title: "hello {{hidden:name}}" });
+    i.title.should.equal("hello Foo Bazzle");
+  });
+
+  it("works with hidden fields from referral", () => {
+    const name = "小飼弾";
+    const uni = encodeURIComponent(name);
+    const ref2 = {
+      ...referral,
+      referral: { ...referral.referral, ref: `form.BAR.foo.${uni}` },
+    };
+    const md = {
+      form: "BAR",
+      foo: "小飼弾",
+      startTime: 1542123799219,
+      pageid: "1051551461692797",
+      seed: 2040794579,
+    };
+    const ctx = { md, user: { name: "Foo Bazzle" } };
+    const i = f.interpolateField(ctx, [], { title: "hello {{hidden:foo}}" });
+    i.title.should.equal(`hello ${name}`);
+  });
+
+  it("works with previously answered fields", () => {
+    const ctx = { log: [], user: {} };
+    const i = f.interpolateField(ctx, [["foo", "Continue"]], {
+      title: "You chose: {{field:foo}}",
+    });
+    i.title.should.equal(`You chose: Continue`);
+  });
+
+  it("Throws if the field is unanswered", () => {
+    const ctx = { log: [], user: {} };
+    const fn = f.interpolateField.bind(null, ctx, [], {
+      title: "You chose: {{field:foo}}",
+    });
+    fn.should.throw();
+  });
+
+  it("works with description", () => {
+    const ctx = { log: [], user: { name: "Foo Bazzle" } };
+    const i = f.interpolateField(ctx, [], {
+      properties: { description: "name: {{hidden:name}}" },
+    });
+    i.properties.description.should.equal("name: Foo Bazzle");
+  });
+
+  it("encodes urls interpolation", () => {
+    const ctx = { log: [], user: { name: "Foo Bazzle" } };
+    const i = f.interpolateField(ctx, [], {
+      properties: {
+        description: "foo: bar\nurl: https://hello.com/?name={{hidden:name}}",
+      },
+    });
+    i.properties.description.should.equal(
+      "foo: bar\nurl: https://hello.com/?name=Foo%20Bazzle"
+    );
+  });
+
+  it("encodes urls interpolation inside text", () => {
+    const ctx = { log: [], user: { name: "Foo Bazzle" } };
+    const i = f.interpolateField(ctx, [], {
+      title: "Please visit: https://hello.com/?name={{hidden:name}}",
+    });
+    i.title.should.equal("Please visit: https://hello.com/?name=Foo%20Bazzle");
+  });
+});
+
+describe("addCustomType", () => {
+  it("changes the type from the yaml if exists", () => {
+    const field = {
+      type: "statement",
+      title: "foo",
+      ref: "foo",
+      properties: { description: "type: share" },
+    };
+    const out = f.addCustomType(field);
+    out.type.should.equal("share");
+  });
+
+  it("adds additional fields into the md property", () => {
+    const field = {
+      type: "statement",
+      title: "foo",
+      ref: "foo",
+      properties: { description: "type: share\nurl: foo" },
+    };
+    const out = f.addCustomType(field);
+    out.md.url.should.equal("foo");
+  });
+
+  it("doesnt change it if no yaml", () => {
+    const field = {
+      type: "statement",
+      title: "foo",
+      ref: "foo",
+      properties: { description: "#notyaml&foo=bar" },
+    };
+    const out = f.addCustomType(field);
+    out.type.should.equal("statement");
+  });
+
+  it("doesnt change the type with a different yaml", () => {
+    const field = {
+      type: "statement",
+      title: "foo",
+      ref: "foo",
+      properties: { description: "foo: bar" },
+    };
+    const out = f.addCustomType(field);
+    out.type.should.equal("statement");
+  });
+
+  it("doesnt change anything with no description", () => {
+    const field = {
+      type: "multiple_choice",
+      title: "foo",
+      ref: "foo",
+      properties: { choices: [{ label: "qux" }, { label: "quux" }] },
+    };
+    const out = f.addCustomType(field);
+    out.type.should.equal("multiple_choice");
+  });
+});
+
+describe("jump", () => {
+  it("makes jump when required and not when not", () => {
+    const qaBad = [["378caa71-fc4f-4041-8315-02b6f33616b9", "10"]];
+    const qaGood = [["378caa71-fc4f-4041-8315-02b6f33616b9", "18"]];
+
+    const yes = f.jump({ form }, qaGood, form.logic[0]);
+    yes.should.equal("0ebfe765-0275-48b2-ad2d-3aacb5bc6755");
+
+    const no = f.jump({ form }, qaBad, form.logic[0]);
+    no.should.equal("3edb7fcc-748c-461c-bacd-593c043c5518");
+  });
+
+  // TODO: should this throw??????
+  it("doesnt make jump if required field doesnt exist", () => {
+    const no = f.jump({ form }, [], form.logic[0]);
+    no.should.equal("3edb7fcc-748c-461c-bacd-593c043c5518");
+  });
+
+  // TODO: this should be checked at form load time
+  it("it defaults to the next field if it cannot fulfil logic jump for any reason", () => {
+    const logic = {
+      type: "field",
+      actions: [
+        {
+          action: "jump",
+          details: { to: { type: "field", value: "foo" } },
+          condition: {
+            op: "is",
+            vars: [
+              { type: "field", value: "baz" },
+              { type: "constant", value: "15" },
+            ],
+          },
+        },
+      ],
+    };
+
+    let fallback = f.jump({ form }, [["baz", "14"]], logic);
+    fallback.should.equal(form.fields[0].ref);
+
+    fallback = f.jump({ form }, [], logic);
+    fallback.should.equal(form.fields[0].ref);
   });
 });
 
 describe("getCondition", () => {
-  const cond = {
-    op: "always",
-    vars: [
-      { type: "field", value: "baz" },
-      { type: "constant", value: 10 },
-    ],
-  };
-
   it("works with always true", () => {
-    f.getCondition({ form }, [], "", cond).should.be.true;
-  });
-
-  it("works with string equals", () => {
-    const cond = {
-      op: "equal",
-      vars: [
-        { type: "field", value: "whats_your_name" },
-        { type: "constant", value: "baz" },
-      ],
-    };
-
-    const ref = "whats_your_name";
-
-    const qaGood = [["whats_your_name", "baz"]];
-    const qaBad = [["whats_your_name", ""]];
-
-    f.getCondition({ form }, qaGood, ref, cond).should.be.true;
-    f.getCondition({ form }, qaGood, ref, { ...cond, op: "is" }).should.be.true;
-    f.getCondition({ form }, qaBad, ref, cond).should.be.false;
-    f.getCondition({ form }, qaBad, ref, { ...cond, op: "is_not" }).should.be
-      .true;
-  });
-
-  it("works with string not equals", () => {
-    const cond = {
-      op: "not_equal",
-      vars: [
-        { type: "field", value: "whats_your_name" },
-        { type: "constant", value: "" },
-      ],
-    };
-
-    const ref = "whats_your_name";
-
-    const qaGood = [["whats_your_name", "baz"]];
-    const qaBad = [["whats_your_name", ""]];
-
-    f.getCondition({ form }, qaGood, ref, cond).should.be.true;
-    f.getCondition({ form }, qaGood, ref, { ...cond, op: "is" }).should.be
-      .false;
-    f.getCondition({ form }, qaBad, ref, cond).should.be.false;
-    f.getCondition({ form }, qaBad, ref, { ...cond, op: "is_not" }).should.be
-      .false;
+    const con = form.logic[2].actions[0].condition;
+    f.getCondition({ form }, [], "", con).should.be.true;
   });
 
   it("works with number equals and not equals is and is not - casts types from strings", () => {
@@ -174,18 +362,25 @@ describe("getCondition", () => {
       .false;
   });
 
-  it("works with number not equals - type casting!", () => {
+  it("works with boolean strings in form and true boolean in metadata", () => {
     const cond = {
       op: "is",
       vars: [
-        { type: "field", value: "baz" },
-        { type: "constant", value: 10 },
+        { type: "hidden", value: "baz" },
+        { type: "constant", value: "true" },
       ],
     };
 
-    const qa = [["baz", "11"]];
+    const qa = [];
+    const md = { baz: true };
 
-    f.getCondition({ form }, qa, "", cond).should.be.false;
+    f.getCondition({ form, md }, qa, "", cond).should.be.true;
+    f.getCondition({ form, md }, qa, "", { ...cond, op: "equal" }).should.be
+      .true;
+    f.getCondition({ form, md }, qa, "", { ...cond, op: "is_not" }).should.be
+      .false;
+    f.getCondition({ form, md }, qa, "", { ...cond, op: "not_equal" }).should.be
+      .false;
   });
 
   it("works with lower_equal_than operator on numbers", () => {
@@ -251,130 +446,234 @@ describe("getCondition", () => {
     f.getCondition({ form }, qa2, "", cond).should.be.false;
     f.getCondition({ form }, qa2, "", { ...cond, op: "or" }).should.be.true;
   });
-});
 
-describe("jump", () => {
-  it("makes jump when required and makes no jump when not", () => {
-    const logic = form.logic[0];
+  it("works with triple operators", () => {
+    const cond = {
+      op: "or",
+      vars: [
+        {
+          op: "equal",
+          vars: [
+            {
+              type: "hidden",
+              value: "seed_16",
+            },
+            {
+              type: "constant",
+              value: "9",
+            },
+          ],
+        },
+        {
+          op: "equal",
+          vars: [
+            {
+              type: "hidden",
+              value: "seed_16",
+            },
+            {
+              type: "constant",
+              value: "10",
+            },
+          ],
+        },
+        {
+          op: "equal",
+          vars: [
+            {
+              type: "hidden",
+              value: "seed_16",
+            },
+            {
+              type: "constant",
+              value: "11",
+            },
+          ],
+        },
+        {
+          op: "equal",
+          vars: [
+            {
+              type: "hidden",
+              value: "seed_16",
+            },
+            {
+              type: "constant",
+              value: "12",
+            },
+          ],
+        },
+      ],
+    };
 
-    const qaGood = [["how_is_your_day", "Terrific!"]];
-    const qaBad = [["how_is_your_day", "Just OK..."]];
+    const qa = [];
 
-    const yes = f.jump(form, qaGood, logic);
-    yes.should.equal("awesome");
+    f.getCondition({ form, md: { seed: 0 } }, qa, "", cond).should.be.false;
+    f.getCondition({ form, md: { seed: 7 } }, qa, "", cond).should.be.false;
+    f.getCondition({ form, md: { seed: 8 } }, qa, "", cond).should.be.true;
+    f.getCondition({ form, md: { seed: 1870657866 } }, qa, "", cond).should.be
+      .true;
+  });
 
-    const no = f.jump(form, qaBad, logic);
-    no.should.equal("oh_no");
+  it("works with a choice on a previous field", () => {
+    const cond = {
+      op: "is",
+      vars: [
+        {
+          type: "field",
+          value: "44659a5e-3640-460a-9614-bd3ae8311043",
+        },
+        {
+          type: "choice",
+          value: "d3bc0725-4371-42ae-8bb4-0492eff445fb",
+        },
+      ],
+    };
+
+    const qa = [["44659a5e-3640-460a-9614-bd3ae8311043", "Female"]];
+    f.getCondition({ form }, qa, "", cond).should.be.true;
+  });
+
+  it("works with a hidden field", () => {
+    const cond = {
+      op: "is",
+      vars: [
+        {
+          type: "hidden",
+          value: "bar",
+        },
+        {
+          type: "constant",
+          value: "foo",
+        },
+      ],
+    };
+
+    f.getCondition({ form, md: { bar: "foo" } }, [], "", cond).should.be.true;
+  });
+
+  it("works with the hidden random seed field", () => {
+    const cond = {
+      op: "equal",
+      vars: [
+        {
+          type: "hidden",
+          value: "seed_5",
+        },
+        {
+          type: "constant",
+          value: "1",
+        },
+      ],
+    };
+
+    f.getCondition({ form, md: { seed: 10 } }, [], "", cond).should.be.true;
+    f.getCondition({ form, md: { seed: 11 } }, [], "", cond).should.be.false;
+  });
+
+  it("works with number not equals - type casting!", () => {
+    const cond = {
+      op: "is",
+      vars: [
+        { type: "field", value: "baz" },
+        { type: "constant", value: 10 },
+      ],
+    };
+
+    const qa = [["baz", "11"]];
+
+    f.getCondition({ form }, qa, "", cond).should.be.false;
   });
 });
 
-describe("getNextField", () => {
-  it("gets the next field in the form taking into account any logic jumps", () => {
-    const ref = "how_is_your_day";
-    const qaGood = [["how_is_your_day", "Terrific!"]];
-    const qaBad = [["how_is_your_day", "Just OK.."]];
+// TODO: move this to VALIDATORS module!
+// describe('formValidator', () => {
+//   it('deals with empty form with a helpful error', () => {
+//     const badform = {...form, fields: []}
+//     const fn = f.formValidator.bind(null, badform)
+//     fn.should.throw(TypeError)
+//   })
+// })
 
-    const yes = f.getNextField(form, qaGood, ref);
-    yes.ref.should.equal("awesome");
-
-    const no = f.getNextField(form, qaBad, ref);
-    no.ref.should.equal("oh_no");
+describe("getChoiceValue", () => {
+  it("gets the value of the selected multiple choice field", () => {
+    const ref = "44659a5e-3640-460a-9614-bd3ae8311043";
+    const choice = "d3bc0725-4371-42ae-8bb4-0492eff445fb";
+    const value = f.getChoiceValue({ form }, ref, choice);
+    value.should.equal("Female");
   });
 });
 
-describe("translateForm", () => {
-  it("forms one array of fields and thankyou screens", () => {
-    const fields = sample.fields.length;
-    const thankyouScreens = sample.thankyou_screens.length;
+describe("getVar", () => {
+  it("gets the field value depending on the var type", () => {
+    const ctx = form;
+    const qa = [["378caa71-fc4f-4041-8315-02b6f33616b9", 10]];
+    const ref = "44659a5e-3640-460a-9614-bd3ae8311043";
+    const vars = [
+      {
+        type: "field",
+        value: "378caa71-fc4f-4041-8315-02b6f33616b9",
+      },
+      {
+        type: "constant",
+        value: 15,
+      },
+    ];
+    const v = vars[0];
+    let value = f.getVar(ctx, qa, ref, v, vars);
+    value.should.equal(10);
 
-    const val = f.translateForm(sample).fields;
-    val.length.should.equal(fields + thankyouScreens);
-  });
-});
-
-describe("_splitUrls", () => {
-  it("works with no url", () => {
-    const split = f._splitUrls("hello baz");
-    split.should.deep.equal([["text", "hello baz"]]);
+    const v2 = vars[1];
+    value = f.getVar(ctx, qa, ref, v2, vars);
+    value.should.equal(15);
   });
 });
 
 describe("getDynamicValue", () => {
-  it("returns the field value of a previously answered question", () => {
-    const qa = [["whats_your_name", "baz"]];
-    const title =
-      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
-    const i = f.getDynamicValue(qa, title);
-    i.should.equal("baz");
-  });
-
-  it("returns false if there is no dynamic value to interpolate", () => {
-    const qa = [["whats_your_name", "baz"]];
-    const title = "How old are you?";
-    const i = f.getDynamicValue(qa, title);
-    i.should.equal(false);
-  });
-
-  it("throws if an invalid field value is found", () => {
-    const qa = [["whats_your_name", ""]];
-    const title =
-      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
-    const fn = () => f.getDynamicValue(qa, title);
-    fn.should.throw(
-      /Nice to meet you, {{field:whats_your_name}}, how is your day going/
-    ); // title
-  });
+  const ctx = { log: [], user: {} };
+  const qa = [["foo", "Continue"]];
+  const v = "field:foo";
+  const i = f.getDynamicValue(ctx, qa, v);
+  i.should.equal(`Continue`);
 });
 
-describe("_interpolate", () => {
-  it("interpolates a field with a dynamic value", () => {
-    const qa = [["whats_your_name", "baz"]];
-    const title =
-      "Nice to meet you, {{field:whats_your_name}}, how is your day going?";
-    const i = f._interpolate(qa, title);
-    i.should.equal("Nice to meet you, baz, how is your day going?");
-  });
-});
-
-describe("interpolateField", () => {
-  const qa = [["whats_your_name", "baz"]];
-  const field = {
-    type: "multiple_choice",
-    title:
-      "Nice to meet you, {{field:whats_your_name}}, how is your day going?",
-    ref: "how_is_your_day",
-  };
-
-  it("works with previously answered fields", () => {
-    const i = f.interpolateField(qa, field);
-    i.title.should.equal("Nice to meet you, baz, how is your day going?");
-  });
-
-  it("works when there is no dynamic value", () => {
-    const qa = [["whats_your_name", "baz"]];
-    const field = {
-      type: "multiple_choice",
-      title: "Nice to meet you, how is your day going?",
-      ref: "how_is_your_day",
-    };
-
-    const i = f.interpolateField(qa, field);
-    i.title.should.equal("Nice to meet you, how is your day going?");
+describe("setFirstRef", () => {
+  it("sets the first field ref", () => {
+    const ctx = form;
+    const value = f.setFirstRef(ctx, 0);
+    value.should.equal("4cc5c31b-6d23-4d50-8536-7abf1cdf0782");
   });
 });
 
 describe("filterFieldTypes", () => {
   it("returns a filtered array of question types only", () => {
     const value = f.filterFieldTypes(form);
-    value.should.eql(["short_text", "multiple_choice", "number"]);
+    value.should.eql([
+      "multiple_choice",
+      "number",
+      "multiple_choice",
+      "multiple_choice",
+      "multiple_choice",
+      "multiple_choice",
+      "opinion_scale",
+      "multiple_choice",
+      "multiple_choice",
+      "multiple_choice",
+      "multiple_choice",
+      "rating",
+      "multiple_choice",
+      "rating",
+      "multiple_choice",
+      "email",
+    ]);
   });
 });
 
 describe("isAQuestion", () => {
   it("returns true if a field is a question", () => {
     const field = {
-      ref: "whats_your_name",
-      type: "short_text",
+      ref: "378caa71-fc4f-4041-8315-02b6f33616b9",
+      type: "number",
     };
     const value = f.isAQuestion(form, field);
     value.should.be.true;
@@ -393,6 +692,17 @@ describe("isAQuestion", () => {
 describe("getQuestionFields", () => {
   it("returns only the fields that are questions", () => {
     const value = f.getQuestionFields(form);
-    value.length.should.equal(3);
+    value.length.should.equal(16);
+  });
+});
+
+describe("_isLast", () => {
+  it("returns true if last field in the form", () => {
+    const field = {
+      ref: "default_tys",
+      title: "Done! Your information was sent perfectly.",
+    };
+    const value = f._isLast(form, field.ref);
+    value.should.be.true;
   });
 });
