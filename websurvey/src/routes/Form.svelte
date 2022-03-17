@@ -85,23 +85,21 @@
 <div class="h-screen bg-indigo-50 flex justify-center">
     <form
         on:submit|preventDefault={handleSubmit}
-        class="h-full w-full lg:w-1/2 xl:w-2/5 flex items-center p-6 bg-white rounded-xl shadow">
-        <div class="space-y-4 w-full">
-            {#if isAQuestion(form, field)}
-                <ProgressBar {form} {field} />
+        class="h-full w-full lg:w-1/2 xl:w-2/5 flex flex-col justify-center p-6 bg-white rounded-xl shadow">
+        {#if isAQuestion(form, field)}
+            <ProgressBar {form} {field} />
+        {/if}
+        {#each lookup as option}
+            {#if option.type === field.type}
+                <svelte:component
+                    this={option.component}
+                    {field}
+                    bind:fieldValue
+                    on:add-field-value={addFieldValue} />
             {/if}
-            {#each lookup as option}
-                {#if option.type === field.type}
-                    <svelte:component
-                        this={option.component}
-                        {field}
-                        bind:fieldValue
-                        on:add-field-value={addFieldValue} />
-                {/if}
-            {/each}
-            {#if !_isLast(form, ref)}
-                <Button />
-            {/if}
-        </div>
+        {/each}
+        {#if !_isLast(form, ref)}
+            <Button />
+        {/if}
     </form>
 </div>

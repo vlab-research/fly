@@ -27,8 +27,8 @@
 </script>
 
 <Title {field} />
-<div class="space-y-2.5 mb-2 w-full">
-    <div class="flex flex-row justify-between items-start mb-2">
+<div class="mb-4 w-full">
+    <div class="flex flex-row justify-between items-start">
         {#each arr as e, i}
             <div class="flex flex-col mr-2 sm:mr-4">
                 <input
