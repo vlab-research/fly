@@ -14,11 +14,8 @@
 
     const arr = [];
 
-    const startAtOne = field.properties.start_at_one;
-
     const count = () => {
-        let index = startAtOne ? 1 : 0;
-        for (let i = index; startAtOne ? i <= steps : i < steps; i++) {
+        for (let i = 0; i <= steps; i++) {
             arr.push(i);
         }
     };
