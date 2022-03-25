@@ -22,7 +22,7 @@
 </script>
 
 <div aria-live="assertive" class="mb-4">
-    <h1 class="text-xs md:text-sm font-medium text-blue-500">
+    <h1 class="text-xs md:text-sm font-medium text-blue-700">
         Question
         {index + 1}
         out of
