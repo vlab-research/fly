@@ -60,9 +60,9 @@ describe("should translate questions that use an opinion scale", () => {
 
   it("quick_replies payload property should return the score and ref", () => {
     for (let [index, el] of translated.quick_replies.entries()) {
-      JSON.parse(el.payload).value.should.equal("" + (index + 1));
+      JSON.parse(el.payload).value.should.equal("" + index);
       JSON.parse(el.payload).ref.should.equal("foo");
-      el.title.should.equal("" + (index + 1));
+      el.title.should.equal("" + index);
       el.content_type.should.equal("text");
     }
   });
