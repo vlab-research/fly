@@ -91,11 +91,15 @@
         {/if}
         {#each lookup as option}
             {#if option.type === field.type}
-                <svelte:component
-                    this={option.component}
-                    {field}
-                    bind:fieldValue
-                    on:add-field-value={addFieldValue} />
+                {#if isAQuestion(form, field)}
+                    <svelte:component
+                        this={option.component}
+                        {field}
+                        bind:fieldValue
+                        on:add-field-value={addFieldValue} />
+                {:else}
+                    <svelte:component this={option.component} {field} />
+                {/if}
             {/if}
         {/each}
         {#if !_isLast(form, ref)}

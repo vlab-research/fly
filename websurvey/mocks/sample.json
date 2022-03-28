@@ -234,7 +234,7 @@
       "title": "How do you rate your level of English?",
       "ref": "a92d20ea-2e0b-4dc0-ba9a-156d8c0a0bad",
       "properties": {
-        "steps": 11,
+        "steps": 10,
         "start_at_one": false,
         "labels": {
           "left": "Poor",
@@ -392,7 +392,7 @@
       "properties": {
         "steps": 10,
         "shape": "user",
-        "start_at_one": true
+        "start_at_one": false
       },
       "validations": {
         "required": true
@@ -438,7 +438,7 @@
       "properties": {
         "steps": 10,
         "shape": "user",
-        "start_at_one": true
+        "start_at_one": false
       },
       "validations": {
         "required": true
