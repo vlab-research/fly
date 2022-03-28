@@ -1,6 +1,5 @@
 <script>
     import { createEventDispatcher, onMount } from "svelte";
-    import { setRequired, ariaRequired } from "../../../lib/typewheels/form.js";
     import Title from "../text/Title.svelte";
 
     export let field, fieldValue;
@@ -20,7 +19,7 @@
     });
 </script>
 
-<Title {field} aria-live="assertive" />
+<Title {field} />
 <div class="mb-4">
     <input
         bind:value={fieldValue}
