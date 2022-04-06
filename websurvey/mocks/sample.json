@@ -234,7 +234,7 @@
       "title": "How do you rate your level of English?",
       "ref": "a92d20ea-2e0b-4dc0-ba9a-156d8c0a0bad",
       "properties": {
-        "steps": 10,
+        "steps": 11,
         "start_at_one": false,
         "labels": {
           "left": "Poor",
@@ -390,7 +390,7 @@
       "title": "Now imagine to pick 10 of your Facebook friends.\n \nAccording to you, how many of them think that a woman should be banned from entering the kitchen or household shrine during her periods? ",
       "ref": "80c3179a-7a7d-470c-91f8-1165020140c0",
       "properties": {
-        "steps": 10,
+        "steps": 11,
         "shape": "user",
         "start_at_one": false
       },
@@ -436,7 +436,7 @@
       "title": "Now imagine to pick 10 of your Facebook friends.\n \nAccording to you, how many of them think that a husband is justified in hitting or beating his wife if he suspects her of being unfaithful?",
       "ref": "f581b4dd-fcb4-46e7-b18e-7fe9f6ed2517",
       "properties": {
-        "steps": 10,
+        "steps": 11,
         "shape": "user",
         "start_at_one": false
       },
