@@ -19,13 +19,14 @@ kafkabrokers: &kb gbv-kafka:9092
 botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host gbv-cockroachdb-public
 
+
 versionDashboard: &vdashboard v0.0.27
 versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.127
+versionReplybot: &vreplybot v0.0.130
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.24
 versionScribble: &vscribble v0.0.21
-versionDinersclub: &vdinersclub v0.0.19
+versionDinersclub: &vdinersclub v0.0.21
 versionFormcentral: &vformcentral v0.0.10
 
 linksniffer:
