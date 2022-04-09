@@ -273,7 +273,7 @@ JSON:
             "method": "POST",
             "url": "https://mypaymentprovider.com/send/money",
             "headers": {"Authorization": "Bearer << MYPROVIDER_TOKEN >>"},
-            "body": { "mobile_number": @MOBILE_QUESTION, "amount": 100 },
+            "body": { "phone": "@MOBILE_QUESTION", "amount": 100, "transaction_id": "survey_x_payment_1" },
             "errorMessage": "path.to.error.message"
         }
     }
@@ -287,6 +287,7 @@ Notes:
 3. The `body` and `headers` properties are optional.
 4. You can pass secrets into the url, the headers, and/or the body. This is done with templating which uses the delimeters `<<` and `>>`. The secrets available are the secrets you create in the dashboard under "Generic Secrets".
 5. `errorMessage` is a "json path", in dot notation, to extract the message provided in `e_payment_http_error_message`. If the status code is not 2XX, the service will consider it an error and expect a JSON body response. If the body is `{"error": {"code": "BAD_NUMBER", "message": "Please provide a valid mobile number"}}` then the `errorMessage` property should be `error.message` in order to extract the message "Please provide a valid mobile number".
+6. If your HTTP payment endpoint requires the phone number as a string, make sure to wrap the reference to the previous question in quotes (`""`).
 
 
 You will have the following hidden fields that can be used for logic and error messages:
