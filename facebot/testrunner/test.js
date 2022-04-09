@@ -62,7 +62,6 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-
     it('Follows logic jumps based on external events: payment success',  async () => {
       const userId = uuid()
       const fields = getFields('forms/SNomCIYT.json')
@@ -75,21 +74,6 @@ describe('Test Bot flow Survey Integration Testing', () => {
       ]
 
       sender(makeReferral(userId, 'SNomCIYT'))
-      await flowMaster(userId, testFlow)
-    })
-
-    it('Follows logic jumps based on external events: reloadly payment success',  async () => {
-      const userId = uuid()
-      const fields = getFields('forms/_SNomCIYT.json')
-
-      const testFlow = [
-        [ok, fields[0], [makeTextResponse(userId, '+918888000000')]],
-        [ok, fields[1], [makeQR(fields[1], userId, 0)]],
-        [ok, fields[2], []],
-        [ok, fields[5], []],
-      ]
-
-      sender(makeReferral(userId, '_SNomCIYT'))
       await flowMaster(userId, testFlow)
     })
 
@@ -112,28 +96,6 @@ describe('Test Bot flow Survey Integration Testing', () => {
       ]
 
       sender(makeReferral(userId, 'gk3gt9ag'))
-      await flowMaster(userId, testFlow)
-    })
-
-    it('Follows logic jumps based on external events: reloadly payment failure',  async () => {
-      const userId = uuid()
-      const vals = {'hidden:e_payment_reloadly_error_message': '400 Bad Request'}
-      const form = fs.readFileSync('forms/_gk3gt9ag.json', 'utf-8')
-      const f = interpolate(form, vals)
-      fs.writeFileSync('forms/temp.json', f)
-
-      const fields = getFields('forms/temp.json')
-
-      const testFlow = [
-        [ok, fields[0], [makeTextResponse(userId, '+918888000000')]],
-        [ok, fields[1], [makeQR(fields[1], userId, 0)]],
-        [ok, fields[2], []],
-        [ok, fields[3], []],
-        [ok, fields[4], []],
-        [ok, fields[0], []],
-      ]
-
-      sender(makeReferral(userId, '_gk3gt9ag'))
       await flowMaster(userId, testFlow)
     })
 
@@ -399,6 +361,8 @@ describe('Test Bot flow Survey Integration Testing', () => {
       sender(makeReferral(userId, 'UGqDwc'))
       await flowMaster(userId, testFlow)
     })
+
+    // does not switch forms on users in the middle of their surveys
   })
 
 
@@ -500,7 +464,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await snooze(8000)
       const state = await getState(chatbase, userId)
       state.current_state.should.equal('END')
-    })    
+    })
   })
 
   parallel('Waits', function () {
