@@ -76,12 +76,15 @@ func TestHttpProviderPayout_MakesPostRequestsWithInterpolatedSecrets(t *testing.
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer sosecret", r.Header.Get("Authorization"))
+		assert.Equal(t, "43", r.Header.Get("Content-Length"))
+		assert.Equal(t, "application/json", r.Header.Get("Accept"))
+
 		assert.Equal(t, "POST", r.Method)
 
 		assert.Equal(t, "/foo", r.URL.Path)
 		assert.Equal(t, "auth=ohsosecret", r.URL.RawQuery)
-		b, _ := io.ReadAll(r.Body)
 
+		b, _ := io.ReadAll(r.Body)
 		assert.Equal(t, reqBody, string(b))
 
 		w.WriteHeader(200)

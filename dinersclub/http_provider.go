@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+
 	"net/http"
+	"net/http/httputil"
 	"strings"
 	"time"
 
@@ -133,6 +136,11 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 	for header := range headers {
 		req.Header.Add(header, headers[header])
 	}
+
+	dump, _ := httputil.DumpRequestOut(req, true)
+
+	// Useful debugging for http provider
+	log.Println(string(dump))
 
 	resp, err := p.client.Do(req)
 	if err != nil {
