@@ -48,6 +48,7 @@ type Result struct {
 	Timestamp      time.Time        `json:"timestamp"`
 	Error          *PaymentError    `json:"error,omitempty"`
 	PaymentDetails *json.RawMessage `json:"payment_details,omitempty"`
+	Response       *json.RawMessage `json:"response,omitempty"`
 }
 
 type Provider interface {

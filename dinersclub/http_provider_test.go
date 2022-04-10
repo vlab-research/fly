@@ -112,7 +112,8 @@ func TestHttpProviderPayout_MakesPostRequestsWithInterpolatedSecrets(t *testing.
 
 	assert.Nil(t, err)
 	assert.Equal(t, true, res.Success)
-
+	// adds details from api as payment details
+	assert.Equal(t, json.RawMessage([]byte(response)), *res.Response)
 }
 
 func TestHttpProviderPayout_MakesGetRequestsWithoutBodyOrHeaders(t *testing.T) {
@@ -153,7 +154,8 @@ func TestHttpProviderPayout_MakesGetRequestsWithoutBodyOrHeaders(t *testing.T) {
 }
 
 func TestHttpProviderPayout_RetrievesErrorMessage(t *testing.T) {
-	tc := TestClient(400, `{"foo": {"bar": "hello error"}, "baz": "hello error"`, nil)
+	response := `{"foo": {"bar": "hello error"}, "baz": "hello error"`
+	tc := TestClient(400, response, nil)
 
 	p := &HttpProvider{
 		client: tc,
@@ -192,6 +194,7 @@ func TestHttpProviderPayout_RetrievesErrorMessage(t *testing.T) {
 	assert.Equal(t, false, res.Success)
 	assert.Equal(t, "400", res.Error.Code)
 	assert.Equal(t, "hello error", res.Error.Message)
+	assert.Equal(t, json.RawMessage([]byte(response)), *res.Response)
 }
 
 func TestHttpProviderPayout_GeneratesErrorForUserIfMissingSecrets(t *testing.T) {

@@ -138,7 +138,6 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 	}
 
 	dump, _ := httputil.DumpRequestOut(req, true)
-
 	// Useful debugging for http provider
 	log.Println(string(dump))
 
@@ -153,7 +152,10 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 	if err != nil {
 		return nil, err // transient???
 	}
-	responseBody := string(bodyBytes)
+
+	// add response to json
+	response := json.RawMessage(bodyBytes)
+	result.Response = &response
 
 	if (resp.StatusCode >= 200) && (resp.StatusCode <= 299) {
 		result.Success = true
@@ -161,6 +163,7 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 		return result, nil
 	}
 
+	responseBody := string(bodyBytes)
 	errorMessage := gjson.Get(responseBody, order.ErrorMessage).String()
 	code := fmt.Sprintf("%d", resp.StatusCode)
 	return formatError(result, event, errorMessage, code)

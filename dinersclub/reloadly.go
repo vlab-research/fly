@@ -127,6 +127,9 @@ func (p *ReloadlyProvider) Payout(event *PaymentEvent) (*Result, error) {
 		return p.formatError(result, err, event.Details)
 	}
 
+	// TODO:
+	// json.Marshal r to add response to result
+
 	result.Success = true
 	result.Timestamp = time.Time(*r.TransactionDate)
 	result.PaymentDetails = event.Details
