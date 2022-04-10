@@ -4,6 +4,7 @@
 const SERVER_URL = '{{{SERVER_URL}}}';
 const params = new URLSearchParams(window.location.search);
 const videoId = params.get('id');
+const pageId = params.get('pageId');
 
 Sentry.init({ dsn: 'https://17c9ad73343d4a15b8e155a722224374@sentry.io/2581797' });
 
@@ -13,7 +14,6 @@ function handleEvent(psid, eventType) {
     xhr.open('POST', SERVER_URL);
     xhr.setRequestHeader('Content-Type', 'application/json');
 
-    const pageId = '{{{FB_PAGE_ID}}}'
     // add ID of video to event...
     xhr.send(JSON.stringify({ user:psid, page:pageId, data, event: { type: 'external', value: { type: `moviehouse:${eventType}`, id: videoId } }}));
   }
@@ -62,7 +62,18 @@ function setPlayer(psid) {
 document.addEventListener('DOMContentLoaded', () => {
   window.extAsyncInit = function () {
 
-    // add surveyId or something of the like to be useful for multiple pages
+    // just for the heck of it, run in parallel
+    MessengerExtensions.getSupportedFeatures(function success(result) {
+      const features = result.supported_features;
+
+      if (features.indexOf("context") === -1) {
+        console.error(`context is not a support feature. Supported features: ${features}`)
+      }
+    }, function error(err) {
+      console.error(`Error getting supported features: ${err}`)
+    });
+
+
     MessengerExtensions.getContext('{{{APP_ID}}}',
       function success(thread_context) {
         setPlayer(thread_context.psid);
