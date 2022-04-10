@@ -57,7 +57,7 @@ describe('getFromMetadata', () => {
     f.getFromMetadata(ctx, 'seed_4').should.equal(2)
     f.getFromMetadata(ctx, 'seed_3').should.equal(3)
   })
- 
+
   it('works with unicode url values', () => {
     const name = '小飼弾'
     const uni = encodeURIComponent(name)
@@ -159,6 +159,44 @@ describe('interpolateField', () => {
     const i = f.interpolateField(ctx, [], { title: 'Please visit: https://hello.com/?name={{hidden:name}}'})
     i.title.should.equal('Please visit: https://hello.com/?name=Foo%20Bazzle')
   })
+
+})
+
+describe('deTypeformify', () => {
+
+  it('removes weird underscore escaping of typeform in title as well', () => {
+    const res = f.deTypeformify('hello {{hidden:e\\_other\\_value}}')
+    res.should.equal("hello {{hidden:e_other_value}}")
+  })
+
+
+  it('removes weird underscore escaping in json', () => {
+    const res = f.deTypeformify('{"otherKey": "other\\_value"}')
+    res.should.equal('{"otherKey": "other_value"}')
+  })
+
+
+  it('removes markdown urls in description as well', () => {
+    const res = f.deTypeformify('{"otherKey": "[https://foo.com](https://foo.com)"}')
+
+    res.should.equal('{"otherKey": "https://foo.com"}')
+  })
+
+
+  it('allows brackets and paranthesis though', () => {
+
+    const s = '{"foo": "hello [thats fine] ok is that (ok?)"}'
+    const res = f.deTypeformify(s)
+    res.should.equal(s)
+  })
+
+
+  it('allows urls to pass through untouched', () => {
+    const s = "type: webview\nurl: https://gbvlinks.nandan.cloud?url=populationfoundation.in&id=\nbuttonText: Visit Population Foundation\nresponseMessage: Click on the button to visit the website\nextensions: false\nkeepMoving: true"
+    const res = f.deTypeformify(s)
+    res.should.equal(s)
+  })
+
 
 })
 

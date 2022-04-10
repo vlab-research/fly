@@ -1,6 +1,7 @@
 const mustache = require('mustache')
 const util = require('util')
 const _ = require('lodash')
+const mle = require('markdown-link-extractor');
 const {translator, addCustomType}= require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
@@ -94,9 +95,28 @@ function interpolate(ctx, qa, s) {
     .join('')
 }
 
+function deTypeformify(s) {
+  if (!s) return s
+
+  s = s.replace(/\\_/g, '_')
+
+  // replace markdown links in description, we don't want that shit.
+  mle(s, true).links.forEach(l => {
+
+    // but only if they're actually markdown links (check for square brackets)
+    if (/\[[^\s]+\]/.test(l.raw)) {
+      s = s.replace(l.raw, () => l.href)
+    }
+  })
+
+  return s
+}
+
 function interpolateField(ctx, qa, field) {
   const keys = ['title', 'properties.description']
   const out = {...field}
+
+  keys.forEach(k => _.set(out, k, deTypeformify(_.get(out, k))))
   keys.forEach(k => _.set(out, k, interpolate(ctx, qa, _.get(out, k))))
   return out
 }
@@ -266,5 +286,6 @@ module.exports = {
   addCustomType,
   getFromMetadata,
   FieldError,
-  _splitUrls
+  _splitUrls,
+  deTypeformify,
 }

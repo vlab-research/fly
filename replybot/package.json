@@ -20,7 +20,7 @@
   "dependencies": {
     "@vlab-research/botspine": "0.0.12",
     "@vlab-research/chatbase-postgres": "0.0.3",
-    "@vlab-research/translate-typeform": "0.0.35",
+    "@vlab-research/translate-typeform": "0.0.36",
     "@vlab-research/utils": "0.0.11",
     "cacheman": "^2.2.1",
     "chrono-node": "^1.3.11",
@@ -28,6 +28,7 @@
     "js-yaml": "^3.14.0",
     "jsonwebtoken": "^8.5.1",
     "lodash": "^4.17.11",
+    "markdown-link-extractor": "^2.0.1",
     "mustache": "^4.0.0",
     "parse-duration": "^0.4.4",
     "r2": "^2.0.1"
