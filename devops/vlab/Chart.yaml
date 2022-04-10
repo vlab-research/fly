@@ -20,7 +20,7 @@ dependencies:
     version: 0.0.1
     repository: https://vlab-research.github.io/fly
   - name: dumper
-    version: 0.0.1
+    version: 0.0.2
     repository: https://vlab-research.github.io/fly
     tags:
       - backup
@@ -30,7 +30,7 @@ dependencies:
     tags:
       - payments
   - name: dean
-    version: 0.0.2
+    version: 0.0.3
     repository: https://vlab-research.github.io/fly
     tags:
       - dean
