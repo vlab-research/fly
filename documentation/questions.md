@@ -295,7 +295,18 @@ You will have the following hidden fields that can be used for logic and error m
 1. `e_payment_http_success` - will be "true" if the payment succeeded.
 2. `e_payment_http_error_message` - an error message, extracted as specified from error json.
 3. `e_payment_http_id` - the PAYMENT_ID
+
+
+# Hidden Fields
+
+Sometimes we surface hidden fields that are too long to be added as hidden fields in Typeform. These can be accessed in the text of a question/statement using the following syntax:
+
 ```
+{{hidden:e_payment_http_result_message_success}}
+```
+
+Where the "too long" hidden field is `e_payment_http_result_message_success` which would be populated, for example, if you had a http payment result that looked like this: `{"message": {"success": "foo"}}` and you wanted to show "foo".
+
 
 # Seeds
 
