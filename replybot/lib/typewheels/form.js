@@ -1,7 +1,6 @@
 const mustache = require('mustache')
 const util = require('util')
 const _ = require('lodash')
-const mle = require('markdown-link-extractor');
 const {translator, addCustomType}= require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
@@ -99,15 +98,6 @@ function deTypeformify(s) {
   if (!s) return s
 
   s = s.replace(/\\_/g, '_')
-
-  // replace markdown links in description, we don't want that shit.
-  mle(s, true).links.forEach(l => {
-
-    // but only if they're actually markdown links (check for square brackets)
-    if (/\[[^\s]+\]/.test(l.raw)) {
-      s = s.replace(l.raw, () => l.href)
-    }
-  })
 
   return s
 }

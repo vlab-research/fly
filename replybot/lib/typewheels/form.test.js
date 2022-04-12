@@ -176,15 +176,7 @@ describe('deTypeformify', () => {
   })
 
 
-  it('removes markdown urls in description as well', () => {
-    const res = f.deTypeformify('{"otherKey": "[https://foo.com](https://foo.com)"}')
-
-    res.should.equal('{"otherKey": "https://foo.com"}')
-  })
-
-
   it('allows brackets and paranthesis though', () => {
-
     const s = '{"foo": "hello [thats fine] ok is that (ok?)"}'
     const res = f.deTypeformify(s)
     res.should.equal(s)

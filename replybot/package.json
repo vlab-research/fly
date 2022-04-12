@@ -28,7 +28,6 @@
     "js-yaml": "^3.14.0",
     "jsonwebtoken": "^8.5.1",
     "lodash": "^4.17.11",
-    "markdown-link-extractor": "^2.0.1",
     "mustache": "^4.0.0",
     "parse-duration": "^0.4.4",
     "r2": "^2.0.1"
