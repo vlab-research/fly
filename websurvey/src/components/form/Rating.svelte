@@ -25,9 +25,11 @@
 
 <Title {field} />
 <div class="mb-4 w-full">
-    <div class="flex flex-row justify-between items-start">
+    <div class="flex flex-row w-full justify-between items-start">
         {#each arr as e, i}
-            <div class="flex flex-col mr-2 sm:mr-4">
+            <label
+                for="label-{e}"
+                class="text-sm md:text-lg flex flex-col items-center border-solid rounded border-indigo-500 border-2 px-2 py-1 md:px-4 md:py-2 bg-indigo-100 transition-colors ease-linear hover:bg-indigo-200 text-sm md:text-lg text-slate-600 cursor-pointer">
                 <input
                     bind:group={fieldValue}
                     on:input={dispatch('add-field-value', fieldValue)}
@@ -36,9 +38,7 @@
                     type="radio"
                     name="steps"
                     value={e}
-                    class="mb-2" />
-                <label for="label-{e}" class="text-sm md:text-lg">{e}</label>
-            </div>
+                    class="mb-2" />{e}</label>
         {/each}
     </div>
 </div>
