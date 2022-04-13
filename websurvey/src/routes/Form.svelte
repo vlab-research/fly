@@ -85,7 +85,7 @@
 <div class="h-screen bg-indigo-50 flex justify-center">
     <form
         on:submit|preventDefault={handleSubmit}
-        class="h-full w-full sm:w-7/12 xl:w-2/5 flex flex-col justify-center p-6 bg-white rounded-xl shadow">
+        class="h-full w-full lg:w-3/5 xl:w-5/12 flex flex-col justify-center p-2 md:p-6 bg-white rounded-xl shadow">
         {#if isAQuestion(form, field)}
             <ProgressBar {form} {field} />
         {/if}

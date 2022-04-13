@@ -24,8 +24,8 @@
 </script>
 
 <Title {field} />
-<div class="mb-4 w-full">
-    <div class="flex flex-row w-full justify-between items-start">
+<div class="mb-4">
+    <div class="flex flex-row justify-between items-center">
         {#each arr as e, i}
             <label
                 for="label-{e}"
