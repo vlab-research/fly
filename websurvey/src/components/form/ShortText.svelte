@@ -28,7 +28,7 @@
         id="field-{field.id}"
         {required}
         type="text"
-        class="max-w-screen-sm focus:ring-indigo-500 focus:border-indigo-500 block pl-2 pr-12 py-2 text-sm md:text-lg border-gray-300 rounded-md w-full md:w-3/4"
-        placeholder={field.title}
+        class="max-w-screen-sm w-full md:w-3/4 pl-2 pr-12 py-2 text-sm md:text-lg border-grey-300 rounded-md"
+        placeholder="Type your answer here..."
         autocomplete={autocompleteValue} />
 </div>
