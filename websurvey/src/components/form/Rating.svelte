@@ -31,7 +31,7 @@
             {#each arr as e, i}
                 <label
                     for="label-{e}"
-                    class="text-sm md:text-lg flex flex-col items-center border-solid rounded border-indigo-500 border-2 px-2 py-1 md:px-4 md:py-2 bg-indigo-100 transition-colors ease-linear hover:bg-indigo-200 text-sm md:text-lg text-slate-600 cursor-pointer">
+                    class="text-sm md:text-lg flex flex-col items-center border-solid rounded border-indigo-300 border-2 px-2 py-1 md:px-4 md:py-2 bg-indigo-100 transition-colors ease-linear hover:bg-indigo-200 text-sm md:text-lg text-slate-600 cursor-pointer">
                     <input
                         bind:group={fieldValue}
                         on:input={dispatch('add-field-value', fieldValue)}

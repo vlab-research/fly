@@ -16,7 +16,7 @@
         {#each field.properties.choices as choice, index (choice.id)}
             <label
                 for="choice-{choice.id}"
-                class="flex flex-row items-center md:w-3/4 mb-2 border-solid rounded border-indigo-500 border-2 p-2 bg-indigo-50 transition-colors ease-linear hover:bg-indigo-200 text-sm md:text-lg text-slate-600 cursor-pointer">
+                class="flex flex-row items-center md:w-3/4 mb-2 border-solid rounded border-indigo-300 border-2 p-2 bg-indigo-50 transition-colors ease-linear hover:bg-indigo-200 text-sm md:text-lg text-slate-600 cursor-pointer">
                 <input
                     bind:group={fieldValue}
                     on:input={dispatch('add-field-value', fieldValue)}
