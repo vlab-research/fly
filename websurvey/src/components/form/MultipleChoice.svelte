@@ -12,9 +12,11 @@
 <Title {field} />
 <div class="flex flex-col mb-4">
     <fieldset>
+        <legend class="hidden">Choose an option</legend>
         {#each field.properties.choices as choice, index (choice.id)}
-            <div class="flex flex-row items-center mb-2">
-                <legend />
+            <label
+                for="choice-{choice.id}"
+                class="flex flex-row items-center md:w-3/4 mb-2 border-solid rounded border-indigo-300 border-2 p-2 bg-indigo-50 transition-colors ease-linear hover:bg-indigo-200 text-sm md:text-lg text-slate-600 cursor-pointer">
                 <input
                     bind:group={fieldValue}
                     on:input={dispatch('add-field-value', fieldValue)}
@@ -23,12 +25,8 @@
                     type="radio"
                     name="choices"
                     value={choice.label}
-                    class="mr-2" />
-                <label
-                    for="choice-{choice.id}"
-                    class="text-sm md:text-lg">{choice.label}
-                </label>
-            </div>
+                    class="mr-2" />{choice.label}
+            </label>
         {/each}
     </fieldset>
 </div>
