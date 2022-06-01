@@ -5,8 +5,35 @@ const {
   cursorResult,
 } = require('@vlab-research/client-cursor-stream');
 
+// gets all responses for a survey created by a user
+async function all({ email, survey }) {
+  const GET_ALL = `SELECT parent_surveyid,
+  parent_shortcode,
+  surveyid,
+  flowid,
+  responses.userid,
+  question_ref,
+  question_idx,
+  question_text,
+  response,
+  timestamp::string,
+  responses.metadata,
+  pageid,
+  translated_response
+  FROM responses
+  LEFT JOIN surveys ON responses.surveyid = surveys.id 
+  LEFT JOIN users ON surveys.userid = users.id
+  WHERE users.email = $1
+  AND surveys.survey_name = $2
+  ORDER BY (responses.userid, timestamp, question_ref)
+  LIMIT 100000`;
+
+  const { rows } = await this.query(GET_ALL, [email, survey]);
+  return rows;
+}
+
 async function firstAndLast() {
-  const GET_ALL = `SELECT *
+  const GET_FIRST_AND_LAST = `SELECT *
     FROM  (
        SELECT DISTINCT ON (1) userid, timestamp AS first_timestamp, response AS first_response, surveyid
        FROM   responses
@@ -17,7 +44,7 @@ async function firstAndLast() {
        FROM   responses
        ORDER  BY 1,2 DESC
        ) l USING (userid)`;
-  const { rows } = await this.query(GET_ALL);
+  const { rows } = await this.query(GET_FIRST_AND_LAST);
   return rows;
 }
 
@@ -96,6 +123,7 @@ async function formData(email, survey) {
 module.exports = {
   name: 'Response',
   queries: pool => ({
+    all: all.bind(pool),
     firstAndLast: firstAndLast.bind(pool),
     formResponses: formResponses.bind(pool),
     formData: formData.bind(pool),

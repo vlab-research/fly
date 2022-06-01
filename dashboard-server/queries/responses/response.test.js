@@ -97,4 +97,29 @@ describe('Response queries', () => {
       responses[1].surveyid.should.equal(survey.id);
     });
   });
+
+  describe('.all()', () => {
+    it('should return all responses for a survey created by a user', async () => {
+      const responses = await Response.all({
+        email: 'test2@vlab.com',
+        survey: 'Survey',
+      });
+
+      const responses2 = await Response.all({
+        email: 'test2@vlab.com',
+        survey: 'Survey123',
+      });
+
+      const responses3 = await Response.all({
+        email: 'test3@vlab.com',
+        survey: 'Survey',
+      });
+
+      responses.length.should.equal(8);
+      responses[0].userid.should.equal('123');
+      responses[1].userid.should.equal('123');
+      responses2.length.should.equal(0);
+      responses3.length.should.equal(0);
+    });
+  });
 });
