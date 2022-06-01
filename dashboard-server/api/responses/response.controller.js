@@ -50,7 +50,6 @@ function handleCsvResponse(dataStream, filename, res) {
 exports.getResponsesCSV = async (req, res) => {
   const { survey } = req.query;
   const { email } = req.user;
-  console.log(email);
   try {
     const responseStream = await Response.formResponses(
       email,
