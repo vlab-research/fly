@@ -1,8 +1,11 @@
 'use strict';
 
-const { ClientCursorStream, cursorResult } = require('@vlab-research/client-cursor-stream')
+const {
+  ClientCursorStream,
+  cursorResult,
+} = require('@vlab-research/client-cursor-stream');
 
-async function all() {
+async function firstAndLast() {
   const GET_ALL = `SELECT *
     FROM  (
        SELECT DISTINCT ON (1) userid, timestamp AS first_timestamp, response AS first_response, surveyid
@@ -44,26 +47,28 @@ async function responsesQuery(pool, email, name, time, lim) {
                  AND surveys.survey_name = $2
                  AND (responses.userid, timestamp, question_ref) > ($3, $4, $5)
                  ORDER BY (responses.userid, timestamp, question_ref)
-                 LIMIT 100000`
+                 LIMIT 100000`;
 
-  const res = await pool.query(query, [email, name, ...lim])
-  const fin = res.rows.slice(-1)[0]
+  const res = await pool.query(query, [email, name, ...lim]);
+  const fin = res.rows.slice(-1)[0];
 
-  if (!fin) return cursorResult(null, null)
+  if (!fin) return cursorResult(null, null);
 
   // function to extract limit from single row
-  return cursorResult(res.rows, [fin['userid'], fin['timestamp'], fin['question_ref']])
+  return cursorResult(res.rows, [
+    fin['userid'],
+    fin['timestamp'],
+    fin['question_ref'],
+  ]);
 }
 
 async function formResponses(email, survey) {
-  const fn = (lim, time) => responsesQuery(this, email, survey, time, lim)
-  const stream = new ClientCursorStream(fn, ['', new Date('1970-01-01'), ''])
+  const fn = (lim, time) => responsesQuery(this, email, survey, time, lim);
+  const stream = new ClientCursorStream(fn, ['', new Date('1970-01-01'), '']);
   return stream;
 }
 
-
 async function formData(email, survey) {
-
   // Adds "version" following same logic as per dashboard.
   // TODO: clean this up, there is duplicated logic with surveys
   // controller -- make surveys controller get by survey_name instead
@@ -91,7 +96,7 @@ async function formData(email, survey) {
 module.exports = {
   name: 'Response',
   queries: pool => ({
-    all: all.bind(pool),
+    firstAndLast: firstAndLast.bind(pool),
     formResponses: formResponses.bind(pool),
     formData: formData.bind(pool),
   }),
