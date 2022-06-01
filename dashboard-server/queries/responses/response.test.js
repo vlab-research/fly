@@ -4,6 +4,15 @@ require('mocha');
 const userModel = require('../users/user.queries');
 const surveyModel = require('../surveys/survey.queries');
 const model = require('./response.queries');
+const request = require('supertest');
+const router = require('./../../api/responses/response.routes');
+
+// hack to avoid bootstrapping the entire
+// server with all its env vars, just test
+// this router in isolation
+const express = require('express');
+const app = express();
+app.use('/', router);
 
 const { DATABASE_CONFIG } = require('../../config');
 
@@ -22,9 +31,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM responses');
-  });
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM responses');
+  // });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -114,12 +123,27 @@ describe('Response queries', () => {
         email: 'test3@vlab.com',
         survey: 'Survey',
       });
-
       responses.length.should.equal(8);
       responses[0].userid.should.equal('123');
       responses[1].userid.should.equal('123');
       responses2.length.should.equal(0);
       responses3.length.should.equal(0);
+    });
+  });
+
+  describe('GET /all', function() {
+    it.only('responds with all responses in json', async function() {
+      const response = await request(app)
+        .get('/?after=2000&limit=100')
+        .query({ email: 'test2@vlab.com', survey: 'Survey' })
+        .set('Accept', 'application/json')
+        .expect(200);
+      console.log(response);
+      response.body.length.should.equal(8);
+      response.statusCode.should.equal(200);
+      response.headers['content-type'].should.equal(
+        'application/json; charset=utf-8',
+      );
     });
   });
 });

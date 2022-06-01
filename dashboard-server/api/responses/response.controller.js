@@ -11,8 +11,20 @@ function handle(err, res) {
 
 exports.getFirstAndLast = async (req, res) => {
   try {
-    const responses = await Response.all();
+    const responses = await Response.firstAndLast();
     res.status(200).send(responses);
+  } catch (err) {
+    handle(err, res);
+  }
+};
+
+exports.getAll = async (req, res) => {
+  const { email } = req.user;
+  const { survey } = req.query;
+
+  try {
+    const response = await Response.all(email, survey);
+    res.status(200).send(response);
   } catch (err) {
     handle(err, res);
   }
@@ -38,6 +50,7 @@ function handleCsvResponse(dataStream, filename, res) {
 exports.getResponsesCSV = async (req, res) => {
   const { survey } = req.query;
   const { email } = req.user;
+  console.log(email);
   try {
     const responseStream = await Response.formResponses(
       email,
