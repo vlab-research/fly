@@ -135,10 +135,10 @@ describe('Response queries', () => {
     it.only('responds with all responses in json', async function() {
       const response = await request(app)
         .get('/?after=2000&limit=100')
-        .query({ email: 'test2@vlab.com', survey: 'Survey' })
+        // .query({ email: 'test2@vlab.com', survey: 'Survey' })
         .set('Accept', 'application/json')
         .expect(200);
-      console.log(response);
+      // console.log(response);
       response.body.length.should.equal(8);
       response.statusCode.should.equal(200);
       response.headers['content-type'].should.equal(
