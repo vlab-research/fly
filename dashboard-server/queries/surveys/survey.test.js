@@ -15,6 +15,7 @@ describe('Survey queries', () => {
   let User;
   let vlabPool;
 
+  // runs before group of tests
   before(async () => {
     vlabPool = new Pool(DATABASE_CONFIG);
 
@@ -22,13 +23,14 @@ describe('Survey queries', () => {
     Survey = surveyModel.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM users');
-    await vlabPool.query('DELETE FROM surveys');
-  });
-
+  // runs after every test
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM users');
+  //   await vlabPool.query('DELETE FROM surveys');
+  // });
 
   describe('.create()', () => {
+    // use .only() to isolate
     it('should insert a new survey and return the newly created record', async () => {
       const user = {
         email: 'test@vlab.com',
@@ -45,8 +47,9 @@ describe('Survey queries', () => {
         title: 'New User Title',
         metadata: '{}',
         survey_name: 'Survey',
-        translation_conf: '{}'
+        translation_conf: '{}',
       };
+
       const newSurvey = await Survey.create(survey);
       newSurvey.formid.should.equal('S8yR4');
       newSurvey.form.should.equal('{"form": "form detail"}');
@@ -73,7 +76,7 @@ describe('Survey queries', () => {
         title: 'Second Survey',
         metadata: '{}',
         survey_name: 'Survey',
-        translation_conf: '{}'
+        translation_conf: '{}',
       };
       await Survey.create(survey);
 
@@ -87,7 +90,7 @@ describe('Survey queries', () => {
         title: 'Other survey',
         metadata: '{}',
         survey_name: 'Survey',
-        translation_conf: '{}'
+        translation_conf: '{}',
       };
       await Survey.create(survey2);
 

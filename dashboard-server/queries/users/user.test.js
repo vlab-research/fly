@@ -17,9 +17,9 @@ describe('User queries', () => {
     User = model.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM users');
-  });
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM users');
+  // });
 
   describe('.create()', () => {
     it('should insert a new user and return the newly created record', async () => {
@@ -31,7 +31,6 @@ describe('User queries', () => {
       newUser.email.should.equal(user.email);
     });
   });
-
 
   describe('.user()', () => {
     it('should return the corresponding user', async () => {
