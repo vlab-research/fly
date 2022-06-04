@@ -12,7 +12,22 @@ const router = require('./../../api/responses/response.routes');
 // this router in isolation
 const express = require('express');
 const app = express();
-app.use('/', router);
+
+// app.use(
+//   '/',
+//   function(req, res, next) {
+//     req.user = { email: 'test2@vlab.com' };
+//     next();
+//   },
+//   router,
+// );
+
+const fakeAuthMiddleware = (req, res, next) => {
+  req.user = { email: 'test2@vlab.com' };
+  next();
+};
+
+app.use('/', fakeAuthMiddleware, router);
 
 const { DATABASE_CONFIG } = require('../../config');
 
@@ -114,6 +129,8 @@ describe('Response queries', () => {
         survey: 'Survey',
       });
 
+      // make these sad paths a different test
+      // test that only some resposnes come back for a user
       const responses2 = await Response.all({
         email: 'test2@vlab.com',
         survey: 'Survey123',
@@ -131,19 +148,14 @@ describe('Response queries', () => {
     });
   });
 
-  describe('GET /all', function() {
-    it.only('responds with all responses in json', async function() {
+  describe('GET /', function() {
+    it('responds with all responses in json', async () => {
       const response = await request(app)
-        .get('/?after=2000&limit=100')
-        // .query({ email: 'test2@vlab.com', survey: 'Survey' })
+        .get('/?survey=Survey&after=2000&limit=100')
         .set('Accept', 'application/json')
+        .expect('Content-Type', /json/)
         .expect(200);
-      // console.log(response);
-      response.body.length.should.equal(8);
-      response.statusCode.should.equal(200);
-      response.headers['content-type'].should.equal(
-        'application/json; charset=utf-8',
-      );
+      response['_body'].length.should.equal(8);
     });
   });
 });
