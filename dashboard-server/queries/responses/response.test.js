@@ -13,15 +13,6 @@ const router = require('./../../api/responses/response.routes');
 const express = require('express');
 const app = express();
 
-// app.use(
-//   '/',
-//   function(req, res, next) {
-//     req.user = { email: 'test2@vlab.com' };
-//     next();
-//   },
-//   router,
-// );
-
 const fakeAuthMiddleware = (req, res, next) => {
   req.user = { email: 'test2@vlab.com' };
   next();
@@ -129,22 +120,27 @@ describe('Response queries', () => {
         survey: 'Survey',
       });
 
-      // make these sad paths a different test
-      // test that only some resposnes come back for a user
-      const responses2 = await Response.all({
-        email: 'test2@vlab.com',
-        survey: 'Survey123',
-      });
-
-      const responses3 = await Response.all({
-        email: 'test3@vlab.com',
-        survey: 'Survey',
-      });
       responses.length.should.equal(8);
       responses[0].userid.should.equal('123');
+      responses[0].response.should.equal('{ "text": "first" }');
       responses[1].userid.should.equal('123');
-      responses2.length.should.equal(0);
-      responses3.length.should.equal(0);
+      responses[1].response.should.equal('{ "text": "last" }');
+
+      it('should return no responses if the survey name is not found', async () => {
+        const responses2 = await Response.all({
+          email: 'test2@vlab.com',
+          survey: 'Survey123',
+        });
+        responses2.length.should.equal(0);
+      });
+
+      it('should return no responses if the user email is not found', async () => {
+        const responses3 = await Response.all({
+          email: 'test3@vlab.com',
+          survey: 'Survey',
+        });
+        responses3.length.should.equal(0);
+      });
     });
   });
 
