@@ -232,7 +232,6 @@ describe('Response queries', () => {
         badResponses.length.should.equal(1);
         goodResponses.length.should.equal(2);
         goodResponses.forEach(el => el.userid.should.equal(126));
-        goodResponses.forEach(el => el.userid.should.equal(126));
         goodResponses.forEach(el =>
           el.response.should.not.equal({ text: 'do not return me' }),
         );
