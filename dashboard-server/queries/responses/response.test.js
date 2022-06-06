@@ -14,7 +14,7 @@ const express = require('express');
 const app = express();
 
 const fakeAuthMiddleware = (req, res, next) => {
-  req.user = { email: 'test@vlab.com' };
+  req.user = { email: 'test3@vlab.com' };
   next();
 };
 
@@ -37,9 +37,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM responses');
-  });
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM responses');
+  // });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -181,6 +181,7 @@ describe('Response queries', () => {
       //     translated_response: null,
       //   },
       // ]);
+
       responses.length.should.equal(2);
       responses[0].userid.should.equal('125');
       responses[0].response.should.equal('{ "text": "first" }');
@@ -197,7 +198,7 @@ describe('Response queries', () => {
 
       it('should return no responses if the user email is not found', async () => {
         const responses3 = await Response.all({
-          email: 'test3@vlab.com',
+          email: 'test4@vlab.com',
           survey: survey.survey_name,
         });
         responses3.length.should.equal(0);
