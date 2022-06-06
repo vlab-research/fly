@@ -14,7 +14,7 @@ const express = require('express');
 const app = express();
 
 const fakeAuthMiddleware = (req, res, next) => {
-  req.user = { email: 'test2@vlab.com' };
+  req.user = { email: 'test@vlab.com' };
   next();
 };
 
@@ -37,16 +37,16 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  // afterEach(async () => {
-  //   await vlabPool.query('DELETE FROM responses');
-  // });
+  afterEach(async () => {
+    await vlabPool.query('DELETE FROM responses');
+  });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
-      const user2 = {
+      const user = {
         email: 'test2@vlab.com',
       };
-      const newUser = await User.create(user2);
+      const newUser = await User.create(user);
 
       const survey = await Survey.create({
         created: new Date(),
@@ -75,29 +75,29 @@ describe('Response queries', () => {
       });
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
-      VALUES
-        ('${survey.id}', '101', '${
+          VALUES
+            ('${survey.id}', '101', '${
         survey.id
       }', '101', 100001, '124', 'ref', 10, 'text', '{ "text": "last" }', '6789', current_date::timestamptz + interval '14 hour')
-       ,('${survey2.id}', '202', '${
+           ,('${survey2.id}', '202', '${
         survey2.id
       }', '202', 100003, '123', 'ref', 10, 'text', '{ "text": "last" }', '6789', (date '2019-04-18')::timestamptz + interval '12 hour')
-       ,('${survey.id}', '101', '${
+           ,('${survey.id}', '101', '${
         survey.id
       }', '101', 100004, '124', 'ref', 10, 'text', '{ "text": "first" }', '6789', current_date::timestamptz + interval '10 hour')
-       ,('${survey2.id}', '202', '${
+           ,('${survey2.id}', '202', '${
         survey2.id
       }', '202', 100005, '123', 'ref', 10, 'text', '{ "text": "first" }', '6789', (date '2019-04-18')::timestamptz + interval '8 hour')
-       ,('${survey2.id}', '202', '${
+           ,('${survey2.id}', '202', '${
         survey2.id
       }', '202', 100003, '125', 'ref', 10, 'text', '{ "text": "last" }', '6789', (date '2019-04-18')::timestamptz + interval '12 hour')
-       ,('${survey.id}', '101', '${
+           ,('${survey.id}', '101', '${
         survey.id
       }', '101', 100004, '125', 'ref', 10, 'text', '{ "text": "first" }', '6789', (date '2019-04-18')::timestamptz + interval '10 hour')
-       ,('${survey2.id}', '202', '${
+           ,('${survey2.id}', '202', '${
         survey2.id
       }', '202', 100005, '125', 'ref', 10, 'text', '{ "text": "first" }', '6789', (date '2019-04-18')::timestamptz + interval '8 hour')
-       ,('${survey.id}', '101', '${
+           ,('${survey.id}', '101', '${
         survey.id
       }', '101', 100006, '124', 'ref', 10, 'text', '{ "text": "middle" }', '6789', current_date::timestamptz + interval '12 hour')`;
 
@@ -115,20 +115,81 @@ describe('Response queries', () => {
 
   describe('.all()', () => {
     it('should return all responses for a survey created by a user', async () => {
-      const responses = await Response.all({
-        email: 'test2@vlab.com',
-        survey: 'Survey',
+      const user = {
+        email: 'test3@vlab.com',
+      };
+      const newUser = await User.create(user);
+
+      const survey = await Survey.create({
+        created: new Date(),
+        formid: 'biy23',
+        form: '{"form": "form detail"}',
+        messages: '{"foo": "bar"}',
+        shortcode: 231,
+        userid: newUser.id,
+        title: 'Survey!',
+        metadata: '{}',
+        survey_name: 'Survey',
+        translation_conf: '{}',
       });
 
-      responses.length.should.equal(8);
-      responses[0].userid.should.equal('123');
+      const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
+    VALUES
+      ('${survey.id}', '101', '${
+        survey.id
+      }', '101', 100001, '125', 'ref', 10, 'text', '{ "text": "last" }', '6789', current_date::timestamptz + interval '14 hour')
+     ,('${survey.id}', '101', '${
+        survey.id
+      }', '101', 100004, '125', 'ref', 10, 'text', '{ "text": "first" }', '6789', current_date::timestamptz + interval '10 hour')`;
+
+      await vlabPool.query(MOCK_QUERY);
+
+      const responses = await Response.all({
+        email: user.email,
+        survey: survey.survey_name,
+      });
+
+      // responses.should.equal([
+      //   {
+      //     parent_surveyid: '1a1700ae-5fce-42e5-a0d9-4e02ea6da52d',
+      //     parent_shortcode: '101',
+      //     surveyid: '1a1700ae-5fce-42e5-a0d9-4e02ea6da52d',
+      //     flowid: '100004',
+      //     userid: '125',
+      //     question_ref: 'ref',
+      //     question_idx: '10',
+      //     question_text: 'text',
+      //     response: '{ "text": "first" }',
+      //     timestamp: '2022-06-06 10:00:00+00:00',
+      //     metadata: null,
+      //     pageid: null,
+      //     translated_response: null,
+      //   },
+      //   {
+      //     parent_surveyid: '1a1700ae-5fce-42e5-a0d9-4e02ea6da52d',
+      //     parent_shortcode: '101',
+      //     surveyid: '1a1700ae-5fce-42e5-a0d9-4e02ea6da52d',
+      //     flowid: '100001',
+      //     userid: '125',
+      //     question_ref: 'ref',
+      //     question_idx: '10',
+      //     question_text: 'text',
+      //     response: '{ "text": "last" }',
+      //     timestamp: '2022-06-06 14:00:00+00:00',
+      //     metadata: null,
+      //     pageid: null,
+      //     translated_response: null,
+      //   },
+      // ]);
+      responses.length.should.equal(2);
+      responses[0].userid.should.equal('125');
       responses[0].response.should.equal('{ "text": "first" }');
-      responses[1].userid.should.equal('123');
+      responses[1].userid.should.equal('125');
       responses[1].response.should.equal('{ "text": "last" }');
 
       it('should return no responses if the survey name is not found', async () => {
         const responses2 = await Response.all({
-          email: 'test2@vlab.com',
+          email: user.name,
           survey: 'Survey123',
         });
         responses2.length.should.equal(0);
@@ -137,7 +198,7 @@ describe('Response queries', () => {
       it('should return no responses if the user email is not found', async () => {
         const responses3 = await Response.all({
           email: 'test3@vlab.com',
-          survey: 'Survey',
+          survey: survey.survey_name,
         });
         responses3.length.should.equal(0);
       });
@@ -151,7 +212,10 @@ describe('Response queries', () => {
         .set('Accept', 'application/json')
         .expect('Content-Type', /json/)
         .expect(200);
-      response['_body'].length.should.equal(8);
+      response.statusCode.should.equal(200);
+      response.headers['content-type'].should.equal(
+        'application/json; charset=utf-8',
+      );
     });
   });
 });

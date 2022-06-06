@@ -19,14 +19,23 @@ exports.getFirstAndLast = async (req, res) => {
 };
 
 exports.getAll = async (req, res) => {
-  const { email } = req.user;
-  const { survey } = req.query;
-
   try {
-    const response = await Response.all(email, survey);
-    res.status(200).send(response);
+    const { survey } = req.query;
+    const { email } = req.user; // req is mutable and we can add whatever we want
+
+    if (!email) {
+      return res.status(400).send('No user, no responses!');
+    }
+
+    if (!survey) {
+      return res.status(400).send('No survey, no responses!');
+    }
+
+    const responses = await Response.all({ email, survey });
+    res.status(200).send(responses);
   } catch (err) {
-    handle(err, res);
+    console.error(err);
+    res.status(500).send(err);
   }
 };
 
@@ -55,6 +64,7 @@ exports.getResponsesCSV = async (req, res) => {
       email,
       decodeURIComponent(survey),
     );
+    console.log(responseStream);
     handleCsvResponse(responseStream, 'responses', res);
   } catch (err) {
     handle(err, res);
