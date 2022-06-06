@@ -64,7 +64,6 @@ exports.getResponsesCSV = async (req, res) => {
       email,
       decodeURIComponent(survey),
     );
-    console.log(responseStream);
     handleCsvResponse(responseStream, 'responses', res);
   } catch (err) {
     handle(err, res);
