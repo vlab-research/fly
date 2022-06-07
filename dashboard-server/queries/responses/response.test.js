@@ -37,9 +37,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  // afterEach(async () => {
-  //   await vlabPool.query('DELETE FROM responses');
-  // });
+  afterEach(async () => {
+    await vlabPool.query('DELETE FROM responses');
+  });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -146,17 +146,21 @@ describe('Response queries', () => {
         translation_conf: '{}',
       });
 
+      const timestamp = '2022-06-06 10:00:00+00:00';
+      const timestamp2 = '2022-06-06 10:00:00+00:01';
+      const timestamp3 = '2022-06-06 10:00:00+00:02';
+
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
         ('${survey.id}', '101', '${
         survey.id
-      }', '101', 100001, '126', 'ref', 10, 'text', '{ "text": "last" }', '6789', current_date::timestamptz + interval '14 hour')
+      }', '101', 100001, '126', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${timestamp}')
        ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100003, '124', 'ref', 10, 'text', '{ "text": "do not return me" }', '6789', (date '2019-04-18')::timestamptz + interval '12 hour')
+      }', '202', 100003, '126', 'ref', 10, 'text', '{ "text": "do not return me" }', '6789', '${timestamp2}')
        ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100004, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', current_date::timestamptz + interval '10 hour')`;
+      }', '101', 100004, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${timestamp3}')`;
 
       await vlabPool.query(MOCK_QUERY);
 
@@ -167,31 +171,31 @@ describe('Response queries', () => {
 
       responses.should.equal([
         {
-          parent_surveyid: 'c741ab33-330a-4b75-b96f-ce390ac8c1d3',
+          parent_surveyid: `${survey.id}`,
           parent_shortcode: '101',
-          surveyid: 'c741ab33-330a-4b75-b96f-ce390ac8c1d3',
+          surveyid: `${survey.id}`,
           flowid: '100004',
           userid: '126',
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
           response: '{ "text": "first" }',
-          timestamp: '2022-06-06 10:00:00+00:00',
+          timestamp: `${timestamp3}`,
           metadata: null,
           pageid: null,
           translated_response: null,
         },
         {
-          parent_surveyid: 'c741ab33-330a-4b75-b96f-ce390ac8c1d3',
+          parent_surveyid: `${survey.id}`,
           parent_shortcode: '101',
-          surveyid: 'c741ab33-330a-4b75-b96f-ce390ac8c1d3',
+          surveyid: `${survey.id}`,
           flowid: '100001',
           userid: '126',
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
           response: '{ "text": "last" }',
-          timestamp: '2022-06-06 14:00:00+00:00',
+          timestamp: `${timestamp}`,
           metadata: null,
           pageid: null,
           translated_response: null,
