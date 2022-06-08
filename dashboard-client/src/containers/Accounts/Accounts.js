@@ -14,13 +14,6 @@ const accountConfs = [
     getName: c => c.details.name
   },
   {
-    to: '/connect/facebook-ads',
-    title: 'Facebook Advertising for Recruitment',
-    entity: 'facebook_ad_user',
-    description: 'To use the Virtual Lab ad optimization with Facebook Advertising, Connect your Facebook account and grant Virtual Lab permission to manage ads on your behalf.',
-    getName: c => c.details.name
-  },
-  {
     to: '/connect/reloadly',
     title: 'Reloadly',
     entity: 'reloadly',
