@@ -146,21 +146,21 @@ describe('Response queries', () => {
         translation_conf: '{}',
       });
 
-      const timestamp = '2022-06-06 10:00:00+00:00';
-      const timestamp2 = '2022-06-06 10:00:00+00:01';
-      const timestamp3 = '2022-06-06 10:00:00+00:02';
+      const timestamp = '2022-06-06 09:58:00+00:00';
+      const timestamp2 = '2022-06-06 10:00:00+00:00';
+      const timestamp3 = '2022-06-06 10:02:00+00:00';
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
         ('${survey.id}', '101', '${
         survey.id
-      }', '101', 100001, '126', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${timestamp}')
+      }', '101', 100001, '126', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${timestamp3}')
        ,('${survey2.id}', '202', '${
         survey2.id
       }', '202', 100003, '126', 'ref', 10, 'text', '{ "text": "do not return me" }', '6789', '${timestamp2}')
        ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100004, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${timestamp3}')`;
+      }', '101', 100004, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${timestamp}')`;
 
       await vlabPool.query(MOCK_QUERY);
 
@@ -169,7 +169,7 @@ describe('Response queries', () => {
         survey: survey.survey_name,
       });
 
-      responses.should.equal([
+      responses.should.eql([
         {
           parent_surveyid: `${survey.id}`,
           parent_shortcode: '101',
@@ -180,7 +180,7 @@ describe('Response queries', () => {
           question_idx: '10',
           question_text: 'text',
           response: '{ "text": "first" }',
-          timestamp: `${timestamp3}`,
+          timestamp: `${timestamp}`,
           metadata: null,
           pageid: null,
           translated_response: null,
@@ -195,7 +195,7 @@ describe('Response queries', () => {
           question_idx: '10',
           question_text: 'text',
           response: '{ "text": "last" }',
-          timestamp: `${timestamp}`,
+          timestamp: `${timestamp3}`,
           metadata: null,
           pageid: null,
           translated_response: null,
