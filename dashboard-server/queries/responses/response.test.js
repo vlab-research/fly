@@ -169,10 +169,10 @@ describe('Response queries', () => {
       }', '101', 100004, '127', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
         timestamps[2]
       }')
-       ,('${survey2.id}', '202', '${
-        survey2.id
+       ,('${survey.id}', '202', '${
+        survey.id
       }', '202', 100005, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
-        timestamps[2]
+        timestamps[3]
       }')
        ,('${survey2.id}', '202', '${
         survey2.id
@@ -193,12 +193,17 @@ describe('Response queries', () => {
       await vlabPool.query(MOCK_QUERY);
 
       // give me all responses after 2022-06-06 09:58:00+00:00, '127', 'ref'
+      const timestamp = timestamps[2];
+      const userid = '126';
+      const ref = 'ref';
+
       const responses = await Response.all({
         email: user.email,
         survey: survey.survey_name,
-        timestamp: timestamps[1],
-        userid: '127',
-        ref: 'ref',
+        timestamp,
+        userid,
+        ref,
+        pageSize: 25, // default
       });
 
       responses.should.eql([
@@ -232,7 +237,36 @@ describe('Response queries', () => {
           pageid: null,
           translated_response: null,
         },
+        {
+          parent_surveyid: survey.id,
+          parent_shortcode: '202',
+          surveyid: survey.id,
+          flowid: '100005',
+          userid: '126',
+          question_ref: 'ref',
+          question_idx: '10',
+          question_text: 'text',
+          response: '{ "text": "first" }',
+          timestamp: timestamps[3],
+          metadata: null,
+          pageid: null,
+          translated_response: null,
+        },
       ]);
+
+      describe('pageSize', () => {
+        it('should return the specified maximum number of responses', async () => {
+          const maxResponses = await Response.all({
+            email: user.email,
+            survey: survey.survey_name,
+            timestamp,
+            userid,
+            ref,
+            pageSize: 1,
+          });
+          maxResponses.length.should.equal(1);
+        });
+      });
 
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
@@ -248,7 +282,7 @@ describe('Response queries', () => {
         it('should return no responses if the survey name is not found', async () => {
           const surveyNotFound = await Response.all({
             email: user.email,
-            survey: 'Survey!',
+            survey: 'Survey',
           });
           surveyNotFound.length.should.equal(0);
         });
@@ -283,7 +317,7 @@ describe('Response queries', () => {
   describe('GET /all', function() {
     it('responds with all responses in json', async () => {
       const response = await request(app)
-        .get('/all?survey=Survey123&after=2000&limit=100')
+        .get(`/all?survey=Survey123&after=1000&limit=100`)
         .set('Accept', 'application/json')
         .expect('Content-Type', /json/)
         .expect(200);
