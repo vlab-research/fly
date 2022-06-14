@@ -192,7 +192,7 @@ describe('Response queries', () => {
 
       await vlabPool.query(MOCK_QUERY);
 
-      // give me all responses after 2022-06-06 09:58:00+00:00, '127', 'ref'
+      // give me all responses after 2022-06-06 10:00:00+00:00, '126', 'ref'
       const timestamp = timestamps[2];
       const userid = '126';
       const ref = 'ref';
