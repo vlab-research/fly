@@ -207,38 +207,44 @@ describe('Response queries', () => {
       responses[1].userid.should.equal('126');
       responses[1].response.should.equal('{ "text": "last" }');
 
-      it('should return no responses if the user email is not found', async () => {
-        const userNotFound = await Response.all({
-          email: 'test4@vlab.com',
-          survey: survey.survey_name,
+      describe('userNotFound', () => {
+        it('should return no responses if the user email is not found', async () => {
+          const userNotFound = await Response.all({
+            email: 'test4@vlab.com',
+            survey: survey.survey_name,
+          });
+          userNotFound.length.should.equal(0);
         });
-        userNotFound.length.should.equal(0);
       });
 
-      it('should return no responses if the survey name is not found', async () => {
-        const surveyNotFound = await Response.all({
-          email: user.email,
-          survey: 'Survey!',
+      describe('surveyNotFound', () => {
+        it('should return no responses if the survey name is not found', async () => {
+          const surveyNotFound = await Response.all({
+            email: user.email,
+            survey: 'Survey!',
+          });
+          surveyNotFound.length.should.equal(0);
         });
-        surveyNotFound.length.should.equal(0);
       });
 
-      it('should only return responses for the given survey', async () => {
-        const goodResponses = await Response.all({
-          email: user.email,
-          survey: survey.survey,
-        });
-        const badResponses = await Response.all({
-          email: user.email,
-          survey: survey2.survey,
-        });
+      describe('responsesNotReturned', () => {
+        it('should only return responses for the given survey', async () => {
+          const responses = await Response.all({
+            email: user.email,
+            survey: survey.survey_name,
+          });
 
-        badResponses.length.should.equal(1);
-        goodResponses.length.should.equal(2);
-        goodResponses.forEach(el => el.userid.should.equal(126));
-        goodResponses.forEach(el =>
-          el.response.should.not.equal({ text: 'do not return me' }),
-        );
+          const goodSurvey = survey;
+          const badSurvey = survey2;
+
+          responses.forEach(response =>
+            response.surveyid.should.equal(goodSurvey.id),
+          );
+
+          responses.forEach(response =>
+            response.surveyid.should.not.equal(badSurvey.id),
+          );
+        });
       });
     });
   });
