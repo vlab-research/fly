@@ -6,7 +6,7 @@ const {
 } = require('@vlab-research/client-cursor-stream');
 
 // gets all responses for a survey created by a user
-async function all({ email, survey }) {
+async function all({ email, survey, timestamp, userid, ref }) {
   const GET_ALL = `SELECT parent_surveyid,
   parent_shortcode,
   surveyid,
@@ -25,10 +25,17 @@ async function all({ email, survey }) {
   LEFT JOIN users ON surveys.userid = users.id
   WHERE users.email = $1
   AND surveys.survey_name = $2
-  ORDER BY (responses.userid, timestamp, question_ref)
+  AND (timestamp,responses.userid, question_ref) > ($3, $4, $5)
+  ORDER BY (timestamp,responses.userid, question_ref)
   LIMIT 100000`;
 
-  const { rows } = await this.query(GET_ALL, [email, survey]);
+  const { rows } = await this.query(GET_ALL, [
+    email,
+    survey,
+    timestamp,
+    userid,
+    ref,
+  ]);
   return rows;
 }
 
