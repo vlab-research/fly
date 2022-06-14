@@ -146,66 +146,93 @@ describe('Response queries', () => {
         translation_conf: '{}',
       });
 
-      const timestamp = '2022-06-06 09:58:00+00:00';
-      const timestamp2 = '2022-06-06 10:00:00+00:00';
-      const timestamp3 = '2022-06-06 10:02:00+00:00';
+      const timestamps = {
+        1: '2022-06-06 09:58:00+00:00',
+        2: '2022-06-06 10:00:00+00:00',
+        3: '2022-06-06 10:02:00+00:00',
+      };
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
         ('${survey.id}', '101', '${
         survey.id
-      }', '101', 100001, '126', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${timestamp3}')
+      }', '101', 100001, '127', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${
+        timestamps[1]
+      }')
        ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100003, '126', 'ref', 10, 'text', '{ "text": "do not return me" }', '6789', '${timestamp2}')
+      }', '202', 100003, '126', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${
+        timestamps[1]
+      }')
        ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100004, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${timestamp}')`;
+      }', '101', 100004, '127', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
+        timestamps[2]
+      }')
+       ,('${survey2.id}', '202', '${
+        survey2.id
+      }', '202', 100005, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
+        timestamps[2]
+      }')
+       ,('${survey2.id}', '202', '${
+        survey2.id
+      }', '202', 100003, '128', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${
+        timestamps[1]
+      }')
+       ,('${survey.id}', '101', '${
+        survey.id
+      }', '101', 100004, '128', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
+        timestamps[2]
+      }')
+       ,('${survey2.id}', '202', '${
+        survey2.id
+      }', '202', 100005, '128', 'ref', 10, 'text', '{ "text": "do not return me" }', '6789', '${
+        timestamps[3]
+      }')`;
 
       await vlabPool.query(MOCK_QUERY);
 
+      // give me all responses after 2022-06-06 09:58:00+00:00, '127', 'ref'
       const responses = await Response.all({
         email: user.email,
         survey: survey.survey_name,
+        timestamp: timestamps[1],
+        userid: '127',
+        ref: 'ref',
       });
 
       responses.should.eql([
         {
-          parent_surveyid: `${survey.id}`,
+          parent_surveyid: survey.id,
           parent_shortcode: '101',
-          surveyid: `${survey.id}`,
+          surveyid: survey.id,
           flowid: '100004',
-          userid: '126',
+          userid: '127',
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
           response: '{ "text": "first" }',
-          timestamp: `${timestamp}`,
+          timestamp: timestamps[2],
           metadata: null,
           pageid: null,
           translated_response: null,
         },
         {
-          parent_surveyid: `${survey.id}`,
+          parent_surveyid: survey.id,
           parent_shortcode: '101',
-          surveyid: `${survey.id}`,
-          flowid: '100001',
-          userid: '126',
+          surveyid: survey.id,
+          flowid: '100004',
+          userid: '128',
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
-          response: '{ "text": "last" }',
-          timestamp: `${timestamp3}`,
+          response: '{ "text": "first" }',
+          timestamp: timestamps[2],
           metadata: null,
           pageid: null,
           translated_response: null,
         },
       ]);
-
-      responses[0].userid.should.equal('126');
-      responses[0].response.should.equal('{ "text": "first" }');
-      responses[1].userid.should.equal('126');
-      responses[1].response.should.equal('{ "text": "last" }');
 
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
@@ -243,6 +270,10 @@ describe('Response queries', () => {
 
           responses.forEach(response =>
             response.surveyid.should.not.equal(badSurvey.id),
+          );
+
+          responses.forEach(response =>
+            response.text.should.not.equal('Do not return me!'),
           );
         });
       });
