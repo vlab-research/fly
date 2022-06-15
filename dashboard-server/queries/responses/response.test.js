@@ -37,9 +37,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM responses');
-  });
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM responses');
+  // });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -113,7 +113,7 @@ describe('Response queries', () => {
     });
   });
 
-  describe('.all()', () => {
+  describe('all()', () => {
     it('should return all responses for a survey created by a user', async () => {
       const user = {
         email: 'test3@vlab.com',
@@ -151,6 +151,19 @@ describe('Response queries', () => {
         2: '2022-06-06 10:00:00+00:00',
         3: '2022-06-06 10:02:00+00:00',
       };
+
+      const mockData = pageSize => {
+        return {
+          email: 'test3@vlab.com',
+          survey: survey.survey_name,
+          timestamp: timestamps[2],
+          userid: '126',
+          ref: 'ref',
+          pageSize,
+        };
+      };
+
+      const defaultPageSize = 25;
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
@@ -193,18 +206,7 @@ describe('Response queries', () => {
       await vlabPool.query(MOCK_QUERY);
 
       // give me all responses after 2022-06-06 10:00:00+00:00, '126', 'ref'
-      const timestamp = timestamps[2];
-      const userid = '126';
-      const ref = 'ref';
-
-      const responses = await Response.all({
-        email: user.email,
-        survey: survey.survey_name,
-        timestamp,
-        userid,
-        ref,
-        pageSize: 25, // default
-      });
+      const responses = await Response.all(mockData(defaultPageSize));
 
       responses.should.eql([
         {
@@ -254,16 +256,18 @@ describe('Response queries', () => {
         },
       ]);
 
+      describe('after', () => {
+        it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
+          const responsesAfterToken = await Response.all(
+            mockData(defaultPageSize),
+          );
+          responsesAfterToken.length.should.equal(3);
+        });
+      });
+
       describe('pageSize', () => {
         it('should return the specified maximum number of responses', async () => {
-          const maxResponses = await Response.all({
-            email: user.email,
-            survey: survey.survey_name,
-            timestamp,
-            userid,
-            ref,
-            pageSize: 1,
-          });
+          const maxResponses = await Response.all(mockData(1));
           maxResponses.length.should.equal(1);
         });
       });
@@ -272,7 +276,6 @@ describe('Response queries', () => {
         it('should return no responses if the user email is not found', async () => {
           const userNotFound = await Response.all({
             email: 'test4@vlab.com',
-            survey: survey.survey_name,
           });
           userNotFound.length.should.equal(0);
         });
@@ -281,8 +284,7 @@ describe('Response queries', () => {
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
           const surveyNotFound = await Response.all({
-            email: user.email,
-            survey: 'Survey',
+            survey: 'This survey does not exist',
           });
           surveyNotFound.length.should.equal(0);
         });
@@ -291,7 +293,6 @@ describe('Response queries', () => {
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
           const responses = await Response.all({
-            email: user.email,
             survey: survey.survey_name,
           });
 
