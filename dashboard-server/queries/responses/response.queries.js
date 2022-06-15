@@ -5,6 +5,10 @@ const {
   cursorResult,
 } = require('@vlab-research/client-cursor-stream');
 
+// const base64 = require('base-64');
+// const decodeToken = base64.decode();
+// const encodeToken = base64.encode();
+
 // gets all responses for a survey created by a user
 async function all({ email, survey, timestamp, userid, ref, pageSize }) {
   const GET_ALL = `SELECT parent_surveyid,
@@ -25,8 +29,8 @@ async function all({ email, survey, timestamp, userid, ref, pageSize }) {
   LEFT JOIN users ON surveys.userid = users.id
   WHERE users.email = $1
   AND surveys.survey_name = $2
-  AND (timestamp,responses.userid, question_ref) > ($3, $4, $5)
-  ORDER BY (timestamp,responses.userid, question_ref)
+  AND (timestamp, responses.userid, question_ref) > ($3, $4, $5)
+  ORDER BY (timestamp, responses.userid, question_ref)
   LIMIT $6`;
 
   const { rows } = await this.query(GET_ALL, [
@@ -39,6 +43,25 @@ async function all({ email, survey, timestamp, userid, ref, pageSize }) {
   ]);
   return rows;
 }
+
+// async function all({ email, survey, token, pageSize }) {
+//   var [timestamp, userid, ref] = decodeToken(token);
+//   const response = _all(email, survey, timestamp, userid, ref, pageSize);
+//   var encodedToken = encodeToken(timestamp, userid, ref);
+//   return {
+//     encodedToken,
+//     data: [response],
+//   };
+// }
+// return an obj with a token as last item in array
+// { pagination: token, data: […] } this is good practice!
+// or token on every object
+// decode the token in here
+// var [timestamp, userid, ref] = decodeToken(token);
+// call _all(timestamp, userid, ref)
+// use the response from _all to populate these vars for encodeToken(timestamp, userid, ref);
+// this will give you a token for every response
+// if multiple tokens for one user take the last one
 
 async function firstAndLast() {
   const GET_FIRST_AND_LAST = `SELECT *

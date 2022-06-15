@@ -37,9 +37,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM responses');
-  });
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM responses');
+  // });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -152,14 +152,18 @@ describe('Response queries', () => {
         3: '2022-06-06 10:02:00+00:00',
       };
 
-      const mockData = {
-        email: 'test3@vlab.com',
-        survey: survey.survey_name,
-        timestamp: timestamps[2],
-        userid: '126',
-        ref: 'ref',
-        pageSize: 25, // default
+      const mockData = (email, survey, timestamp, userid, ref, pageSize) => {
+        return {
+          email,
+          survey,
+          timestamp,
+          userid,
+          ref,
+          pageSize, // default
+        };
       };
+
+      const defaultPageSize = 25;
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
@@ -202,7 +206,16 @@ describe('Response queries', () => {
       await vlabPool.query(MOCK_QUERY);
 
       // give me all responses after 2022-06-06 10:00:00+00:00, '126', 'ref'
-      const responses = await Response.all(mockData);
+      const responses = await Response.all(
+        mockData(
+          'test3@vlab.com',
+          survey.survey_name,
+          timestamps[2],
+          '126',
+          'ref',
+          defaultPageSize,
+        ),
+      );
 
       responses.should.eql([
         {
@@ -252,47 +265,78 @@ describe('Response queries', () => {
         },
       ]);
 
-      // describe('pageSize', () => {
-      //   it('should return the specified maximum number of responses', async () => {
-      //     const maxResponses = await Response.all({
-      //       mockData: { pageSize: 2 },
-      //     });
-      //     maxResponses.length.should.equal(2);
-      //   });
-      // });
-
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
-          const userNotFound = await Response.all({
-            mockData: { email: 'test4@vlab.com' },
-          });
+          const userNotFound = await Response.all(
+            mockData(
+              'test4@vlab.com',
+              survey.survey_name,
+              timestamps[2],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
           userNotFound.length.should.equal(0);
         });
 
         it('should return a response if the user email is found', async () => {
-          const userFound = await Response.all(mockData);
+          const userFound = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              survey.survey_name,
+              timestamps[2],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
           userFound.length.should.equal(3);
         });
       });
 
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
-          const surveyNotFound = await Response.all({
-            mockData: { survey: 'this survey doesnt exist!' },
-          });
-
+          const surveyNotFound = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              'this survey does not exist!',
+              timestamps[2],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
           surveyNotFound.length.should.equal(0);
         });
 
         it('should return a response if the survey is found', async () => {
-          const userFound = await Response.all(mockData);
+          const userFound = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              survey.survey_name,
+              timestamps[2],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
           userFound.length.should.equal(3);
         });
       });
 
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
-          const responses = await Response.all(mockData);
+          const responses = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              survey.survey_name,
+              timestamps[2],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
 
           const goodSurvey = survey;
           const badSurvey = survey2;
@@ -306,20 +350,80 @@ describe('Response queries', () => {
           );
         });
       });
+
+      describe('pageSize', () => {
+        it('should return the specified maximum number of responses', async () => {
+          const maxResponses = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              survey.survey_name,
+              timestamps[2],
+              '126',
+              'ref',
+              2,
+            ),
+          );
+          maxResponses.length.should.equal(2);
+        });
+      });
+
+      describe('after', () => {
+        it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
+          const responsesAfterToken = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              survey.survey_name,
+              timestamps[1],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
+          responsesAfterToken.length.should.equal(4);
+        });
+
+        it('should return less responses for a later timestamp', async () => {
+          const responsesAfterToken = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              survey.survey_name,
+              timestamps[2],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
+          responsesAfterToken.length.should.equal(3);
+        });
+
+        it('should return no responses when on the last token', async () => {
+          const responsesAfterToken = await Response.all(
+            mockData(
+              'test3@vlab.com',
+              survey.survey_name,
+              timestamps[3],
+              '126',
+              'ref',
+              defaultPageSize,
+            ),
+          );
+          responsesAfterToken.length.should.equal(0);
+        });
+      });
     });
   });
+});
 
-  describe('GET /all', function() {
-    it('responds with all responses in json', async () => {
-      const response = await request(app)
-        .get(`/all?survey=Survey123&after=1000&limit=100`)
-        .set('Accept', 'application/json')
-        .expect('Content-Type', /json/)
-        .expect(200);
-      response.statusCode.should.equal(200);
-      response.headers['content-type'].should.equal(
-        'application/json; charset=utf-8',
-      );
-    });
+describe('GET /all', function() {
+  it('responds with all responses in json', async () => {
+    const response = await request(app)
+      .get(`/all?survey=Survey123&after=1000&limit=100`)
+      .set('Accept', 'application/json')
+      .expect('Content-Type', /json/)
+      .expect(200);
+    response.statusCode.should.equal(200);
+    response.headers['content-type'].should.equal(
+      'application/json; charset=utf-8',
+    );
   });
 });
