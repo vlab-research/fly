@@ -37,9 +37,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  // afterEach(async () => {
-  //   await vlabPool.query('DELETE FROM responses');
-  // });
+  afterEach(async () => {
+    await vlabPool.query('DELETE FROM responses');
+  });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -152,18 +152,14 @@ describe('Response queries', () => {
         3: '2022-06-06 10:02:00+00:00',
       };
 
-      const mockData = pageSize => {
-        return {
-          email: 'test3@vlab.com',
-          survey: survey.survey_name,
-          timestamp: timestamps[2],
-          userid: '126',
-          ref: 'ref',
-          pageSize,
-        };
+      const mockData = {
+        email: 'test3@vlab.com',
+        survey: survey.survey_name,
+        timestamp: timestamps[2],
+        userid: '126',
+        ref: 'ref',
+        pageSize: 25, // default
       };
-
-      const defaultPageSize = 25;
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
@@ -206,7 +202,7 @@ describe('Response queries', () => {
       await vlabPool.query(MOCK_QUERY);
 
       // give me all responses after 2022-06-06 10:00:00+00:00, '126', 'ref'
-      const responses = await Response.all(mockData(defaultPageSize));
+      const responses = await Response.all(mockData);
 
       responses.should.eql([
         {
@@ -256,59 +252,57 @@ describe('Response queries', () => {
         },
       ]);
 
-      describe('after', () => {
-        it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
-          const responsesAfterToken = await Response.all(
-            mockData(defaultPageSize),
-          );
-          responsesAfterToken.length.should.equal(3);
-        });
-      });
-
-      describe('pageSize', () => {
-        it('should return the specified maximum number of responses', async () => {
-          const maxResponses = await Response.all(mockData(1));
-          maxResponses.length.should.equal(1);
-        });
-      });
+      // describe('pageSize', () => {
+      //   it('should return the specified maximum number of responses', async () => {
+      //     const maxResponses = await Response.all({
+      //       mockData: { pageSize: 2 },
+      //     });
+      //     maxResponses.length.should.equal(2);
+      //   });
+      // });
 
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
           const userNotFound = await Response.all({
-            email: 'test4@vlab.com',
+            mockData: { email: 'test4@vlab.com' },
           });
           userNotFound.length.should.equal(0);
+        });
+
+        it('should return a response if the user email is found', async () => {
+          const userFound = await Response.all(mockData);
+          userFound.length.should.equal(3);
         });
       });
 
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
           const surveyNotFound = await Response.all({
-            survey: 'This survey does not exist',
+            mockData: { survey: 'this survey doesnt exist!' },
           });
+
           surveyNotFound.length.should.equal(0);
+        });
+
+        it('should return a response if the survey is found', async () => {
+          const userFound = await Response.all(mockData);
+          userFound.length.should.equal(3);
         });
       });
 
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
-          const responses = await Response.all({
-            survey: survey.survey_name,
-          });
+          const responses = await Response.all(mockData);
 
           const goodSurvey = survey;
           const badSurvey = survey2;
 
-          responses.forEach(response =>
-            response.surveyid.should.equal(goodSurvey.id),
-          );
+          responses.forEach(el => el.surveyid.should.equal(goodSurvey.id));
 
-          responses.forEach(response =>
-            response.surveyid.should.not.equal(badSurvey.id),
-          );
+          responses.forEach(el => el.surveyid.should.not.equal(badSurvey.id));
 
-          responses.forEach(response =>
-            response.text.should.not.equal('Do not return me!'),
+          responses.forEach(el =>
+            el.response.should.not.equal('Do not return me!'),
           );
         });
       });
