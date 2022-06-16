@@ -37,9 +37,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM responses');
-  });
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM responses');
+  // });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -268,7 +268,7 @@ describe('Response queries', () => {
         });
 
         it('should return a response if the user email is found', async () => {
-          const userFound = await Response.all(mockData());
+          const userFound = await Response.all(mockData(user.email));
           userFound.length.should.equal(3);
         });
       });
@@ -281,7 +281,7 @@ describe('Response queries', () => {
           surveyNotFound.length.should.equal(0);
         });
 
-        it('should return a response if the survey is found', async () => {
+        it('should return a response if the survey name is found', async () => {
           const userFound = await Response.all(
             mockData('test3@vlab.com', survey.survey_name),
           );
