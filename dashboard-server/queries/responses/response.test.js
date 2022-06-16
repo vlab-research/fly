@@ -37,9 +37,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  // afterEach(async () => {
-  //   await vlabPool.query('DELETE FROM responses');
-  // });
+  afterEach(async () => {
+    await vlabPool.query('DELETE FROM responses');
+  });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -152,18 +152,23 @@ describe('Response queries', () => {
         3: '2022-06-06 10:02:00+00:00',
       };
 
-      const mockData = (email, survey, timestamp, userid, ref, pageSize) => {
+      const mockData = (
+        email = user.email,
+        survey = 'Survey123',
+        timestamp = timestamps[2],
+        userid = '126',
+        ref = 'ref',
+        pageSize = 25, // default
+      ) => {
         return {
           email,
           survey,
           timestamp,
           userid,
           ref,
-          pageSize, // default
+          pageSize,
         };
       };
-
-      const defaultPageSize = 25;
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
@@ -206,16 +211,7 @@ describe('Response queries', () => {
       await vlabPool.query(MOCK_QUERY);
 
       // give me all responses after 2022-06-06 10:00:00+00:00, '126', 'ref'
-      const responses = await Response.all(
-        mockData(
-          'test3@vlab.com',
-          survey.survey_name,
-          timestamps[2],
-          '126',
-          'ref',
-          defaultPageSize,
-        ),
-      );
+      const responses = await Response.all(mockData());
 
       responses.should.eql([
         {
@@ -267,30 +263,12 @@ describe('Response queries', () => {
 
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
-          const userNotFound = await Response.all(
-            mockData(
-              'test4@vlab.com',
-              survey.survey_name,
-              timestamps[2],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
-          );
+          const userNotFound = await Response.all(mockData('test4@vlab.com'));
           userNotFound.length.should.equal(0);
         });
 
         it('should return a response if the user email is found', async () => {
-          const userFound = await Response.all(
-            mockData(
-              'test3@vlab.com',
-              survey.survey_name,
-              timestamps[2],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
-          );
+          const userFound = await Response.all(mockData());
           userFound.length.should.equal(3);
         });
       });
@@ -298,28 +276,14 @@ describe('Response queries', () => {
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
           const surveyNotFound = await Response.all(
-            mockData(
-              'test3@vlab.com',
-              'this survey does not exist!',
-              timestamps[2],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
+            mockData('test3@vlab.com', 'this survey does not exist!'),
           );
           surveyNotFound.length.should.equal(0);
         });
 
         it('should return a response if the survey is found', async () => {
           const userFound = await Response.all(
-            mockData(
-              'test3@vlab.com',
-              survey.survey_name,
-              timestamps[2],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
+            mockData('test3@vlab.com', survey.survey_name),
           );
           userFound.length.should.equal(3);
         });
@@ -328,14 +292,7 @@ describe('Response queries', () => {
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
           const responses = await Response.all(
-            mockData(
-              'test3@vlab.com',
-              survey.survey_name,
-              timestamps[2],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
+            mockData('test3@vlab.com', survey.survey_name),
           );
 
           const goodSurvey = survey;
@@ -370,42 +327,21 @@ describe('Response queries', () => {
       describe('after', () => {
         it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
           const responsesAfterToken = await Response.all(
-            mockData(
-              'test3@vlab.com',
-              survey.survey_name,
-              timestamps[1],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
+            mockData('test3@vlab.com', survey.survey_name, timestamps[1]),
           );
           responsesAfterToken.length.should.equal(4);
         });
 
         it('should return less responses for a later timestamp', async () => {
           const responsesAfterToken = await Response.all(
-            mockData(
-              'test3@vlab.com',
-              survey.survey_name,
-              timestamps[2],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
+            mockData('test3@vlab.com', survey.survey_name, timestamps[2]),
           );
           responsesAfterToken.length.should.equal(3);
         });
 
         it('should return no responses when on the last token', async () => {
           const responsesAfterToken = await Response.all(
-            mockData(
-              'test3@vlab.com',
-              survey.survey_name,
-              timestamps[3],
-              '126',
-              'ref',
-              defaultPageSize,
-            ),
+            mockData('test3@vlab.com', survey.survey_name, timestamps[3]),
           );
           responsesAfterToken.length.should.equal(0);
         });
