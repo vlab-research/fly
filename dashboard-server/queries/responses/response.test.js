@@ -211,7 +211,7 @@ describe('Response queries', () => {
       await vlabPool.query(MOCK_QUERY);
 
       // give me all responses after 2022-06-06 10:00:00+00:00, '126', 'ref'
-      const responses = await Response.all(mockData());
+      const responses = await Response._all(mockData());
 
       responses.should.eql([
         {
@@ -263,26 +263,26 @@ describe('Response queries', () => {
 
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
-          const userNotFound = await Response.all(mockData('test4@vlab.com'));
+          const userNotFound = await Response._all(mockData('test4@vlab.com'));
           userNotFound.length.should.equal(0);
         });
 
         it('should return a response if the user email is found', async () => {
-          const userFound = await Response.all(mockData(user.email));
+          const userFound = await Response._all(mockData(user.email));
           userFound.length.should.equal(3);
         });
       });
 
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
-          const surveyNotFound = await Response.all(
+          const surveyNotFound = await Response._all(
             mockData('test3@vlab.com', 'this survey does not exist!'),
           );
           surveyNotFound.length.should.equal(0);
         });
 
         it('should return a response if the survey name is found', async () => {
-          const userFound = await Response.all(
+          const userFound = await Response._all(
             mockData('test3@vlab.com', survey.survey_name),
           );
           userFound.length.should.equal(3);
@@ -291,7 +291,7 @@ describe('Response queries', () => {
 
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
-          const responses = await Response.all(
+          const responses = await Response._all(
             mockData('test3@vlab.com', survey.survey_name),
           );
 
@@ -310,7 +310,7 @@ describe('Response queries', () => {
 
       describe('pageSize', () => {
         it('should return the specified maximum number of responses', async () => {
-          const maxResponses = await Response.all(
+          const maxResponses = await Response._all(
             mockData(
               'test3@vlab.com',
               survey.survey_name,
@@ -326,34 +326,48 @@ describe('Response queries', () => {
 
       describe('after', () => {
         it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
-          const responsesAfterToken = await Response.all(
+          const responsesAfterToken = await Response._all(
             mockData('test3@vlab.com', survey.survey_name, timestamps[1]),
           );
           responsesAfterToken.length.should.equal(4);
         });
 
         it('should return less responses for a later timestamp', async () => {
-          const responsesAfterToken = await Response.all(
+          const responsesAfterToken = await Response._all(
             mockData('test3@vlab.com', survey.survey_name, timestamps[2]),
           );
           responsesAfterToken.length.should.equal(3);
         });
 
         it('should return no responses when on the last token', async () => {
-          const responsesAfterToken = await Response.all(
+          const responsesAfterToken = await Response._all(
             mockData('test3@vlab.com', survey.survey_name, timestamps[3]),
           );
           responsesAfterToken.length.should.equal(0);
         });
       });
+
+      // describe('after', () => {
+      //   it('should return all responses after a given token', async () => {
+      //     const token = encodeToken('2022-06-06 10:00:00+00:00, 126, ref');
+      //     console.log('i am the token: ' + token);
+      //     const responsesAfterToken = await Response._all(
+      //       'test3@vlab.com',
+      //       survey.survey_name,
+      //       token,
+      //       25,
+      //     );
+      //     responsesAfterToken.length.should.equal(3);
+      //   });
+      // });
     });
   });
 });
 
 describe('GET /all', function() {
-  it('responds with all responses in json', async () => {
+  it('responds with a list of response objects each with a token', async () => {
     const response = await request(app)
-      .get(`/all?survey=Survey123&after=1000&limit=100`)
+      .get(`/all?survey=Survey123&limit=100`) // no token needed here
       .set('Accept', 'application/json')
       .expect('Content-Type', /json/)
       .expect(200);
@@ -362,4 +376,23 @@ describe('GET /all', function() {
       'application/json; charset=utf-8',
     );
   });
+
+  // it('responds with a paginated list of responses', async () => {
+  //   const response = await request(app)
+  //     .get(`/all?survey=Survey123&after="sometoken"&limit=100`)
+  //     .set('Accept', 'application/json')
+  //     .expect('Content-Type', /json/)
+  //     .expect(200);
+  //   response.statusCode.should.equal(200);
+  //   response.headers['content-type'].should.equal(
+  //     'application/json; charset=utf-8',
+  //   );
+  // });
 });
+
+// the first call comes without a token
+// needs to work without a token
+// response.body.token exists - test this part first
+// make another request with the same token - expect to get new responses
+// if I don't know what timestamp to start from start from 0
+// ['', new Date('1970-01-01'), '']
