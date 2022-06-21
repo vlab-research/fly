@@ -4,8 +4,9 @@ require('mocha');
 const userModel = require('../users/user.queries');
 const surveyModel = require('../surveys/survey.queries');
 const model = require('./response.queries');
-const request = require('supertest');
 const router = require('./../../api/responses/response.routes');
+const t = require('./token');
+const request = require('supertest');
 
 // hack to avoid bootstrapping the entire
 // server with all its env vars, just test
@@ -276,14 +277,14 @@ describe('Response queries', () => {
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
           const surveyNotFound = await Response._all(
-            mockData('test3@vlab.com', 'this survey does not exist!'),
+            mockData(user.email, 'this survey does not exist!'),
           );
           surveyNotFound.length.should.equal(0);
         });
 
         it('should return a response if the survey name is found', async () => {
           const userFound = await Response._all(
-            mockData('test3@vlab.com', survey.survey_name),
+            mockData(user.email, survey.survey_name),
           );
           userFound.length.should.equal(3);
         });
@@ -292,7 +293,7 @@ describe('Response queries', () => {
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
           const responses = await Response._all(
-            mockData('test3@vlab.com', survey.survey_name),
+            mockData(user.email, survey.survey_name),
           );
 
           const goodSurvey = survey;
@@ -312,7 +313,7 @@ describe('Response queries', () => {
         it('should return the specified maximum number of responses', async () => {
           const maxResponses = await Response._all(
             mockData(
-              'test3@vlab.com',
+              user.email,
               survey.survey_name,
               timestamps[2],
               '126',
@@ -327,72 +328,73 @@ describe('Response queries', () => {
       describe('after', () => {
         it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
           const responsesAfterToken = await Response._all(
-            mockData('test3@vlab.com', survey.survey_name, timestamps[1]),
+            mockData(user.email, survey.survey_name, timestamps[1]),
           );
           responsesAfterToken.length.should.equal(4);
         });
 
         it('should return less responses for a later timestamp', async () => {
           const responsesAfterToken = await Response._all(
-            mockData('test3@vlab.com', survey.survey_name, timestamps[2]),
+            mockData(user.email, survey.survey_name, timestamps[2]),
           );
           responsesAfterToken.length.should.equal(3);
         });
 
         it('should return no responses when on the last token', async () => {
           const responsesAfterToken = await Response._all(
-            mockData('test3@vlab.com', survey.survey_name, timestamps[3]),
+            mockData(user.email, survey.survey_name, timestamps[3]),
           );
           responsesAfterToken.length.should.equal(0);
         });
       });
 
-      // describe('after', () => {
-      //   it('should return all responses after a given token', async () => {
-      //     const token = encodeToken('2022-06-06 10:00:00+00:00, 126, ref');
-      //     console.log('i am the token: ' + token);
-      //     const responsesAfterToken = await Response._all(
-      //       'test3@vlab.com',
-      //       survey.survey_name,
-      //       token,
-      //       25,
-      //     );
-      //     responsesAfterToken.length.should.equal(3);
-      //   });
-      // });
+      describe('after (token version)', () => {
+        it('should return all responses after a given token', async () => {
+          const token = new t.Token();
+          const rawToken = token.rawToken(timestamps[2], '126', 'ref');
+          const encodedToken = token.encode(rawToken);
+
+          const responsesAfterToken = await Response.all(
+            user.email,
+            survey.survey_name,
+            encodedToken,
+            25,
+          );
+          responsesAfterToken.length.should.equal(3);
+        });
+      });
     });
   });
 });
 
-describe('GET /all', function() {
-  it('responds with a list of response objects each with a token', async () => {
-    const response = await request(app)
-      .get(`/all?survey=Survey123&limit=100`) // no token needed here
-      .set('Accept', 'application/json')
-      .expect('Content-Type', /json/)
-      .expect(200);
-    response.statusCode.should.equal(200);
-    response.headers['content-type'].should.equal(
-      'application/json; charset=utf-8',
-    );
-  });
+it('responds with a list of all responses each with a token', async () => {
+  const survey = 'Survey123';
+  const pageSize = 100;
 
-  // it('responds with a paginated list of responses', async () => {
-  //   const response = await request(app)
-  //     .get(`/all?survey=Survey123&after="sometoken"&limit=100`)
-  //     .set('Accept', 'application/json')
-  //     .expect('Content-Type', /json/)
-  //     .expect(200);
-  //   response.statusCode.should.equal(200);
-  //   response.headers['content-type'].should.equal(
-  //     'application/json; charset=utf-8',
-  //   );
-  // });
+  const response = await request(app)
+    .get(`/all?survey=${survey}&pageSize=${pageSize}`) // no token needed here
+    .set('Accept', 'application/json')
+    .expect('Content-Type', /json/)
+    .expect(200);
+  response.statusCode.should.equal(200);
+  response.headers['content-type'].should.equal(
+    'application/json; charset=utf-8',
+  );
 });
+
+// it('responds with a paginated list of responses', async () => {
+//   const response = await request(app)
+//     .get(`/all?survey=Survey123&after="sometoken"&limit=100`)
+//     .set('Accept', 'application/json')
+//     .expect('Content-Type', /json/)
+//     .expect(200);
+//   response.statusCode.should.equal(200);
+//   response.headers['content-type'].should.equal(
+//     'application/json; charset=utf-8',
+//   );
+// });
 
 // the first call comes without a token
 // needs to work without a token
 // response.body.token exists - test this part first
 // make another request with the same token - expect to get new responses
-// if I don't know what timestamp to start from start from 0
-// ['', new Date('1970-01-01'), '']

@@ -1,16 +1,16 @@
 'use strict';
 
+const t = require('./token');
+
+const token = new t.Token();
+
 const {
   ClientCursorStream,
   cursorResult,
 } = require('@vlab-research/client-cursor-stream');
 
-// const base64 = require('base-64');
-// const decodeToken = base64.decode();
-// const encodeToken = base64.encode();
-
 // gets all responses for a survey created by a user
-async function all({ email, survey, timestamp, userid, ref, pageSize }) {
+async function _all({ email, survey, timestamp, userid, ref, pageSize }) {
   const GET_ALL = `SELECT parent_surveyid,
   parent_shortcode,
   surveyid,
@@ -41,27 +41,27 @@ async function all({ email, survey, timestamp, userid, ref, pageSize }) {
     ref,
     pageSize,
   ]);
+
   return rows;
 }
 
-// async function all({ email, survey, token, pageSize }) {
-//   var [timestamp, userid, ref] = decodeToken(token);
-//   const response = _all(email, survey, timestamp, userid, ref, pageSize);
-//   var encodedToken = encodeToken(timestamp, userid, ref);
-//   return {
-//     encodedToken,
-//     data: [response],
-//   };
-// }
-// return an obj with a token as last item in array
-// { pagination: token, data: […] } this is good practice!
-// or token on every object
-// decode the token in here
-// var [timestamp, userid, ref] = decodeToken(token);
-// call _all(timestamp, userid, ref)
-// use the response from _all to populate these vars for encodeToken(timestamp, userid, ref);
-// this will give you a token for every response
-// if multiple tokens for one user take the last one
+// `${timestamp}/${userid}/${question_ref}`
+async function all(email, survey, encodedToken = null, pageSize) {
+  var [timestamp, userid, ref] =
+    encodedToken !== null ? token.decode(encodedToken) : token.default();
+
+  const responses = await _all(email, survey, timestamp, userid, ref, pageSize);
+
+  const tokenToBeSentBackInBodyofResponse = token.encode(
+    timestamp,
+    userid,
+    ref,
+  );
+
+  return {
+    items: [{ token: tokenToBeSentBackInBodyofResponse, answers: [responses] }], // one token per response
+  };
+}
 
 async function firstAndLast() {
   const GET_FIRST_AND_LAST = `SELECT *
@@ -76,6 +76,7 @@ async function firstAndLast() {
        ORDER  BY 1,2 DESC
        ) l USING (userid)`;
   const { rows } = await this.query(GET_FIRST_AND_LAST);
+
   return rows;
 }
 
@@ -155,6 +156,7 @@ module.exports = {
   name: 'Response',
   queries: pool => ({
     all: all.bind(pool),
+    _all: _all.bind(pool),
     firstAndLast: firstAndLast.bind(pool),
     formResponses: formResponses.bind(pool),
     formData: formData.bind(pool),

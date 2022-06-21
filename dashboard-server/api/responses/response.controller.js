@@ -20,7 +20,7 @@ exports.getFirstAndLast = async (req, res) => {
 
 exports.getAll = async (req, res) => {
   try {
-    const { survey } = req.query;
+    const { survey, encodedToken, pageSize } = req.query;
     const { email } = req.user; // req is mutable and we can add whatever we want
 
     if (!email) {
@@ -31,7 +31,7 @@ exports.getAll = async (req, res) => {
       return res.status(400).send('No survey, no responses!');
     }
 
-    const responses = await Response.all({ email, survey });
+    const responses = await Response.all(email, survey, encodedToken, pageSize);
     res.status(200).send(responses);
   } catch (err) {
     console.error(err);
