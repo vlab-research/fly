@@ -10,7 +10,7 @@ const {
 } = require('@vlab-research/client-cursor-stream');
 
 // gets all responses for a survey created by a user
-async function _all({ email, survey, timestamp, userid, ref, pageSize }) {
+async function _all({ email, survey, timestamp, userid, ref, pageSize }, pool) {
   const GET_ALL = `SELECT parent_surveyid,
   parent_shortcode,
   surveyid,
@@ -33,7 +33,8 @@ async function _all({ email, survey, timestamp, userid, ref, pageSize }) {
   ORDER BY (timestamp, responses.userid, question_ref)
   LIMIT $6`;
 
-  const { rows } = await this.query(GET_ALL, [
+  const { rows } = await pool.query(GET_ALL, [
+    // currently shows pool.query is not a function
     email,
     survey,
     timestamp,
@@ -45,12 +46,19 @@ async function _all({ email, survey, timestamp, userid, ref, pageSize }) {
   return rows;
 }
 
-// `${timestamp}/${userid}/${question_ref}`
 async function all(email, survey, encodedToken = null, pageSize) {
   var [timestamp, userid, ref] =
     encodedToken !== null ? token.decode(encodedToken) : token.default();
 
-  const responses = await _all(email, survey, timestamp, userid, ref, pageSize);
+  const responses = await _all(
+    email,
+    survey,
+    timestamp,
+    userid,
+    ref,
+    pageSize,
+    this,
+  );
 
   const tokenToBeSentBackInBodyofResponse = token.encode(
     timestamp,
@@ -156,7 +164,6 @@ module.exports = {
   name: 'Response',
   queries: pool => ({
     all: all.bind(pool),
-    _all: _all.bind(pool),
     firstAndLast: firstAndLast.bind(pool),
     formResponses: formResponses.bind(pool),
     formData: formData.bind(pool),
