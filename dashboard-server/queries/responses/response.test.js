@@ -6,6 +6,7 @@ const surveyModel = require('../surveys/survey.queries');
 const model = require('./response.queries');
 const router = require('./../../api/responses/response.routes');
 const t = require('./token');
+const r = require('./response.queries');
 const request = require('supertest');
 
 // hack to avoid bootstrapping the entire
@@ -115,7 +116,7 @@ describe('Response queries', () => {
   });
 
   describe('all()', () => {
-    it('should return all responses for a survey created by a user', async () => {
+    it('should return an unpaginated list of responses for a survey created by a user', async () => {
       const user = {
         email: 'test3@vlab.com',
       };
@@ -151,24 +152,6 @@ describe('Response queries', () => {
         1: '2022-06-06 09:58:00+00:00',
         2: '2022-06-06 10:00:00+00:00',
         3: '2022-06-06 10:02:00+00:00',
-      };
-
-      const mockData = (
-        email = user.email,
-        survey = 'Survey123',
-        timestamp = timestamps[2],
-        userid = '126',
-        ref = 'ref',
-        pageSize = 25, // default
-      ) => {
-        return {
-          email,
-          survey,
-          timestamp,
-          userid,
-          ref,
-          pageSize,
-        };
       };
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
@@ -211,159 +194,208 @@ describe('Response queries', () => {
 
       await vlabPool.query(MOCK_QUERY);
 
-      // give me all responses after 2022-06-06 10:00:00+00:00, '126', 'ref'
-      const responses = await Response._all(mockData());
+      let encodedToken;
 
-      responses.should.eql([
-        {
-          parent_surveyid: survey.id,
-          parent_shortcode: '101',
-          surveyid: survey.id,
-          flowid: '100004',
-          userid: '127',
-          question_ref: 'ref',
-          question_idx: '10',
-          question_text: 'text',
-          response: '{ "text": "first" }',
-          timestamp: timestamps[2],
-          metadata: null,
-          pageid: null,
-          translated_response: null,
-        },
-        {
-          parent_surveyid: survey.id,
-          parent_shortcode: '101',
-          surveyid: survey.id,
-          flowid: '100004',
-          userid: '128',
-          question_ref: 'ref',
-          question_idx: '10',
-          question_text: 'text',
-          response: '{ "text": "first" }',
-          timestamp: timestamps[2],
-          metadata: null,
-          pageid: null,
-          translated_response: null,
-        },
-        {
-          parent_surveyid: survey.id,
-          parent_shortcode: '202',
-          surveyid: survey.id,
-          flowid: '100005',
-          userid: '126',
-          question_ref: 'ref',
-          question_idx: '10',
-          question_text: 'text',
-          response: '{ "text": "first" }',
-          timestamp: timestamps[3],
-          metadata: null,
-          pageid: null,
-          translated_response: null,
-        },
-      ]);
+      const responses = await Response.all(
+        user.email,
+        survey.survey_name,
+        encodedToken,
+        25,
+      );
 
-      describe('userNotFound', () => {
-        it('should return no responses if the user email is not found', async () => {
-          const userNotFound = await Response._all(mockData('test4@vlab.com'));
-          userNotFound.length.should.equal(0);
-        });
-
-        it('should return a response if the user email is found', async () => {
-          const userFound = await Response._all(mockData(user.email));
-          userFound.length.should.equal(3);
-        });
+      responses.items[0].should.eql({
+        token: 'MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==',
+        answers: [
+          {
+            parent_surveyid: survey.id,
+            parent_shortcode: '101',
+            surveyid: survey.id,
+            flowid: '100001',
+            userid: '127',
+            question_ref: 'ref',
+            question_idx: '10',
+            question_text: 'text',
+            response: '{ "text": "last" }',
+            timestamp: timestamps[1],
+            metadata: null,
+            pageid: null,
+            translated_response: null,
+          },
+          {
+            parent_surveyid: survey.id,
+            parent_shortcode: '101',
+            surveyid: survey.id,
+            flowid: '100004',
+            userid: '127',
+            question_ref: 'ref',
+            question_idx: '10',
+            question_text: 'text',
+            response: '{ "text": "first" }',
+            timestamp: timestamps[2],
+            metadata: null,
+            pageid: null,
+            translated_response: null,
+          },
+          {
+            parent_surveyid: survey.id,
+            parent_shortcode: '101',
+            surveyid: survey.id,
+            flowid: '100004',
+            userid: '128',
+            question_ref: 'ref',
+            question_idx: '10',
+            question_text: 'text',
+            response: '{ "text": "first" }',
+            timestamp: timestamps[2],
+            metadata: null,
+            pageid: null,
+            translated_response: null,
+          },
+          {
+            parent_surveyid: survey.id,
+            parent_shortcode: '202',
+            surveyid: survey.id,
+            flowid: '100005',
+            userid: '126',
+            question_ref: 'ref',
+            question_idx: '10',
+            question_text: 'text',
+            response: '{ "text": "first" }',
+            timestamp: timestamps[3],
+            metadata: null,
+            pageid: null,
+            translated_response: null,
+          },
+        ],
       });
 
-      describe('surveyNotFound', () => {
-        it('should return no responses if the survey name is not found', async () => {
-          const surveyNotFound = await Response._all(
-            mockData(user.email, 'this survey does not exist!'),
-          );
-          surveyNotFound.length.should.equal(0);
-        });
+      // const mockData = (
+      //   email = user.email,
+      //   survey = 'Survey123',
+      //   timestamp = timestamps[2],
+      //   userid = '126',
+      //   ref = 'ref',
+      //   pageSize = 25,
+      //   // default
+      // ) => {
+      //   return {
+      //     email,
+      //     survey,
+      //     timestamp,
+      //     userid,
+      //     ref,
+      //     pageSize,
+      //   };
+      // };
 
-        it('should return a response if the survey name is found', async () => {
-          const userFound = await Response._all(
-            mockData(user.email, survey.survey_name),
-          );
-          userFound.length.should.equal(3);
-        });
-      });
+      // describe('userNotFound', () => {
+      //   it('should return no responses if the user email is not found', async () => {
+      //     const userNotFound = await Response.all(
+      //       'test3@vlab.com',
+      //       survey.survey_name,
+      //       encodedToken,
+      //       25,
+      //     );
+      //     userNotFound.length.should.equal(0);
+      //   });
+      // });
 
-      describe('responsesNotReturned', () => {
-        it('should only return responses for the given survey', async () => {
-          const responses = await Response._all(
-            mockData(user.email, survey.survey_name),
-          );
+      // it('should return a response if the user email is found', async () => {
+      //   const userFound = await r._all(mockData(user.email));
+      //   userFound.length.should.equal(3);
+      // });
 
-          const goodSurvey = survey;
-          const badSurvey = survey2;
+      // describe('surveyNotFound', () => {
+      //   it('should return no responses if the survey name is not found', async () => {
+      //     const surveyNotFound = await r._all(
+      //       mockData(user.email, 'this survey does not exist!'),
+      //     );
+      //     surveyNotFound.length.should.equal(0);
+      //   });
 
-          responses.forEach(el => el.surveyid.should.equal(goodSurvey.id));
-
-          responses.forEach(el => el.surveyid.should.not.equal(badSurvey.id));
-
-          responses.forEach(el =>
-            el.response.should.not.equal('Do not return me!'),
-          );
-        });
-      });
-
-      describe('pageSize', () => {
-        it('should return the specified maximum number of responses', async () => {
-          const maxResponses = await Response._all(
-            mockData(
-              user.email,
-              survey.survey_name,
-              timestamps[2],
-              '126',
-              'ref',
-              2,
-            ),
-          );
-          maxResponses.length.should.equal(2);
-        });
-      });
-
-      describe('after', () => {
-        it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
-          const responsesAfterToken = await Response._all(
-            mockData(user.email, survey.survey_name, timestamps[1]),
-          );
-          responsesAfterToken.length.should.equal(4);
-        });
-
-        it('should return less responses for a later timestamp', async () => {
-          const responsesAfterToken = await Response._all(
-            mockData(user.email, survey.survey_name, timestamps[2]),
-          );
-          responsesAfterToken.length.should.equal(3);
-        });
-
-        it('should return no responses when on the last token', async () => {
-          const responsesAfterToken = await Response._all(
-            mockData(user.email, survey.survey_name, timestamps[3]),
-          );
-          responsesAfterToken.length.should.equal(0);
-        });
-      });
-
-      describe('after (token version)', () => {
-        it('should return all responses after a given token', async () => {
-          const token = new t.Token();
-          const rawToken = token.rawToken(timestamps[2], '126', 'ref');
-          const encodedToken = token.encode(rawToken);
-
-          const responsesAfterToken = await Response.all(
-            user.email,
-            survey.survey_name,
-            encodedToken,
-            25,
-          );
-          responsesAfterToken.length.should.equal(3);
-        });
-      });
+      // it('should return a response if the survey name is found', async () => {
+      //   const userFound = await r._all(
+      //     mockData(user.email, survey.survey_name),
+      //   );
+      //   userFound.length.should.equal(3);
+      // });
     });
+
+    // describe('responsesNotReturned', () => {
+    //   it('should only return responses for the given survey', async () => {
+    //     const responses = await r._all(
+    //       mockData(user.email, survey.survey_name),
+    //     );
+
+    //     const goodSurvey = survey;
+    //     const badSurvey = survey2;
+
+    //     responses.forEach(el => el.surveyid.should.equal(goodSurvey.id));
+
+    //     responses.forEach(el => el.surveyid.should.not.equal(badSurvey.id));
+
+    //     responses.forEach(el =>
+    //       el.response.should.not.equal('Do not return me!'),
+    //     );
+    //   });
+    // });
+
+    // describe('pageSize', () => {
+    //   it('should return the specified maximum number of responses', async () => {
+    //     const maxResponses = await r._all(
+    //       mockData(
+    //         user.email,
+    //         survey.survey_name,
+    //         timestamps[2],
+    //         '126',
+    //         'ref',
+    //         2,
+    //       ),
+    //     );
+    //     maxResponses.length.should.equal(2);
+    //   });
+    // });
+
+    // describe('after', () => {
+    //   it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
+    //     const responsesAfterToken = await r._all(
+    //       mockData(user.email, survey.survey_name, timestamps[1]),
+    //     );
+    //     responsesAfterToken.length.should.equal(4);
+    //   });
+
+    // it('should return less responses for a later timestamp', async () => {
+    //   const responsesAfterToken = await r._all(
+    //     mockData(user.email, survey.survey_name, timestamps[2]),
+    //   );
+    //   responsesAfterToken.length.should.equal(3);
+    // });
+
+    //   it('should return no responses when on the last token', async () => {
+    //     const responsesAfterToken = await r._all(
+    //       mockData(user.email, survey.survey_name, timestamps[3]),
+    //     );
+    //     responsesAfterToken.length.should.equal(0);
+    //   });
+    // });
+
+    //   describe('after (token version)', () => {
+
+    //     it('should return all responses after a given token', async () => {
+    //       const token = new t.Token();
+    //       const rawToken = token.rawToken(timestamps[2], '126', 'ref');
+    //       const encodedToken = token.encode(rawToken);
+
+    //       const responsesAfterToken = await Response.all(
+    //         user.email,
+    //         survey.survey_name,
+    //         encodedToken,
+    //         25,
+    //       );
+    //       responsesAfterToken.length.should.equal(3);
+    //     });
+    //   });
+    // });
   });
 });
 

@@ -12,8 +12,7 @@ const {
 
 const { DATABASE_CONFIG } = require('../../config');
 
-// gets all responses for a survey created by a user
-async function _all({ email, survey, timestamp, userid, ref, pageSize }, pool) {
+async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
   const GET_ALL = `SELECT parent_surveyid,
   parent_shortcode,
   surveyid,
@@ -50,6 +49,7 @@ async function _all({ email, survey, timestamp, userid, ref, pageSize }, pool) {
   return rows;
 }
 
+// gets all responses for a survey created by a user and returns with a token
 async function all(email, survey, encodedToken = null, pageSize) {
   var [timestamp, userid, ref] =
     encodedToken !== null ? token.decode(encodedToken) : token.default();
@@ -71,7 +71,7 @@ async function all(email, survey, encodedToken = null, pageSize) {
   );
 
   return {
-    items: [{ token: tokenToBeSentBackInBodyofResponse, answers: [responses] }], // one token per response
+    items: [{ token: tokenToBeSentBackInBodyofResponse, answers: responses }], // one token per response
   };
 }
 

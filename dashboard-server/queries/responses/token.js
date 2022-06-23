@@ -18,7 +18,7 @@ class Token {
   }
 
   default() {
-    const firstToken = `${new Date('1970-01-01')}/ ''/ ''`;
+    const firstToken = "1970-01-01 00:00:00+00:00/''/''";
     return firstToken.split('/');
   }
 }

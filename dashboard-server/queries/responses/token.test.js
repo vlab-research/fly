@@ -13,11 +13,9 @@ describe('default', () => {
     const token = new t.Token();
     var [timestamp, userid, ref] = token.default();
 
-    timestamp.should.equal(
-      'Thu Jan 01 1970 01:00:00 GMT+0100 (Central European Standard Time)',
-    );
-    userid.should.equal(" ''");
-    ref.should.equal(" ''");
+    timestamp.should.equal('1970-01-01 00:00:00+00:00');
+    userid.should.equal("''");
+    ref.should.equal("''");
   });
 });
 
