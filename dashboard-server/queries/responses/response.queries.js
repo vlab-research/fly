@@ -1,4 +1,5 @@
 'use strict';
+const { Pool } = require('pg');
 
 const t = require('./token');
 
@@ -8,6 +9,8 @@ const {
   ClientCursorStream,
   cursorResult,
 } = require('@vlab-research/client-cursor-stream');
+
+const { DATABASE_CONFIG } = require('../../config');
 
 // gets all responses for a survey created by a user
 async function _all({ email, survey, timestamp, userid, ref, pageSize }, pool) {
@@ -33,8 +36,9 @@ async function _all({ email, survey, timestamp, userid, ref, pageSize }, pool) {
   ORDER BY (timestamp, responses.userid, question_ref)
   LIMIT $6`;
 
+  pool = new Pool(DATABASE_CONFIG);
+
   const { rows } = await pool.query(GET_ALL, [
-    // currently shows pool.query is not a function
     email,
     survey,
     timestamp,
@@ -162,6 +166,7 @@ async function formData(email, survey) {
 
 module.exports = {
   name: 'Response',
+  _all,
   queries: pool => ({
     all: all.bind(pool),
     firstAndLast: firstAndLast.bind(pool),
