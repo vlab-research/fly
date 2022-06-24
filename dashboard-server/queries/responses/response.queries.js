@@ -1,5 +1,4 @@
 'use strict';
-const { Pool } = require('pg');
 
 const t = require('./token');
 
@@ -9,8 +8,6 @@ const {
   ClientCursorStream,
   cursorResult,
 } = require('@vlab-research/client-cursor-stream');
-
-const { DATABASE_CONFIG } = require('../../config');
 
 async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
   const GET_ALL = `SELECT parent_surveyid,
@@ -34,8 +31,6 @@ async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
   AND (timestamp, responses.userid, question_ref) > ($3, $4, $5)
   ORDER BY (timestamp, responses.userid, question_ref)
   LIMIT $6`;
-
-  pool = new Pool(DATABASE_CONFIG);
 
   const { rows } = await pool.query(GET_ALL, [
     email,
