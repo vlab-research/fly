@@ -6,8 +6,8 @@ const surveyModel = require('../surveys/survey.queries');
 const model = require('./response.queries');
 const router = require('./../../api/responses/response.routes');
 const t = require('./token');
-const r = require('./response.queries');
 const request = require('supertest');
+const token = new t.Token();
 
 // hack to avoid bootstrapping the entire
 // server with all its env vars, just test
@@ -115,6 +115,14 @@ describe('Response queries', () => {
     });
   });
 
+  const timestamps = {
+    1: '2022-06-06 09:58:00+00:00',
+    2: '2022-06-06 10:00:00+00:00',
+    3: '2022-06-06 10:02:00+00:00',
+  };
+
+  const defaultPageSize = 25;
+
   describe('all()', () => {
     it('should return an unpaginated list of responses for a survey created by a user', async () => {
       const user = {
@@ -147,12 +155,6 @@ describe('Response queries', () => {
         survey_name: 'Survey321',
         translation_conf: '{}',
       });
-
-      const timestamps = {
-        1: '2022-06-06 09:58:00+00:00',
-        2: '2022-06-06 10:00:00+00:00',
-        3: '2022-06-06 10:02:00+00:00',
-      };
 
       const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
@@ -196,12 +198,16 @@ describe('Response queries', () => {
 
       let encodedToken;
 
-      const responses = await Response.all(
-        user.email,
-        survey.survey_name,
-        encodedToken,
-        25,
-      );
+      const mockData = {
+        email: user.email,
+        surveyName: survey.survey_name,
+        after: encodedToken,
+        pageSize: defaultPageSize,
+      };
+
+      const { email, surveyName, after, pageSize } = mockData;
+
+      const responses = await Response.all(email, surveyName, after, pageSize);
 
       responses.items[0].should.eql({
         token: 'MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==',
@@ -268,163 +274,185 @@ describe('Response queries', () => {
           },
         ],
       });
+      describe('userNotFound', () => {
+        it('should return no responses if the user email is not found', async () => {
+          const userNotFound = await Response.all(
+            'userdoesntexist@vlab.com',
+            surveyName,
+            after,
+            pageSize,
+          );
 
-      // const mockData = (
-      //   email = user.email,
-      //   survey = 'Survey123',
-      //   timestamp = timestamps[2],
-      //   userid = '126',
-      //   ref = 'ref',
-      //   pageSize = 25,
-      //   // default
-      // ) => {
-      //   return {
-      //     email,
-      //     survey,
-      //     timestamp,
-      //     userid,
-      //     ref,
-      //     pageSize,
-      //   };
-      // };
+          const answers = userNotFound.items[0].answers;
+          answers.length.should.equal(0);
+        });
+      });
 
-      // describe('userNotFound', () => {
-      //   it('should return no responses if the user email is not found', async () => {
-      //     const userNotFound = await Response.all(
-      //       'test3@vlab.com',
-      //       survey.survey_name,
-      //       encodedToken,
-      //       25,
-      //     );
-      //     userNotFound.length.should.equal(0);
-      //   });
-      // });
+      it('should return a response if the user email is found', async () => {
+        const userFound = await Response.all(
+          email,
+          surveyName,
+          after,
+          pageSize,
+        );
 
-      // it('should return a response if the user email is found', async () => {
-      //   const userFound = await r._all(mockData(user.email));
-      //   userFound.length.should.equal(3);
-      // });
+        const answers = userFound.items[0].answers;
+        answers.length.should.equal(4);
+      });
 
-      // describe('surveyNotFound', () => {
-      //   it('should return no responses if the survey name is not found', async () => {
-      //     const surveyNotFound = await r._all(
-      //       mockData(user.email, 'this survey does not exist!'),
-      //     );
-      //     surveyNotFound.length.should.equal(0);
-      //   });
+      describe('surveyNotFound', () => {
+        it('should return no responses if the survey name is not found', async () => {
+          const surveyNotFound = await Response.all(
+            user.email,
+            'this survey does not exist!',
+            encodedToken,
+            defaultPageSize,
+          );
 
-      // it('should return a response if the survey name is found', async () => {
-      //   const userFound = await r._all(
-      //     mockData(user.email, survey.survey_name),
-      //   );
-      //   userFound.length.should.equal(3);
-      // });
+          const answers = surveyNotFound.items[0].answers;
+          answers.length.should.equal(0);
+        });
+
+        it('should return a response if the survey name is found', async () => {
+          const surveyFound = await Response.all(
+            user.email,
+            survey.survey_name,
+            encodedToken,
+            defaultPageSize,
+          );
+
+          const answers = surveyFound.items[0].answers;
+          answers.length.should.equal(4);
+        });
+      });
+
+      describe('responsesNotReturned', () => {
+        it('should only return responses for the given survey', async () => {
+          const responses = await Response.all(
+            user.email,
+            survey.survey_name,
+            encodedToken,
+            defaultPageSize,
+          );
+
+          const goodSurvey = survey;
+          const badSurvey = survey2;
+
+          const answers = responses.items[0].answers;
+
+          answers.forEach(el => el.surveyid.should.equal(goodSurvey.id));
+          answers.forEach(el => el.surveyid.should.not.equal(badSurvey.id));
+          answers.forEach(el =>
+            el.response.should.not.equal('Do not return me!'),
+          );
+        });
+      });
+
+      describe('pageSize', () => {
+        it('should return the specified maximum number of responses', async () => {
+          let pageSize = 2;
+
+          let maxResponses = await Response.all(
+            email,
+            surveyName,
+            after,
+            pageSize,
+          );
+
+          let answers = maxResponses.items[0].answers;
+          answers.length.should.equal(2);
+
+          pageSize = 1;
+
+          maxResponses = await Response.all(email, surveyName, after, pageSize);
+
+          answers = maxResponses.items[0].answers;
+          answers.length.should.equal(1);
+        });
+      });
+
+      describe('after', () => {
+        it('should return all new responses after a given token', async () => {
+          const after = token.getToken(timestamps[2], '126', 'ref');
+
+          const responsesAfterToken = await Response.all(
+            email,
+            surveyName,
+            after,
+            defaultPageSize,
+          );
+
+          const answers = responsesAfterToken.items[0].answers;
+          answers.length.should.equal(3);
+        });
+
+        it('should return no new responses when on the last token', async () => {
+          const after = token.getToken(timestamps[3], '126', 'ref');
+
+          const responsesAfterToken = await Response.all(
+            email,
+            surveyName,
+            after,
+            defaultPageSize,
+          );
+
+          responsesAfterToken.items[0].should.eql({
+            token: 'MjAyMi0wNi0wNiAxMDowMjowMCswMDowMA==',
+            answers: [],
+          });
+          responsesAfterToken.items[0].answers.length.should.equal(0);
+        });
+      });
+
+      describe('ROUTE /all', () => {
+        it('responds with a list of all responses', async () => {
+          const survey = 'Survey123';
+          const pageSize = defaultPageSize;
+
+          const response = await request(app)
+            .get(`/all?survey=${survey}&pageSize=${pageSize}`) // no token needed here
+            .set('Accept', 'application/json')
+            .expect('Content-Type', /json/)
+            .expect(200);
+          response.statusCode.should.equal(200);
+          response.headers['content-type'].should.equal(
+            'application/json; charset=utf-8',
+          );
+
+          const answers = response.body.items[0].answers;
+          answers.length.should.equal(4);
+
+          // should return a token in the response
+          const token = response.body.items[0].token;
+          token.should.equal('MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==');
+        });
+      });
+
+      describe('ROUTE /all (after)', () => {
+        // give me all responses after '2022-06-06 10:00:00+00:00'
+        it('responds with a list of new responses after a given token', async () => {
+          const survey = 'Survey123';
+          const pageSize = defaultPageSize;
+          const encodedToken = token.getToken(timestamps[2], '126', 'ref');
+
+          const response = await request(app)
+            .get(
+              `/all?survey=${survey}&after=${encodedToken}&pageSize=${pageSize}`,
+            )
+            .set('Accept', 'application/json')
+            .expect('Content-Type', /json/)
+            .expect(200);
+          response.statusCode.should.equal(200);
+          response.headers['content-type'].should.equal(
+            'application/json; charset=utf-8',
+          );
+          const answers = response.body.items[0].answers;
+          answers.length.should.equal(3);
+        });
+      });
     });
-
-    // describe('responsesNotReturned', () => {
-    //   it('should only return responses for the given survey', async () => {
-    //     const responses = await r._all(
-    //       mockData(user.email, survey.survey_name),
-    //     );
-
-    //     const goodSurvey = survey;
-    //     const badSurvey = survey2;
-
-    //     responses.forEach(el => el.surveyid.should.equal(goodSurvey.id));
-
-    //     responses.forEach(el => el.surveyid.should.not.equal(badSurvey.id));
-
-    //     responses.forEach(el =>
-    //       el.response.should.not.equal('Do not return me!'),
-    //     );
-    //   });
-    // });
-
-    // describe('pageSize', () => {
-    //   it('should return the specified maximum number of responses', async () => {
-    //     const maxResponses = await r._all(
-    //       mockData(
-    //         user.email,
-    //         survey.survey_name,
-    //         timestamps[2],
-    //         '126',
-    //         'ref',
-    //         2,
-    //       ),
-    //     );
-    //     maxResponses.length.should.equal(2);
-    //   });
-    // });
-
-    // describe('after', () => {
-    //   it('should return all responses after a given timestamp/userid/ref (will be updated to token)', async () => {
-    //     const responsesAfterToken = await r._all(
-    //       mockData(user.email, survey.survey_name, timestamps[1]),
-    //     );
-    //     responsesAfterToken.length.should.equal(4);
-    //   });
-
-    // it('should return less responses for a later timestamp', async () => {
-    //   const responsesAfterToken = await r._all(
-    //     mockData(user.email, survey.survey_name, timestamps[2]),
-    //   );
-    //   responsesAfterToken.length.should.equal(3);
-    // });
-
-    //   it('should return no responses when on the last token', async () => {
-    //     const responsesAfterToken = await r._all(
-    //       mockData(user.email, survey.survey_name, timestamps[3]),
-    //     );
-    //     responsesAfterToken.length.should.equal(0);
-    //   });
-    // });
-
-    //   describe('after (token version)', () => {
-
-    //     it('should return all responses after a given token', async () => {
-    //       const token = new t.Token();
-    //       const rawToken = token.rawToken(timestamps[2], '126', 'ref');
-    //       const encodedToken = token.encode(rawToken);
-
-    //       const responsesAfterToken = await Response.all(
-    //         user.email,
-    //         survey.survey_name,
-    //         encodedToken,
-    //         25,
-    //       );
-    //       responsesAfterToken.length.should.equal(3);
-    //     });
-    //   });
-    // });
   });
 });
-
-it('responds with a list of all responses each with a token', async () => {
-  const survey = 'Survey123';
-  const pageSize = 100;
-
-  const response = await request(app)
-    .get(`/all?survey=${survey}&pageSize=${pageSize}`) // no token needed here
-    .set('Accept', 'application/json')
-    .expect('Content-Type', /json/)
-    .expect(200);
-  response.statusCode.should.equal(200);
-  response.headers['content-type'].should.equal(
-    'application/json; charset=utf-8',
-  );
-});
-
-// it('responds with a paginated list of responses', async () => {
-//   const response = await request(app)
-//     .get(`/all?survey=Survey123&after="sometoken"&limit=100`)
-//     .set('Accept', 'application/json')
-//     .expect('Content-Type', /json/)
-//     .expect(200);
-//   response.statusCode.should.equal(200);
-//   response.headers['content-type'].should.equal(
-//     'application/json; charset=utf-8',
-//   );
-// });
 
 // the first call comes without a token
 // needs to work without a token

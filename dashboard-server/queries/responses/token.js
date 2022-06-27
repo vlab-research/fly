@@ -21,6 +21,11 @@ class Token {
     const firstToken = "1970-01-01 00:00:00+00:00/''/''";
     return firstToken.split('/');
   }
+
+  getToken(timestamp, userid, ref) {
+    const rawToken = this.rawToken(timestamp, userid, ref);
+    return encode(rawToken);
+  }
 }
 
 module.exports = { Token };

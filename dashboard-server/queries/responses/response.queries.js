@@ -59,14 +59,10 @@ async function all(email, survey, encodedToken = null, pageSize) {
     this,
   );
 
-  const tokenToBeSentBackInBodyofResponse = token.encode(
-    timestamp,
-    userid,
-    ref,
-  );
+  const returnedToken = token.encode(timestamp, userid, ref);
 
   return {
-    items: [{ token: tokenToBeSentBackInBodyofResponse, answers: responses }], // one token per response
+    items: [{ token: returnedToken, answers: responses }], // one token per response
   };
 }
 

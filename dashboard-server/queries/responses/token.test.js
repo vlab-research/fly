@@ -1,4 +1,5 @@
 const t = require('./token');
+const token = new t.Token();
 
 const timestamps = {
   1: '2022-06-06 09:58:00+00:00',
@@ -10,7 +11,6 @@ const ref = 'ref';
 
 describe('default', () => {
   it('returns a default timestamp, userid and ref', () => {
-    const token = new t.Token();
     var [timestamp, userid, ref] = token.default();
 
     timestamp.should.equal('1970-01-01 00:00:00+00:00');
@@ -21,16 +21,13 @@ describe('default', () => {
 
 describe('encode', () => {
   it('returns an encoded token', () => {
-    const token = new t.Token();
     const timestamp = timestamps[1];
-
     const rawToken = token.rawToken(timestamp, userid, ref);
     const encodedToken = token.encode(rawToken);
     encodedToken.should.equal(encodedToken);
   });
 
   it('encodes the first default token', () => {
-    const token = new t.Token();
     var [timestamp, userid, ref] = token.default();
     const rawToken = token.rawToken(timestamp, userid, ref);
     const encodedToken = token.encode(rawToken);
@@ -40,13 +37,19 @@ describe('encode', () => {
 
 describe('decode', () => {
   it('decodes a token into three readable values', () => {
-    const token = new t.Token();
     const timestamp = timestamps[1];
-
     const rawToken = token.rawToken(timestamp, userid, ref);
     const encodedToken = token.encode(rawToken);
     const decodedToken = token.decode(encodedToken);
     decodedToken.should.equal(decodedToken);
     decodedToken.should.have.length(3);
+  });
+});
+
+describe('getToken', () => {
+  it('returns a token from three values', () => {
+    const timestamp = timestamps[1];
+    const getToken = token.getToken(timestamp, userid, ref);
+    getToken.should.equal('MjAyMi0wNi0wNiAwOTo1ODowMCswMDowMC8xMjYvcmVm');
   });
 });
