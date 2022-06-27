@@ -39,9 +39,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  afterEach(async () => {
-    await vlabPool.query('DELETE FROM responses');
-  });
+  // afterEach(async () => {
+  //   await vlabPool.query('DELETE FROM responses');
+  // });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -386,12 +386,10 @@ describe('Response queries', () => {
         });
       });
 
-      const defaultPageSize = 25;
-
       describe('ROUTE /all', () => {
         it('responds with a list of all responses', async () => {
           const response = await request(app)
-            .get(`/all?survey=${surveyName}&pageSize=${defaultPageSize}`) // no token needed here
+            .get(`/all?survey=${surveyName}&pageSize=25`) // no token needed here
             .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect(200);
@@ -414,9 +412,7 @@ describe('Response queries', () => {
           const after = token.getToken(timestamps[2], '126', 'ref');
 
           const response = await request(app)
-            .get(
-              `/all?survey=${surveyName}&after=${after}&pageSize=${defaultPageSize}`,
-            )
+            .get(`/all?survey=${surveyName}&after=${after}&pageSize=25`)
             .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect(200);
