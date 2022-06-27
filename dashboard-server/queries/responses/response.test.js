@@ -39,9 +39,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  // afterEach(async () => {
-  //   await vlabPool.query('DELETE FROM responses');
-  // });
+  afterEach(async () => {
+    await vlabPool.query('DELETE FROM responses');
+  });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {
@@ -120,8 +120,6 @@ describe('Response queries', () => {
     2: '2022-06-06 10:00:00+00:00',
     3: '2022-06-06 10:02:00+00:00',
   };
-
-  const defaultPageSize = 25;
 
   describe('all()', () => {
     it('should return an unpaginated list of responses for a survey created by a user', async () => {
@@ -202,12 +200,11 @@ describe('Response queries', () => {
         email: user.email,
         surveyName: survey.survey_name,
         after: encodedToken,
-        pageSize: defaultPageSize,
       };
 
-      const { email, surveyName, after, pageSize } = mockData;
+      const { email, surveyName, after } = mockData;
 
-      const responses = await Response.all(email, surveyName, after, pageSize);
+      const responses = await Response.all(email, surveyName, after);
 
       responses.items[0].should.eql({
         token: 'MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==',
@@ -280,7 +277,6 @@ describe('Response queries', () => {
             'userdoesntexist@vlab.com',
             surveyName,
             after,
-            pageSize,
           );
 
           const answers = userNotFound.items[0].answers;
@@ -289,12 +285,7 @@ describe('Response queries', () => {
       });
 
       it('should return a response if the user email is found', async () => {
-        const userFound = await Response.all(
-          email,
-          surveyName,
-          after,
-          pageSize,
-        );
+        const userFound = await Response.all(email, surveyName, after);
 
         const answers = userFound.items[0].answers;
         answers.length.should.equal(4);
@@ -306,7 +297,6 @@ describe('Response queries', () => {
             email,
             'this survey does not exist!',
             after,
-            defaultPageSize,
           );
 
           const answers = surveyNotFound.items[0].answers;
@@ -314,12 +304,7 @@ describe('Response queries', () => {
         });
 
         it('should return a response if the survey name is found', async () => {
-          const surveyFound = await Response.all(
-            email,
-            surveyName,
-            after,
-            defaultPageSize,
-          );
+          const surveyFound = await Response.all(email, surveyName, after);
 
           const answers = surveyFound.items[0].answers;
           answers.length.should.equal(4);
@@ -332,7 +317,6 @@ describe('Response queries', () => {
             user.email,
             survey.survey_name,
             encodedToken,
-            defaultPageSize,
           );
 
           const goodSurvey = survey;
@@ -379,7 +363,6 @@ describe('Response queries', () => {
             email,
             surveyName,
             after,
-            defaultPageSize,
           );
 
           const answers = responsesAfterToken.items[0].answers;
@@ -393,7 +376,6 @@ describe('Response queries', () => {
             email,
             surveyName,
             after,
-            defaultPageSize,
           );
 
           responsesAfterToken.items[0].should.eql({
@@ -403,6 +385,8 @@ describe('Response queries', () => {
           responsesAfterToken.items[0].answers.length.should.equal(0);
         });
       });
+
+      const defaultPageSize = 25;
 
       describe('ROUTE /all', () => {
         it('responds with a list of all responses', async () => {

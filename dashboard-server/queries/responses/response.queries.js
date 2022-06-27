@@ -45,7 +45,7 @@ async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
 }
 
 // gets all responses for a survey created by a user and returns with a token
-async function all(email, survey, encodedToken = null, pageSize) {
+async function all(email, survey, encodedToken = null, pageSize = 25) {
   var [timestamp, userid, ref] =
     encodedToken !== null ? token.decode(encodedToken) : token.default();
 
