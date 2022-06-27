@@ -303,9 +303,9 @@ describe('Response queries', () => {
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
           const surveyNotFound = await Response.all(
-            user.email,
+            email,
             'this survey does not exist!',
-            encodedToken,
+            after,
             defaultPageSize,
           );
 
@@ -315,9 +315,9 @@ describe('Response queries', () => {
 
         it('should return a response if the survey name is found', async () => {
           const surveyFound = await Response.all(
-            user.email,
-            survey.survey_name,
-            encodedToken,
+            email,
+            surveyName,
+            after,
             defaultPageSize,
           );
 
@@ -406,11 +406,8 @@ describe('Response queries', () => {
 
       describe('ROUTE /all', () => {
         it('responds with a list of all responses', async () => {
-          const survey = 'Survey123';
-          const pageSize = defaultPageSize;
-
           const response = await request(app)
-            .get(`/all?survey=${survey}&pageSize=${pageSize}`) // no token needed here
+            .get(`/all?survey=${surveyName}&pageSize=${defaultPageSize}`) // no token needed here
             .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect(200);
@@ -422,7 +419,6 @@ describe('Response queries', () => {
           const answers = response.body.items[0].answers;
           answers.length.should.equal(4);
 
-          // should return a token in the response
           const token = response.body.items[0].token;
           token.should.equal('MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==');
         });
@@ -431,13 +427,11 @@ describe('Response queries', () => {
       describe('ROUTE /all (after)', () => {
         // give me all responses after '2022-06-06 10:00:00+00:00'
         it('responds with a list of new responses after a given token', async () => {
-          const survey = 'Survey123';
-          const pageSize = defaultPageSize;
-          const encodedToken = token.getToken(timestamps[2], '126', 'ref');
+          const after = token.getToken(timestamps[2], '126', 'ref');
 
           const response = await request(app)
             .get(
-              `/all?survey=${survey}&after=${encodedToken}&pageSize=${pageSize}`,
+              `/all?survey=${surveyName}&after=${after}&pageSize=${defaultPageSize}`,
             )
             .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
@@ -453,8 +447,3 @@ describe('Response queries', () => {
     });
   });
 });
-
-// the first call comes without a token
-// needs to work without a token
-// response.body.token exists - test this part first
-// make another request with the same token - expect to get new responses
