@@ -23,6 +23,7 @@ const fakeAuthMiddleware = (req, res, next) => {
 app.use('/', fakeAuthMiddleware, router);
 
 const { DATABASE_CONFIG } = require('../../config');
+const { decode } = require('base-64');
 
 describe('Response queries', () => {
   let Response;
@@ -387,41 +388,35 @@ describe('Response queries', () => {
       });
 
       describe('ROUTE /all', () => {
-        it('responds with a list of all responses', async () => {
-          const response = await request(app)
+        it('responds with a list of responses after a given token', async () => {
+          // first request
+          const firstResponse = await request(app)
             .get(`/all?survey=${surveyName}&pageSize=25`) // no token needed here
             .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect(200);
-          response.statusCode.should.equal(200);
-          response.headers['content-type'].should.equal(
+
+          firstResponse.statusCode.should.equal(200);
+          firstResponse.headers['content-type'].should.equal(
             'application/json; charset=utf-8',
           );
 
-          const answers = response.body.items[0].answers;
+          const answers = firstResponse.body.items[0].answers;
           answers.length.should.equal(4);
 
-          const token = response.body.items[0].token;
-          token.should.equal('MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==');
-        });
-      });
+          let tokenReceived = firstResponse.body.items[0].token;
+          tokenReceived.should.equal('MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==');
+          const decodedToken = token.decode(tokenReceived);
+          const tokenSent = token.encode(decodedToken);
+          tokenReceived.should.not.equal(tokenSent);
 
-      describe('ROUTE /all (after)', () => {
-        // give me all responses after '2022-06-06 10:00:00+00:00'
-        it('responds with a list of new responses after a given token', async () => {
-          const after = token.getToken(timestamps[2], '126', 'ref');
-
-          const response = await request(app)
-            .get(`/all?survey=${surveyName}&after=${after}&pageSize=25`)
-            .set('Accept', 'application/json')
-            .expect('Content-Type', /json/)
-            .expect(200);
-          response.statusCode.should.equal(200);
-          response.headers['content-type'].should.equal(
-            'application/json; charset=utf-8',
+          // second request
+          const secondResponse = await request(app).get(
+            `/all?survey=${surveyName}&after=${tokenSent}&pageSize=25`,
           );
-          const answers = response.body.items[0].answers;
-          answers.length.should.equal(3);
+
+          tokenReceived = secondResponse.body.items[0].token;
+          tokenReceived.should.equal('MTk3MC0wMS0wMSAwMDowMDowMCswMDowMCws');
         });
       });
     });
