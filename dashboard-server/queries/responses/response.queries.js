@@ -9,6 +9,8 @@ const {
   cursorResult,
 } = require('@vlab-research/client-cursor-stream');
 
+class RequestError extends Error {}
+
 async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
   const GET_ALL = `SELECT parent_surveyid,
   parent_shortcode,
@@ -44,10 +46,9 @@ async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
   return rows;
 }
 
-// gets all responses for a survey created by a user and returns with a token
-async function all(email, survey, encodedToken = null, pageSize = 25) {
+async function all(email, survey, after = null, pageSize = 25) {
   var [timestamp, userid, ref] =
-    encodedToken !== null ? token.decode(encodedToken) : token.default();
+    after !== null ? token.decode(after) : token.default();
 
   const responses = await _all(
     email,
@@ -59,10 +60,18 @@ async function all(email, survey, encodedToken = null, pageSize = 25) {
     this,
   );
 
-  const returnedToken = token.encode(timestamp, userid, ref);
+  if (!responses) {
+    throw new RequestError(
+      `Could not find the requested survey: ${survey} for user: ${email}`,
+    );
+  }
+
+  responses.map(r =>
+    Object.assign(r, { token: token.encode(r.timestamp, r.userid, r.ref) }),
+  );
 
   return {
-    items: [{ token: returnedToken, answers: responses }], // one token per response
+    responses, // one token per response
   };
 }
 
