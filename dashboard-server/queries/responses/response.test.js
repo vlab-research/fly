@@ -23,7 +23,6 @@ const fakeAuthMiddleware = (req, res, next) => {
 app.use('/', fakeAuthMiddleware, router);
 
 const { DATABASE_CONFIG } = require('../../config');
-const { decode } = require('base-64');
 
 describe('Response queries', () => {
   let Response;
@@ -195,139 +194,129 @@ describe('Response queries', () => {
 
       await vlabPool.query(MOCK_QUERY);
 
-      let encodedToken;
-
       const mockData = {
         email: user.email,
         surveyName: survey.survey_name,
-        after: encodedToken,
+        after: null,
       };
 
       const { email, surveyName, after } = mockData;
 
-      const responses = await Response.all(email, surveyName, after);
+      const res = await Response.all(email, surveyName, after);
 
-      responses.items[0].should.eql({
-        token: 'MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==',
-        answers: [
-          {
-            parent_surveyid: survey.id,
-            parent_shortcode: '101',
-            surveyid: survey.id,
-            flowid: '100001',
-            userid: '127',
-            question_ref: 'ref',
-            question_idx: '10',
-            question_text: 'text',
-            response: '{ "text": "last" }',
-            timestamp: timestamps[1],
-            metadata: null,
-            pageid: null,
-            translated_response: null,
-          },
-          {
-            parent_surveyid: survey.id,
-            parent_shortcode: '101',
-            surveyid: survey.id,
-            flowid: '100004',
-            userid: '127',
-            question_ref: 'ref',
-            question_idx: '10',
-            question_text: 'text',
-            response: '{ "text": "first" }',
-            timestamp: timestamps[2],
-            metadata: null,
-            pageid: null,
-            translated_response: null,
-          },
-          {
-            parent_surveyid: survey.id,
-            parent_shortcode: '101',
-            surveyid: survey.id,
-            flowid: '100004',
-            userid: '128',
-            question_ref: 'ref',
-            question_idx: '10',
-            question_text: 'text',
-            response: '{ "text": "first" }',
-            timestamp: timestamps[2],
-            metadata: null,
-            pageid: null,
-            translated_response: null,
-          },
-          {
-            parent_surveyid: survey.id,
-            parent_shortcode: '202',
-            surveyid: survey.id,
-            flowid: '100005',
-            userid: '126',
-            question_ref: 'ref',
-            question_idx: '10',
-            question_text: 'text',
-            response: '{ "text": "first" }',
-            timestamp: timestamps[3],
-            metadata: null,
-            pageid: null,
-            translated_response: null,
-          },
-        ],
-      });
+      res.responses.should.eql([
+        {
+          parent_surveyid: survey.id,
+          parent_shortcode: '101',
+          surveyid: survey.id,
+          flowid: '100001',
+          userid: '127',
+          question_ref: 'ref',
+          question_idx: '10',
+          question_text: 'text',
+          response: '{ "text": "last" }',
+          timestamp: timestamps[1],
+          metadata: null,
+          pageid: null,
+          translated_response: null,
+          token: 'MjAyMi0wNi0wNiAwOTo1ODowMCswMDowMC8xMjcvdW5kZWZpbmVk',
+        },
+        {
+          parent_surveyid: survey.id,
+          parent_shortcode: '101',
+          surveyid: survey.id,
+          flowid: '100004',
+          userid: '127',
+          question_ref: 'ref',
+          question_idx: '10',
+          question_text: 'text',
+          response: '{ "text": "first" }',
+          timestamp: timestamps[2],
+          metadata: null,
+          pageid: null,
+          translated_response: null,
+          token: 'MjAyMi0wNi0wNiAxMDowMDowMCswMDowMC8xMjcvdW5kZWZpbmVk',
+        },
+        {
+          parent_surveyid: survey.id,
+          parent_shortcode: '101',
+          surveyid: survey.id,
+          flowid: '100004',
+          userid: '128',
+          question_ref: 'ref',
+          question_idx: '10',
+          question_text: 'text',
+          response: '{ "text": "first" }',
+          timestamp: timestamps[2],
+          metadata: null,
+          pageid: null,
+          translated_response: null,
+          token: 'MjAyMi0wNi0wNiAxMDowMDowMCswMDowMC8xMjgvdW5kZWZpbmVk',
+        },
+        {
+          parent_surveyid: survey.id,
+          parent_shortcode: '202',
+          surveyid: survey.id,
+          flowid: '100005',
+          userid: '126',
+          question_ref: 'ref',
+          question_idx: '10',
+          question_text: 'text',
+          response: '{ "text": "first" }',
+          timestamp: timestamps[3],
+          metadata: null,
+          pageid: null,
+          translated_response: null,
+          token: 'MjAyMi0wNi0wNiAxMDowMjowMCswMDowMC8xMjYvdW5kZWZpbmVk',
+        },
+      ]);
+
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
-          const userNotFound = await Response.all(
+          const res = await Response.all(
             'userdoesntexist@vlab.com',
             surveyName,
             after,
           );
-
-          const answers = userNotFound.items[0].answers;
-          answers.length.should.equal(0);
+          res.responses.length.should.equal(0);
         });
       });
 
       it('should return a response if the user email is found', async () => {
-        const userFound = await Response.all(email, surveyName, after);
-
-        const answers = userFound.items[0].answers;
-        answers.length.should.equal(4);
+        const res = await Response.all(email, surveyName, after);
+        res.responses.length.should.equal(4);
       });
 
       describe('surveyNotFound', () => {
         it('should return no responses if the survey name is not found', async () => {
-          const surveyNotFound = await Response.all(
+          const res = await Response.all(
             email,
             'this survey does not exist!',
             after,
           );
 
-          const answers = surveyNotFound.items[0].answers;
-          answers.length.should.equal(0);
+          // res.should.throw(/this survey does not exist!/); // survey
+          res.responses.length.should.equal(0);
         });
 
         it('should return a response if the survey name is found', async () => {
-          const surveyFound = await Response.all(email, surveyName, after);
-
-          const answers = surveyFound.items[0].answers;
-          answers.length.should.equal(4);
+          const res = await Response.all(email, surveyName, after);
+          res.responses.length.should.equal(4);
         });
       });
 
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
-          const responses = await Response.all(
-            user.email,
-            survey.survey_name,
-            encodedToken,
-          );
+          const res = await Response.all(email, survey, after);
 
           const goodSurvey = survey;
           const badSurvey = survey2;
 
-          const answers = responses.items[0].answers;
-
-          answers.forEach(el => el.surveyid.should.equal(goodSurvey.id));
-          answers.forEach(el => el.surveyid.should.not.equal(badSurvey.id));
-          answers.forEach(el =>
+          res.responses.forEach(el => el.surveyid.should.equal(goodSurvey.id));
+          res.responses.forEach(el =>
+            el.surveyid.should.not.equal(badSurvey.id),
+          );
+          res.responses.forEach(el =>
             el.response.should.not.equal('Do not return me!'),
           );
         });
@@ -336,87 +325,57 @@ describe('Response queries', () => {
       describe('pageSize', () => {
         it('should return the specified maximum number of responses', async () => {
           let pageSize = 2;
-
-          let maxResponses = await Response.all(
-            email,
-            surveyName,
-            after,
-            pageSize,
-          );
-
-          let answers = maxResponses.items[0].answers;
-          answers.length.should.equal(2);
+          let res = await Response.all(email, surveyName, after, pageSize);
+          res.responses.length.should.equal(2);
 
           pageSize = 1;
-
-          maxResponses = await Response.all(email, surveyName, after, pageSize);
-
-          answers = maxResponses.items[0].answers;
-          answers.length.should.equal(1);
+          res = await Response.all(email, surveyName, after, pageSize);
+          res.responses.length.should.equal(1);
         });
       });
 
       describe('after', () => {
         it('should return all new responses after a given token', async () => {
-          const after = token.getToken(timestamps[2], '126', 'ref');
-
-          const responsesAfterToken = await Response.all(
-            email,
-            surveyName,
-            after,
-          );
-
-          const answers = responsesAfterToken.items[0].answers;
-          answers.length.should.equal(3);
+          const after = token.create(timestamps[2], '126', 'ref');
+          const res = await Response.all(email, surveyName, after);
+          res.responses.length.should.equal(3);
         });
 
         it('should return no new responses when on the last token', async () => {
-          const after = token.getToken(timestamps[3], '126', 'ref');
-
-          const responsesAfterToken = await Response.all(
-            email,
-            surveyName,
-            after,
-          );
-
-          responsesAfterToken.items[0].should.eql({
-            token: 'MjAyMi0wNi0wNiAxMDowMjowMCswMDowMA==',
-            answers: [],
-          });
-          responsesAfterToken.items[0].answers.length.should.equal(0);
+          const after = token.create(timestamps[3], '126', 'ref');
+          const res = await Response.all(email, surveyName, after);
+          res.responses.length.should.equal(0);
         });
       });
 
       describe('ROUTE /all', () => {
         it('responds with a list of responses after a given token', async () => {
           // first request
-          const firstResponse = await request(app)
+          let response = await request(app)
             .get(`/all?survey=${surveyName}&pageSize=25`) // no token needed here
             .set('Accept', 'application/json')
             .expect('Content-Type', /json/)
             .expect(200);
 
-          firstResponse.statusCode.should.equal(200);
-          firstResponse.headers['content-type'].should.equal(
+          response.statusCode.should.equal(200);
+          response.headers['content-type'].should.equal(
             'application/json; charset=utf-8',
           );
 
-          const answers = firstResponse.body.items[0].answers;
-          answers.length.should.equal(4);
+          let responses = response.body.responses;
 
-          let tokenReceived = firstResponse.body.items[0].token;
-          tokenReceived.should.equal('MTk3MC0wMS0wMSAwMDowMDowMCswMDowMA==');
-          const decodedToken = token.decode(tokenReceived);
-          const tokenSent = token.encode(decodedToken);
-          tokenReceived.should.not.equal(tokenSent);
+          responses.length.should.equal(4);
+          responses.map(r => r.should.have.property('token'));
+
+          const exampleToken = responses[2].token;
 
           // second request
-          const secondResponse = await request(app).get(
-            `/all?survey=${surveyName}&after=${tokenSent}&pageSize=25`,
+          response = await request(app).get(
+            `/all?survey=${surveyName}&after=${exampleToken}&pageSize=25`,
           );
 
-          tokenReceived = secondResponse.body.items[0].token;
-          tokenReceived.should.equal('MTk3MC0wMS0wMSAwMDowMDowMCswMDowMCws');
+          responses = response.body.responses;
+          responses.length.should.equal(1);
         });
       });
     });
