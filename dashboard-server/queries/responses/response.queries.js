@@ -2,6 +2,10 @@
 
 const t = require('./token');
 
+const base64 = require('base-64');
+const decode = base64.decode;
+const encode = base64.encode;
+
 const token = new t.Token();
 
 const {
@@ -48,7 +52,9 @@ async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
 
 async function all(email, survey, after = null, pageSize = 25) {
   var [timestamp, userid, ref] =
-    after !== null ? token.decode(after) : token.default();
+    after !== null
+      ? token.decode(after)
+      : '1970-01-01 00:00:00+00:00,,'.split(',');
 
   const responses = await _all(
     email,
@@ -67,7 +73,9 @@ async function all(email, survey, after = null, pageSize = 25) {
   }
 
   responses.map(r =>
-    Object.assign(r, { token: token.encode(r.timestamp, r.userid, r.ref) }),
+    Object.assign(r, {
+      token: token.encode([r.timestamp, r.userid, r.question_ref]),
+    }),
   );
 
   return {

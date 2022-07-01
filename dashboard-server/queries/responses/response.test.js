@@ -219,7 +219,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: 'MjAyMi0wNi0wNiAwOTo1ODowMCswMDowMC8xMjcvdW5kZWZpbmVk',
+          token: token.encode([timestamps[1], '127', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -235,7 +235,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: 'MjAyMi0wNi0wNiAxMDowMDowMCswMDowMC8xMjcvdW5kZWZpbmVk',
+          token: token.encode([timestamps[2], '127', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -251,7 +251,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: 'MjAyMi0wNi0wNiAxMDowMDowMCswMDowMC8xMjgvdW5kZWZpbmVk',
+          token: token.encode([timestamps[2], '128', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -267,7 +267,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: 'MjAyMi0wNi0wNiAxMDowMjowMCswMDowMC8xMjYvdW5kZWZpbmVk',
+          token: token.encode([timestamps[3], '126', 'ref']),
         },
       ]);
 
@@ -336,13 +336,13 @@ describe('Response queries', () => {
 
       describe('after', () => {
         it('should return all new responses after a given token', async () => {
-          const after = token.create(timestamps[2], '126', 'ref');
+          const after = token.encode([timestamps[2], '126', 'ref']);
           const res = await Response.all(email, surveyName, after);
           res.responses.length.should.equal(3);
         });
 
         it('should return no new responses when on the last token', async () => {
-          const after = token.create(timestamps[3], '126', 'ref');
+          const after = token.encode([timestamps[3], '126', 'ref']);
           const res = await Response.all(email, surveyName, after);
           res.responses.length.should.equal(0);
         });
@@ -364,18 +364,25 @@ describe('Response queries', () => {
 
           let responses = response.body.responses;
 
-          responses.length.should.equal(4);
+          responses.length.should.equal(4); // all responses
           responses.map(r => r.should.have.property('token'));
 
-          const exampleToken = responses[2].token;
-
           // second request
+          let exampleToken = responses[0].token;
           response = await request(app).get(
             `/all?survey=${surveyName}&after=${exampleToken}&pageSize=25`,
           );
 
           responses = response.body.responses;
-          responses.length.should.equal(1);
+          responses.length.should.equal(3);
+
+          // third request
+          exampleToken = responses[0].token;
+          response = await request(app).get(
+            `/all?survey=${surveyName}&after=${exampleToken}&pageSize=25`,
+          );
+          responses = response.body.responses;
+          responses.length.should.equal(2);
         });
       });
     });
