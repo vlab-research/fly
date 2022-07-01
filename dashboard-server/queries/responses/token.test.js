@@ -37,9 +37,15 @@ describe('Token', () => {
       it('when reversed it decodes to the same three values', () => {
         const encodedToken = token.encode(decodedToken);
         encodedToken.should.equal(encodedToken);
+        token
+          .decode(encodedToken)
+          .should.eql(['2022-06-06 09:58:00+00:00', '126', 'ref']);
 
         const encodedToken2 = token.encode(decodedToken2);
         encodedToken2.should.equal(encodedToken2);
+        token
+          .decode(encodedToken2)
+          .should.eql(['2022-06-06 10:00:00+00:00', '126', 'ref']);
       });
     });
   });
