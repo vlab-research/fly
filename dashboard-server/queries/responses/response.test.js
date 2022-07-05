@@ -8,6 +8,7 @@ const router = require('./../../api/responses/response.routes');
 const t = require('./token');
 const request = require('supertest');
 const token = new t.Token();
+const r = require('./response.queries');
 
 // hack to avoid bootstrapping the entire
 // server with all its env vars, just test
@@ -122,7 +123,7 @@ describe('Response queries', () => {
   };
 
   describe('all()', () => {
-    it('should return an unpaginated list of responses for a survey created by a user', async () => {
+    it('should return a list of responses for a survey created by a user', async () => {
       const user = {
         email: 'test3@vlab.com',
       };
@@ -271,6 +272,37 @@ describe('Response queries', () => {
         },
       ]);
 
+      describe('checkSurveyExists', () => {
+        it('should return true if the survey is found', async () => {
+          const res = await r.checkSurveyExists('Survey123');
+          res.should.eql([{ exists: true }]);
+        });
+
+        it('should return false if the survey is not found', async () => {
+          const res = await r.checkSurveyExists('survey does not exist');
+          res.should.eql([{ exists: false }]);
+        });
+      });
+
+      // describe('surveyNotFound', () => {
+      //   it('should return no responses if the survey name is not found', async () => {
+      //     const res = await Response.all(
+      //       email,
+      //       'this survey does not exist!',
+      //       after,
+      //     );
+
+      //     // res.should.throw(/this survey does not exist!/); // survey
+      //     // res.should.throw(/test3@vlab.com/); // email
+      //     // res.responses.length.should.equal(0);
+      //   });
+
+      //   it('should return a response if the survey name is found', async () => {
+      //     const res = await Response.all(email, surveyName, after);
+      //     res.responses.length.should.equal(4);
+      //   });
+      // });
+
       describe('userNotFound', () => {
         it('should return no responses if the user email is not found', async () => {
           const res = await Response.all(
@@ -278,28 +310,13 @@ describe('Response queries', () => {
             surveyName,
             after,
           );
+
           res.responses.length.should.equal(0);
-        });
-      });
-
-      it('should return a response if the user email is found', async () => {
-        const res = await Response.all(email, surveyName, after);
-        res.responses.length.should.equal(4);
-      });
-
-      describe('surveyNotFound', () => {
-        it('should return no responses if the survey name is not found', async () => {
-          const res = await Response.all(
-            email,
-            'this survey does not exist!',
-            after,
-          );
-
-          // res.should.throw(/this survey does not exist!/); // survey
-          res.responses.length.should.equal(0);
+          // res.should.throw(/Survey123/); // survey
+          // res.should.throw(/userdoesntexist@vlab.com/); // email
         });
 
-        it('should return a response if the survey name is found', async () => {
+        it('should return a response if the user email is found', async () => {
           const res = await Response.all(email, surveyName, after);
           res.responses.length.should.equal(4);
         });
@@ -344,7 +361,7 @@ describe('Response queries', () => {
         it('should return no new responses when on the last token', async () => {
           const after = token.encode([timestamps[3], '126', 'ref']);
           const res = await Response.all(email, surveyName, after);
-          res.responses.length.should.equal(0);
+          res.responses.length.should.equal(0); // this shouldn't throw an error
         });
       });
 

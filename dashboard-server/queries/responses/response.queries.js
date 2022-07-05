@@ -46,11 +46,24 @@ async function _all(email, survey, timestamp, userid, ref, pageSize, pool) {
   return rows;
 }
 
+async function checkSurveyExists(survey, pool) {
+  const SURVEY_EXISTS = `
+  SELECT EXISTS(SELECT 1 FROM responses LEFT JOIN surveys ON responses.surveyid = surveys.id WHERE surveys.survey_name = $1);
+`;
+
+  const { rows } = await pool.query(SURVEY_EXISTS, [survey]);
+  return rows;
+}
+
 async function all(email, survey, after = null, pageSize = 25) {
   var [timestamp, userid, ref] =
     after !== null
       ? token.decode(after)
       : '1970-01-01 00:00:00+00:00,,'.split(',');
+
+  const surveyCheck = await checkSurveyExists(survey, this);
+
+  const [{ exists }] = surveyCheck;
 
   const responses = await _all(
     email,
@@ -62,22 +75,33 @@ async function all(email, survey, after = null, pageSize = 25) {
     this,
   );
 
-  if (!responses) {
-    throw new RequestError(
-      `Could not find the requested survey: ${survey} for user: ${email}`,
-    );
-  }
-
   responses.map(r =>
     Object.assign(r, {
       token: token.encode([r.timestamp, r.userid, r.question_ref]),
     }),
   );
 
-  return {
-    responses, // one token per response
-  };
+  if (exists) {
+    try {
+      if (!exists) {
+        throw new RequestError(
+          `No responses were found for survey ${survey} for user ${email}`,
+        );
+      }
+      return {
+        responses, // one token per response
+      };
+    } catch (e) {
+      alert(e.message);
+    }
+  }
 }
+
+// if (!responses.length) {
+//   throw new RequestError(
+//     `No new responses found for ${survey} for user: ${email}`,
+//   );
+// }
 
 async function firstAndLast() {
   const GET_FIRST_AND_LAST = `SELECT *
@@ -171,6 +195,7 @@ async function formData(email, survey) {
 module.exports = {
   name: 'Response',
   _all,
+  checkSurveyExists,
   queries: pool => ({
     all: all.bind(pool),
     firstAndLast: firstAndLast.bind(pool),
