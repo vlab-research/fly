@@ -92,12 +92,9 @@ async function all(email, surveyName, after = null, pageSize = 25) {
   );
 
   try {
-    if (!user.exists) {
-      throw new RequestError(`No responses were found for user ${email}`);
-    }
-    if (!survey.exists) {
+    if (!user.exists || !survey.exists) {
       throw new RequestError(
-        `No responses were found for ${surveyName} for user ${email}`,
+        `No responses were found for survey: ${surveyName} for user: ${email}`,
       );
     }
     return { responses };

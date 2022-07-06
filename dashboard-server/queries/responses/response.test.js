@@ -297,7 +297,9 @@ describe('Response queries', () => {
             surveyName,
             after,
           );
-          res.should.throw(/'userdoesntexist@vlab.com'/);
+
+          res.should.throw(/userdoesntexist@vlab.com/);
+          res.should.throw(/test3@vlab.com/);
         });
 
         it('should return a response if the user email is found', async () => {
