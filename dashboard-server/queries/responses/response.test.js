@@ -40,9 +40,9 @@ describe('Response queries', () => {
     Response = model.queries(vlabPool);
   });
 
-  // afterEach(async () => {
-  //   await vlabPool.query('DELETE FROM responses');
-  // });
+  afterEach(async () => {
+    await vlabPool.query('DELETE FROM responses');
+  });
 
   describe('.firstAndLast()', () => {
     it('should get the first and last responses for each survey created by a user', async () => {

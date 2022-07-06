@@ -201,7 +201,6 @@ module.exports = {
   checkSurveyExists,
   checkUserExists,
   queries: pool => ({
-    // checkUserExists: checkUserExists.bind(pool),
     all: all.bind(pool),
     firstAndLast: firstAndLast.bind(pool),
     formResponses: formResponses.bind(pool),
