@@ -272,48 +272,32 @@ describe('Response queries', () => {
         },
       ]);
 
-      describe('checkSurveyExists', () => {
-        it('should return true if the survey is found', async () => {
-          const res = await r.checkSurveyExists('Survey123');
-          res.should.eql([{ exists: true }]);
+      describe('surveyNotFound', () => {
+        it('should throw an error if the survey name is not found', async () => {
+          const res = await Response.all(
+            email,
+            'this survey does not exist!',
+            after,
+          );
+
+          res.should.throw(/this survey does not exist!/);
+          res.should.throw(/test3@vlab.com/);
         });
 
-        it('should return false if the survey is not found', async () => {
-          const res = await r.checkSurveyExists('survey does not exist');
-          res.should.eql([{ exists: false }]);
+        it('should return a response if the survey name is found', async () => {
+          const res = await Response.all(email, surveyName, after);
+          res.responses.length.should.equal(4);
         });
       });
 
-      // describe('surveyNotFound', () => {
-      //   it('should return no responses if the survey name is not found', async () => {
-      //     const res = await Response.all(
-      //       email,
-      //       'this survey does not exist!',
-      //       after,
-      //     );
-
-      //     // res.should.throw(/this survey does not exist!/); // survey
-      //     // res.should.throw(/test3@vlab.com/); // email
-      //     // res.responses.length.should.equal(0);
-      //   });
-
-      //   it('should return a response if the survey name is found', async () => {
-      //     const res = await Response.all(email, surveyName, after);
-      //     res.responses.length.should.equal(4);
-      //   });
-      // });
-
       describe('userNotFound', () => {
-        it('should return no responses if the user email is not found', async () => {
+        it('should throw an error if the user email is not found', async () => {
           const res = await Response.all(
             'userdoesntexist@vlab.com',
             surveyName,
             after,
           );
-
-          res.responses.length.should.equal(0);
-          // res.should.throw(/Survey123/); // survey
-          // res.should.throw(/userdoesntexist@vlab.com/); // email
+          res.should.throw(/'userdoesntexist@vlab.com'/);
         });
 
         it('should return a response if the user email is found', async () => {
@@ -324,7 +308,7 @@ describe('Response queries', () => {
 
       describe('responsesNotReturned', () => {
         it('should only return responses for the given survey', async () => {
-          const res = await Response.all(email, survey, after);
+          const res = await Response.all(email, surveyName, after);
 
           const goodSurvey = survey;
           const badSurvey = survey2;
