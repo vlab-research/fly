@@ -85,22 +85,19 @@ async function all(email, surveyName, after = null, pageSize = 25) {
     this,
   );
 
+  if (!user.exists || !survey.exists) {
+    throw new RequestError(
+      `No responses were found for survey: ${surveyName} for user: ${email}`,
+    );
+  }
+
   responses.map(r =>
     Object.assign(r, {
       token: token.encode([r.timestamp, r.userid, r.question_ref]),
     }),
   );
 
-  try {
-    if (!user.exists || !survey.exists) {
-      throw new RequestError(
-        `No responses were found for survey: ${surveyName} for user: ${email}`,
-      );
-    }
-    return { responses };
-  } catch (e) {
-    console.log(e.message);
-  }
+  return { responses };
 }
 
 async function firstAndLast() {

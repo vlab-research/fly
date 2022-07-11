@@ -1,6 +1,7 @@
 const { Pool } = require('pg');
 require('chai').should();
 require('mocha');
+
 const userModel = require('../users/user.queries');
 const surveyModel = require('../surveys/survey.queries');
 const model = require('./response.queries');
@@ -8,7 +9,10 @@ const router = require('./../../api/responses/response.routes');
 const t = require('./token');
 const request = require('supertest');
 const token = new t.Token();
-const r = require('./response.queries');
+const chai = require('chai');
+const chaiAsPromised = require('chai-as-promised');
+const expect = chai.expect;
+chai.use(chaiAsPromised);
 
 // hack to avoid bootstrapping the entire
 // server with all its env vars, just test
@@ -273,38 +277,34 @@ describe('Response queries', () => {
       ]);
 
       describe('surveyNotFound', () => {
-        it('should throw an error if the survey name is not found', async () => {
-          const res = await Response.all(
-            email,
-            'this survey does not exist!',
-            after,
+        it('should catch an error', async () => {
+          const surveyNotFound = 'this survey does not exist';
+          return expect(
+            Response.all(email, surveyNotFound, after),
+          ).to.be.rejectedWith(
+            `No responses were found for survey: ${surveyNotFound} for user: ${email}`,
           );
-
-          res.should.throw(/this survey does not exist!/);
-          res.should.throw(/test3@vlab.com/);
         });
 
-        it('should return a response if the survey name is found', async () => {
-          const res = await Response.all(email, surveyName, after);
-          res.responses.length.should.equal(4);
+        it('should return a fulfilled promise', async () => {
+          return Promise.resolve(Response.all(email, surveyName, after)).should
+            .be.fulfilled;
         });
       });
 
       describe('userNotFound', () => {
-        it('should throw an error if the user email is not found', async () => {
-          const res = await Response.all(
-            'userdoesntexist@vlab.com',
-            surveyName,
-            after,
+        it('should catch an error', async () => {
+          const userNotFound = 'unknownuser@vlab.com';
+          return expect(
+            Response.all(userNotFound, surveyName, after),
+          ).to.be.rejectedWith(
+            `No responses were found for survey: ${surveyName} for user: ${userNotFound}`,
           );
-
-          res.should.throw(/userdoesntexist@vlab.com/);
-          res.should.throw(/test3@vlab.com/);
         });
 
-        it('should return a response if the user email is found', async () => {
-          const res = await Response.all(email, surveyName, after);
-          res.responses.length.should.equal(4);
+        it('should return a fulfilled promise', async () => {
+          return Promise.resolve(Response.all(email, surveyName, after)).should
+            .be.fulfilled;
         });
       });
 
