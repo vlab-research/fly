@@ -152,6 +152,34 @@ describe('Machine integrated', () => {
 
 
 
+  it('returns no payment when the message is a repeat and does not publish report', async () => {
+    const _echo = md => ({...echo, message: { ...echo.message, metadata: md }})
+    const m = new Machine()
+    m.getPageToken = () => Promise.resolve('footoken')
+
+    m.getForm = () => Promise.resolve([{ logic: [],
+                                          fields: [{type: 'statement', title: 'foo', ref: 'foo'},
+                                                   {type: 'short_text', title: 'bar', ref: 'bar'}]}, 'foo'])
+
+    const md = { ref: 'foo', type: 'payment', payment: { provider: 'reloadly', details: { foo: 'bar'}}, repeat: true}
+
+    const event = _echo(md)
+
+    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
+    m.sendMessage = () => Promise.resolve({})
+
+    const report = await m.run({ state: 'RESPONDING', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
+
+    report.user.should.equal('bar')
+    should.not.exist(report.error)
+    report.timestamp.should.equal(event.timestamp)
+    should.not.exist(report.actions) 
+    report.publish.should.be.false
+    should.not.exist(report.payment)
+  })
+
+
+
   it('returns an error report with INTERNAL when internal network failures happen', async () => {
     const m = new Machine()
     m.getPageToken = () => Promise.resolve('footoken')

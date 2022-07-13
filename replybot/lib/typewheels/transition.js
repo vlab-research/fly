@@ -13,6 +13,9 @@ function getPayment(userid, pageid, timestamp, event) {
   const payment = _.get(event, 'message.metadata.payment')
   if (!payment) return
 
+  const repeat = _.get(event, 'message.metadata.repeat')
+  if (repeat) return 
+
   // todo: handle errors from bad forms until
   // form validation exists
   const {provider, details} = payment
