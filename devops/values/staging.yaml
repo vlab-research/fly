@@ -21,9 +21,9 @@ versionBotserver: &vbotserver 0.0.9
 versionReplybot: &vreplybot v0.0.126
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.24
-versionScribble: &vscribble v0.0.20
+versionScribble: &vscribble v0.0.21
 versionDinersclub: &vdinersclub v0.0.19
-versionFormcentral: &vformcentral v0.0.8
+versionFormcentral: &vformcentral v0.0.9
 
 processingAlerts: []
 laggingAlerts: []
@@ -228,6 +228,10 @@ dumper:
     requests:
       cpu: 100m
       memory: 256Mi
+
+  storage:
+    storageClass: standard
+    size: 20Gi
 
   keySecret: gbv-dumper-keys
   env:

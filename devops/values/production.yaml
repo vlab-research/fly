@@ -8,6 +8,7 @@ tags:
   scribble: true
   dean: true
 
+
 kafkabrokers: &kb "kafka-headless.default.svc.cluster.local:29092"
 chatTopic: &topic "vlab-prod-chat-events"
 stateTopic: &statetopic "vlab-prod-state"
@@ -19,12 +20,12 @@ chatbaseHost: &host "gbv-cockroachdb-public"
 
 versionDashboard: &vdashboard v0.0.27
 versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.126
+versionReplybot: &vreplybot v0.0.134
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.24
 versionScribble: &vscribble v0.0.21
-versionDinersclub: &vdinersclub v0.0.19
-versionFormcentral: &vformcentral v0.0.8
+versionDinersclub: &vdinersclub v0.0.23
+versionFormcentral: &vformcentral v0.0.10
 
 processingAlerts:
   - consumergroup: replybot
@@ -128,7 +129,7 @@ dinersclub:
     - name: DINERSCLUB_POOL_SIZE
       value: "8"
     - name: DINERSCLUB_PROVIDERS
-      value: "fake,reloadly,giftcard"
+      value: "fake,reloadly,giftcard,http"
 
 dean:
   image:
@@ -151,13 +152,13 @@ dean:
   - name: DEAN_ERROR_TAGS
     value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
-    value: "24 hours"
+    value: "48 hours"
   - name: DEAN_FB_CODES
     value: "2022,613,-1,190,80006"
   - name: DEAN_BLOCKED_INTERVAL
-    value: "24 hours"
+    value: "48 hours"
   - name: DEAN_RESPONDING_INTERVAL
-    value: "24 hours"
+    value: "48 hours"
   - name: DEAN_RESPONDING_GRACE
     value: "20 minutes"
   - name: DEAN_SEND_DELAY
@@ -254,18 +255,22 @@ scribble:
 dumper:
   image:
     repository: vlabresearch/dumper
-    tag: 0.0.11
+    tag: 0.0.12
     pullPolicy: IfNotPresent
 
   completions: 1
   parallelism: 1
   backoffLimit: 8
 
-  schedule: "30 0 * * *"
+  schedule: "0 0 * * *"
   resources:
     requests:
       cpu: 750m
-      memory: 300Mi
+      memory: 250Mi
+
+  storage:
+    storageClass: standard
+    size: 200Gi
 
   keySecret: gbv-dumper-keys
   env:
@@ -275,7 +280,7 @@ dumper:
     value: "gs://vlab-research-backups/gbv-india/"
 
 formcentral:
-  replicaCount: 1
+  replicaCount: 3
   image:
     tag: *vformcentral
   env:
@@ -415,7 +420,7 @@ replybot:
       memory: 100Mi
   env:
   - name: FAKE
-    value: "NOTHIN"
+    value: "NOTHING"
   - name: CHATBASE_BACKEND
     value: "@vlab-research/chatbase-postgres"
   - name: CHATBASE_DATABASE
