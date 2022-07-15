@@ -6,9 +6,8 @@ const userModel = require('../users/user.queries');
 const surveyModel = require('../surveys/survey.queries');
 const model = require('./response.queries');
 const router = require('./../../api/responses/response.routes');
-const t = require('./token');
+const token = require('./token');
 const request = require('supertest');
-const token = new t.Token();
 const chai = require('chai');
 const chaiAsPromised = require('chai-as-promised');
 const expect = chai.expect;
@@ -224,7 +223,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encode([timestamps[1], '127', 'ref']),
+          token: token.encoded([timestamps[1], '127', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -240,7 +239,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encode([timestamps[2], '127', 'ref']),
+          token: token.encoded([timestamps[2], '127', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -256,7 +255,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encode([timestamps[2], '128', 'ref']),
+          token: token.encoded([timestamps[2], '128', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -272,7 +271,7 @@ describe('Response queries', () => {
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encode([timestamps[3], '126', 'ref']),
+          token: token.encoded([timestamps[3], '126', 'ref']),
         },
       ]);
 
@@ -286,9 +285,9 @@ describe('Response queries', () => {
           );
         });
 
-        it('should return a fulfilled promise', async () => {
-          return Promise.resolve(Response.all(email, surveyName, after)).should
-            .be.fulfilled;
+        it('should return a list of responses when the user is found', async () => {
+          const surveyFound = await Response.all(email, surveyName, after);
+          surveyFound.responses.should.have.length(4);
         });
       });
 
@@ -302,9 +301,9 @@ describe('Response queries', () => {
           );
         });
 
-        it('should return a fulfilled promise', async () => {
-          return Promise.resolve(Response.all(email, surveyName, after)).should
-            .be.fulfilled;
+        it('should return a list of responses when the user is found', async () => {
+          const userFound = await Response.all(email, surveyName, after);
+          userFound.responses.should.have.length(4);
         });
       });
 
@@ -339,13 +338,13 @@ describe('Response queries', () => {
 
       describe('after', () => {
         it('should return all new responses after a given token', async () => {
-          const after = token.encode([timestamps[2], '126', 'ref']);
+          const after = token.encoded([timestamps[2], '126', 'ref']);
           const res = await Response.all(email, surveyName, after);
           res.responses.length.should.equal(3);
         });
 
         it('should return no new responses when on the last token', async () => {
-          const after = token.encode([timestamps[3], '126', 'ref']);
+          const after = token.encoded([timestamps[3], '126', 'ref']);
           const res = await Response.all(email, surveyName, after);
           res.responses.length.should.equal(0); // this shouldn't throw an error
         });
@@ -371,18 +370,18 @@ describe('Response queries', () => {
           responses.map(r => r.should.have.property('token'));
 
           // second request
-          let exampleToken = responses[0].token;
+          let token = responses[0].token;
           response = await request(app).get(
-            `/all?survey=${surveyName}&after=${exampleToken}&pageSize=25`,
+            `/all?survey=${surveyName}&after=${token}&pageSize=25`,
           );
 
           responses = response.body.responses;
           responses.length.should.equal(3);
 
           // third request
-          exampleToken = responses[0].token;
+          token = responses[0].token;
           response = await request(app).get(
-            `/all?survey=${surveyName}&after=${exampleToken}&pageSize=25`,
+            `/all?survey=${surveyName}&after=${token}&pageSize=25`,
           );
           responses = response.body.responses;
           responses.length.should.equal(2);

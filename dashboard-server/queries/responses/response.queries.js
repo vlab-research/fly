@@ -1,8 +1,6 @@
 'use strict';
 
-const t = require('./token');
-
-const token = new t.Token();
+const token = require('./token');
 
 const {
   ClientCursorStream,
@@ -66,7 +64,7 @@ async function checkUserExists(email, pool) {
 async function all(email, surveyName, after = null, pageSize = 25) {
   var [timestamp, userid, ref] =
     after !== null
-      ? token.decode(after)
+      ? token.decoded(after)
       : '1970-01-01 00:00:00+00:00,,'.split(',');
 
   const userCheck = await checkUserExists(email, this);
@@ -93,7 +91,7 @@ async function all(email, surveyName, after = null, pageSize = 25) {
 
   responses.map(r =>
     Object.assign(r, {
-      token: token.encode([r.timestamp, r.userid, r.question_ref]),
+      token: token.encoded([r.timestamp, r.userid, r.question_ref]),
     }),
   );
 

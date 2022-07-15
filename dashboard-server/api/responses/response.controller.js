@@ -21,7 +21,7 @@ exports.getFirstAndLast = async (req, res) => {
 exports.getAll = async (req, res) => {
   try {
     const { survey, after, pageSize } = req.query;
-    const { email } = req.user; // req is mutable and we can add whatever we want
+    const { email } = req.user;
 
     if (!email) {
       return res.status(400).send('No user, no responses!');
