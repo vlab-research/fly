@@ -1,5 +1,4 @@
-const t = require('./token');
-const token = new t.Token();
+const token = require('./token');
 
 const timestamps = {
   1: '2022-06-06 09:58:00+00:00',
@@ -12,10 +11,10 @@ const ref = 'ref';
 describe('Token', () => {
   describe('encode', () => {
     const values = [timestamps[1], userid, ref];
-    const encodedToken = token.encode(values);
+    const encodedToken = token.encoded(values);
 
     const values2 = [timestamps[2], userid, ref];
-    const encodedToken2 = token.encode(values2);
+    const encodedToken2 = token.encoded(values2);
 
     it('returns a unique token', () => {
       encodedToken.should.equal('MjAyMi0wNi0wNiAwOTo1ODowMCswMDowMCwxMjYscmVm');
@@ -26,8 +25,8 @@ describe('Token', () => {
     });
 
     describe('decode', () => {
-      const decodedToken = token.decode(encodedToken);
-      const decodedToken2 = token.decode(encodedToken2);
+      const decodedToken = token.decoded(encodedToken);
+      const decodedToken2 = token.decoded(encodedToken2);
 
       it('decodes a token into three readable values', () => {
         decodedToken.should.eql(['2022-06-06 09:58:00+00:00', '126', 'ref']);
@@ -35,16 +34,16 @@ describe('Token', () => {
       });
 
       it('when reversed it decodes to the same three values', () => {
-        const encodedToken = token.encode(decodedToken);
+        const encodedToken = token.encoded(decodedToken);
         encodedToken.should.equal(encodedToken);
         token
-          .decode(encodedToken)
+          .decoded(encodedToken)
           .should.eql(['2022-06-06 09:58:00+00:00', '126', 'ref']);
 
-        const encodedToken2 = token.encode(decodedToken2);
+        const encodedToken2 = token.encoded(decodedToken2);
         encodedToken2.should.equal(encodedToken2);
         token
-          .decode(encodedToken2)
+          .decoded(encodedToken2)
           .should.eql(['2022-06-06 10:00:00+00:00', '126', 'ref']);
       });
     });
