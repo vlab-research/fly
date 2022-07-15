@@ -84,37 +84,37 @@ describe('Response queries', () => {
           VALUES
             ('${survey.id}', '101', '${
         survey.id
-      }', '101', 100001, '124', 'ref', 10, 'text', '{ "text": "last" }', '6789', current_date::timestamptz + interval '14 hour')
+      }', '101', 100001, '124', 'ref', 10, 'text', 'last', '6789', current_date::timestamptz + interval '14 hour')
            ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100003, '123', 'ref', 10, 'text', '{ "text": "last" }', '6789', (date '2019-04-18')::timestamptz + interval '12 hour')
+      }', '202', 100003, '123', 'ref', 10, 'text', 'last', '6789', (date '2019-04-18')::timestamptz + interval '12 hour')
            ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100004, '124', 'ref', 10, 'text', '{ "text": "first" }', '6789', current_date::timestamptz + interval '10 hour')
+      }', '101', 100004, '124', 'ref', 10, 'text', 'first', '6789', current_date::timestamptz + interval '10 hour')
            ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100005, '123', 'ref', 10, 'text', '{ "text": "first" }', '6789', (date '2019-04-18')::timestamptz + interval '8 hour')
+      }', '202', 100005, '123', 'ref', 10, 'text', 'first', '6789', (date '2019-04-18')::timestamptz + interval '8 hour')
            ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100003, '125', 'ref', 10, 'text', '{ "text": "last" }', '6789', (date '2019-04-18')::timestamptz + interval '12 hour')
+      }', '202', 100003, '125', 'ref', 10, 'text', 'last', '6789', (date '2019-04-18')::timestamptz + interval '12 hour')
            ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100004, '125', 'ref', 10, 'text', '{ "text": "first" }', '6789', (date '2019-04-18')::timestamptz + interval '10 hour')
+      }', '101', 100004, '125', 'ref', 10, 'text', 'first', '6789', (date '2019-04-18')::timestamptz + interval '10 hour')
            ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100005, '125', 'ref', 10, 'text', '{ "text": "first" }', '6789', (date '2019-04-18')::timestamptz + interval '8 hour')
+      }', '202', 100005, '125', 'ref', 10, 'text', 'first', '6789', (date '2019-04-18')::timestamptz + interval '8 hour')
            ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100006, '124', 'ref', 10, 'text', '{ "text": "middle" }', '6789', current_date::timestamptz + interval '12 hour')`;
+      }', '101', 100006, '124', 'ref', 10, 'text', 'middle', '6789', current_date::timestamptz + interval '12 hour')`;
 
       await vlabPool.query(MOCK_QUERY);
       const responses = await Response.firstAndLast();
 
-      responses[0].first_response.should.equal('{ "text": "first" }');
-      responses[0].last_response.should.equal('{ "text": "last" }');
+      responses[0].first_response.should.equal('first');
+      responses[0].last_response.should.equal('last');
       responses[0].surveyid.should.equal(survey2.id);
-      responses[1].first_response.should.equal('{ "text": "first" }');
-      responses[1].last_response.should.equal('{ "text": "last" }');
+      responses[1].first_response.should.equal('first');
+      responses[1].last_response.should.equal('last');
       responses[1].surveyid.should.equal(survey.id);
     });
   });
@@ -162,37 +162,37 @@ describe('Response queries', () => {
       VALUES
         ('${survey.id}', '101', '${
         survey.id
-      }', '101', 100001, '127', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${
+      }', '101', 100001, '127', 'ref', 10, 'text', 'last', '6789', '${
         timestamps[1]
       }')
        ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100003, '126', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${
+      }', '202', 100003, '126', 'ref', 10, 'text', 'last', '6789', '${
         timestamps[1]
       }')
        ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100004, '127', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
+      }', '101', 100004, '127', 'ref', 10, 'text', 'first', '6789', '${
         timestamps[2]
       }')
        ,('${survey.id}', '202', '${
         survey.id
-      }', '202', 100005, '126', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
+      }', '202', 100005, '126', 'ref', 10, 'text', 'first', '6789', '${
         timestamps[3]
       }')
        ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100003, '128', 'ref', 10, 'text', '{ "text": "last" }', '6789', '${
+      }', '202', 100003, '128', 'ref', 10, 'text', 'last', '6789', '${
         timestamps[1]
       }')
        ,('${survey.id}', '101', '${
         survey.id
-      }', '101', 100004, '128', 'ref', 10, 'text', '{ "text": "first" }', '6789', '${
+      }', '101', 100004, '128', 'ref', 10, 'text', 'first', '6789', '${
         timestamps[2]
       }')
        ,('${survey2.id}', '202', '${
         survey2.id
-      }', '202', 100005, '128', 'ref', 10, 'text', '{ "text": "do not return me" }', '6789', '${
+      }', '202', 100005, '128', 'ref', 10, 'text', 'do not return me', '6789', '${
         timestamps[3]
       }')`;
 
@@ -218,7 +218,7 @@ describe('Response queries', () => {
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
-          response: '{ "text": "last" }',
+          response: 'last',
           timestamp: timestamps[1],
           metadata: null,
           pageid: null,
@@ -234,7 +234,7 @@ describe('Response queries', () => {
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
-          response: '{ "text": "first" }',
+          response: 'first',
           timestamp: timestamps[2],
           metadata: null,
           pageid: null,
@@ -250,7 +250,7 @@ describe('Response queries', () => {
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
-          response: '{ "text": "first" }',
+          response: 'first',
           timestamp: timestamps[2],
           metadata: null,
           pageid: null,
@@ -266,7 +266,7 @@ describe('Response queries', () => {
           question_ref: 'ref',
           question_idx: '10',
           question_text: 'text',
-          response: '{ "text": "first" }',
+          response: 'first',
           timestamp: timestamps[3],
           metadata: null,
           pageid: null,
