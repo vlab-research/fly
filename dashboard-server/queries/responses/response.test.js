@@ -285,7 +285,7 @@ describe('Response queries', () => {
           );
         });
 
-        it('should return a list of responses when the user is found', async () => {
+        it('should return a list of responses when the survey is found', async () => {
           const surveyFound = await Response.all(email, surveyName, after);
           surveyFound.responses.should.have.length(4);
         });
