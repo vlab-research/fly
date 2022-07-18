@@ -871,8 +871,9 @@ describe('Machine', () => {
                             {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
 
     const log = [referral, tyEcho, delivery, text]
-    const action = getMessage(log, form, user)[0]
-    JSON.parse(action.message.metadata).repeat.should.be.true
+    const actions = getMessage(log, form, user)
+    JSON.parse(actions[0].message.metadata).repeat.should.be.true
+    JSON.parse(actions[1].message.metadata).isRepeat.should.be.true
   })
 
   it('Responds to is_echos that come after the delivery watermark', () => {
@@ -978,11 +979,13 @@ describe('Machine', () => {
                    fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    action.message.text.should.contain('Sorry')
+    actions[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions[0].message.text.should.contain('Sorry')
+
+    actions[1].message.metadata.should.equal('{"isRepeat":true,"ref":"foo"}')
   })
 
   it('uses custom_messages when they exist', () => {

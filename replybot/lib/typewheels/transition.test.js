@@ -152,7 +152,7 @@ describe('Machine integrated', () => {
 
 
 
-  it('returns no payment when the message is a repeat and does not publish report', async () => {
+  it('returns no payment when the message is a repeat', async () => {
     const _echo = md => ({...echo, message: { ...echo.message, metadata: md }})
     const m = new Machine()
     m.getPageToken = () => Promise.resolve('footoken')
@@ -161,20 +161,26 @@ describe('Machine integrated', () => {
                                           fields: [{type: 'statement', title: 'foo', ref: 'foo'},
                                                    {type: 'short_text', title: 'bar', ref: 'bar'}]}, 'foo'])
 
-    const md = { ref: 'foo', type: 'payment', payment: { provider: 'reloadly', details: { foo: 'bar'}}, repeat: true}
+
+    const md = { ref: 'foo', type: 'payment', payment: { provider: 'reloadly', details: { foo: 'bar'}}, isRepeat: true}
 
     const event = _echo(md)
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
+
+
+    // check what's called, to see all actions returned... 
     m.sendMessage = () => Promise.resolve({})
 
     const report = await m.run({ state: 'RESPONDING', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
     report.user.should.equal('bar')
+
+    console.log(report)
     should.not.exist(report.error)
     report.timestamp.should.equal(event.timestamp)
-    should.not.exist(report.actions) 
-    report.publish.should.be.false
+    report.actions.should.eql([])
+    report.publish.should.be.true 
     should.not.exist(report.payment)
   })
 

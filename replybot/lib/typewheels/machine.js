@@ -121,6 +121,10 @@ function _blankStart(event) {
            md: getMetadata(event)}
 }
 
+// reset form
+// form: getForm(event)
+// + initialState...
+
 function _stitch(state, form, nxt) {
 
   // retains metadata (seed)
@@ -160,6 +164,13 @@ function exec (state, nxt) {
 
     // ignore referral to same form
     // (should repeat previous question)
+
+    // if current form in entire history of forms, ignore.
+
+    // then create "reset process" - which resets all state to 0
+    // for a given user.
+    // Could be as simple as making "reset" the secret shortcode.
+
     if (form === _currentForm(state)) {
       if (state.state === 'QOUT') return _repeat(state)
       return _noop()
@@ -420,6 +431,9 @@ function apply (state, output) {
             ...output.stateUpdate,
             state: 'RESPONDING' }
 
+  // reset
+  // _initialState() + some md? Same seed? New seed?
+
   case 'SWITCH_FORM':
     return { ..._initialState(),
              ...output.stateUpdate,
@@ -506,7 +520,13 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   const md = msg && JSON.parse(msg.metadata)
 
   if (md.repeat) {
-    const repeat = translateField(ctx, qa, getField(ctx, md.ref))
+
+    // Add metadata to know if a repeated question
+    // is a repeat or not 
+    const f = getField(ctx, md.ref)
+    f.md = { isRepeat: true }
+
+    const repeat = translateField(ctx, qa, f)
     return [q, repeat]
   }
 
