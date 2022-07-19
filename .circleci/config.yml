@@ -32,7 +32,7 @@ jobs:
       - run:
           name: Install kind
           command: |
-              GO111MODULE="on" go get sigs.k8s.io/kind@v0.8.1
+              GO111MODULE="on" go install sigs.k8s.io/kind@v0.14.0
       - run:
           name: Setup kind cluster
           command: |
