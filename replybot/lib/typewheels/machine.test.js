@@ -988,6 +988,22 @@ describe('Machine', () => {
     actions[1].message.metadata.should.equal('{"isRepeat":true,"ref":"foo"}')
   })
 
+
+  it('repeats when it misses validation and tags custom types as isRepeat', () => {
+
+    const form = { logic: [],
+                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties: {description: '{"type": "wait"}'}}]}
+
+    const log = [referral, echo, delivery, text]
+    const actions = getMessage(log, form, user)
+
+    // repeat ref foo with sorry message...
+    actions[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions[0].message.text.should.contain('No response')
+
+    actions[1].message.metadata.should.equal('{"isRepeat":true,"type":"wait","ref":"foo"}')
+  })
+
   it('uses custom_messages when they exist', () => {
 
     // TODO: this is not unit test, implicitly testing validation of multiple choice.
