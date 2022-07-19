@@ -3,21 +3,21 @@ version: 2
 jobs:
   test_dinersclub:
     machine:
-      image: cimg/base
+      image: ubuntu-2204:2022.04.1
     steps:
       - checkout
       - run:
           command: ./test.sh dinersclub --is-ci
   test_formcentral:
     machine:
-      image: cimg/base
+      image: ubuntu-2204:2022.04.1
     steps:
       - checkout
       - run:
           command: ./test.sh formcentral --is-ci
   test_e2e:
     machine:
-      image: cimg/base
+      image: ubuntu-2204:2022.04.1
     steps:
       - checkout
       - run:
