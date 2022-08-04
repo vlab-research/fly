@@ -10,52 +10,13 @@ import (
 )
 
 const (
-	surveySql = `drop table if exists surveys;
-                 create table if not exists surveys(
-                   userid VARCHAR NOT NULL,
-                   shortcode VARCHAR NOT NULL,
-                   messages_json JSON,
-                   created TIMESTAMPTZ NOT NULL,
-                   has_followup BOOL AS (messages_json->>'label.buttonHint.default' IS NOT NULL) STORED
-                 );
+	insertUserSql = `
+		INSERT INTO users(id, email) 
+		VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', 'test@test.com');
+	`
+	pageInsertSql = `INSERT INTO credentials(entity, key, userid, details) VALUES ('facebook_page', ($1)->>'id', 'e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', $1)`
 
-                drop table if exists credentials;
-                create table if not exists credentials(
-                    userid VARCHAR NOT NULL,
-		    entity VARCHAR NOT NULL,
-		    key VARCHAR NOT NULL UNIQUE,
-		    created TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		    details JSONB NOT NULL,
-		    facebook_page_id VARCHAR AS (CASE WHEN entity = 'facebook_page' THEN details->>'id' ELSE NULL END) STORED,
-		    UNIQUE(entity, key),
-                    UNIQUE(facebook_page_id)
-                );
-        `
-
-	pageInsertSql   = `INSERT INTO credentials(entity, key, userid, details) VALUES ('facebook_page', ($1)->>'id', 'owner', $1)`
-	surveyInsertSql = `INSERT INTO surveys(userid, shortcode, created, messages_json) VALUES ('owner', $1, $2, $3);`
-
-	stateSql = `drop table if exists states;
-                create table if not exists states(
-   	          userid VARCHAR NOT NULL,
-		  pageid VARCHAR NOT NULL NOT NULL,
-		  updated TIMESTAMPTZ NOT NULL,
-		  current_state VARCHAR NOT NULL,
-		  state_json JSON NOT NULL,
-                  current_form VARCHAR AS (state_json->'forms'->>-1) STORED,
-                  form_start_time TIMESTAMPTZ AS (CEILING((state_json->'md'->>'startTime')::INT/1000)::INT::TIMESTAMPTZ) STORED,
-                  previous_with_token BOOL AS (state_json->'previousOutput'->>'token' IS NOT NULL) STORED,
-                  previous_is_followup BOOL AS (state_json->'previousOutput'->>'followUp' IS NOT NULL) STORED,
-		  timeout_date TIMESTAMPTZ AS (CASE
-			WHEN state_json->'wait'->>'type' = 'timeout' THEN (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMPTZ + (state_json->'wait'->>'value')::INTERVAL)
-			ELSE NULL
-		  END) STORED,
-                  fb_error_code varchar AS (state_json->'error'->>'code') STORED,
-                  error_tag VARCHAR AS (state_json->'error'->>'tag') STORED,
-                  next_retry TIMESTAMP AS ((FLOOR((POWER(2, JSON_ARRAY_LENGTH(state_json->'retries'))*60000 + (state_json->'retries'->>-1)::INT)::INT)/1000)::INT::TIMESTAMP) STORED,
-                  CONSTRAINT "valid_state_json" CHECK (state_json ? 'state'),
-				  PRIMARY KEY (userid, pageid)
-           );`
+	surveyInsertSql = `INSERT INTO surveys(userid, formid, form, title, shortcode, created, messages) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', 'formid', '{}', 'title', $1, $2, $3);`
 
 	insertQuery = `INSERT INTO
                    states(userid, pageid, updated, current_state, state_json)
@@ -85,8 +46,8 @@ func makeStateJson(startTime time.Time, form, previousOutput string) string {
 func TestGetRespondingsGetsOnlyThoseInGivenInterval(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
+	before(pool)
 
-	mustExec(t, pool, stateSql)
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -108,14 +69,13 @@ func TestGetRespondingsGetsOnlyThoseInGivenInterval(t *testing.T) {
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "foo", events[0].User)
 
-	mustExec(t, pool, "drop table states")
 }
 
 func TestGetRespondingsOnlyGetsThoseOutsideOfGracePeriod(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
+	before(pool)
 
-	mustExec(t, pool, stateSql)
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -137,14 +97,13 @@ func TestGetRespondingsOnlyGetsThoseOutsideOfGracePeriod(t *testing.T) {
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "baz", events[0].User)
 
-	mustExec(t, pool, "drop table states")
 }
 
 func TestGetBlockedOnlyGetsThoseWithCodesInsideWindow(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
+	before(pool)
 
-	mustExec(t, pool, stateSql)
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -171,14 +130,13 @@ func TestGetBlockedOnlyGetsThoseWithCodesInsideWindow(t *testing.T) {
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "foo", events[0].User)
 
-	mustExec(t, pool, "drop table states")
 }
 
 func TestGetBlockedOnlyGetsThoseWithNextRetryPassed(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
+	before(pool)
 
-	mustExec(t, pool, stateSql)
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -209,14 +167,13 @@ func TestGetBlockedOnlyGetsThoseWithNextRetryPassed(t *testing.T) {
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "foo", events[0].User)
 
-	mustExec(t, pool, "drop table states")
 }
 
 func TestGetErroredGetsByTag(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
+	before(pool)
 
-	mustExec(t, pool, stateSql)
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -237,23 +194,23 @@ func TestGetErroredGetsByTag(t *testing.T) {
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "foo", events[0].User)
 
-	mustExec(t, pool, "drop table states")
 }
 
 func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
+	before(pool)
 
 	ts := time.Now().UTC().Add(-30 * time.Minute)
 	ms := ts.Unix() * 1000
 
-	mustExec(t, pool, stateSql)
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
 		ts,
 		"WAIT_EXTERNAL_EVENT",
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"], 
                       "waitStart": %v,
                       "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
 
@@ -263,6 +220,7 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 		ts,
 		"WAIT_EXTERNAL_EVENT",
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
                       "waitStart": %v,
                       "wait": { "type": "timeout", "value": "40 minutes"}}`, ms))
 
@@ -277,20 +235,60 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
+}
 
-	mustExec(t, pool, "drop table states")
+func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-30 * time.Minute)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short3"],
+                      "waitStart": %v,
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
+
+	cfg := &Config{TimeoutBlacklist: []string{"short3"}}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "foo", events[0].User)
+
+	assert.Equal(t, "timeout", events[0].Event.Type)
+
+	ev, _ := json.Marshal(events[0].Event)
+	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
+
 }
 
 func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
+	before(pool)
 
-	mustExec(t, pool, stateSql)
-	mustExec(t, pool, surveySql)
-
+	mustExec(t, pool, insertUserSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
 	mustExec(t, pool, pageInsertSql, `{"id": "qux"}`)
 	mustExec(t, pool, pageInsertSql, `{"id": "quux"}`)
+
 	mustExec(t, pool, surveyInsertSql, "with_followup", time.Now().UTC().Add(-50*time.Hour), `{"label.buttonHint.default": "this is follow up"}`)
 	mustExec(t, pool, surveyInsertSql, "with_followup", time.Now().UTC().Add(-40*time.Hour), `{"label.buttonHint.default": "this is follow up"}`)
 	mustExec(t, pool, surveyInsertSql, "with_followup", time.Now().UTC().Add(-20*time.Hour), `{"label.other": "not a follow up"}`)
@@ -349,5 +347,4 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), `{"type":"follow_up","value":"foo"}`)
 
-	mustExec(t, pool, "drop table states")
 }

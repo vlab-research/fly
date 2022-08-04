@@ -118,9 +118,14 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
               FROM states
               WHERE
                 current_state = 'WAIT_EXTERNAL_EVENT' AND
-                timeout_date < $1`
-
+                timeout_date < $1 `
 	d := time.Now().UTC()
+
+	if len(cfg.TimeoutBlacklist) > 0 {
+		query += `AND current_form != ANY($2)`
+		return get(conn, getTimeout, query, d, cfg.TimeoutBlacklist)
+	}
+
 	return get(conn, getTimeout, query, d)
 }
 

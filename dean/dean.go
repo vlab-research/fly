@@ -50,6 +50,7 @@ type Config struct {
 	Botserver          string        `env:"BOTSERVER_URL,required"`
 	Codes              []string      `env:"DEAN_FB_CODES,required" envSeparator:","`
 	ErrorTags          []string      `env:"DEAN_ERROR_TAGS,required" envSeparator:","`
+	TimeoutBlacklist   []string      `env:"DEAN_TIMEOUT_BLACKLIST,required" envSeparator:","`
 	ErrorInterval      string        `env:"DEAN_ERROR_INTERVAL,required"`
 	BlockedInterval    string        `env:"DEAN_BLOCKED_INTERVAL,required"`
 	RespondingInterval string        `env:"DEAN_RESPONDING_INTERVAL,required"`

@@ -33,7 +33,7 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 }
 
 func testPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/test")
+	config, err := pgxpool.ParseConfig("postgres://root@localhost:5432/chatroach") 
 	handle(err)
 
 	ctx := context.Background()
@@ -41,4 +41,19 @@ func testPool() *pgxpool.Pool {
 	handle(err)
 
 	return pool
+}
+
+
+func resetDb(pool *pgxpool.Pool, tableNames []string) error {
+	query := ""
+	for _, table := range tableNames {
+		query += fmt.Sprintf("DELETE FROM %s; ", table)
+	}
+
+	_, err := pool.Exec(context.Background(), query)
+	return err
+}
+
+func before(pool *pgxpool.Pool) {
+	resetDb(pool, []string{"states", "surveys", "users"})
 }
