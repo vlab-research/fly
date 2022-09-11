@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/dgraph-io/ristretto"
@@ -88,7 +89,7 @@ func (s *ResponseScribbler) SendBatch(data []Writeable) error {
 	return err
 }
 
-func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, *trans.FormJson, error) {
+func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.Form, *trans.Form, error) {
 	query := `
         WITH t AS
            (SELECT
@@ -103,8 +104,8 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, 
         FROM t INNER JOIN surveys ON surveys.id = t.dest
     `
 
-	src := new(trans.FormJson)
-	dest := new(trans.FormJson)
+	src := new(trans.Form)
+	dest := new(trans.Form)
 	err := pool.QueryRow(context.Background(), query, surveyid).Scan(src, dest)
 
 	return src, dest, err
@@ -126,7 +127,7 @@ func (r ResponseScribbler) cachedTranslator(response *Response) (*trans.FormTran
 		return nil, nil
 	}
 
-	translator, err := trans.MakeTranslatorByShape(src, dest)
+	translator, err := trans.MakeTranslatorByRef(src, dest) 
 	if err != nil {
 		// This shouldn't happen, it's an error!
 		return nil, err
@@ -139,7 +140,8 @@ func (r ResponseScribbler) cachedTranslator(response *Response) (*trans.FormTran
 func (r ResponseScribbler) Translate(response *Response) (*string, error) {
 	translator, err := r.cachedTranslator(response)
 	if err != nil {
-		return nil, err
+		log.Println(err)
+		return nil, nil
 	}
 
 	if translator == nil {
