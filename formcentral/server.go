@@ -41,7 +41,7 @@ func (s *Server) GetTranslator(c echo.Context) error {
 
 func (s *Server) CreateTranslator(c echo.Context) error {
 	type TranslatorRequest struct {
-		Form        *trans.FormJson `json:"form"`
+		Form        *trans.Form `json:"form"`
 		Destination string          `json:"destination"`
 		Self        bool            `json:"self"`
 	}
@@ -50,7 +50,7 @@ func (s *Server) CreateTranslator(c echo.Context) error {
 		return err
 	}
 
-	var dest *trans.FormJson
+	var dest *trans.Form
 	if req.Self {
 		dest = req.Form
 	} else {
@@ -62,7 +62,7 @@ func (s *Server) CreateTranslator(c echo.Context) error {
 		}
 	}
 
-	translator, err := trans.MakeTranslatorByShape(req.Form, dest)
+	translator, err := trans.MakeTranslatorByRef(req.Form, dest)
 	if err != nil {
 		msg := fmt.Sprintf("Could not create translation mapping. Failed with the following error: %v", err.Error())
 		return echo.NewHTTPError(http.StatusBadRequest, msg)
@@ -86,6 +86,7 @@ func (s *Server) GetSurveyByParams(c echo.Context) error {
 	}
 
 	timestampFmt := time.Unix(int64(math.Ceil(timestampFloat/1000)), 0)
+
 	survey, err := getSurveyByParams(s.pool, pageid, shortcode, timestampFmt)
 
 	if err != nil {

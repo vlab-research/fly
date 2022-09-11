@@ -13,7 +13,7 @@ import (
 type Survey struct {
    ID               string         `json:"id"`
    Userid           string         `json:"userid"`
-   Form_json        trans.FormJson `json:"form_json"`
+   Form_json        trans.Form `json:"form_json"`
    Form             string         `json:"form"`
    Shortcode        string         `json:"shortcode"`
    Translation_conf string         `json:"translation_conf"`
@@ -35,10 +35,10 @@ func getPool(cfg *Config) *pgxpool.Pool {
 	return pool
 }
 
-func getForm(pool *pgxpool.Pool, dest string) (*trans.FormJson, error) {
+func getForm(pool *pgxpool.Pool, dest string) (*trans.Form, error) {
 	query := `SELECT form_json FROM surveys WHERE id = $1`
 
-	form := new(trans.FormJson)
+	form := new(trans.Form)
 	err := pool.QueryRow(context.Background(), query, dest).Scan(form)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func getForm(pool *pgxpool.Pool, dest string) (*trans.FormJson, error) {
 	return form, err
 }
 
-func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, *trans.FormJson, error) {
+func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.Form, *trans.Form, error) {
 	query := `
         WITH t AS
            (SELECT
@@ -61,8 +61,8 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.FormJson, 
         FROM t INNER JOIN surveys ON surveys.id = t.dest
     `
 
-	src := new(trans.FormJson)
-	dest := new(trans.FormJson)
+	src := new(trans.Form)
+	dest := new(trans.Form)
 	err := pool.QueryRow(context.Background(), query, surveyid).Scan(src, dest)
 
 	return src, dest, err
