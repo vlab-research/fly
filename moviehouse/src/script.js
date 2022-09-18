@@ -2,11 +2,25 @@
 /* global Sentry, MessengerExtensions, Vimeo */
 
 const SERVER_URL = '{{{SERVER_URL}}}';
-const params = new URLSearchParams(window.location.search);
-const videoId = params.get('id');
-const pageId = params.get('pageId');
+
+// make params dissapear after getting them 
+const params = getQueryParams()
+const videoId = params['id'];
+const pageId = params['pageId'];
+const userId = params['userId'];
 
 Sentry.init({ dsn: 'https://17c9ad73343d4a15b8e155a722224374@sentry.io/2581797' });
+
+function getQueryParams() {
+  const obj = {}
+  const url = new URL(window.location)
+  url.searchParams.forEach((v, k) => {
+    obj[k] = v
+  })
+
+  window.history.replaceState({}, document.title, url.pathname)
+  return obj
+}
 
 function handleEvent(psid, eventType) {
   return function sendEvent(data) {
@@ -15,7 +29,7 @@ function handleEvent(psid, eventType) {
     xhr.setRequestHeader('Content-Type', 'application/json');
 
     // add ID of video to event...
-    xhr.send(JSON.stringify({ user:psid, page:pageId, data, event: { type: 'external', value: { type: `moviehouse:${eventType}`, id: videoId } }}));
+    xhr.send(JSON.stringify({ user: psid, page: pageId, data, event: { type: 'external', value: { type: `moviehouse:${eventType}`, id: videoId } } }));
   }
 }
 
@@ -59,44 +73,48 @@ function setPlayer(psid) {
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  window.extAsyncInit = function () {
+function initMessenger() {
 
-    // just for the heck of it, run in parallel
-    MessengerExtensions.getSupportedFeatures(function success(result) {
-      const features = result.supported_features;
+  // just for the heck of it, run in parallel
+  MessengerExtensions.getSupportedFeatures(function success(result) {
+    const features = result.supported_features;
 
-      if (features.indexOf("context") === -1) {
-        console.error(`context is not a support feature. Supported features: ${features}`)
-      }
-    }, function error(err) {
-      console.error(`Error getting supported features: ${err}`)
-    });
+    if (features.indexOf("context") === -1) {
+      console.error(`context is not a support feature. Supported features: ${features}`)
+    }
+  }, function error(err) {
+    console.error(`Error getting supported features: ${err}`)
+  });
 
 
-    MessengerExtensions.getContext('{{{APP_ID}}}',
-      function success(thread_context) {
-        setPlayer(thread_context.psid);
-      },
-      function error(err) {
-        let title, message;
+  MessengerExtensions.getContext('{{{APP_ID}}}',
+    function success(thread_context) {
+      setPlayer(thread_context.psid);
+    },
+    function error(err) {
+      let title, message;
 
-        switch (err) {
+      switch (err) {
         case 2071010:
           title = '❌ Browser version error';
-          message = 'Your browser or version of Messenger is too old and does not support viewing these videos. You can update your version of Messenger or view it on messenger.com via a modern web browser.';
+          message = 'Sorry, we cannot show you this video. It is only visible for study participants. Potentially, your browser or version of Messenger is too old and does not support viewing these videos. You can update your version of Messenger or view it on messenger.com via a modern web browser.';
           break;
         case 2071011:
           title = '🔒Forbidden';
-          message = 'You must view this page within a Messenger conversation in the Messenger application (either via a browser at messenger.com or within the mobile app "Messenger"). If you are viewing this page in Messenger, you might need a newer version of the Messenger app to view this video. You can also view it on messenger.com via a modern web browser.';
+          message = 'This video is only visible for study participants. You must view this page within a Messenger conversation in the Messenger application (either via a browser at messenger.com or within the mobile app "Messenger"). If you are viewing this page in Messenger, you might need a newer version of the Messenger app to view this video. You can also view it on messenger.com via a modern web browser.';
           break;
         default:
           title = '❌ Unknown browser error';
           message = 'We could not display this page in your browser. Please try again in a few hours or days.';
-        }
-
-        handleError(new Error(err), title, message);
       }
-    );
-  };
+
+      handleError(new Error(err), title, message);
+    }
+  );
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (!userId) {
+    window.extAsyncInit = initMessenger
+  }
 });
