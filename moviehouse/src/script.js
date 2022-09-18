@@ -114,7 +114,9 @@ function initMessenger() {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (!userId) {
+  if (userId) {
+    setPlayer(userId)
+  } else {
     window.extAsyncInit = initMessenger
   }
 });
