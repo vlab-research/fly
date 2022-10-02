@@ -16,13 +16,13 @@ dependencies:
   version: 0.0.1
 - name: dumper
   repository: https://vlab-research.github.io/fly
-  version: 0.0.1
+  version: 0.0.3
 - name: dinersclub
   repository: https://vlab-research.github.io/fly
   version: 0.0.1
 - name: dean
   repository: https://vlab-research.github.io/fly
-  version: 0.0.2
+  version: 0.0.3
 - name: scribble
   repository: https://vlab-research.github.io/fly
   version: 0.0.1
@@ -41,5 +41,5 @@ dependencies:
 - name: kafka
   repository: https://charts.bitnami.com/bitnami
   version: 14.0.5
-digest: sha256:7f8d490756488dc695f5156abb516e47497cd63b389e28c76f9b7e0edf6aed27
-generated: "2021-09-14T03:25:25.231775314+02:00"
+digest: sha256:a08a868ff218b55652a69b22390146a596d33adb6f9ddf9eb5316f82f29b12d3
+generated: "2022-04-11T00:32:41.875292801+02:00"
