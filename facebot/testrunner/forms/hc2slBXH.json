@@ -37,7 +37,7 @@
     {
       "id": "iHWP8mD4K3qj",
       "title": "Hey, how are you?",
-      "ref": "6ce49ffc-dbf6-4910-8b2d-17f16b0cf456",
+      "ref": "how_are_you",
       "properties": {
         "randomize": false,
         "allow_multiple_selection": false,
@@ -64,7 +64,7 @@
     {
       "id": "6jwUKWwNiPEv",
       "title": "And why?",
-      "ref": "03f65958-685f-4391-957d-6e7f2a16a7d5",
+      "ref": "and_why",
       "properties": {},
       "validations": {
         "required": false

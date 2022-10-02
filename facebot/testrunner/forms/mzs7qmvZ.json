@@ -37,7 +37,7 @@
     {
       "id": "R3G1Zg8LIe4S",
       "title": "Hola, qué tal?",
-      "ref": "c6dabb1f-9cff-4594-aa45-34624e377e42",
+      "ref": "how_are_you",
       "properties": {
         "randomize": false,
         "allow_multiple_selection": false,
@@ -46,12 +46,12 @@
         "choices": [
           {
             "id": "UG5x8MRuDf0i",
-            "ref": "a8ca32c2-24be-423a-93f8-736006ab23f5",
+            "ref": "36a565d2-e0d2-472c-9e7a-9270833b3a14",
             "label": "Bien"
           },
           {
             "id": "j3juj4uoxHhr",
-            "ref": "bf407dce-01ee-4fb1-8e96-369c74666769",
+            "ref": "10d460ac-dca8-48b4-b5a0-4c64df3fa51a",
             "label": "Mal"
           }
         ]
@@ -64,7 +64,7 @@
     {
       "id": "5p3phbYZO1PR",
       "title": "Y porqué?",
-      "ref": "64d59e1e-49e8-4dc5-a8e3-010cee42b172",
+      "ref": "and_why",
       "properties": {},
       "validations": {
         "required": false
