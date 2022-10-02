@@ -20,10 +20,10 @@ chatbaseHost: &host "gbv-cockroachdb-public"
 
 versionDashboard: &vdashboard v0.0.27
 versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.136
+versionReplybot: &vreplybot v0.0.137
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.24
-versionScribble: &vscribble v0.0.21
+versionDean: &vdean v0.0.25
+versionScribble: &vscribble v0.0.22-temp-fix
 versionDinersclub: &vdinersclub v0.0.23
 versionFormcentral: &vformcentral v0.0.10
 
@@ -121,13 +121,13 @@ dinersclub:
     - name: KAFKA_GROUP
       value: "dinersclub"
     - name: DINERSCLUB_BATCH_SIZE
-      value: "8"
+      value: "2"
     - name: DINERSCLUB_RETRY_BOTSERVER
       value: "2m"
     - name: DINERSCLUB_RETRY_PROVIDER
       value: "2m"
     - name: DINERSCLUB_POOL_SIZE
-      value: "8"
+      value: "2"
     - name: DINERSCLUB_PROVIDERS
       value: "fake,reloadly,giftcard,http"
 
@@ -167,6 +167,8 @@ dean:
     value: "6 hours"
   - name: DEAN_FOLLOWUP_MAX
     value: "24 hours"
+  - name: DEAN_TIMEOUT_BLACKLIST
+    value: ""
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"

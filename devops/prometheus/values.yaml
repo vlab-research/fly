@@ -33,6 +33,7 @@ kubeScheduler:
   enabled: false
 
 alertmanager:
+  enabled: true
   alertmanagerSpec:
     useExistingSecret: true
     configSecret: "alertmanager"

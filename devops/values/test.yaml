@@ -25,7 +25,7 @@ versionBotserver: &vbotserver 0.0.9
 versionReplybot: &vreplybot v0.0.136
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.25
-versionScribble: &vscribble v0.0.21
+versionScribble: &vscribble v0.0.23
 versionDinersclub: &vdinersclub v0.0.23
 versionFormcentral: &vformcentral v0.0.10
 
@@ -269,6 +269,8 @@ dean:
     value: "2022,-1"
   - name: DEAN_ERROR_TAGS
     value: "NETWORK,INTERNAL"
+  - name: DEAN_TIMEOUT_BLACKLIST
+    value: ""
   - name: DEAN_ERROR_INTERVAL
     value: "24 hours"
   - name: DEAN_BLOCKED_INTERVAL
