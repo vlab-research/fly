@@ -21,6 +21,11 @@ function makeRepeat(field, text) {
   return { text: text,
            metadata: JSON.stringify({ repeat: true, ref  }) }
 }
+
+function makeRepeated(field) {
+    return {...field, metadata: JSON.stringify({isRepeat: true, ...JSON.parse(field.metadata)})}
+}
+
 const ok = { res: 'success' }
 
 function interpolate(str, values) {
@@ -212,10 +217,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const testFlow = [
         [ok, fields[0], [makeTextResponse(userId, '23345')]],
         [ok, repeatPhone, []],
-        [ok, fields[0], [makeTextResponse(userId, '+918888000000')]],
+        [ok, makeRepeated(fields[0]), [makeTextResponse(userId, '+918888000000')]],
         [ok, fields[1], [makeTextResponse(userId, 'foo')]],
         [ok, repeatEmail, []],
-        [ok, fields[1], [makeTextResponse(userId, 'foo@gmail.com')]],
+        [ok, makeRepeated(fields[1]), [makeTextResponse(userId, 'foo@gmail.com')]],
         [ok, fields[2], []]
       ];
 
@@ -234,10 +239,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const testFlow = [
         [ok, fields[0], [makeTextResponse(userId, 'haha not number')]],
         [ok, repeatNumber, []],
-        [ok, fields[0], [makeTextResponse(userId, '590')]],
+        [ok, makeRepeated(fields[0]), [makeTextResponse(userId, '590')]],
         [ok, fields[1], [makeTextResponse(userId, 'foozzzz')]],
         [ok, repeatSelect, []],
-        [ok, fields[1], [makeQR(fields[1], userId, 0)]],
+        [ok, makeRepeated(fields[1]), [makeQR(fields[1], userId, 0)]],
         [ok, fields[2], []]
       ];
 
@@ -376,7 +381,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const testFlow = [
         [ok, fields[0], [makeTextResponse(userId, 'LOL')]],
         [ok, { text: 'Please wait!', metadata: '{"repeat":true,"ref":"bd2b2376-d722-4b51-8e1e-c2000ce6ec55"}'}, []],
-        [ok, fields[0], []],
+        [ok, makeRepeated(fields[0]), []],
         [ok, fields[1], [makeTextResponse(userId, 'LOL')]],
         [ok, fields[2], []],
       ]
@@ -434,7 +439,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const testFlow = [
         [ok, fields[0], []],
         [ok, followUp, []],
-        [ok, fields[0], [makeQR(fields[0], userId, 0)]],
+        [ok, makeRepeated(fields[0]), [makeQR(fields[0], userId, 0)]],
         [ok, fields[1], []],
       ]
 
