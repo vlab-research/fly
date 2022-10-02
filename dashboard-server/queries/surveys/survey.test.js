@@ -20,11 +20,17 @@ describe('Survey queries', () => {
 
     User = userModel.queries(vlabPool);
     Survey = surveyModel.queries(vlabPool);
+
+    await vlabPool.query('DELETE FROM responses');
+    await vlabPool.query('DELETE FROM surveys');
+    await vlabPool.query('DELETE FROM users');
   });
 
   afterEach(async () => {
-    await vlabPool.query('DELETE FROM users');
+    await vlabPool.query('DELETE FROM responses');
     await vlabPool.query('DELETE FROM surveys');
+    await vlabPool.query('DELETE FROM users');
+
   });
 
 

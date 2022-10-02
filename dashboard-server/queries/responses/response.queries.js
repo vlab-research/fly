@@ -98,22 +98,6 @@ async function all(email, surveyName, after = null, pageSize = 25) {
   return { responses };
 }
 
-async function firstAndLast() {
-  const query = `SELECT *
-    FROM  (
-       SELECT DISTINCT ON (1) userid, timestamp AS first_timestamp, response AS first_response, surveyid
-       FROM   responses
-       ORDER  BY 1,2
-       ) f
-    JOIN (
-       SELECT DISTINCT ON (1) userid, timestamp AS last_timestamp, response AS last_response, surveyid
-       FROM   responses
-       ORDER  BY 1,2 DESC
-       ) l USING (userid)`;
-  const { rows } = await this.query(query);
-
-  return rows;
-}
 
 // TODO: remove question_text and push to another download? save space.
 async function responsesQuery(pool, email, name, time, lim) {
@@ -194,7 +178,6 @@ module.exports = {
   checkUserExists,
   queries: pool => ({
     all: all.bind(pool),
-    firstAndLast: firstAndLast.bind(pool),
     formResponses: formResponses.bind(pool),
     formData: formData.bind(pool),
   }),

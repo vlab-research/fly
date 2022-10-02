@@ -9,14 +9,6 @@ function handle(err, res) {
   res.status(500).end();
 }
 
-exports.getFirstAndLast = async (req, res) => {
-  try {
-    const responses = await Response.firstAndLast();
-    res.status(200).send(responses);
-  } catch (err) {
-    handle(err, res);
-  }
-};
 
 exports.getAll = async (req, res) => {
   try {
