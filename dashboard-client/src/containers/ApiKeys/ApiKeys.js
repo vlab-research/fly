@@ -12,28 +12,18 @@ const ApiKeys = () => {
   const [items, setItems] = useState([])
 
   const getCredentials = async () => {
-    let variable = '';
     let value = '';
     let disabled = false;
 
     if (key) {
-      const res = await api.fetcher({
-        path: '/credentials', method: 'GET',
-      });
-      const allCreds = await res.json();
-      const secrets = allCreds.filter(e => e.entity === 'api-key');
-      const secret = secrets.find(c => c.name === key);
-      if (!secret) {
-        throw new Error("Attempting to update a secret that doesn't exist!");
-      }
-
-      variable = key;
-      value = secret.details.name;
+      value = key;
       disabled = true;
+
+      // don't allow this...
     }
 
     const items = [
-      { name: 'name', label: 'Name of API Key', initialValue: variable, input: <Input disabled={disabled} /> },
+      { name: 'name', label: 'Name of API Key', initialValue: value, input: <Input disabled={disabled} /> },
     ]
 
     setItems(items)
@@ -43,26 +33,40 @@ const ApiKeys = () => {
     getCredentials();
   }, []);
 
-  const handleCreate = async ({ variable, value }) => {
-    if (!variable || !value) {
-      alert('You must provide both a variable and a value to create a secret.');
+  const handleCreate = async ({ name }) => {
+    if (!name) {
+      alert('You must provide a name to create an API key');
       return;
     }
 
-    const body = { entity: 'secrets', key: variable, details: { value } };
-    await api.fetcher({
-      path: '/credentials', method: key ? 'PUT' : 'POST', body, raw: true,
+    if (key) {
+      alert('Nothing to do here for now...');
+      return;
+    }
+
+    const body = { name };
+    const res = await api.fetcher({
+      path: '/auth/api-token', method: 'POST', body, raw: true
     });
+
+    if (!res.ok) {
+      const { error } = await res.json();
+      return alert(`Sorry: ${error}`)
+    }
+
+    const b = await res.json();
+    const { token } = b;
+    alert(`Your new token (keep it safe): \n\n${token}`);
   }
 
-  const description = `To add generic secrets provide the variable name and value here.`
+  const description = `To create a new API Key.`
 
   return (
     <KVLinkModal
       items={items}
-      title="Add Generic Secrets"
+      title="Create new API key"
       description={description}
-      successText={!key ? "Create" : "Update"}
+      successText={"Create"}
       handleCreate={handleCreate}
       loading={items === []}
     />

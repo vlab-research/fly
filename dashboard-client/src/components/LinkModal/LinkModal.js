@@ -6,9 +6,14 @@ import { PrimaryBtn, SecondaryBtn } from '../UI';
 const Actions = ({
   success, successText, selected, back,
 }) => {
-  const handleClick = (e) => {
+  const handleClick = async (e) => {
     e.preventDefault();
-    success(selected);
+
+    try {
+      await success(selected);
+    } catch (e) {
+      alert(`Oops, something went wrong: ${e}`)
+    }
   };
 
   return (
@@ -16,7 +21,7 @@ const Actions = ({
       <SecondaryBtn onClick={(e) => { e.preventDefault(); back(); }} type="text">
         Cancel
       </SecondaryBtn>
-      <PrimaryBtn onClick={handleClick} type="text">{ successText }</PrimaryBtn>
+      <PrimaryBtn onClick={handleClick} type="text">{successText}</PrimaryBtn>
     </s.ActionsBtns>
   );
 };
@@ -41,7 +46,7 @@ const LinkModal = ({
   return (
     <s.Modal onClick={closeModal}>
       <s.ModalBox>
-        { loading ? (<s.Spinner />) : (
+        {loading ? (<s.Spinner />) : (
           <>
             <s.ModalHeader />
             <s.ModalTitle>
@@ -50,8 +55,8 @@ const LinkModal = ({
               {' '}
             </s.ModalTitle>
             <s.List>
-              { content ? content 
-              : dataSource.length ? dataSource.map((item, index) => (
+              {content ? content
+                : dataSource.length ? dataSource.map((item, index) => (
                   <s.ListItem
                     key={item.id}
                     active={item.id === selected.id}
@@ -69,8 +74,8 @@ const LinkModal = ({
               }
             </s.List>
             <s.ModalFooter>
-              { footer ? footer(selected)
-              : <LinkModal.s.Selected></LinkModal.s.Selected> }
+              {footer ? footer(selected)
+                : <LinkModal.s.Selected></LinkModal.s.Selected>}
               <Actions {...{ success, successText, selected, back }} />
             </s.ModalFooter>
           </>

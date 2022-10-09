@@ -11,28 +11,33 @@ const accountConfs = [
     title: 'Facebook Page for Messenger Chatbot',
     entity: 'facebook_page',
     description: 'To use the Virtual Lab chatbot, Connect your Facebook account and grant Virtual Lab permission to manage messages for the Page for which you are the administrator. Virtual Lab will have permission to send and receieve messages on the behalf of the Page.',
-    getName: c => c.details.name
+    getName: c => c.details.name,
+    buttonText: 'Connect',
+    // TODO: add "actions" with name/route for each action
   },
   {
     to: '/connect/reloadly',
     title: 'Reloadly',
     entity: 'reloadly',
     description: 'To enable top-ups in Virtual Lab chatbot using Reloadly, provide your Reloadly API keys.',
-    getName: c => c.details.id
+    getName: c => c.details.id,
+    buttonText: 'Connect',
   },
   {
     to: '/connect/secrets',
     title: 'Generic Secrets',
     entity: 'secrets',
     description: 'Add generic secrets for additional plugins here.',
-    getName: c => c.key
+    getName: c => c.key,
+    buttonText: 'Add Secret',
   },
   {
     to: '/connect/api-keys',
     title: 'Fly API Keys',
-    entity: 'api-key',
+    entity: 'api_token',
     description: 'API Keys for connecting Fly to other applications',
-    getName: c => c.name
+    getName: c => c.details.name,
+    buttonText: 'Create',
   },
 ];
 
@@ -63,7 +68,7 @@ const Accounts = () => {
               <List.Item
                 extra={(
                   <CreateBtn key={1} to={item.to}>
-                    {'CONNECT'}
+                    {item.buttonText.toUpperCase()}
                   </CreateBtn>
                 )
                 }

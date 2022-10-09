@@ -5,29 +5,29 @@ import { Form } from 'antd';
 import LinkModal from '../LinkModal';
 
 
-const KVLinkModal = ({items, title, description, successText, handleCreate, loading}) => {
+const KVLinkModal = ({ items, title, description, successText, handleCreate, loading }) => {
   const history = useHistory();
   const back = () => history.go(-1);
   const [form] = Form.useForm();
 
-  items.forEach(i => form.setFieldsValue({[i.name]: i.initialValue}));
+  items.forEach(i => form.setFieldsValue({ [i.name]: i.initialValue }));
 
   const success = async () => {
-    const vals = items.reduce((a, i) => ({...a, [i.name]: form.getFieldValue(i.name)}), {});
+    const vals = items.reduce((a, i) => ({ ...a, [i.name]: form.getFieldValue(i.name) }), {});
     await handleCreate(vals);
     back();
   }
 
   const content = <>
     <span className="description">
-      { description }
+      {description}
     </span>
     <Form
-      form={ form }
+      form={form}
       labelCol={{ span: 10 }}
       style={{ marginLeft: 'auto', marginRight: 'auto' }}
     >
-      { items.map(i => (
+      {items.map(i => (
         <Form.Item
           key={i.name}
           label={i.label}
@@ -42,12 +42,12 @@ const KVLinkModal = ({items, title, description, successText, handleCreate, load
 
   return (
     <LinkModal
-      successText={ successText }
-      title={ title }
-      back={ back }
-      loading={ loading }
-      content={ content }
-      success={ success }
+      successText={successText}
+      title={title}
+      back={back}
+      loading={loading}
+      content={content}
+      success={success}
     />
   );
 };
