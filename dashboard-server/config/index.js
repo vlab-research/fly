@@ -66,7 +66,7 @@ const config = {
     algorithms: ['RS256'],
   },
   SERVER_JWT: {
-    secret: envVars.AUTH0_DASHBOARD_SECRET
+    secret: isTest() ? 'secret' : envVars.AUTH0_DASHBOARD_SECRET
   },
   DATABASE_CONFIG: {
     user: isTest() ? 'root' : envVars.DB_USER || 'postgres',

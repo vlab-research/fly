@@ -5,7 +5,6 @@ require('mocha');
 const userModel = require('../users/user.queries');
 const surveyModel = require('../surveys/survey.queries');
 const model = require('./response.queries');
-const router = require('./../../api/responses/response.routes');
 const token = require('./token');
 const request = require('supertest');
 const chai = require('chai');
@@ -13,19 +12,9 @@ const chaiAsPromised = require('chai-as-promised');
 const expect = chai.expect;
 chai.use(chaiAsPromised);
 
-// hack to avoid bootstrapping the entire
-// server with all its env vars, just test
-// this router in isolation
-const express = require('express');
-const app = express();
-
-const fakeAuthMiddleware = (req, res, next) => {
-  req.user = { email: 'test3@vlab.com' };
-  next();
-};
-
-app.use('/', fakeAuthMiddleware, router);
-
+const { AuthUtil } = require('../../utils');
+const { makeAPIToken } = AuthUtil;
+const app = require('../../server');
 const { DATABASE_CONFIG } = require('../../config');
 
 describe('Response queries', () => {
@@ -63,7 +52,7 @@ describe('Response queries', () => {
       email: 'test3@vlab.com',
     };
 
-    // create and get user, in case already exists 
+    // create and get user, in case already exists
     await User.create(user);
     const newUser = await User.user(user);
 
@@ -133,7 +122,7 @@ describe('Response queries', () => {
 
   describe('all()', () => {
     it('should return a list of responses for a survey created by a user', async () => {
-      console.log('BEFORE FIRST')
+
       const res = await Response.all(email, surveyName, afterParam);
       res.responses.should.eql([
         {
@@ -279,10 +268,17 @@ describe('Response queries', () => {
     });
 
     describe('GET /responses', () => {
+      let authToken;
+
+      before(async () => {
+        authToken = await makeAPIToken({ email })
+      })
+
       it('responds with a list of responses after a given token', async () => {
         // first request
         let response = await request(app)
-          .get(`/?survey=${surveyName}&pageSize=25`) // no token needed here
+          .get(`/api/v1/responses?survey=${surveyName}&pageSize=25`) // no token needed here
+          .set('Authorization', `Bearer ${authToken}`)
           .set('Accept', 'application/json')
           .expect('Content-Type', /json/)
           .expect(200);
@@ -300,8 +296,8 @@ describe('Response queries', () => {
         // second request
         let token = responses[0].token;
         response = await request(app).get(
-          `/?survey=${surveyName}&after=${token}&pageSize=25`,
-        );
+          `/api/v1/responses?survey=${surveyName}&after=${token}&pageSize=25`,
+        ).set('Authorization', `Bearer ${authToken}`);
 
         responses = response.body.responses;
         responses.length.should.equal(3);
@@ -309,8 +305,8 @@ describe('Response queries', () => {
         // third request
         token = responses[0].token;
         response = await request(app).get(
-          `/?survey=${surveyName}&after=${token}&pageSize=25`,
-        );
+          `/api/v1/responses?survey=${surveyName}&after=${token}&pageSize=25`,
+        ).set('Authorization', `Bearer ${authToken}`);
         responses = response.body.responses;
         responses.length.should.equal(2);
       });

@@ -1,4 +1,5 @@
 const jwt = require('express-jwt');
+
 const { JWT: clientConfig, SERVER_JWT: serverConfig } = require('../config');
 
 // make middleware that tries auth0 client then if that fails

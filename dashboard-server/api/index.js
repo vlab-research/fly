@@ -6,6 +6,7 @@ router
   .use('/surveys', require('./surveys'))
   .use('/typeform', require('./typeform'))
   .use('/credentials', require('./credentials'))
-  .use('/facebook', require('./facebook'));
+  .use('/facebook', require('./facebook'))
+  .use('/auth', require('./auth/auth.routes'));
 
 module.exports = router;

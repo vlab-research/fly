@@ -1,5 +1,4 @@
 const express = require('express');
-const CubejsServerCore = require('@cubejs-backend/server-core');
 const cors = require('cors');
 const bodyparser = express.json();
 
@@ -14,7 +13,7 @@ app
   .use(cors({ exposedHeaders: ['Content-Disposition'] }))
   .use(bodyparser)
   .use(`/api/v${API_VERSION}`, auth, router)
-  .use(function(err, req, res, next) {
+  .use(function (err, req, res, next) {
     if (err.name === 'UnauthorizedError') {
       res.status(401).send('Invalid Token.');
     }
@@ -23,12 +22,5 @@ app
     // TODO: check connection to DB
     return res.status(200).send('hola');
   });
-
-const options = {
-  devServer: false,
-  checkAuthMiddleware: auth,
-};
-
-CubejsServerCore.create(options).initApp(app);
 
 module.exports = app;
