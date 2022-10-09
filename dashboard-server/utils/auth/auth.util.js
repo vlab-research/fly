@@ -1,3 +1,4 @@
+const { Credential } = require('../../queries');
 const jwtwebtoken = require('jsonwebtoken');
 const { SERVER_JWT: serverConfig } = require('../../config');
 
@@ -14,4 +15,8 @@ async function makeAPIToken(payload) {
   })
 }
 
-module.exports = { makeAPIToken }
+function insertIntoCredentials(email, name) {
+  return Credential.create({ key: name, entity: 'api_token', details: { name }, email })
+}
+
+module.exports = { makeAPIToken, insertIntoCredentials }

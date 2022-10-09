@@ -9,7 +9,7 @@ const jwt = require('jsonwebtoken')
 
 const app = require('../../server');
 const { AuthUtil } = require('../../utils');
-const { makeAPIToken } = AuthUtil;
+const { makeAPIToken, insertIntoCredentials } = AuthUtil;
 const email = 'test@vlab.com'
 
 describe('POST /auth/api-token', () => {
@@ -58,6 +58,19 @@ describe('POST /auth/api-token', () => {
     const creds = res[0]
     creds.key.should.equal('foo')
     creds.details.name.should.equal('foo')
+  })
+
+
+  it('Sends a 400 if the token name already exists', async () => {
+    await insertIntoCredentials(email, 'foo')
+
+    await request(app)
+      .post(`/api/v1/auth/api-token`)
+      .send({ name: 'foo' })
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('Accept', 'application/json')
+      .expect('Content-Type', /json/)
+      .expect(400);
   })
 })
 
