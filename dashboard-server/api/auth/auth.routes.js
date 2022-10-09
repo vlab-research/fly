@@ -1,11 +1,7 @@
 const router = require('express').Router();
-const { Credential } = require('../../queries');
 const { AuthUtil } = require('../../utils');
-const { makeAPIToken } = AuthUtil;
+const { makeAPIToken, insertIntoCredentials } = AuthUtil;
 
-function insertIntoCredentials(email, name) {
-  return Credential.create({ key: name, entity: 'api_token', details: { name }, email })
-}
 
 async function createApiToken(req, res) {
   const { email } = req.user;
@@ -18,8 +14,18 @@ async function createApiToken(req, res) {
     }
   )
 
-  const cred = await insertIntoCredentials(email, name)
-  res.status(201).json({ name: cred.details.name, token })
+  try {
+    const cred = await insertIntoCredentials(email, name)
+    res.status(201).json({ name: cred.details.name, token })
+  } catch (e) {
+
+    if (e.code === '23505') {
+      res.status(400).json({ error: 'Sorry, there is already an API Key with that name' })
+    } else {
+      res.status(500).json({ error: e })
+    }
+  }
+
 }
 
 async function revokeApiToken(req, res) {

@@ -7,7 +7,7 @@ exports.createCredential = async function (req, res) {
   const { email } = req.user;
 
   try {
-    const cred = await Credential.create({...req.body, email});
+    const cred = await Credential.create({ ...req.body, email });
     return res.status(201).json(cred);
   } catch (e) {
     console.error(e)
@@ -29,9 +29,9 @@ exports.updateCredential = async function (req, res) {
   const { email } = req.user;
 
   try {
-    const cred = await Credential.update({...req.body, email});
+    const cred = await Credential.update({ ...req.body, email });
     if (!cred) {
-      return res.status(404).json({'error': `Could not find credentials to match: ${JSON.stringify(req.body)}`})
+      return res.status(404).json({ 'error': `Could not find credentials to match: ${JSON.stringify(req.body)}` })
     }
     return res.status(200).json(cred);
   } catch (e) {
@@ -44,9 +44,9 @@ exports.getCredentials = async function (req, res) {
   const { email } = req.user;
 
   try {
-    const creds = await Credential.get({email});
+    const creds = await Credential.get({ email });
     return res.status(200).json(creds);
-  } catch (e){
+  } catch (e) {
     console.error(e)
     return res.status(500).send(e);
   }
