@@ -1,0 +1,62 @@
+Info 0    [18:49:46.664] Starting TS Server
+Info 1    [18:49:46.664] Version: 4.8.3
+Info 2    [18:49:46.664] Arguments: /usr/bin/node /home/nandan/.emacs.d/.cache/lsp/npm/typescript/lib/node_modules/typescript/lib/tsserver.js --useInferredProjectPerProjectRoot --cancellationPipeName /tmp/67273e475e3ee3ce811480b587268473/tscancellation* --logFile /home/nandan/Documents/vlab-research/fly/dashboard-client/.log/tsserver.log --logVerbosity info --locale en --validateDefaultNpmLocation --useNodeIpc
+Info 3    [18:49:46.664] Platform: linux NodeVersion: 18 CaseSensitive: true
+Info 4    [18:49:46.664] ServerMode: undefined syntaxOnly: false hasUnknownServerMode: undefined
+Info 5    [18:49:46.680] Format host information updated
+Info 6    [18:49:46.736] Search path: /home/nandan/Documents/vlab-research/fly/dashboard-client/src/containers/Accounts
+Info 7    [18:49:46.738] For info: /home/nandan/Documents/vlab-research/fly/dashboard-client/src/containers/Accounts/Accounts.js :: No config files found.
+Info 8    [18:49:46.746] Starting updateGraphWorker: Project: /dev/null/inferredProject1*
+Info 9    [18:49:50.963] Finishing updateGraphWorker: Project: /dev/null/inferredProject1* Version: 1 structureChanged: true structureIsReused:: Not Elapsed: 4216.058514997363ms
+Info 10   [18:49:50.963] Project '/dev/null/inferredProject1*' (Inferred)
+Info 11   [18:49:50.963] 	Files (476)
+
+Info 12   [18:49:50.963] -----------------------------------------------
+Info 13   [18:49:50.995] AutoImportProviderProject: found 8 root files in 8 dependencies in 20.778469003736973 ms
+Info 14   [18:49:50.996] Starting updateGraphWorker: Project: /dev/null/autoImportProviderProject1*
+Info 15   [18:49:52.583] Finishing updateGraphWorker: Project: /dev/null/autoImportProviderProject1* Version: 1 structureChanged: true structureIsReused:: Not Elapsed: 1587.2176140025258ms
+Info 16   [18:49:52.584] Project '/dev/null/autoImportProviderProject1*' (AutoImportProvider)
+Info 17   [18:49:52.584] 	Files (1228)
+
+Info 18   [18:49:52.584] -----------------------------------------------
+Info 19   [18:49:53.560] Starting updateGraphWorker: Project: /dev/null/inferredProject1*
+Info 20   [18:49:53.781] Finishing updateGraphWorker: Project: /dev/null/inferredProject1* Version: 2 structureChanged: true structureIsReused:: Not Elapsed: 220.45683900266886ms
+Info 21   [18:49:53.781] Project '/dev/null/inferredProject1*' (Inferred)
+Info 22   [18:49:53.781] 	Files (498)
+
+Info 23   [18:49:53.781] -----------------------------------------------
+Info 24   [18:49:53.781] Project '/dev/null/autoImportProviderProject1*' (AutoImportProvider)
+Info 25   [18:49:53.781] 	Files (1228)
+
+Info 26   [18:49:53.781] -----------------------------------------------
+Info 27   [18:49:55.424] Search path: /home/nandan/Documents/vlab-research/fly/dashboard-client/src/containers/Secrets
+Info 28   [18:49:55.424] For info: /home/nandan/Documents/vlab-research/fly/dashboard-client/src/containers/Secrets/Secrets.js :: No config files found.
+Info 29   [18:49:55.425] Starting updateGraphWorker: Project: /dev/null/inferredProject1*
+Info 30   [18:49:55.526] Finishing updateGraphWorker: Project: /dev/null/inferredProject1* Version: 3 structureChanged: true structureIsReused:: Not Elapsed: 101.00725900381804ms
+Info 31   [18:49:55.526] Project '/dev/null/inferredProject1*' (Inferred)
+Info 32   [18:49:55.526] 	Files (504)
+
+Info 33   [18:49:55.526] -----------------------------------------------
+Info 34   [18:49:55.526] Project '/dev/null/autoImportProviderProject1*' (AutoImportProvider)
+Info 35   [18:49:55.526] 	Files (1228)
+
+Info 36   [18:49:55.526] -----------------------------------------------
+Info 37   [18:49:55.990] Before ensureProjectForOpenFiles:
+Info 38   [18:49:55.990] After ensureProjectForOpenFiles:
+Info 39   [18:49:55.991] got projects updated in background, updating diagnostics for /home/nandan/Documents/vlab-research/fly/dashboard-client/src/containers/Accounts/Accounts.js,/home/nandan/Documents/vlab-research/fly/dashboard-client/src/containers/Secrets/Secrets.js
+Info 40   [19:04:07.975] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 41   [19:04:07.981] Elapsed:: 0.4027569964528084ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 42   [19:04:07.981] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 43   [19:04:07.981] Elapsed:: 0.047946996986866ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 44   [19:04:07.981] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations
+Info 45   [19:04:07.981] Elapsed:: 0.03957900404930115ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations
+Info 46   [19:04:07.981] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations
+Info 47   [19:04:07.981] Elapsed:: 0.012856997549533844ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations
+Info 48   [20:06:45.182] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 49   [20:06:45.184] Elapsed:: 0.1772869974374771ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 50   [20:06:45.185] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 51   [20:06:45.185] Elapsed:: 0.20374500006437302ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/inferredProject1* WatchType: Failed Lookup Locations
+Info 52   [20:06:45.185] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations
+Info 53   [20:06:45.185] Elapsed:: 0.05117800086736679ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 0:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations
+Info 54   [20:06:45.186] DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations
+Info 55   [20:06:45.186] Elapsed:: 0.0803770050406456ms DirectoryWatcher:: Triggered with /home/nandan/.cache/typescript/4.8/node_modules/fsevents 1:: WatchInfo: /home/nandan/.cache/typescript/4.8/node_modules 1 undefined Project: /dev/null/autoImportProviderProject1* WatchType: Failed Lookup Locations

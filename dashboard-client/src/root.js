@@ -3,7 +3,7 @@ import React from 'react';
 import { Router, Route } from 'react-router-dom';
 import { Layout } from 'antd';
 import {
-  App, LoginScreen, Surveys,
+  App, LoginScreen, Surveys, ApiKeys
 } from './containers';
 import { PrivateRoute, Spinner } from './components';
 import { TypeformCreateAuth } from './components/TypeformCreate/TypeformCreate';
@@ -31,6 +31,7 @@ const Root = () => (
       <PrivateRoute exact path="/connect/facebook-ads" component={NotFound} auth={Auth} />
       <PrivateRoute exact path="/connect/reloadly" component={Reloadly} auth={Auth} />
       <PrivateRoute exact path="/connect/secrets" component={Secrets} auth={Auth} />
+      <PrivateRoute exact path="/connect/api-keys" component={ApiKeys} auth={Auth} />
       <PrivateRoute path="/surveys/:survey?" component={Surveys} auth={Auth} />
       <Route exact path="/login" render={props => <LoginScreen {...props} auth={Auth} />} />
       <Route

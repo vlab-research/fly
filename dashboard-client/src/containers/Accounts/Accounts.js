@@ -27,6 +27,13 @@ const accountConfs = [
     description: 'Add generic secrets for additional plugins here.',
     getName: c => c.key
   },
+  {
+    to: '/connect/api-keys',
+    title: 'Fly API Keys',
+    entity: 'api-key',
+    description: 'API Keys for connecting Fly to other applications',
+    getName: c => c.name
+  },
 ];
 
 const Accounts = () => {

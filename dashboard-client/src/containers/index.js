@@ -10,6 +10,7 @@ import DurationReport from './DurationReport';
 import TopQuestionsReport from './TopQuestionsReport';
 import AnswersReport from './AnswersReport';
 import JoinTimeReport from './JoinTimeReport';
+import ApiKeys from './ApiKeys';
 
 export {
   App,
@@ -24,4 +25,5 @@ export {
   TopQuestionsReport,
   AnswersReport,
   JoinTimeReport,
+  ApiKeys,
 };
