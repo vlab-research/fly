@@ -1,13 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"github.com/stretchr/testify/assert"
+	"github.com/vlab-research/go-reloadly/reloadly"
+	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/vlab-research/go-reloadly/reloadly"
 )
 
 func before() {
@@ -179,4 +180,62 @@ func TestReloadlyResultsOnMissingKey(t *testing.T) {
 
 	err := provider.Auth(&User{}, "")
 	assert.Contains(t, err.Error(), "No key provided")
+}
+
+func TestReloadlyAuthsWithCredsBasedOnKey(t *testing.T) {
+	before()
+
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	insertUserSql := `
+		INSERT INTO users(id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+	`
+	mustExec(t, pool, insertUserSql)
+	insertFbPageSql := `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'facebook_page', 'test-key', '{"id": "page"}');
+	`
+	mustExec(t, pool, insertFbPageSql)
+	insertReloadlySql := `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'reloadly', 'test-key-1', '{"id": "test-id-1", "secret": "test-secret-1"}');
+	`
+	mustExec(t, pool, insertReloadlySql)
+
+	insertReloadlySql2 := `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'reloadly', 'test-key-2', '{"id": "test-id-2", "secret": "test-secret-2"}');
+	`
+	mustExec(t, pool, insertReloadlySql2)
+
+	rt := func(req *http.Request) (*http.Response, error) {
+
+		data, _ := ioutil.ReadAll(req.Body)
+		assert.Contains(t, string(data), "test-secret-1")
+
+		body := `{}`
+
+		res := &http.Response{
+			StatusCode: 200,
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte(body))),
+		}
+		return res, nil
+	}
+
+	svc := &reloadly.Service{Client: &http.Client{Transport: TestTransport(rt)}}
+	provider := &ReloadlyProvider{pool, svc, ""}
+	pe := &PaymentEvent{
+		Pageid: "page",
+	}
+
+	user, err := provider.GetUserFromPaymentEvent(pe)
+	assert.NotNil(t, user)
+	assert.Nil(t, err)
+
+	err = provider.Auth(user, "test-key-1")
+	assert.Nil(t, err)
+
 }
