@@ -1,6 +1,6 @@
 {
   "id": "gk3gt9ag",
-  "type": "form",
+  "type": "quiz",
   "title": "payment test - fake - failure",
   "workspace": {
     "href": "https://api.typeform.com/workspaces/WA44hg"
@@ -14,20 +14,39 @@
     "meta": {
       "allow_indexing": false
     },
+    "hide_navigation": false,
     "is_public": true,
     "is_trial": false,
     "show_progress_bar": true,
     "show_typeform_branding": true,
-    "are_uploads_public": false
+    "are_uploads_public": false,
+    "show_time_to_complete": false,
+    "show_number_of_submissions": false,
+    "show_cookie_consent": false,
+    "show_question_number": true,
+    "pro_subdomain_enabled": false,
+    "capabilities": {
+      "e2e_encryption": {
+        "enabled": false,
+        "modifiable": false
+      }
+    }
   },
   "thankyou_screens": [
     {
       "id": "DefaultTyScreen",
       "ref": "default_tys",
-      "title": "Done! Your information was sent perfectly.",
+      "title": "Thanks for completing this typeform\nNow *create your own* — it's free, easy, & beautiful",
+      "type": "thankyou_screen",
       "properties": {
-        "show_button": false,
-        "share_icons": false
+        "show_button": true,
+        "share_icons": false,
+        "button_mode": "default_redirect",
+        "button_text": "Create a *typeform*"
+      },
+      "attachment": {
+        "type": "image",
+        "href": "https://images.typeform.com/images/2dpnUBBkz2VN"
       }
     }
   ],
@@ -76,7 +95,7 @@
       "title": "Thank you, we'll send money there!!",
       "ref": "b69e2638-5999-44b6-b44d-5931578b1956",
       "properties": {
-        "description": "type: wait\nwait: \n    type: external\n    value:\n        type: payment:fake\n        id: foobaz\n\npayment: \n    provider: fake\n    details:\n        result:\n            type: payment:fake\n            id: foobaz\n            success: false\n            error: \n                code: FAKE\n                message: you fake",
+        "description": "{\n    \"type\": \"wait\",\n    \"wait\": {\n        \"type\": \"external\",\n        \"value\": {\n            \"type\": \"payment:fake\",\n            \"id\": \"foobaz\"\n        }\n    },\n    \"payment\": {\n        \"provider\": \"fake\",\n        \"details\": {\n            \"result\": {\n                \"type\": \"payment:fake\",\n                \"id\": \"foobaz\",\n                \"success\": false,\n                \"error\": {\n                    \"code\": \"FAKE\",\n                    \"message\": \"you fake\"\n                }\n            }\n        }\n    }\n}",
         "button_text": "Continue",
         "hide_marks": false
       },
@@ -105,12 +124,18 @@
     {
       "id": "DefaultTyScreen",
       "ref": "default_tys",
-      "title": "Done! Your information was sent perfectly.",
+      "title": "Thanks for completing this typeform\nNow *create your own* — it's free, easy, & beautiful",
+      "type": "thankyou_screen",
       "properties": {
-        "show_button": false,
-        "share_icons": false
+        "show_button": true,
+        "share_icons": false,
+        "button_mode": "default_redirect",
+        "button_text": "Create a *typeform*"
       },
-      "type": "thankyou_screen"
+      "attachment": {
+        "type": "image",
+        "href": "https://images.typeform.com/images/2dpnUBBkz2VN"
+      }
     }
   ],
   "hidden": [
@@ -179,8 +204,11 @@
       ]
     }
   ],
+  "created_at": "2020-09-20T13:45:13+00:00",
+  "last_updated_at": "2022-12-03T20:03:18+00:00",
+  "published_at": "2021-10-10T00:50:55+00:00",
   "_links": {
-    "display": "https://nandanrao.typeform.com/to/gk3gt9ag"
+    "display": "https://survey.typeform.com/to/gk3gt9ag"
   },
   "custom_messages": {}
 }
