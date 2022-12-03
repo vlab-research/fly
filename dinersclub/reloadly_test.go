@@ -166,3 +166,17 @@ func TestReloadlyResultsOnMissingCredentials(t *testing.T) {
 	err = provider.Auth(user, "test-key")
 	assert.Equal(t, err.Error(), "No reloadly credentials were found for user: 00000000-0000-0000-0000-000000000000")
 }
+
+func TestReloadlyResultsOnMissingKey(t *testing.T) {
+	before()
+
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	svc := &reloadly.Service{}
+	provider := &ReloadlyProvider{pool, svc, ""}
+
+	err := provider.Auth(&User{}, "")
+	assert.Contains(t, err.Error(), "No key provided")
+}

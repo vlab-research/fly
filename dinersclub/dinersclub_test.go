@@ -56,7 +56,6 @@ func TestDinersClub(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -69,7 +68,6 @@ func TestDinersClub(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -147,7 +145,6 @@ func TestDinersClubErrorsOnNonExistentProvider(t *testing.T) {
 			"userid": "foo",
 			"pageid": "page",
 			"provider": "baz",
-			"key": "baz-key",
 			"timestamp": 1600558963867,
 			"details": {
 				"result": {
@@ -178,7 +175,6 @@ func TestDinersClubRepeatsOnServerErrorFromBotserver(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -210,7 +206,6 @@ func TestDinersClubErrorsWhenProviderNotListed(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -247,7 +242,6 @@ func TestDinersClubErrorsOnMissingUser(t *testing.T) {
 			"pageid": "invalid-page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -290,7 +284,6 @@ func TestDinersClubCache(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -303,7 +296,6 @@ func TestDinersClubCache(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -316,7 +308,6 @@ func TestDinersClubCache(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
-			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -358,7 +349,6 @@ func TestDinersClubAuthError(t *testing.T) {
 			"userid": "bad-user",
 			"pageid": "page",
 			"provider": "fake",
-			"key": "fake",
 			"timestamp": 1600558963867,
 			"details": {
 				"result": {

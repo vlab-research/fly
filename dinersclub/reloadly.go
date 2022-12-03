@@ -71,6 +71,10 @@ func (p *ReloadlyProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, 
 }
 
 func (p *ReloadlyProvider) Auth(user *User, key string) error {
+	if key == "" {
+		return fmt.Errorf(`No key provided for Reloadly provider. A key is required for Reloadly Payment Events!`)
+	}
+
 	crds, err := p.getCredentials(user.Id, key)
 	if err != nil {
 		return err

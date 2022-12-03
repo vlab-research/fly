@@ -28,7 +28,7 @@ type PaymentEvent struct {
 	Pageid    string           `json:"pageid" validate:"required"`
 	Timestamp *JSTimestamp     `json:"timestamp" validate:"required"`
 	Provider  string           `json:"provider" validate:"required"`
-	Key       string           `json:"key" validate:"required"`
+	Key       string           `json:"key"`
 	Details   *json.RawMessage `json:"details" validate:"required"`
 }
 
