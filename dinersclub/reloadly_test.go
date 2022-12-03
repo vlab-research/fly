@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vlab-research/go-reloadly/reloadly"
 	"github.com/stretchr/testify/assert"
+	"github.com/vlab-research/go-reloadly/reloadly"
 )
 
 func before() {
@@ -75,7 +75,7 @@ func TestReloadlyReportsSuccessResult(t *testing.T) {
 	defer pool.Close()
 
 	insertUserSql := `
-		INSERT INTO users(id, email) 
+		INSERT INTO users(id, email)
 		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
 	`
 	mustExec(t, pool, insertUserSql)
@@ -108,7 +108,7 @@ func TestReloadlyReportsSuccessResult(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, user.Id, "00000000-0000-0000-0000-000000000000")
 
-	err = provider.Auth(user)
+	err = provider.Auth(user, "test-key")
 	assert.Nil(t, err)
 
 	res, err := provider.Payout(pe)
@@ -144,7 +144,7 @@ func TestReloadlyResultsOnMissingCredentials(t *testing.T) {
 	defer pool.Close()
 
 	insertUserSql := `
-		INSERT INTO users(id, email) 
+		INSERT INTO users(id, email)
 		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
 	`
 	mustExec(t, pool, insertUserSql)
@@ -163,6 +163,6 @@ func TestReloadlyResultsOnMissingCredentials(t *testing.T) {
 	assert.NotNil(t, user)
 	assert.Nil(t, err)
 
-	err = provider.Auth(user)
+	err = provider.Auth(user, "test-key")
 	assert.Equal(t, err.Error(), "No reloadly credentials were found for user: 00000000-0000-0000-0000-000000000000")
 }

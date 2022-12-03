@@ -7,7 +7,7 @@ import (
 
 type FakeProvider struct {
 	getUserFromPaymentEvent GetUserFromPaymentEvent
-	auth Auth
+	auth                    Auth
 }
 
 type FakeDetails struct {
@@ -23,14 +23,14 @@ func (p *FakeProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, erro
 }
 
 func getUserFromFakePaymentEvent(event *PaymentEvent) (*User, error) {
-	return &User{Id:"test-id"}, nil
+	return &User{Id: "test-id"}, nil
 }
 
-func (p *FakeProvider) Auth(user *User) error {
-	return p.auth(user)
+func (p *FakeProvider) Auth(user *User, key string) error {
+	return p.auth(user, key)
 }
 
-func auth(user *User) error {
+func auth(user *User, key string) error {
 	return nil
 }
 

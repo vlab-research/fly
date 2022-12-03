@@ -28,6 +28,7 @@ type PaymentEvent struct {
 	Pageid    string           `json:"pageid" validate:"required"`
 	Timestamp *JSTimestamp     `json:"timestamp" validate:"required"`
 	Provider  string           `json:"provider" validate:"required"`
+	Key       string           `json:"key" validate:"required"`
 	Details   *json.RawMessage `json:"details" validate:"required"`
 }
 
@@ -53,12 +54,12 @@ type Result struct {
 
 type Provider interface {
 	GetUserFromPaymentEvent(*PaymentEvent) (*User, error)
-	Auth(*User) error
+	Auth(*User, string) error
 	Payout(*PaymentEvent) (*Result, error)
 }
 
 type GetUserFromPaymentEvent func(event *PaymentEvent) (*User, error)
-type Auth func(user *User) error
+type Auth func(user *User, key string) error
 
 func GenericGetUser(pool *pgxpool.Pool, event *PaymentEvent) (*User, error) {
 	query := `SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1`

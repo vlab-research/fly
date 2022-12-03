@@ -101,12 +101,14 @@ func authError(pe *PaymentEvent, e error) *Result {
 }
 
 func (dc *DC) checkCache(provider Provider, pe *PaymentEvent, user *User) (Provider, error) {
-	key := pe.Provider + user.Id
+
+	// add key, provider + key + user.Id = key
+	key := pe.Provider + pe.Key + user.Id
 	p, ok := dc.cache.Get(key)
 	if ok {
 		return p.(Provider), nil
 	}
-	e := provider.Auth(user)
+	e := provider.Auth(user, pe.Key) // also add key
 	if e != nil {
 		return nil, e
 	}

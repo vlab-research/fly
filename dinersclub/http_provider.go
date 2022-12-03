@@ -31,7 +31,7 @@ func (p *HttpProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, erro
 	return GenericGetUser(p.pool, event)
 }
 
-func (p *HttpProvider) Auth(user *User) error {
+func (p *HttpProvider) Auth(user *User, key string) error {
 	query := `SELECT key, details->>'value' FROM credentials WHERE entity='secrets' AND userid=$1`
 
 	rows, err := p.pool.Query(context.Background(), query, user.Id)

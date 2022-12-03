@@ -126,7 +126,7 @@ func TestGiftCardsReportsSuccessResult(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, user.Id, "00000000-0000-0000-0000-000000000000")
 
-	err = provider.Auth(user)
+	err = provider.Auth(user, "test-key")
 	assert.Nil(t, err)
 
 	res, err := provider.Payout(pe)

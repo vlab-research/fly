@@ -63,7 +63,7 @@ func TestHttpProviderAuth_GetsSecrets(t *testing.T) {
 	}
 
 	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
-	p.Auth(user)
+	p.Auth(user, "anythingcanbehere")
 	assert.Equal(t, 2, len(p.secrets))
 	assert.Equal(t, "bar", p.secrets["foo"])
 	assert.Equal(t, "qux", p.secrets["baz"])

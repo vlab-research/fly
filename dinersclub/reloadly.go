@@ -70,8 +70,8 @@ func (p *ReloadlyProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, 
 	return GenericGetUser(p.pool, event)
 }
 
-func (p *ReloadlyProvider) Auth(user *User) error {
-	crds, err := p.getCredentials(user.Id)
+func (p *ReloadlyProvider) Auth(user *User, key string) error {
+	crds, err := p.getCredentials(user.Id, key)
 	if err != nil {
 		return err
 	}
@@ -91,9 +91,9 @@ func (p *ReloadlyProvider) Auth(user *User) error {
 	return p.svc.Auth(auth.Id, auth.Secret)
 }
 
-func (p *ReloadlyProvider) getCredentials(userid string) (*Credentials, error) {
-	query := `SELECT details FROM credentials WHERE entity='reloadly' AND userid=$1 LIMIT 1`
-	row := p.pool.QueryRow(context.Background(), query, userid)
+func (p *ReloadlyProvider) getCredentials(userid string, key string) (*Credentials, error) {
+	query := `SELECT details FROM credentials WHERE entity='reloadly' AND userid=$1 AND key=$2 LIMIT 1`
+	row := p.pool.QueryRow(context.Background(), query, userid, key)
 	var c Credentials
 	err := row.Scan(&c.Details)
 

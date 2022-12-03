@@ -2,18 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"fmt"
 
+	"github.com/dgraph-io/ristretto"
 	"github.com/go-playground/validator/v10"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/vlab-research/botparty"
-	"github.com/dgraph-io/ristretto"
-	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 func getDC(ts *httptest.Server) *DC {
@@ -56,6 +56,7 @@ func TestDinersClub(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -68,6 +69,7 @@ func TestDinersClub(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -145,6 +147,7 @@ func TestDinersClubErrorsOnNonExistentProvider(t *testing.T) {
 			"userid": "foo",
 			"pageid": "page",
 			"provider": "baz",
+			"key": "baz-key",
 			"timestamp": 1600558963867,
 			"details": {
 				"result": {
@@ -175,6 +178,7 @@ func TestDinersClubRepeatsOnServerErrorFromBotserver(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -206,6 +210,7 @@ func TestDinersClubErrorsWhenProviderNotListed(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -242,6 +247,7 @@ func TestDinersClubErrorsOnMissingUser(t *testing.T) {
 			"pageid": "invalid-page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -284,6 +290,7 @@ func TestDinersClubCache(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -296,6 +303,7 @@ func TestDinersClubCache(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -308,6 +316,7 @@ func TestDinersClubCache(t *testing.T) {
 			"pageid": "page",
 			"timestamp": 1600558963867,
 			"provider": "fake",
+			"key": "fake",
 			"details": {
 				"result": {
 					"type": "foo",
@@ -334,12 +343,12 @@ func TestDinersClubAuthError(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 
-	auth := func(user *User) error {
+	auth := func(user *User, key string) error {
 		return fmt.Errorf(`No credentials were found for user: %s`, user.Id)
 	}
 	getProvider := func(pool *pgxpool.Pool, event *PaymentEvent) (Provider, error) {
 		getUser := func(event *PaymentEvent) (*User, error) {
-			return &User{Id:"bad-user"}, nil
+			return &User{Id: "bad-user"}, nil
 		}
 		return NewFakeProvider(getUser, auth)
 	}
@@ -349,6 +358,7 @@ func TestDinersClubAuthError(t *testing.T) {
 			"userid": "bad-user",
 			"pageid": "page",
 			"provider": "fake",
+			"key": "fake",
 			"timestamp": 1600558963867,
 			"details": {
 				"result": {
