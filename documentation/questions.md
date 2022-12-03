@@ -226,6 +226,7 @@ JSON:
     },
     "payment": {
         "provider": "reloadly",
+        "key": "name-of-your-credentials",
         "details": {
             "mobile": @MOBILE_QUESTION,
             "operator": @OPERATOR_QUESTION,
@@ -242,6 +243,7 @@ Notes:
 
 1. The "wait" is not strictly necessary but likely desired!
 2. `PAYMENT_ID` can be useful to keep track of multiple payments to the same person or different payments to different treatment arms (a unique id per treatment arm).
+3. the `key` is the name you give the desired Reloadly credentials in the Fly dashboard.
 
 You will have the following hidden fields that can be used for logic and error messages:
 
