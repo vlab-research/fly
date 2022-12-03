@@ -20,7 +20,7 @@ const accountConfs = [
     title: 'Reloadly',
     entity: 'reloadly',
     description: 'To enable top-ups in Virtual Lab chatbot using Reloadly, provide your Reloadly API keys.',
-    getName: c => c.details.id,
+    getName: c => c.key,
     buttonText: 'Connect',
   },
   {
