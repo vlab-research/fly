@@ -13,6 +13,7 @@ async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool) {
   const query = `SELECT parent_surveyid,
   parent_shortcode,
   surveyid,
+  surveys.shortcode,
   flowid,
   responses.userid,
   question_ref,
@@ -24,7 +25,7 @@ async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool) {
   pageid,
   translated_response
   FROM responses
-  LEFT JOIN surveys ON responses.surveyid = surveys.id 
+  LEFT JOIN surveys ON responses.surveyid = surveys.id
   LEFT JOIN users ON surveys.userid = users.id
   WHERE users.email = $1
   AND surveys.survey_name = $2
@@ -73,7 +74,7 @@ async function all(email, surveyName, after = null, pageSize = 25) {
   const surveyCheck = await checkSurveyExists(surveyName, this);
   const [survey] = surveyCheck;
 
-  const responses = await _all(
+  let responses = await _all(
     email,
     surveyName,
     timestamp,
@@ -89,11 +90,12 @@ async function all(email, surveyName, after = null, pageSize = 25) {
     );
   }
 
-  responses.map(r =>
-    Object.assign(r, {
-      token: token.encoded([r.timestamp, r.userid, r.question_ref]),
-    }),
-  );
+  responses = responses.map(r => (
+    {
+      ...r,
+      token: token.encoded([r.timestamp, r.userid, r.question_ref])
+    }
+  ))
 
   return { responses };
 }

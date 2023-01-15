@@ -88,26 +88,26 @@ describe('Response queries', () => {
 
     const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
-        ('${survey.id}', '101', '${survey.id
-      }', '101', 100001, '127', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
+        ('${survey.id}', '231', '${survey.id
+      }', '231', 100001, '127', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
       }')
-       ,('${survey2.id}', '202', '${survey2.id
-      }', '202', 100003, '126', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
+       ,('${survey2.id}', '123', '${survey2.id
+      }', '123', 100003, '126', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
       }')
-       ,('${survey.id}', '101', '${survey.id
-      }', '101', 100004, '127', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
+       ,('${survey.id}', '231', '${survey.id
+      }', '231', 100004, '127', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
       }')
-       ,('${survey.id}', '202', '${survey.id
-      }', '202', 100005, '126', 'ref', 10, 'text', 'first', '6789', '${timestamps[3]
+       ,('${survey.id}', '231', '${survey.id
+      }', '231', 100005, '126', 'ref', 10, 'text', 'first', '6789', '${timestamps[3]
       }')
-       ,('${survey2.id}', '202', '${survey2.id
-      }', '202', 100003, '128', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
+       ,('${survey2.id}', '123', '${survey2.id
+      }', '123', 100003, '128', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
       }')
-       ,('${survey.id}', '101', '${survey.id
-      }', '101', 100004, '128', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
+       ,('${survey.id}', '231', '${survey.id
+      }', '231', 100004, '128', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
       }')
-       ,('${survey2.id}', '202', '${survey2.id
-      }', '202', 100005, '128', 'ref', 10, 'text', 'do not return me', '6789', '${timestamps[3]
+       ,('${survey2.id}', '123', '${survey2.id
+      }', '123', 100005, '128', 'ref', 10, 'text', 'do not return me', '6789', '${timestamps[3]
       }')`;
 
 
@@ -127,7 +127,8 @@ describe('Response queries', () => {
       res.responses.should.eql([
         {
           parent_surveyid: survey.id,
-          parent_shortcode: '101',
+          parent_shortcode: '231',
+          shortcode: '231',
           surveyid: survey.id,
           flowid: '100001',
           userid: '127',
@@ -143,7 +144,8 @@ describe('Response queries', () => {
         },
         {
           parent_surveyid: survey.id,
-          parent_shortcode: '101',
+          parent_shortcode: '231',
+          shortcode: '231',
           surveyid: survey.id,
           flowid: '100004',
           userid: '127',
@@ -159,7 +161,8 @@ describe('Response queries', () => {
         },
         {
           parent_surveyid: survey.id,
-          parent_shortcode: '101',
+          parent_shortcode: '231',
+          shortcode: '231',
           surveyid: survey.id,
           flowid: '100004',
           userid: '128',
@@ -175,7 +178,8 @@ describe('Response queries', () => {
         },
         {
           parent_surveyid: survey.id,
-          parent_shortcode: '202',
+          parent_shortcode: '231',
+          shortcode: '231',
           surveyid: survey.id,
           flowid: '100005',
           userid: '126',
