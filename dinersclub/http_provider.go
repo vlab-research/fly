@@ -66,6 +66,7 @@ type HttpPaymentDetails struct {
 	Body         *json.RawMessage  `json:"body"`
 	Headers      map[string]string `json:"headers"`
 	ErrorMessage string            `json:"errorMessage"`
+	ResponsePath string            `json:"responsePath"`
 }
 
 func (p *HttpProvider) Interpolate(s string) (string, error) {
@@ -86,6 +87,14 @@ func formatError(result *Result, event *PaymentEvent, message, code string) (*Re
 
 	result.Error = error
 	return result, nil
+}
+
+func GetFromJson(json []byte, path string) string {
+	if path == "" {
+		return string(json)
+	}
+
+	return gjson.GetBytes(json, path).String()
 }
 
 func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
@@ -153,8 +162,9 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 		return nil, err // transient???
 	}
 
-	// add response to json
-	response := json.RawMessage(bodyBytes)
+	responseString := GetFromJson(bodyBytes, order.ResponsePath)
+	response := json.RawMessage([]byte(responseString))
+
 	result.Response = &response
 
 	if (resp.StatusCode >= 200) && (resp.StatusCode <= 299) {
@@ -163,8 +173,7 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 		return result, nil
 	}
 
-	responseBody := string(bodyBytes)
-	errorMessage := gjson.Get(responseBody, order.ErrorMessage).String()
+	errorMessage := GetFromJson(bodyBytes, order.ErrorMessage)
 	code := fmt.Sprintf("%d", resp.StatusCode)
 	return formatError(result, event, errorMessage, code)
 }

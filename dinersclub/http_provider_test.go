@@ -197,6 +197,30 @@ func TestHttpProviderPayout_RetrievesErrorMessage(t *testing.T) {
 	assert.Equal(t, json.RawMessage([]byte(response)), *res.Response)
 }
 
+func TestHttpProviderPayout_RetrievesResponseFromPath(t *testing.T) {
+	response := `{"foo": {"bar": [{"baz": "hello response"}]}}`
+	tc := TestClient(200, response, nil)
+
+	p := &HttpProvider{
+		client: tc,
+	}
+
+	// get nested message
+	details := json.RawMessage([]byte(
+		`{
+                  "method": "POST",
+                  "url": "https://foo.com",
+		  "responsePath": "foo.bar.0.baz"}`,
+	))
+	event := &PaymentEvent{Details: &details}
+
+	res, err := p.Payout(event)
+
+	assert.Nil(t, err)
+	assert.Equal(t, true, res.Success)
+	assert.Equal(t, "hello response", string(*res.Response))
+}
+
 func TestHttpProviderPayout_GeneratesErrorForUserIfMissingSecrets(t *testing.T) {
 	tc := TestClient(200, `{"foo": {"bar": "hello error"}`, nil)
 
