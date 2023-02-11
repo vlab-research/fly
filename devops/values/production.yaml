@@ -18,13 +18,13 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 
 
-versionDashboard: &vdashboard v0.0.30
+versionDashboard: &vdashboard v0.0.31
 versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.138
+versionReplybot: &vreplybot v0.0.139
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.25
 versionScribble: &vscribble v0.0.22-temp-fix
-versionDinersclub: &vdinersclub v0.0.25
+versionDinersclub: &vdinersclub v0.0.26
 versionFormcentral: &vformcentral v0.0.10
 
 processingAlerts:
@@ -330,7 +330,9 @@ linksniffer:
     hosts:
       - host: links.vlab.digital
         paths:
-          - "/"
+          - path: '/'
+            pathType: Prefix
+
     tls:
       - secretName: gbv-linksniffer-cert
         hosts:
@@ -397,7 +399,9 @@ dashboard:
     hosts:
       - host: gbv-dashboard.nandan.cloud
         paths:
-          - '/'
+          - path: '/'
+            pathType: Prefix
+
     tls:
       - secretName: gbv-dashboard-cert
         hosts:
@@ -488,7 +492,9 @@ botserver:
     hosts:
       - host: gbvbot.nandan.cloud
         paths:
-          - "/"
+          - path: '/'
+            pathType: Prefix
+
     tls:
       - secretName: gbv-botserver-cert
         hosts:

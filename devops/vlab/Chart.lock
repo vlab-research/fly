@@ -4,13 +4,13 @@ dependencies:
   version: 0.0.1
 - name: botserver
   repository: https://vlab-research.github.io/fly
-  version: 0.0.1
+  version: 0.0.2
 - name: linksniffer
   repository: https://vlab-research.github.io/fly
-  version: 0.0.1
+  version: 0.0.2
 - name: dashboard
   repository: https://vlab-research.github.io/fly
-  version: 0.0.1
+  version: 0.0.2
 - name: formcentral
   repository: https://vlab-research.github.io/fly
   version: 0.0.1
@@ -40,6 +40,6 @@ dependencies:
   version: 5.0.1
 - name: kafka
   repository: https://charts.bitnami.com/bitnami
-  version: 14.0.5
-digest: sha256:a08a868ff218b55652a69b22390146a596d33adb6f9ddf9eb5316f82f29b12d3
-generated: "2022-04-11T00:32:41.875292801+02:00"
+  version: 20.0.6
+digest: sha256:e48aaf42e52e627c8bd6eb42eb4c65c4197958c283ed8dd3a566d418c0fa9052
+generated: "2023-02-11T01:46:30.841094348+01:00"
