@@ -524,5 +524,5 @@ cockroachdb:
     enabled: no
   storage:
     persistentVolume:
-      size: 100Gi
+      size: 140Gi
       storageClass: "pd-ssd"
