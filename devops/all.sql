@@ -1,7 +1,7 @@
 /* USAGE AT SETUP:
 *****************
 export VLAB_NAME=foo
-cat chatroach.sql | kubectl run -i --rm cockroach-client --image=cockroachdb/cockroach:v19.2.3 --restart=Never --command -- ./cockroach sql --insecure --host ${VLAB_NAME}-cockroachdb-public.default
+cat chatroach.sql | kubectl run -i --rm cockroach-client --image=cockroachdb/cockroach:v20.1.4 --restart=Never --command -- ./cockroach sql --insecure --host ${VLAB_NAME}-cockroachdb-public.default
 *****************
 */
 

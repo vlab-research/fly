@@ -17,7 +17,8 @@ kubectl create secret generic gbv-bot-envs --from-env-file=dev/.env
 # install
 ######################
 
-helm install gbv vlab -f values/test.yaml
+# use upgrade as it allows script to be idempotent
+helm upgrade --install gbv vlab -f values/test.yaml
 
 ######################
 # create database

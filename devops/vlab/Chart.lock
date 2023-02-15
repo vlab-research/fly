@@ -37,9 +37,9 @@ dependencies:
   version: 0.0.1
 - name: cockroachdb
   repository: https://charts.cockroachdb.com/
-  version: 5.0.1
+  version: 10.0.4
 - name: kafka
   repository: https://charts.bitnami.com/bitnami
   version: 20.0.6
-digest: sha256:e48aaf42e52e627c8bd6eb42eb4c65c4197958c283ed8dd3a566d418c0fa9052
-generated: "2023-02-11T01:46:30.841094348+01:00"
+digest: sha256:238e6670fb4456a6a23011caf1ae9e459a0004b49b65cdb0b1df086620d2b0f3
+generated: "2023-02-15T10:37:03.232780983+01:00"
