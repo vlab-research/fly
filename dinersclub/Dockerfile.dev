@@ -1,4 +1,4 @@
-FROM golang:alpine
+FROM golang:alpine3.16
 
 RUN apk add --no-cache \
     gcc \

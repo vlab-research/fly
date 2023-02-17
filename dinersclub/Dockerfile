@@ -1,8 +1,8 @@
-FROM golang:alpine AS build
+FROM golang:alpine3.16 AS build
 RUN apk add --no-cache \
         gcc \
         libc-dev \
-        librdkafka-dev=1.8.2-r0 --repository=http://dl-cdn.alpinelinux.org/alpine/edge/community \
+        librdkafka-dev=1.8.2-r0 \
         pkgconf
 RUN mkdir /app
 WORKDIR /app
@@ -14,9 +14,8 @@ COPY . /app/
 RUN go build -tags dynamic -a -o main .
 
 
-FROM alpine
-RUN apk add --no-cache \
-        librdkafka-dev=1.8.2-r0 --repository=http://dl-cdn.alpinelinux.org/alpine/edge/community
+FROM alpine:3.16
+RUN apk add --no-cache librdkafka-dev=1.8.2-r0
 WORKDIR /app
 COPY --from=build /app/main /app/
 CMD ["/app/main"]
