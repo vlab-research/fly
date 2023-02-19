@@ -23,8 +23,7 @@
     "mustache": "^4.0.1",
     "pg": "^7.18.1",
     "r2": "^2.0.1",
-    "uuid": "^3.3.3",
-    "zeromq": "^6.0.0-beta.6"
+    "uuid": "^3.3.3"
   },
   "devDependencies": {
     "eslint": "^7.8.1"
