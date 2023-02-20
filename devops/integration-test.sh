@@ -10,7 +10,7 @@ kubectl create secret generic gbv-bot-envs --from-env-file=./testing/.test-env
 # install
 ######################
 
-helm install gbv vlab -f values/test.yaml
+helm upgrade --install gbv vlab -f values/test.yaml
 kubectl apply -f testing/facebot.yaml
 
 ######################

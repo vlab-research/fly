@@ -58,7 +58,7 @@ dependencies:
 # TODO: move database out of here (treat as provider)
 # add init job to create database and users
   - name: cockroachdb
-    version: 5.0.1
+    version: 10.0.4
     repository: https://charts.cockroachdb.com/
     tags:
       - cockroach
