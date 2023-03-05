@@ -1195,7 +1195,7 @@ describe('Machine', () => {
 
     const form = {
       logic: [],
-      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 25 hours' } },
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: '' } },
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
@@ -1205,6 +1205,24 @@ describe('Machine', () => {
     const action = getMessage(log, form, user)
     action.length.should.equal(1)
     action[0].recipient.one_time_notif_token.should.equal('FOOBAR')
+    action[0].message.text.should.equal('bar')
+  })
+
+
+  it('sends the messages with an update tag if asked for', () => {
+
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar', properties: { description: '{"sendParams": {"tag": "CONFIRMED_EVENT_UPDATE", "messaging_type": "MESSAGE_TAG"}}' } }]
+    }
+
+    const log = [referral]
+    const action = getMessage(log, form, user)
+    action.length.should.equal(1)
+
+    action[0].messaging_type.should.equal("MESSAGE_TAG")
+    action[0].tag.should.equal("CONFIRMED_EVENT_UPDATE")
+    action[0].recipient.id.should.equal('123')
     action[0].message.text.should.equal('bar')
   })
 

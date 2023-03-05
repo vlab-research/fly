@@ -35,8 +35,10 @@ function repeatResponse(question, text) {
   }
 
   return {
-    text,
-    metadata: JSON.stringify({ repeat: true, ref: question })
+    message: {
+      text,
+      metadata: JSON.stringify({ repeat: true, ref: question })
+    }
   }
 }
 
@@ -559,7 +561,7 @@ function _gatherResponses(ctx, qa, q, previous = []) {
     const f = getField(ctx, md.ref)
     f.md = { isRepeat: true }
 
-    const repeat = { message: translateField(ctx, qa, f) }
+    const repeat = translateField(ctx, qa, f)
     return [q, repeat]
   }
 
@@ -567,7 +569,7 @@ function _gatherResponses(ctx, qa, q, previous = []) {
     // if question is statement, recursively
     // get the next question and send it too!
     const nq = nextQuestion(ctx, qa, md.ref)
-    if (nq) return _gatherResponses(ctx, qa, { message: nq }, [...previous, q])
+    if (nq) return _gatherResponses(ctx, qa, nq, [...previous, q])
   }
 
   return [...previous, q]
@@ -576,19 +578,18 @@ function _gatherResponses(ctx, qa, q, previous = []) {
 function _response(ctx, qa, { question, validation, response, token, followUp }) {
 
   // if we haven't asked anything, it must be the first question!
-
   if (!question) {
     const message = translateField(ctx, qa, ctx.form.fields[0])
 
     if (token) {
-      return { recipient: { one_time_notif_token: token }, message }
+      return { recipient: { one_time_notif_token: token }, ...message }
     }
 
-    return { message }
+    return message
   }
 
   if (followUp) {
-    return { message: repeatResponse(question, followUpMessage(ctx.form.custom_messages)) }
+    return repeatResponse(question, followUpMessage(ctx.form.custom_messages))
   }
 
   // otherwise, validate the response
@@ -601,17 +602,17 @@ function _response(ctx, qa, { question, validation, response, token, followUp })
 
     // Note: this could be abstracted to be more flexible
     const msg = message || defaultMessage(ctx.form.custom_messages)
-    return { message: repeatResponse(question, msg) }
+    return repeatResponse(question, msg)
   }
 
   if (token) {
     return {
       recipient: { one_time_notif_token: token },
-      message: nextQuestion(ctx, qa, question)
+      ...nextQuestion(ctx, qa, question)
     }
   }
 
-  return { message: nextQuestion(ctx, qa, question) }
+  return nextQuestion(ctx, qa, question)
 }
 
 function respond(ctx, qa, output) {
