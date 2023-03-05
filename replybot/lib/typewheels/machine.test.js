@@ -599,7 +599,7 @@ describe('getState', () => {
   })
 
   it('removes tokens to the state when it needs to use them for timeout', () => {
-    const wait = { type: 'timeout', value: '25 hours' }
+    const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
     // value should be...?
     const externalEvent = {
@@ -619,7 +619,7 @@ describe('getState', () => {
 
 
   it('removes tokens to the state when it needs to use them for a bailout', () => {
-    const wait = { type: 'timeout', value: '25 hours' }
+    const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
     const externalEvent = {
       source: 'synthetic',
@@ -1182,7 +1182,7 @@ describe('Machine', () => {
   })
 
   it('sends the messages to the token if a token is needed', () => {
-    const wait = { type: 'timeout', value: '25 hours' }
+    const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
     // value should be...?
     const externalEvent = {
@@ -1536,7 +1536,7 @@ describe('Machine', () => {
 
 
   it('Redo event resends the same token if redo sent after wait time', () => {
-    const wait = { type: 'timeout', value: '25 hours' }
+    const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
     //   // value should be...?
     const externalEvent = {

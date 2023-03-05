@@ -143,13 +143,11 @@ function _stitch(state, form, nxt) {
   })
 }
 
-
 function tokenWrap(state, nxt, output) {
 
   if (!state.wait) return output
 
-  const needsToken = (state.wait.notifyPermission) || (nxt.timestamp - state.waitStart >= 1000 * 60 * 60 * 24)
-  if (!needsToken || !state.tokens) {
+  if (!state.wait.notifyPermission || !state.tokens) {
     return output
   }
 
@@ -157,8 +155,6 @@ function tokenWrap(state, nxt, output) {
 
   return { ...output, token, stateUpdate: { ...output.stateUpdate, tokens } }
 }
-
-
 
 function exec(state, nxt) {
   switch (categorizeEvent(nxt)) {
@@ -553,9 +549,7 @@ function nextQuestion(ctx, qa, question) {
 
 
 function _gatherResponses(ctx, qa, q, previous = []) {
-
-  // ducktype has recipient
-  const msg = q && (q.recipient ? q.message : q)
+  const msg = q.message
   const md = msg && JSON.parse(msg.metadata)
 
   if (md.repeat) {
@@ -565,7 +559,7 @@ function _gatherResponses(ctx, qa, q, previous = []) {
     const f = getField(ctx, md.ref)
     f.md = { isRepeat: true }
 
-    const repeat = translateField(ctx, qa, f)
+    const repeat = { message: translateField(ctx, qa, f) }
     return [q, repeat]
   }
 
@@ -573,7 +567,7 @@ function _gatherResponses(ctx, qa, q, previous = []) {
     // if question is statement, recursively
     // get the next question and send it too!
     const nq = nextQuestion(ctx, qa, md.ref)
-    if (nq) return _gatherResponses(ctx, qa, nq, [...previous, q])
+    if (nq) return _gatherResponses(ctx, qa, { message: nq }, [...previous, q])
   }
 
   return [...previous, q]
@@ -583,18 +577,18 @@ function _response(ctx, qa, { question, validation, response, token, followUp })
 
   // if we haven't asked anything, it must be the first question!
 
-  // ADD token???
   if (!question) {
     const message = translateField(ctx, qa, ctx.form.fields[0])
 
     if (token) {
       return { recipient: { one_time_notif_token: token }, message }
     }
-    return message
+
+    return { message }
   }
 
   if (followUp) {
-    return repeatResponse(question, followUpMessage(ctx.form.custom_messages))
+    return { message: repeatResponse(question, followUpMessage(ctx.form.custom_messages)) }
   }
 
   // otherwise, validate the response
@@ -607,7 +601,7 @@ function _response(ctx, qa, { question, validation, response, token, followUp })
 
     // Note: this could be abstracted to be more flexible
     const msg = message || defaultMessage(ctx.form.custom_messages)
-    return repeatResponse(question, msg)
+    return { message: repeatResponse(question, msg) }
   }
 
   if (token) {
@@ -617,11 +611,11 @@ function _response(ctx, qa, { question, validation, response, token, followUp })
     }
   }
 
-  return nextQuestion(ctx, qa, question)
+  return { message: nextQuestion(ctx, qa, question) }
 }
 
 function respond(ctx, qa, output) {
-  const addRecipient = msg => ({ recipient: { id: ctx.user.id }, message: msg })
+  const addRecipient = dat => ({ recipient: { id: ctx.user.id }, ...dat })
 
   return _gatherResponses(ctx, qa, _response(ctx, qa, output))
     .filter(r => !!r)
