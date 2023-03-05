@@ -38,7 +38,7 @@ const (
 			"fields": [
 				{
 					"title": "What is your gender? ",
-					"ref": "eng_foo",
+					"ref": "foo",
 					"properties": {
 						"choices": [
 							{ "label": "Male" },
@@ -50,7 +50,7 @@ const (
 				},
 				{
 					"title": "Which state do you currently live in?\n- A. foo 91  bar\n- B. Jharkhand\n- C. Odisha\n- D. Uttar Pradesh",
-					"ref": "eng_bar",
+					"ref": "bar",
 					"properties": {
 						"choices": [
 							{ "label": "A" },
@@ -63,7 +63,7 @@ const (
 				},
 				{
 					"title": "How old are you?",
-					"ref": "eng_baz",
+					"ref": "baz",
 					"properties": {},
 					"type": "number"
 				}
@@ -138,7 +138,7 @@ func TestTranslatorReturns404IfDestinationNotFound(t *testing.T) {
 	defer pool.Close()
 
 	params := fmt.Sprintf(`{"destination": "foo", "form": %v}`, formA)
-	_, c, s := request(pool, http.MethodPost, "/translator", params)
+	_, c, s := request(pool, http.MethodPost, "/translators", params)
 	err := s.CreateTranslator(c)
 
 	assert.Equal(t, err.(*echo.HTTPError).Code, 404)
@@ -182,7 +182,7 @@ func TestTranslatorReturns400IfNotTranslatable(t *testing.T) {
 	mustExec(t, pool, insertSurvey, surveyid, userid, form)
 
 	params := fmt.Sprintf(`{"destination": surveyid, "form": %v}`, formA)
-	_, c, s := request(pool, http.MethodPost, "/translator", params)
+	_, c, s := request(pool, http.MethodPost, "/translators", params)
 	err := s.CreateTranslator(c)
 
 	assert.Equal(t, err.(*echo.HTTPError).Code, 400)
@@ -199,7 +199,7 @@ func TestTranslatorReturnsTranslator(t *testing.T) {
 	mustExec(t, pool, insertSurvey, surveyid, userid, formB)
 
 	params := fmt.Sprintf(`{"destination": "%v", "form": %v}`, surveyid, formA)
-	rec, c, s := request(pool, http.MethodPost, "/translator", params)
+	rec, c, s := request(pool, http.MethodPost, "/translators", params)
 	err := s.CreateTranslator(c)
 
 	assert.Nil(t, err)
@@ -208,7 +208,7 @@ func TestTranslatorReturnsTranslator(t *testing.T) {
 	ft := new(trans.FormTranslator)
 	json.Unmarshal([]byte(rec.Body.String()), ft)
 
-	assert.True(t, ft.Fields["eng_foo"].Translate)
+	assert.True(t, ft.Fields["foo"].Translate)
 }
 
 func TestTranslatorWorksWithSelf(t *testing.T) {
@@ -219,7 +219,7 @@ func TestTranslatorWorksWithSelf(t *testing.T) {
 	defer pool.Close()
 
 	params := fmt.Sprintf(`{"self": true, "form": %v}`, formA)
-	rec, c, s := request(pool, http.MethodPost, "/translator", params)
+	rec, c, s := request(pool, http.MethodPost, "/translators", params)
 	err := s.CreateTranslator(c)
 
 	assert.Nil(t, err)
@@ -228,7 +228,7 @@ func TestTranslatorWorksWithSelf(t *testing.T) {
 	ft := new(trans.FormTranslator)
 	json.Unmarshal([]byte(rec.Body.String()), ft)
 
-	assert.Equal(t, "Jharkhand", ft.Fields["eng_bar"].Mapping["B"])
+	assert.Equal(t, "Jharkhand", ft.Fields["bar"].Mapping["B"])
 }
 
 func TestGetTranslatorGetsFromID(t *testing.T) {
@@ -242,7 +242,7 @@ func TestGetTranslatorGetsFromID(t *testing.T) {
 	mustExec(t, pool, insertSurvey, "33333333-3333-3333-3333-333333333333", userid, formB)
 	mustExec(t, pool, insertWithTranslation, surveyid, userid, formA, `{"destination": "33333333-3333-3333-3333-333333333333"}`)
 
-	rec, c, s := request(pool, http.MethodGet, "/translator/foo", "")
+	rec, c, s := request(pool, http.MethodGet, "/translators/foo", "")
 	c.SetParamNames("surveyid")
 	c.SetParamValues(surveyid)
 	err := s.GetTranslator(c)
@@ -253,8 +253,8 @@ func TestGetTranslatorGetsFromID(t *testing.T) {
 	ft := new(trans.FormTranslator)
 	json.Unmarshal([]byte(rec.Body.String()), ft)
 
-	assert.True(t, ft.Fields["eng_foo"].Translate)
-	assert.Equal(t, "पुरुष", ft.Fields["eng_foo"].Mapping["Male"])
+	assert.True(t, ft.Fields["foo"].Translate)
+	assert.Equal(t, "पुरुष", ft.Fields["foo"].Mapping["Male"])
 }
 
 func TestGetTranslatorGetsSelf(t *testing.T) {
@@ -268,7 +268,7 @@ func TestGetTranslatorGetsSelf(t *testing.T) {
 	mustExec(t, pool, insertSurvey, "33333333-3333-3333-3333-333333333333", userid, formB)
 	mustExec(t, pool, insertWithTranslation, surveyid, userid, formA, `{"self": true}`)
 
-	rec, c, s := request(pool, http.MethodGet, "/translator/foo", "")
+	rec, c, s := request(pool, http.MethodGet, "/translators/foo", "")
 	c.SetParamNames("surveyid")
 	c.SetParamValues(surveyid)
 	err := s.GetTranslator(c)
@@ -279,8 +279,8 @@ func TestGetTranslatorGetsSelf(t *testing.T) {
 	ft := new(trans.FormTranslator)
 	json.Unmarshal([]byte(rec.Body.String()), ft)
 
-	assert.True(t, ft.Fields["eng_foo"].Translate)
-	assert.Equal(t, "Jharkhand", ft.Fields["eng_bar"].Mapping["B"])
+	assert.True(t, ft.Fields["foo"].Translate)
+	assert.Equal(t, "Jharkhand", ft.Fields["bar"].Mapping["B"])
 }
 
 func TestGetTranslatorReturns404OnRawTranslationConf(t *testing.T) {
@@ -294,7 +294,7 @@ func TestGetTranslatorReturns404OnRawTranslationConf(t *testing.T) {
 	mustExec(t, pool, insertSurvey, "33333333-3333-3333-3333-333333333333", userid, formB)
 	mustExec(t, pool, insertWithTranslation, surveyid, userid, formA, `{}`)
 
-	_, c, s := request(pool, http.MethodGet, "/translator/foo", "")
+	_, c, s := request(pool, http.MethodGet, "/translators/foo", "")
 	c.SetParamNames("surveyid")
 	c.SetParamValues("foo")
 	err := s.GetTranslator(c)
@@ -309,7 +309,7 @@ func TestGetTranslatorReturns404OnMissingSourceForm(t *testing.T) {
 	pool := getPool(cfg)
 	defer pool.Close()
 
-	_, c, s := request(pool, http.MethodGet, "/translator/foo", "")
+	_, c, s := request(pool, http.MethodGet, "/translators/foo", "")
 	c.SetParamNames("surveyid")
 	c.SetParamValues("baz")
 	err := s.GetTranslator(c)
@@ -355,7 +355,7 @@ func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
 	mustExec(t, pool, insertSurvey, "33333333-3333-3333-3333-333333333333", userid, smallForm)
 	mustExec(t, pool, insertWithTranslation, surveyid, userid, formA, `{"destination": "33333333-3333-3333-3333-333333333333"}`)
 
-	_, c, s := request(pool, http.MethodGet, "/translator/foo", "")
+	_, c, s := request(pool, http.MethodGet, "/translators/foo", "")
 	c.SetParamNames("surveyid")
 	c.SetParamValues(surveyid)
 	err := s.GetTranslator(c)
