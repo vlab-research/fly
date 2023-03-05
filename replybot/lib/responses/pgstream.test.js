@@ -8,7 +8,7 @@ const { Buffered, DBStream } = require('./pgstream')
 describe('Buffered', () => {
   it('Returns vals', async () => {
 
-    const f = async () => [1,2,3,4]
+    const f = async () => [1, 2, 3, 4]
     const fn = sinon.fake(f)
     const b = new Buffered(fn)
     const res = []
@@ -18,7 +18,7 @@ describe('Buffered', () => {
     }
 
     fn.callCount.should.equal(2)
-    res.should.eql([1,2,3,4,1,2,3,4])
+    res.should.eql([1, 2, 3, 4, 1, 2, 3, 4])
   })
 
   it('Doesnt break when given null or undefined', async () => {
@@ -38,12 +38,12 @@ describe('Buffered', () => {
 })
 
 describe('DBStream', () => {
-  it('Streams data from a continuous function and stops', (done) =>  {
+  it('Streams data from a continuous function and stops', (done) => {
 
     let i = 0
     const fn = async (lim) => {
       if (i++ < 5) {
-        return [[1,2,3], lim+10]
+        return [[1, 2, 3], lim + 10]
       }
       return [null, null]
     }
@@ -66,7 +66,7 @@ describe('DBStream', () => {
     })
   })
 
-  it('Emits an error when the function errors', (done) =>  {
+  it('Emits an error when the function errors', (done) => {
     class TestError extends Error {}
 
     let i = 0
@@ -76,7 +76,7 @@ describe('DBStream', () => {
         throw new TestError('foo')
       }
       else if (i < 2) {
-        return [[1,2,3], lim+10]
+        return [[1, 2, 3], lim + 10]
       }
       return [null, null]
     }
@@ -92,7 +92,7 @@ describe('DBStream', () => {
     })
   })
 
-  it('Emits an descriptive error when the query returns not array', (done) =>  {
+  it('Emits an descriptive error when the query returns not array', (done) => {
     class TestError extends Error {}
 
     let i = 0

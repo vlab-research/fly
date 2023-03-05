@@ -1,7 +1,7 @@
-const {getField, FieldError} = require('../typewheels/form')
-const {StateStore} = require('../typewheels/statestore')
-const {Machine} = require('../typewheels/transition')
-const {TokenStore} = require('../typewheels/tokenstore')
+const { getField, FieldError } = require('../typewheels/form')
+const { StateStore } = require('../typewheels/statestore')
+const { Machine } = require('../typewheels/transition')
+const { TokenStore } = require('../typewheels/tokenstore')
 const util = require('util')
 
 function responseVals(newState, update, form, surveyid, pageid, userid, timestamp) {
@@ -10,9 +10,9 @@ function responseVals(newState, update, form, surveyid, pageid, userid, timestam
     const shortcode = newState.forms.slice(-1)[0]
 
     const flowid = newState.forms.length
-    const [question_idx, {title:question_text, ref:question_ref}] = getField({form}, q, true)
+    const [question_idx, { title: question_text, ref: question_ref }] = getField({ form }, q, true)
 
-    const {seed, form:parent_shortcode} = newState.md
+    const { seed, form: parent_shortcode } = newState.md
     const metadata = newState.md
 
     return {
@@ -49,7 +49,7 @@ class Responser {
     return vals
   }
 
-  async write ({key:userId, value}) {
+  async write({ key: userId, value }) {
     try {
       const vals = await this.updateStore(userId, value)
       if (vals) await this.put(vals)
@@ -70,7 +70,7 @@ class Responser {
 
 
 
-  put (vals) {
+  put(vals) {
     const query = `INSERT INTO responses(parent_surveyid,
                                          parent_shortcode,
                                          surveyid,

@@ -17,7 +17,7 @@ class TokenStore {
       throw new Error(`Cannot find token for facebook page with id: ${page}`)
     }
 
-    const {token} = res.rows[0]
+    const { token } = res.rows[0]
     return token
   }
 

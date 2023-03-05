@@ -1,7 +1,7 @@
 const mustache = require('mustache')
 const util = require('util')
 const _ = require('lodash')
-const {translator, addCustomType}= require('@vlab-research/translate-typeform')
+const { translator, addCustomType } = require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
 class FieldError extends Error {}
@@ -22,19 +22,20 @@ function getSeed(md, key) {
 }
 
 // METADATA consists of:
+
 // 1. Anything on the user object (id, name, first_name, last_name)
 // 2. Anything sent in the original url "ref" query param (i.e. form, via ?ref=form.foo)
 // 3. A random seed, given by 'seed_2' or 'seed_7' or 'seed_N' for any number needed
 function getFromMetadata(ctx, key) {
-  const {user, md} = ctx
+  const { user, md } = ctx
 
   if (/seed_/.test(key)) return getSeed(md, key)
 
-  const meta = {...user, ...md }
+  const meta = { ...user, ...md }
 
   if (meta[key] === undefined) {
     throw new TypeError(`Cannot create field text as the value ${key} does not exist in metadata ${util.inspect(meta)}`)
-    }
+  }
 
   return meta[key]
 }
@@ -52,13 +53,13 @@ function getDynamicValue(ctx, qa, v) {
   return val
 }
 
-function _zip(a,b) {
+function _zip(a, b) {
   // zips two arrays together, alternating, starting with a
   if (!a || !b) return a.concat(b)
   const len = a.length + b.length
-  const arr =[]
-  for (let i=0; i<len; i++) {
-    i%2 ? arr.push(b.shift()) : arr.push(a.shift())
+  const arr = []
+  for (let i = 0; i < len; i++) {
+    i % 2 ? arr.push(b.shift()) : arr.push(a.shift())
   }
   return arr
 }
@@ -75,8 +76,8 @@ function _splitUrls(s) {
 
 function _interpolate(ctx, qa, s, encode) {
   const lookup = encode ?
-        v => encodeURIComponent(getDynamicValue(ctx, qa, v)) :
-        v => getDynamicValue(ctx, qa, v)
+    v => encodeURIComponent(getDynamicValue(ctx, qa, v)) :
+    v => getDynamicValue(ctx, qa, v)
 
   return mustache.parse(s)
     .map(t => t[0] === 'name' ? lookup(t[1]) : t[1])
@@ -87,7 +88,7 @@ function interpolate(ctx, qa, s) {
   if (!s) return s
 
   return _splitUrls(s)
-    .map(([type,val]) => {
+    .map(([type, val]) => {
       if (type === 'url') return _interpolate(ctx, qa, val, true)
       if (type === 'text') return _interpolate(ctx, qa, val, false)
     })
@@ -104,7 +105,7 @@ function deTypeformify(s) {
 
 function interpolateField(ctx, qa, field) {
   const keys = ['title', 'properties.description']
-  const out = {...field}
+  const out = { ...field }
 
   keys.forEach(k => _.set(out, k, deTypeformify(_.get(out, k))))
   keys.forEach(k => _.set(out, k, interpolate(ctx, qa, _.get(out, k))))
@@ -115,12 +116,12 @@ function translateField(ctx, qa, field) {
   return translator(addCustomType(interpolateField(ctx, qa, field)))
 }
 
-function getField({form, user}, ref, index=false) {
+function getField({ form, user }, ref, index = false) {
   if (!form.fields.length) {
     throw new FieldError(`This form has no fields: ${form.id}`)
   }
 
-  const idx = form.fields.map(({ref}) => ref).indexOf(ref)
+  const idx = form.fields.map(({ ref }) => ref).indexOf(ref)
   const field = form.fields[idx]
 
   if (!field) {
@@ -131,7 +132,7 @@ function getField({form, user}, ref, index=false) {
 }
 
 function _isLast(form, field) {
-  const idx = form.fields.findIndex(({ref}) => ref === field)
+  const idx = form.fields.findIndex(({ ref }) => ref === field)
   return idx === form.fields.length - 1
 }
 
@@ -142,14 +143,14 @@ function _getNext(form, currentRef) {
     return null
   }
 
-  const idx = form.fields.findIndex(({ref}) => ref === currentRef)
+  const idx = form.fields.findIndex(({ ref }) => ref === currentRef)
   return form.fields[idx + 1]
 }
 
 function getNextField(ctx, qa, currentField) {
-  const {form} = ctx
+  const { form } = ctx
 
-  const logic = form.logic && form.logic.find(({ref}) => ref === currentField)
+  const logic = form.logic && form.logic.find(({ ref }) => ref === currentField)
 
   if (logic) {
     const nxt = jump(ctx, qa, logic)
@@ -166,9 +167,9 @@ function jump(ctx, qa, logic) {
   // there is no default -- proper error and
   // maybe work out a new state... "blocked?"
 
-  const {ref, actions} = logic
+  const { ref, actions } = logic
 
-  for (let {condition, details} of actions) {
+  for (let { condition, details } of actions) {
     if (getCondition(ctx, qa, ref, condition)) {
       return details.to.value
     }
@@ -180,7 +181,7 @@ function jump(ctx, qa, logic) {
 
 function getFieldValue(qa, ref) {
   // last valid answer
-  const match = qa.filter(([q,__]) => q === ref).pop()
+  const match = qa.filter(([q, __]) => q === ref).pop()
 
   // return null if there are no matches,
   // or if there are no answers,
@@ -189,20 +190,20 @@ function getFieldValue(qa, ref) {
 }
 
 const funs = {
-  'and': (a,b) => a && b,
-  'or': (a,b) => a || b,
-  'greater_than': (a,b) => a > b,
-  'lower_than': (a,b) => a < b,
-  'greater_equal_than': (a,b) => a >= b,
-  'lower_equal_than': (a,b) => a <= b,
-  'is': (a,b) => a === b,
-  'equal': (a,b) => a === b,
-  'is_not': (a,b) => a !== b,
-  'not_equal': (a,b) => a !== b
+  'and': (a, b) => a && b,
+  'or': (a, b) => a || b,
+  'greater_than': (a, b) => a > b,
+  'lower_than': (a, b) => a < b,
+  'greater_equal_than': (a, b) => a >= b,
+  'lower_equal_than': (a, b) => a <= b,
+  'is': (a, b) => a === b,
+  'equal': (a, b) => a === b,
+  'is_not': (a, b) => a !== b,
+  'not_equal': (a, b) => a !== b
 }
 
 
-function getCondition(ctx, qa, ref, {op, vars}){
+function getCondition(ctx, qa, ref, { op, vars }) {
   if (op === 'always') return true
 
   const f = funs[op]
@@ -221,15 +222,15 @@ function getCondition(ctx, qa, ref, {op, vars}){
 
   // vars should be length 2 unless and/or in which case
   // can be length unlimited so we reduce through logic
-  return vars.map((v)=> getVar(ctx, qa, ref, v, vars)).reduce(fn)
+  return vars.map((v) => getVar(ctx, qa, ref, v, vars)).reduce(fn)
 }
 
-function getChoiceValue({form}, ref, choice) {
+function getChoiceValue({ form }, ref, choice) {
   const val = form.fields
-        .find(f => f.ref === ref)
-        .properties.choices
-        .find(c => c.ref === choice)
-        .label
+    .find(f => f.ref === ref)
+    .properties.choices
+    .find(c => c.ref === choice)
+    .label
 
   if (!val) {
     throw new TypeError(`Could not find value for choice: ${choice} in question ${ref}`)
@@ -244,7 +245,7 @@ function getVar(ctx, qa, ref, v, vars) {
     return getCondition(ctx, qa, ref, v)
   }
 
-  const {type, value} = v
+  const { type, value } = v
 
   if (type == 'constant') {
     return value

@@ -3,18 +3,18 @@ const chai = require('chai')
 const should = chai.should()
 const fs = require('fs')
 const _ = require('lodash')
-const {parseLogJSON} = require('./utils')
-const {followUpMessage}= require('@vlab-research/translate-typeform')
-const {_initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata} = require('./machine')
+const { parseLogJSON } = require('./utils')
+const { followUpMessage } = require('@vlab-research/translate-typeform')
+const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
-const _echo = md => ({...echo, message: { ...echo.message, metadata: md.ref ? md : {ref: md} }})
+const _echo = md => ({ ...echo, message: { ...echo.message, metadata: md.ref ? md : { ref: md } } })
 
 describe('getWatermark', () => {
   it('should work with both marks', () => {
-    getWatermark(read).should.deep.equal({ type: 'read', mark: 10})
-    getWatermark(delivery).should.deep.equal({ type: 'delivery', mark: 15})
+    getWatermark(read).should.deep.equal({ type: 'read', mark: 10 })
+    getWatermark(delivery).should.deep.equal({ type: 'delivery', mark: 15 })
   })
   it('should return undefined if not a read or delivery message', () => {
     should.not.exist(getWatermark(echo))
@@ -24,55 +24,59 @@ describe('getWatermark', () => {
 
 describe('makeEventMetadata', () => {
   it('should get the metadata for a simple linksniffer event', () => {
-    const event = { event: { type: 'external', value: {type: 'linksniffer:click', url: 'foobar'}}}
+    const event = { event: { type: 'external', value: { type: 'linksniffer:click', url: 'foobar' } } }
     const md = makeEventMetadata(event)
-    md.should.eql({e_linksniffer_click_url: 'foobar'})
+    md.should.eql({ e_linksniffer_click_url: 'foobar' })
   })
 
   it('should get multiple key/value pairs if they exist', () => {
-    const event = { event: { type: 'external', value: {type: 'random', id: 'foo', foo: 'bar'}}}
+    const event = { event: { type: 'external', value: { type: 'random', id: 'foo', foo: 'bar' } } }
     const md = makeEventMetadata(event)
-    md.should.eql({e_random_id: 'foo', e_random_foo: 'bar'})
+    md.should.eql({ e_random_id: 'foo', e_random_foo: 'bar' })
   })
 
   it('should unnest kv pairs if they exist', () => {
-    const event = { event: { type: 'external', value: { type: 'payment:reloadly', success: false, error: { message: 'foobar', code: 'BAR', doublenest: { foo: 'baz' } }}}}
+    const event = { event: { type: 'external', value: { type: 'payment:reloadly', success: false, error: { message: 'foobar', code: 'BAR', doublenest: { foo: 'baz' } } } } }
 
     const md = makeEventMetadata(event)
-    md.should.eql({e_payment_reloadly_success: false,
-                   e_payment_reloadly_error_message: 'foobar',
-                   e_payment_reloadly_error_doublenest_foo: 'baz',
-                   e_payment_reloadly_error_code: 'BAR'})
+    md.should.eql({
+      e_payment_reloadly_success: false,
+      e_payment_reloadly_error_message: 'foobar',
+      e_payment_reloadly_error_doublenest_foo: 'baz',
+      e_payment_reloadly_error_code: 'BAR'
+    })
   })
 
   it('shoudl work with array values and key them out by index', () => {
-    const event = { event: { type: 'external', value: { type: 'random', list: ['foo', 'bar']}}}
+    const event = { event: { type: 'external', value: { type: 'random', list: ['foo', 'bar'] } } }
 
     const md = makeEventMetadata(event)
-    md.should.eql({e_random_list_0: 'foo',
-                   e_random_list_1: 'bar'})
+    md.should.eql({
+      e_random_list_0: 'foo',
+      e_random_list_1: 'bar'
+    })
   })
 
   it('should work with number values', () => {
-    const event = { event: { type: 'external', value: {type: 'random', foo: 1234}}}
+    const event = { event: { type: 'external', value: { type: 'random', foo: 1234 } } }
     const md = makeEventMetadata(event)
-    md.should.eql({e_random_foo: 1234})
+    md.should.eql({ e_random_foo: 1234 })
   })
 
   it('should work with boolean values', () => {
-    const event = { event: { type: 'external', value: {type: 'random', foo: false}}}
+    const event = { event: { type: 'external', value: { type: 'random', foo: false } } }
     const md = makeEventMetadata(event)
-    md.should.eql({e_random_foo: false})
+    md.should.eql({ e_random_foo: false })
   })
 
   it('should set null but not undefined values', () => {
-    const event = { event: { type: 'external', value: {type: 'random', foo: undefined, bar: null}}}
+    const event = { event: { type: 'external', value: { type: 'random', foo: undefined, bar: null } } }
     const md = makeEventMetadata(event)
     md.should.eql({ e_random_bar: null })
   })
 
   it('should return undefined if an event not properly formatted', () => {
-    const event = { event: { type: 'external', value: {}}}
+    const event = { event: { type: 'external', value: {} } }
     const md = makeEventMetadata(event)
     should.not.exist(md)
   })
@@ -102,7 +106,7 @@ describe('getCurrentForm', () => {
   })
 
   it('Gets the first form with an initial qr payload referral', () => {
-    const qrReferral = {...qr, message: { quick_reply: { value: "accept", payload: {referral: {ref:"form.FOO.foo.bar"}}}}}
+    const qrReferral = { ...qr, message: { quick_reply: { value: "accept", payload: { referral: { ref: "form.FOO.foo.bar" } } } } }
     const log = [qrReferral]
     const state = getState(log)
     state.forms[0].should.equal('FOO')
@@ -127,7 +131,7 @@ describe('getCurrentForm', () => {
   })
 
   it('Changes form with new referral', () => {
-    const ref2 = {...referral, referral: {...referral.referral, ref: 'form.BAR'}}
+    const ref2 = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
 
     const log = [referral, text, echo, delivery, multipleChoice, ref2]
     const state = getState(log)
@@ -159,14 +163,14 @@ describe('getState', () => {
   })
 
   it('Gets a question responding state before delivered', () => {
-    const log = [referral, text ]
+    const log = [referral, text]
     const state = getState(log)
     state.state.should.equal('RESPONDING')
     should.not.exist(state.question)
   })
 
   it('Gets a question responding state to unnanounced message', () => {
-    const log = [ text ]
+    const log = [text]
     const state = getState(log)
     state.state.should.equal('RESPONDING')
     should.not.exist(state.question)
@@ -181,11 +185,13 @@ describe('getState', () => {
 
 
   it('Ignores unknown event (message event)', () => {
-    const e = { sender: { id: '123' },
-                recipient: { id: '345' },
-                timestamp: 1605980769303,
-                message: { mid: 'foo'},
-                source: 'messenger' }
+    const e = {
+      sender: { id: '123' },
+      recipient: { id: '345' },
+      timestamp: 1605980769303,
+      message: { mid: 'foo' },
+      source: 'messenger'
+    }
 
     const log = [referral, text, echo, e]
     const state = getState(log)
@@ -212,7 +218,7 @@ describe('getState', () => {
   })
 
   it('Responds to own statements', () => {
-    const log = [referral, echo, delivery, text, statementEcho ]
+    const log = [referral, echo, delivery, text, statementEcho]
     const state = getState(log)
     state.state.should.equal('RESPONDING')
   })
@@ -229,7 +235,7 @@ describe('getState', () => {
   it('Updates the qa of the state even with falsey answers', () => {
     const echo2 = _echo('bar')
 
-    const log = [referral, echo, {...text, message: {text: 0}}, _echo('bar'), {...text, message: {text: ''}}]
+    const log = [referral, echo, { ...text, message: { text: 0 } }, _echo('bar'), { ...text, message: { text: '' } }]
     const qa = getState(log).qa
 
     qa[0][0].should.equal('foo')
@@ -276,7 +282,7 @@ describe('getState', () => {
     const wait = { type: 'timeout', value: '2 days' }
 
 
-    const log = [referral, echo, text, _echo({wait, ref: 'bar'})]
+    const log = [referral, echo, text, _echo({ wait, ref: 'bar' })]
     const state = getState(log)
     state.state.should.equal('WAIT_EXTERNAL_EVENT')
   })
@@ -285,7 +291,7 @@ describe('getState', () => {
 
     const wait = { type: 'timeout', value: '2 days' }
 
-    const log = [referral, echo, delivery, text, _echo({wait, ref: 'bar'}), text]
+    const log = [referral, echo, delivery, text, _echo({ wait, ref: 'bar' }), text]
     const state = getState(log)
     state.state.should.equal('RESPONDING')
   })
@@ -296,12 +302,12 @@ describe('getState', () => {
     const wait = { type: 'timeout', value: '2 days' }
 
     const log = [referral, echo, delivery,
-                 text,
-                 _echo({wait, ref: 'foo'}),
-                 text,
-                 echo,
-                 {...echo, timestamp: 10, message: {...echo.message, metadata: {wait}}}
-                 ]
+      text,
+      _echo({ wait, ref: 'foo' }),
+      text,
+      echo,
+      { ...echo, timestamp: 10, message: { ...echo.message, metadata: { wait } } }
+    ]
     const state = getState(log)
     state.state.should.equal('WAIT_EXTERNAL_EVENT')
     state.waitStart.should.equal(5)
@@ -312,11 +318,13 @@ describe('getState', () => {
     const wait = { type: 'timeout', value: '1 hour' }
 
     // value should be...?
-    const externalEvent = { source: 'synthetic',
-                            event: { type: 'timeout', value: Date.now() + 1000*60*60 }}
+    const externalEvent = {
+      source: 'synthetic',
+      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 }
+    }
 
     const d = Date.now()
-    const log = [referral, text, {...echo, timestamp: d, message: {...echo.message, metadata: { wait }}}, externalEvent]
+    const log = [referral, text, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait } } }, externalEvent]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -328,16 +336,18 @@ describe('getState', () => {
     const wait = {
       op: 'or',
       vars:
-      [ { type: 'timeout', value: '2 days' },
-        { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } } ]
+        [{ type: 'timeout', value: '2 days' },
+        { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }]
     }
 
-    const externalEvent = { source: 'synthetic',
-                            timestamp: Date.now(),
-                            event: { type: 'external', value: {type: 'moviehouse:play', id: 'foobar' }}}
+    const externalEvent = {
+      source: 'synthetic',
+      timestamp: Date.now(),
+      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+    }
 
 
-    const log = [referral, _echo({wait, ref: 'foo'}), externalEvent]
+    const log = [referral, _echo({ wait, ref: 'foo' }), externalEvent]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -353,14 +363,16 @@ describe('getState', () => {
     const wait = {
       op: 'and',
       vars:
-      [ { type: 'timeout', value: '2 days' },
-        { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } } ]
+        [{ type: 'timeout', value: '2 days' },
+        { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }]
     }
 
-    const externalEvent = { source: 'synthetic',
-                            event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' }}}
+    const externalEvent = {
+      source: 'synthetic',
+      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+    }
 
-    const log = [referral, _echo({wait, ref: 'foo'}), externalEvent]
+    const log = [referral, _echo({ wait, ref: 'foo' }), externalEvent]
 
     const state = getState(log)
     state.state.should.equal('WAIT_EXTERNAL_EVENT')
@@ -376,18 +388,22 @@ describe('getState', () => {
     const wait = {
       op: 'and',
       vars:
-      [ { type: 'timeout', value: '2 hours' },
-        { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } } ]
+        [{ type: 'timeout', value: '2 hours' },
+        { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }]
     }
 
-    const externalEventA = { source: 'synthetic',
-                            event: { type: 'external', value: {type: 'moviehouse:play', id: 'foobar' }}}
+    const externalEventA = {
+      source: 'synthetic',
+      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+    }
 
     // value should be...?
-    const externalEventB = { source: 'synthetic',
-                             event: { type: 'timeout', value: Date.now() + 1000*60*120 }}
+    const externalEventB = {
+      source: 'synthetic',
+      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 120 }
+    }
 
-    const log = [referral, {...echo, timestamp: Date.now(), message: {...echo.message, metadata: {wait}}}, externalEventA, externalEventB]
+    const log = [referral, { ...echo, timestamp: Date.now(), message: { ...echo.message, metadata: { wait } } }, externalEventA, externalEventB]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -401,9 +417,11 @@ describe('getState', () => {
 
   it('Does not add event to metadata if not waiting external event', () => {
 
-    const externalEvent = { source: 'synthetic',
-                            timestamp: Date.now(),
-                            event: { type: 'external', value: {type: 'moviehouse:play', id: 'foobar' }}}
+    const externalEvent = {
+      source: 'synthetic',
+      timestamp: Date.now(),
+      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+    }
 
 
     const log = [referral, echo, text, externalEvent]
@@ -416,8 +434,8 @@ describe('getState', () => {
 
   it('It switches forms after a form stitch message is sent, keeps metadata', () => {
 
-    const metadata = { "type":"stitch", "stitch": {"form":"BAR"}, "ref":"foo" }
-    const log = [referral, {...echo, message: {...echo.message, metadata} }]
+    const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
+    const log = [referral, { ...echo, message: { ...echo.message, metadata } }]
 
     const oldState = getState([referral])
     const state = getState(log)
@@ -433,13 +451,15 @@ describe('getState', () => {
   it('It switches forms after a form stitch message is sent, keeps metadata from previous events', () => {
 
 
-    const wait = {type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+    const wait = { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
 
-    const externalEvent = { source: 'synthetic',
-                            event: { type: 'external', value: {type: 'moviehouse:play', id: 'foobar' }}}
+    const externalEvent = {
+      source: 'synthetic',
+      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+    }
 
-    const metadata = { "type":"stitch", "stitch": {"form":"BAR"}, "ref":"foo" }
-    const log = [referral, _echo({wait, ref: 'foo'}), externalEvent, {...echo, message: {...echo.message, metadata} }]
+    const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
+    const log = [referral, _echo({ wait, ref: 'foo' }), externalEvent, { ...echo, message: { ...echo.message, metadata } }]
 
     const oldState = getState([referral])
     const state = getState(log)
@@ -458,8 +478,8 @@ describe('getState', () => {
 
 
   it('It keeps tokens when it stitches forms together', () => {
-    const metadata = { "type":"stitch", "stitch": {"form":"BAR"}, "ref":"foo" }
-    const log = [referral, optin, {...echo, message: {...echo.message, metadata} }]
+    const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
+    const log = [referral, optin, { ...echo, message: { ...echo.message, metadata } }]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -490,7 +510,7 @@ describe('getState', () => {
   })
 
   it('gets into a blocked state when given a report with a FB error', () => {
-    const report = synthetic({ type: 'machine_report', value: {error: { tag: 'FB', code: 200, message: 'foo'}}})
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200, message: 'foo' } } })
     const log = [referral, echo, text, report]
     const state = getState(log)
     state.state.should.equal('BLOCKED')
@@ -500,9 +520,9 @@ describe('getState', () => {
 
 
   it('gets into a new blocked state when given a new report with a new FB error', () => {
-    const reportA = synthetic({ type: 'machine_report', value: {error: { tag: 'FB', code: 200, message: 'foo'}}})
-    const reportB = synthetic({ type: 'machine_report', value: {error: { tag: 'FB', code: 300, message: 'bar'}}})
-    const log = [referral, echo, text, reportA, synthetic({type: 'redo'}), reportB]
+    const reportA = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200, message: 'foo' } } })
+    const reportB = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 300, message: 'bar' } } })
+    const log = [referral, echo, text, reportA, synthetic({ type: 'redo' }), reportB]
     const state = getState(log)
     state.state.should.equal('BLOCKED')
     state.error.code.should.equal(300)
@@ -510,7 +530,7 @@ describe('getState', () => {
   })
 
   it('gets into an error state when given a report with a different error', () => {
-    const report = synthetic({ type: 'machine_report', value: {error: { tag: 'INTERNAL', code: 'FOO'}}})
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
     const log = [referral, echo, text, report]
     const state = getState(log)
     state.state.should.equal('ERROR')
@@ -519,7 +539,7 @@ describe('getState', () => {
 
   it('gets into a blocked state when given a bad platform response', () => {
 
-    const pr = {...syntheticPR, event: {...syntheticPR.event, value: {response: { error: { code: 2022}}}}}
+    const pr = { ...syntheticPR, event: { ...syntheticPR.event, value: { response: { error: { code: 2022 } } } } }
     const log = [referral, echo, text, pr]
     const state = getState(log)
 
@@ -529,7 +549,7 @@ describe('getState', () => {
   it('gets out of a blocked state if an echo follows a bad platform response', () => {
     // TODO: Is this what we want??? Race conditions???
 
-    const pr = {...syntheticPR, event: {...syntheticPR.event, value: {response: { error: { code: 2022}}}}}
+    const pr = { ...syntheticPR, event: { ...syntheticPR.event, value: { response: { error: { code: 2022 } } } } }
     const log = [referral, echo, text, pr, echo]
     const state = getState(log)
 
@@ -538,7 +558,7 @@ describe('getState', () => {
 
   it('gets out of a blocked state if a user responds', () => {
     // TODO: Is this what we want???
-    const pr = {...syntheticPR, event: {...syntheticPR.event, value: {response: { error: { code: 2022}}}}}
+    const pr = { ...syntheticPR, event: { ...syntheticPR.event, value: { response: { error: { code: 2022 } } } } }
     const log = [referral, echo, text, pr, text]
     const state = getState(log)
 
@@ -547,8 +567,8 @@ describe('getState', () => {
   })
 
   it('gets out of a blocked state with an unblock event', () => {
-    const e = synthetic({ type: 'unblock', value: { state: 'WAIT_EXTERNAL_EVENT'}})
-    const pr = {...syntheticPR, event: {...syntheticPR.event, value: {response: { error: { code: 2022}}}}}
+    const e = synthetic({ type: 'unblock', value: { state: 'WAIT_EXTERNAL_EVENT' } })
+    const pr = { ...syntheticPR, event: { ...syntheticPR.event, value: { response: { error: { code: 2022 } } } } }
     const log = [referral, echo, text, pr, e]
     const state = getState(log)
 
@@ -559,7 +579,7 @@ describe('getState', () => {
 
 
   it('ignores an unblock event if not blocked', () => {
-    const e = synthetic({ type: 'unblock', value: { state: 'WAIT_EXTERNAL_EVENT'}})
+    const e = synthetic({ type: 'unblock', value: { state: 'WAIT_EXTERNAL_EVENT' } })
     const log = [referral, echo, text, e]
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -582,13 +602,15 @@ describe('getState', () => {
     const wait = { type: 'timeout', value: '25 hours' }
 
     // value should be...?
-    const externalEvent = { source: 'synthetic',
-                            timestamp: Date.now() + 1000*60*60*25,
-                            event: { type: 'timeout', value: Date.now() + 1000*60*60*25 }}
+    const externalEvent = {
+      source: 'synthetic',
+      timestamp: Date.now() + 1000 * 60 * 60 * 25,
+      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
+    }
 
     const d = Date.now()
 
-    const log = [referral, optin, text, {...echo, timestamp: d, message: {...echo.message, metadata: { wait }}}, externalEvent]
+    const log = [referral, optin, text, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait } } }, externalEvent]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -599,21 +621,25 @@ describe('getState', () => {
   it('removes tokens to the state when it needs to use them for a bailout', () => {
     const wait = { type: 'timeout', value: '25 hours' }
 
-    const externalEvent = { source: 'synthetic',
-                            timestamp: Date.now() + 1000*60*60*25,
-                            event: { type: 'bailout', value: {form: 'BAR'} }}
+    const externalEvent = {
+      source: 'synthetic',
+      timestamp: Date.now() + 1000 * 60 * 60 * 25,
+      event: { type: 'bailout', value: { form: 'BAR' } }
+    }
 
     const d = Date.now()
 
-    const log = [referral, optin, text, {...echo, timestamp: d, message: {...echo.message, metadata: { wait }}}]
+    const log = [referral, optin, text, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait } } }]
 
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'barbaz', ref: 'barbaz'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'barbaz', ref: 'barbaz' }]
+    }
 
 
     const state = getState(log)
     const output = exec(state, externalEvent)
-    const action = act({form, user:{}}, state, output)[0]
+    const action = act({ form, user: {} }, state, output)[0]
     output.action.should.equal('SWITCH_FORM')
     output.form.should.equal('BAR')
     action.recipient.one_time_notif_token.should.equal('FOOBAR')
@@ -627,21 +653,23 @@ describe('Machine', () => {
 
   it('gets the correct start field even with no referral', () => {
     const output = exec(_initialState(), text)
-    const action = act({user, form, log:[text]}, _initialState(), output)[0]
+    const action = act({ user, form, log: [text] }, _initialState(), output)[0]
     action.message.text.should.equal(form.fields[0].title)
   })
 
   it('sends the first message when it gets a referral', () => {
     const output = exec(_initialState(), referral)
-    const action = act({user, form, log:[referral]}, _initialState(), output)[0]
+    const action = act({ user, form, log: [referral] }, _initialState(), output)[0]
 
     action.message.text.should.equal(form.fields[0].title)
   })
 
   it('Validates answers via postback', () => {
-    const form = { logic: [],
-                   fields: [{type: 'legal', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'legal', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const log = [referral, echo, delivery, multipleChoice]
     const action = getMessage(log, form, user)[0]
@@ -649,9 +677,11 @@ describe('Machine', () => {
   })
 
   it('Invalidates answers to legal when not in set', () => {
-    const form = { logic: [],
-                   fields: [{type: 'legal', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'legal', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const log = [referral, echo, delivery, text]
     const action = getMessage(log, form, user)[0]
@@ -660,10 +690,12 @@ describe('Machine', () => {
 
 
   it('Invalidates answers to short_text when a previous postback is sent', () => {
-    const form = { logic: [],
-                   fields: [{type: 'legal', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'},
-                            {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'legal', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' },
+      { type: 'thankyou_screen', title: 'baz', ref: 'baz' }]
+    }
 
     const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
     const action = getMessage(log, form, user)[0]
@@ -672,7 +704,7 @@ describe('Machine', () => {
 
   it('Works when initial messages are delivery', () => {
     const log = [delivery, delivery, echo]
-    const state = getState(log.slice(0,-1))
+    const state = getState(log.slice(0, -1))
     const output = exec(state, parseLogJSON([echo])[0])
     output.action.should.equal('WAIT_RESPONSE')
     output.question.should.equal('foo')
@@ -681,7 +713,7 @@ describe('Machine', () => {
 
   it('Validates answers via qr', () => {
     const log = [referral, text, echo, delivery, qr]
-    const state = getState(log.slice(0,-1))
+    const state = getState(log.slice(0, -1))
     const output = exec(state, qr)
     should.not.exist(output.validation)
   })
@@ -700,7 +732,7 @@ describe('Machine', () => {
   })
 
   it('It ignores platform response errors when in blocked state', () => {
-    const report = synthetic({ type: 'platform_response', value: {response: {error: { tag: 'FB', code: 200}}}})
+    const report = synthetic({ type: 'platform_response', value: { response: { error: { tag: 'FB', code: 200 } } } })
     const log = [referral, echo, text, report]
     const state = getState(log)
     const output = exec(state, report)
@@ -708,7 +740,7 @@ describe('Machine', () => {
   })
 
   it('It ignores machine report errors when in blocked state', () => {
-    const report = synthetic({ type: 'machine_report', value: {error: { tag: 'FB', code: 200}}})
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200 } } })
     const log = [referral, echo, text, report]
     const state = getState(log)
     const output = exec(state, report)
@@ -716,7 +748,7 @@ describe('Machine', () => {
   })
 
   it('It ignores machine report errors when in error state', () => {
-    const report = synthetic({ type: 'machine_report', value: {error: { tag: 'INTERNAL', code: 200}}})
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 200 } } })
     const log = [referral, echo, text, report]
     const state = getState(log)
     const output = exec(state, report)
@@ -724,8 +756,8 @@ describe('Machine', () => {
   })
 
   it('It ignores machine reports for error when in blocked state', () => {
-    const report = synthetic({ type: 'machine_report', value: {error: { tag: 'FB', code: 200}}})
-    const report2 = synthetic({ type: 'machine_report', value: {error: { tag: 'INTERNAL', code: 200}}})
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200 } } })
+    const report2 = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 200 } } })
     const log = [referral, echo, text, report]
     const state = getState(log)
     state.state.should.equal('BLOCKED')
@@ -734,9 +766,9 @@ describe('Machine', () => {
   })
 
   it('It can move from a blocked state to an error state after a redo event', () => {
-    const report = synthetic({ type: 'machine_report', value: {error: { tag: 'FB', code: 200}}})
-    const report2 = synthetic({ type: 'machine_report', value: {error: { tag: 'INTERNAL', code: 200}}})
-    const log = [referral, echo, text, report, synthetic({type: 'redo'})]
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200 } } })
+    const report2 = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 200 } } })
+    const log = [referral, echo, text, report, synthetic({ type: 'redo' })]
     const state = getState(log)
     state.state.should.equal('RESPONDING')
     const output = exec(state, report2)
@@ -745,7 +777,7 @@ describe('Machine', () => {
 
 
   it('previousOutput has followUp prop when given follow_up event', () => {
-    const fu = synthetic({ type: 'follow_up', value: 'foo'})
+    const fu = synthetic({ type: 'follow_up', value: 'foo' })
     const log = [referral, echo, fu]
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -754,7 +786,7 @@ describe('Machine', () => {
 
 
   it('previousOutput has no followUp prop when user continue after follow_up event', () => {
-    const fu = synthetic({ type: 'follow_up', value: 'foo'})
+    const fu = synthetic({ type: 'follow_up', value: 'foo' })
     const log = [referral, echo, fu, echo, text, echo]
     const state = getState(log)
     state.state.should.equal('QOUT')
@@ -762,9 +794,11 @@ describe('Machine', () => {
   })
 
   it('it gets the next question when there is a next', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const log = [referral, echo, delivery, text]
     const action = getMessage(log, form, user)[0]
@@ -772,21 +806,25 @@ describe('Machine', () => {
   })
 
   it('Responds to opening text without referral', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'bar', ref: 'bar'},
-                            {type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'qux', ref: 'qux'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar' },
+      { type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'qux', ref: 'qux' }]
+    }
 
     const log = [text]
     const actions = getMessage(log, form, user)
     actions.length.should.equal(2)
-    actions.forEach((a,i) => a.message.text.should.equal(form.fields[i].title))
+    actions.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
   })
 
   it('Keeps metadata from opening form switch', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: '{{hidden:foo}}', ref: 'qux'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: '{{hidden:foo}}', ref: 'qux' }]
+    }
 
     const log = [referral, echo, text]
     const actions = getMessage(log, form, user)
@@ -795,35 +833,41 @@ describe('Machine', () => {
   })
 
   it('Responds to opening sticker without referral', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'bar', ref: 'bar'},
-                            {type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'qux', ref: 'qux'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar' },
+      { type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'qux', ref: 'qux' }]
+    }
 
     const log = [text]
     const actions = getMessage(log, form, user)
     actions.length.should.equal(2)
-    actions.forEach((a,i) => a.message.text.should.equal(form.fields[i].title))
+    actions.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
   })
 
   it('Sends multiple questions if first is statement', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'bar', ref: 'bar'},
-                            {type: 'statement', title: 'baz', ref: 'baz'},
-                            {type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'qux', ref: 'qux'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar' },
+      { type: 'statement', title: 'baz', ref: 'baz' },
+      { type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'qux', ref: 'qux' }]
+    }
 
     const log = [referral]
     const actions = getMessage(log, form, user)
     actions.length.should.equal(3)
-    actions.forEach((a,i) => a.message.text.should.equal(form.fields[i].title))
+    actions.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
   })
 
   it('Sends multiple questions if first is moveOn', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'bar', ref: 'bar', properties: { description: 'type: webview\nurl: foo.com\nbuttonText: WTF\nkeepMoving: true'}},
-                            {type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'qux', ref: 'qux'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar', properties: { description: 'type: webview\nurl: foo.com\nbuttonText: WTF\nkeepMoving: true' } },
+      { type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'qux', ref: 'qux' }]
+    }
 
     const log = [referral]
     const actions = getMessage(log, form, user)
@@ -833,9 +877,11 @@ describe('Machine', () => {
   })
 
   it('Ignores responses to a statement if it is moving on to another question', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'bar', ref: 'bar'},
-                            {type: 'short_text', title: 'foo', ref: 'foo'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar' },
+      { type: 'short_text', title: 'foo', ref: 'foo' }]
+    }
 
     const log = [referral, statementEcho, delivery, text]
     const action = getMessage(log, form, user)[0]
@@ -843,22 +889,26 @@ describe('Machine', () => {
   })
 
   it('Responds to 0 as a text input', () => {
-    const form = { logic: [],
-                   fields: [{type: 'number', title: 'foo', ref: 'foo'},
-                            {type: 'statement', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'number', title: 'foo', ref: 'foo' },
+      { type: 'statement', title: 'bar', ref: 'bar' }]
+    }
 
-    const log = [referral, echo, delivery, {...text, message: {text: 0}}]
+    const log = [referral, echo, delivery, { ...text, message: { text: 0 } }]
     const action = getMessage(log, form, user)[0]
     action.message.text.should.equal('bar')
   })
 
 
   it('Does not resend a statement at the end', () => {
-    const echo2 = {...statementEcho, message: { ...statementEcho.message, metadata: { ref: "foo", type: "statement"}}}
+    const echo2 = { ...statementEcho, message: { ...statementEcho.message, metadata: { ref: "foo", type: "statement" } } }
 
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'bar', ref: 'bar'},
-                            {type: 'statement', title: 'foo', ref: 'foo'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar' },
+      { type: 'statement', title: 'foo', ref: 'foo' }]
+    }
 
     const log = [referral, statementEcho, delivery, echo2]
     const action = getMessage(log, form, user)[0]
@@ -866,9 +916,11 @@ describe('Machine', () => {
   })
 
   it('Sends a repeat message after an answer to a statement in the end', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'thankyou_screen', title: 'baz', ref: 'baz' }]
+    }
 
     const log = [referral, tyEcho, delivery, text]
     const actions = getMessage(log, form, user)
@@ -877,20 +929,24 @@ describe('Machine', () => {
   })
 
   it('Responds to is_echos that come after the delivery watermark', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'thankyou_screen', title: 'baz', ref: 'baz' }]
+    }
 
 
-    const log = [referral, delivery, {...echo, timestamp: delivery.delivery.watermark}, text]
+    const log = [referral, delivery, { ...echo, timestamp: delivery.delivery.watermark }, text]
     const action = getMessage(log, form, user)[0]
     action.message.text.should.equal('baz')
   })
 
   it('Responds to is_echos that come before the delivery watermark', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'thankyou_screen', title: 'baz', ref: 'baz' }]
+    }
 
 
     const log = [referral, echo, delivery, text]
@@ -900,20 +956,28 @@ describe('Machine', () => {
 
 
   it('it follows logic jumps when there are some to follow', () => {
-    const logic = { type: 'field',
-                    ref: 'foo',
-                    actions: [ { action: 'jump',
-                                 details:
-                                 { to: { type: 'field', value: 'baz' }},
-                                 condition:
-                                 { op: 'is',
-                                   vars: [ { type: 'field', value: 'foo' },
-                                           { type: 'constant', value: 'foo' }]}}]}
+    const logic = {
+      type: 'field',
+      ref: 'foo',
+      actions: [{
+        action: 'jump',
+        details:
+          { to: { type: 'field', value: 'baz' } },
+        condition:
+        {
+          op: 'is',
+          vars: [{ type: 'field', value: 'foo' },
+          { type: 'constant', value: 'foo' }]
+        }
+      }]
+    }
 
-    const form = { logic: [ logic ],
-                   fields: [{ type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'},
-                            {type: 'number', title: 'baz', ref: 'baz'}]}
+    const form = {
+      logic: [logic],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' },
+      { type: 'number', title: 'baz', ref: 'baz' }]
+    }
 
     const log = [referral, echo, delivery, text]
     const action = getMessage(log, form, user)[0]
@@ -921,23 +985,31 @@ describe('Machine', () => {
   })
 
   it('it follows logic jumps from postbacks', () => {
-    const logic = { type: 'field',
-                    ref: 'foo',
-                    actions: [ { action: 'jump',
-                                 details:
-                                 { to: { type: 'field', value: 'baz' }},
-                                 condition:
-                                 { op: 'is',
-                                   vars: [ { type: 'field', value: 'foo' },
+    const logic = {
+      type: 'field',
+      ref: 'foo',
+      actions: [{
+        action: 'jump',
+        details:
+          { to: { type: 'field', value: 'baz' } },
+        condition:
+        {
+          op: 'is',
+          vars: [{ type: 'field', value: 'foo' },
 
-                                           // TODO: make sure this is a reasonable test.
-                                           // boolean shouldnt be possible from typeform...
-                                           { type: 'constant', value: true }]}}]}
+          // TODO: make sure this is a reasonable test.
+          // boolean shouldnt be possible from typeform...
+          { type: 'constant', value: true }]
+        }
+      }]
+    }
 
-    const form = { logic: [ logic ],
-                   fields: [{ type: 'legal', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'},
-                            {type: 'number', title: 'baz', ref: 'baz'}]}
+    const form = {
+      logic: [logic],
+      fields: [{ type: 'legal', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' },
+      { type: 'number', title: 'baz', ref: 'baz' }]
+    }
 
     const log = [referral, echo, multipleChoice]
     const action = getMessage(log, form, user)[0]
@@ -946,26 +1018,34 @@ describe('Machine', () => {
 
 
   it('it follows logic jumps based on event data', () => {
-    const logic = { type: 'field',
-                    ref: 'bar',
-                    actions: [ { action: 'jump',
-                                 details:
-                                 { to: { type: 'field', value: 'qux' }},
-                                 condition:
-                                 { op: 'equal',
-                                   vars: [ { type: 'hidden', value: 'e_payment_reloadly_success' },
-                                           { type: 'constant', value: 'true' }]}}]}
+    const logic = {
+      type: 'field',
+      ref: 'bar',
+      actions: [{
+        action: 'jump',
+        details:
+          { to: { type: 'field', value: 'qux' } },
+        condition:
+        {
+          op: 'equal',
+          vars: [{ type: 'hidden', value: 'e_payment_reloadly_success' },
+          { type: 'constant', value: 'true' }]
+        }
+      }]
+    }
 
-    const form = { logic: [ logic ],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: external\n    value:\n      type: payment:reloadly'}},
-                            {type: 'statement', title: 'bar', ref: 'bar'},
-                            {type: 'number', title: 'baz', ref: 'baz'},
-                            {type: 'number', title: 'qux', ref: 'qux'}]}
+    const form = {
+      logic: [logic],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: external\n    value:\n      type: payment:reloadly' } },
+      { type: 'statement', title: 'bar', ref: 'bar' },
+      { type: 'number', title: 'baz', ref: 'baz' },
+      { type: 'number', title: 'qux', ref: 'qux' }]
+    }
 
 
-    const event = synthetic({type: 'external', value: { type: 'payment:reloadly', success: true}}) // deal with bool
+    const event = synthetic({ type: 'external', value: { type: 'payment:reloadly', success: true } }) // deal with bool
 
-    const log = [referral, _echo({ref: 'foo', type: 'wait', wait: { type: 'external', value: { type: 'payment:reloadly'}}}), event]
+    const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: { type: 'external', value: { type: 'payment:reloadly' } } }), event]
 
     const action = getMessage(log, form, user)[1]
     action.message.should.deep.equal({ text: 'qux', metadata: '{"ref":"qux"}' })
@@ -975,8 +1055,10 @@ describe('Machine', () => {
 
     // TODO: this is not unit test, implicitly testing validation of multiple choice.
     // fix this by injecting mock!
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'qux' }, { label: 'quux' }] } }]
+    }
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
@@ -991,8 +1073,10 @@ describe('Machine', () => {
 
   it('repeats when it misses validation and tags custom types as isRepeat', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties: {description: '{"type": "wait"}'}}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: '{"type": "wait"}' } }]
+    }
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
@@ -1008,9 +1092,11 @@ describe('Machine', () => {
 
     // TODO: this is not unit test, implicitly testing validation of multiple choice.
     // fix this by injecting mock!
-    const form = { logic: [],
-                   custom_messages: {'label.error.mustSelect': 'baz error'},
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
+    const form = {
+      logic: [],
+      custom_messages: { 'label.error.mustSelect': 'baz error' },
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'qux' }, { label: 'quux' }] } }]
+    }
 
     const log = [referral, echo, delivery, text]
     const action = getMessage(log, form, user)[0]
@@ -1025,9 +1111,11 @@ describe('Machine', () => {
 
     // TODO: this is not unit test, implicitly testing validation of multiple choice.
     // fix this by injecting mock!
-    const form = { logic: [],
-                   custom_messages: {'label.error.mustSelect': 'baz error'},
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
+    const form = {
+      logic: [],
+      custom_messages: { 'label.error.mustSelect': 'baz error' },
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'qux' }, { label: 'quux' }] } }]
+    }
 
     const log = [referral, echo, delivery, text]
     const action = getMessage(log, form, user)[0]
@@ -1039,9 +1127,11 @@ describe('Machine', () => {
 
   it('If a wait is a statement, it does not send multiple items', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 1 minute'}},
-                           {type: 'short_text', title: 'bar', ref: 'bar' }]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 1 minute' } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const wait = { type: 'timeout', value: '1 minute', response: 'baz' }
     const log = [referral]
@@ -1052,9 +1142,11 @@ describe('Machine', () => {
 
   it('repeats with custom response when responding to a wait ', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nresponseMessage: baz\nwait:\n    type: timeout\n    value: 1 minute'}},
-                           {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nresponseMessage: baz\nwait:\n    type: timeout\n    value: 1 minute' } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const log = [referral, echo, text]
 
@@ -1069,9 +1161,11 @@ describe('Machine', () => {
 
   it('repeats with default response when responding to a wait without response', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 1 minute'}},
-                           {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 1 minute' } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
 
 
@@ -1091,18 +1185,22 @@ describe('Machine', () => {
     const wait = { type: 'timeout', value: '25 hours' }
 
     // value should be...?
-    const externalEvent = { source: 'synthetic',
-                            timestamp: Date.now() + 1000*60*60*25,
-                            event: { type: 'timeout', value: Date.now() + 1000*60*60*25 }}
+    const externalEvent = {
+      source: 'synthetic',
+      timestamp: Date.now() + 1000 * 60 * 60 * 25,
+      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
+    }
 
     const d = Date.now()
 
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 25 hours'}},
-                           {type: 'short_text', title: 'bar', ref: 'bar' }]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 25 hours' } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
 
-    const log = [referral, optin, {...echo, timestamp: d, message: {...echo.message, metadata: { wait, ref: 'foo' }}}, externalEvent]
+    const log = [referral, optin, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, externalEvent]
 
     const action = getMessage(log, form, user)
     action.length.should.equal(1)
@@ -1113,9 +1211,13 @@ describe('Machine', () => {
 
   it('It creates a stitch type message when provided type stitch metadata', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties:
-                             { description: 'type: stitch\nstitch:\n    form: BAR'}}]}
+    const form = {
+      logic: [],
+      fields: [{
+        type: 'statement', title: 'foo', ref: 'foo', properties:
+          { description: 'type: stitch\nstitch:\n    form: BAR' }
+      }]
+    }
 
     const log = [referral]
     const action = getMessage(log, form, user)[0]
@@ -1127,8 +1229,10 @@ describe('Machine', () => {
 
   it('It recieves payload referrals and starts chatting', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo' }]
+    }
 
     const log = [payloadReferral]
     const action = getMessage(log, form, user)[0]
@@ -1138,9 +1242,11 @@ describe('Machine', () => {
 
 
   it('moves onward when validation succeeds', () => {
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'foo' }, { label: 'quux' }] } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const log = [referral, echo, delivery, text]
 
@@ -1150,9 +1256,11 @@ describe('Machine', () => {
 
 
   it('ignores referral sent when responding', () => {
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'foo' }, { label: 'quux' }] } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     should.not.exist(getMessage([referral, referral], form, user)[0])
     should.not.exist(getMessage([referral, delivery, echo, text, referral], form, user)[0])
@@ -1160,21 +1268,25 @@ describe('Machine', () => {
 
 
   it('ignores referral sent when waiting', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 1 minute'}},
-                           {type: 'short_text', title: 'bar', ref: 'bar' }]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 1 minute' } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const wait = { type: 'timeout', value: '1 minute'}
-    const log = [referral, {...echo, message: {...echo.message, metadata: { wait, ref: 'foo' }}}, referral]
+    const wait = { type: 'timeout', value: '1 minute' }
+    const log = [referral, { ...echo, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, referral]
 
     should.not.exist(getMessage(log, form, user)[0])
   })
 
 
   it('repeats questions on a repeat referral if unanswered question', () => {
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'foo' }, { label: 'quux' }] } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const messages = getMessage([referral, delivery, echo, referral], form, user)
     JSON.parse(messages[0].message.metadata).repeat.should.be.true
@@ -1183,8 +1295,12 @@ describe('Machine', () => {
 
   it('ignores referrals when the person is the referrer ', () => {
 
-    const secondRef = {...referral, referral: {... referral.referral,
-                                               ref: `form.BAR.referrer.${USER_ID}`}}
+    const secondRef = {
+      ...referral, referral: {
+        ...referral.referral,
+        ref: `form.BAR.referrer.${USER_ID}`
+      }
+    }
     should.not.exist(getMessage([referral, echo, secondRef], form)[0])
   })
 
@@ -1193,9 +1309,11 @@ describe('Machine', () => {
   })
 
   it('ignores multiple responses to a single question', () => {
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'foo' }, { label: 'quux' }] } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
     const log = [referral, delivery, echo, qr, qr]
     const action = getMessage(log, form, user)[0]
     should.not.exist(action)
@@ -1203,33 +1321,39 @@ describe('Machine', () => {
 
 
   it('Validates a quick reply when valid', () => {
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'foo' }, { label: 'quux' }] } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const response = {...qr, message: { quick_reply: { payload: { value:"quux",ref:"foo" }}}}
+    const response = { ...qr, message: { quick_reply: { payload: { value: "quux", ref: "foo" } } } }
     const log = [referral, echo, delivery, response]
     const action = getMessage(log, form, user)[0]
     action.message.text.should.equal('bar')
   })
 
   it('Validates a quick reply with 0 value', () => {
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: '0'}, {label: '1'}]}},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: '0' }, { label: '1' }] } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const response = {...qr, message: { quick_reply: { payload: { value:0, ref:"foo" }}}}
+    const response = { ...qr, message: { quick_reply: { payload: { value: 0, ref: "foo" } } } }
     const log = [referral, echo, delivery, response]
     const action = getMessage(log, form, user)[0]
     action.message.text.should.equal('bar')
   })
 
   it('Validates a quick reply when payload is string (as in email)', () => {
-    const form = { logic: [],
-                   fields: [{type: 'email', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'email', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const response = {...qr, message: { quick_reply: { payload: "foo@gmail.com" }}}
+    const response = { ...qr, message: { quick_reply: { payload: "foo@gmail.com" } } }
     const log = [referral, echo, delivery, response]
     const action = getMessage(log, form, user)[0]
     action.message.text.should.equal('bar')
@@ -1237,13 +1361,15 @@ describe('Machine', () => {
 
 
   it('Invalidates a quick reply when invalid', () => {
-    const del1 = {...delivery, delivery: { watermark: 5 }}
+    const del1 = { ...delivery, delivery: { watermark: 5 } }
 
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'foo'}, {label: 'quux'}]}},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'foo' }, { label: 'quux' }] } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const response = {...qr, message: { quick_reply: { payload: { value:"qux", ref:"foo" }}}}
+    const response = { ...qr, message: { quick_reply: { payload: { value: "qux", ref: "foo" } } } }
 
     const log = [referral, del1, echo, delivery, response]
 
@@ -1253,10 +1379,14 @@ describe('Machine', () => {
 
 
   it('Validates an optin when it is a response to a notify request', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties:
-                             { description: 'type: notify' }},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{
+        type: 'statement', title: 'foo', ref: 'foo', properties:
+          { description: 'type: notify' }
+      },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
 
     const log = [referral, echo, optin]
@@ -1267,8 +1397,10 @@ describe('Machine', () => {
 
   it('Invalidates an optin when it comes from nowhere', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
 
     const log = [referral, _echo('bar'), optin]
@@ -1279,10 +1411,12 @@ describe('Machine', () => {
 
 
   it('Resends a message with a follow_up event', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }]
+    }
 
-    const fu = synthetic({ type: 'follow_up', value: 'foo'})
+    const fu = synthetic({ type: 'follow_up', value: 'foo' })
     const log = [referral, echo, fu]
 
     const actions = getMessage(log, form, user)
@@ -1293,10 +1427,12 @@ describe('Machine', () => {
 
 
   it('ignores a follow_up event if not in QOUT state', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }]
+    }
 
-    const fu = synthetic({ type: 'follow_up', value: 'foo'})
+    const fu = synthetic({ type: 'follow_up', value: 'foo' })
     const log = [referral, echo, text, fu]
 
     const actions = getMessage(log, form, user)
@@ -1305,11 +1441,13 @@ describe('Machine', () => {
 
 
   it('ignores a follow_up event for a different question', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const fu = synthetic({ type: 'follow_up', value: 'foo'})
+    const fu = synthetic({ type: 'follow_up', value: 'foo' })
     const log = [referral, _echo('foo'), text, _echo('bar'), fu]
 
     const actions = getMessage(log, form, user)
@@ -1317,11 +1455,13 @@ describe('Machine', () => {
   })
 
   it('Resends a waiting message with a redo event', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const log = [referral, synthetic({type: 'redo'})]
+    const log = [referral, synthetic({ type: 'redo' })]
     const actions = getMessage(log, form, user)
     actions[0].message.text.should.equal('foo')
     actions[1].message.text.should.equal('bar')
@@ -1331,13 +1471,15 @@ describe('Machine', () => {
   })
 
   it('Resends a waiting message with a redo event when blocked and keeps retry and qa', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const report = synthetic({ type: 'machine_report', value: {error: { tag: 'FB', code: 200, message: 'foo'}}})
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200, message: 'foo' } } })
 
-    const log = [referral, echo, text, report, synthetic({type: 'redo'})]
+    const log = [referral, echo, text, report, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
     actions[0].message.text.should.equal('bar')
@@ -1350,21 +1492,23 @@ describe('Machine', () => {
 
 
   it('Wipes the retries history when a message is finally sent', () => {
-    const form = { logic: [],
-                   fields: [{type: 'short_text', title: 'foo', ref: 'foo'},
-                            {type: 'thankyou_screen', title: 'baz', ref: 'baz'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'thankyou_screen', title: 'baz', ref: 'baz' }]
+    }
 
-    const now = Date.now() - 60000*60
+    const now = Date.now() - 60000 * 60
 
     const log = [referral,
-                 synthetic({type: 'redo'}, {timestamp: now}),
-                 synthetic({type: 'redo'}, {timestamp: now + 60000}),
-                 synthetic({type: 'redo'}, {timestamp: now + 60000*10}),
-                 synthetic({type: 'redo'}, {timestamp: now + 60000*45}),
-                 synthetic({type: 'redo'}, {timestamp: now + 60000*60}),
-                 echo,
-                 text
-                ]
+      synthetic({ type: 'redo' }, { timestamp: now }),
+      synthetic({ type: 'redo' }, { timestamp: now + 60000 }),
+      synthetic({ type: 'redo' }, { timestamp: now + 60000 * 10 }),
+      synthetic({ type: 'redo' }, { timestamp: now + 60000 * 45 }),
+      synthetic({ type: 'redo' }, { timestamp: now + 60000 * 60 }),
+      echo,
+      text
+    ]
 
     const actions = getMessage(log, form, user)
     actions.length.should.equal(1)
@@ -1377,11 +1521,13 @@ describe('Machine', () => {
   // NOTE: this isn't great from UX standpoint, but splitting up batch messages is
   // hard and rare edge case really...
   it('Resends all messages if some of a batch didnt get sent, when given a redo event', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const log = [referral, statementEcho, synthetic({type: 'redo'})]
+    const log = [referral, statementEcho, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
     actions[0].message.text.should.equal('foo')
@@ -1392,18 +1538,22 @@ describe('Machine', () => {
   it('Redo event resends the same token if redo sent after wait time', () => {
     const wait = { type: 'timeout', value: '25 hours' }
 
-  //   // value should be...?
-    const externalEvent = { source: 'synthetic',
-                            timestamp: Date.now() + 1000*60*60*25,
-                            event: { type: 'timeout', value: Date.now() + 1000*60*60*25 }}
+    //   // value should be...?
+    const externalEvent = {
+      source: 'synthetic',
+      timestamp: Date.now() + 1000 * 60 * 60 * 25,
+      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
+    }
 
     const d = Date.now()
 
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 25 hours'}},
-                           {type: 'short_text', title: 'bar', ref: 'bar' }]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: 'type: wait\nwait:\n    type: timeout\n    value: 25 hours' } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const log = [referral, optin, _echo({wait, ref: 'foo'}), externalEvent, synthetic({type:'redo'})]
+    const log = [referral, optin, _echo({ wait, ref: 'foo' }), externalEvent, synthetic({ type: 'redo' })]
 
     const action = getMessage(log, form, user)
 
@@ -1415,10 +1565,12 @@ describe('Machine', () => {
 
   it('repeats again when redo sent on missed validation', () => {
 
-    const form = { logic: [],
-                   fields: [{type: 'multiple_choice', title: 'foo', ref: 'foo', properties: {choices: [{label: 'qux'}, {label: 'quux'}]}}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'qux' }, { label: 'quux' }] } }]
+    }
 
-    const log = [referral, echo, text, synthetic({type: 'redo'})]
+    const log = [referral, echo, text, synthetic({ type: 'redo' })]
     const action = getMessage(log, form, user)[0]
 
     action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
@@ -1427,8 +1579,8 @@ describe('Machine', () => {
 
 
   it('It switches forms again if redo sent after form switch', () => {
-    const metadata = { "type":"stitch", "stitch": {"form":"BAR"}, "ref":"foo" }
-    const log = [referral, _echo(metadata), synthetic({type: 'redo'})]
+    const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
+    const log = [referral, _echo(metadata), synthetic({ type: 'redo' })]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -1438,12 +1590,14 @@ describe('Machine', () => {
 
 
   it('It re-creates stitch type message when redo comes after stitch', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const metadata = { "type":"stitch", "stitch": {"form":"BAR"}, "ref":"foo" }
-    const log = [referral, _echo(metadata), synthetic({type: 'redo'})]
+    const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
+    const log = [referral, _echo(metadata), synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
     actions.length.should.equal(2)
@@ -1453,12 +1607,14 @@ describe('Machine', () => {
 
 
   it('It redoes when blocked as reported in platform response and gets redo event', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
-    const pr = _.set(syntheticPR, 'event.value.response', {error: {code: 2022}})
-    const log = [referral, echo, pr, synthetic({type: 'redo'})]
+    const pr = _.set(syntheticPR, 'event.value.response', { error: { code: 2022 } })
+    const log = [referral, echo, pr, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
     actions.length.should.equal(2)
@@ -1473,13 +1629,15 @@ describe('Machine', () => {
   // after "echo" from Facebook a 100% sure thing... which it surely isn't...
   // but, we should do fine if user responds...
   it('ignores a redo event if the echo was recieved from facebook', () => {
-    const form = { logic: [],
-                   fields: [{type: 'statement', title: 'foo', ref: 'foo'},
-                            {type: 'short_text', title: 'bar', ref: 'bar'}]}
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
 
     const echoBar = _.set(echo, 'message.metadata.ref', 'bar')
 
-    const log = [referral, statementEcho, echoBar, synthetic({type: 'redo'})]
+    const log = [referral, statementEcho, echoBar, synthetic({ type: 'redo' })]
     const action = getMessage(log, form, user)[0]
 
     should.not.exist(action)

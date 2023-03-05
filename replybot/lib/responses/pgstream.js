@@ -1,4 +1,4 @@
-const {Readable} = require('stream')
+const { Readable } = require('stream')
 
 class Buffered {
   constructor(fn) {
@@ -22,7 +22,7 @@ class Buffered {
 // and a new limit
 class DBStream extends Readable {
   constructor(query, init, streamOpts) {
-    super({objectMode: true, ...streamOpts})
+    super({ objectMode: true, ...streamOpts })
     this.query = query
     this.lim = init
     this.dat = []
