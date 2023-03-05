@@ -20,13 +20,13 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host gbv-cockroachdb-public
 
 
-versionDashboard: &vdashboard v0.0.30
+versionDashboard: &vdashboard v0.0.31
 versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.138
+versionReplybot: &vreplybot v0.0.140
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.25
 versionScribble: &vscribble v0.0.23
-versionDinersclub: &vdinersclub v0.0.25
+versionDinersclub: &vdinersclub v0.0.26
 versionFormcentral: &vformcentral v0.0.10
 
 linksniffer:
