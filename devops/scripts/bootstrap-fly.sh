@@ -12,7 +12,7 @@ helm repo update
 ######################
 helm upgrade --install db cockroachdb/cockroachdb \
   --values values/integrations/cdb.yaml \
-  --timeout 10m \
+  --timeout 5m0s \
   --wait
 
 kubectl apply -f dev/cockroachdb.hack.yaml
@@ -21,7 +21,7 @@ kubectl apply -f dev/cockroachdb.hack.yaml
 # create database
 ######################
 # Migrations should be idempotent
-cat migrations/init.sql | kubectl run -i \
+cat migrations/*.sql | kubectl run -i \
   --rm cockroach-client \
   --image=cockroachdb/cockroach:v2.1.4 \
   --restart=Never \

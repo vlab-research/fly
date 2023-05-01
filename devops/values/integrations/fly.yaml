@@ -369,6 +369,9 @@ scribble:
       - name: KAFKA_GROUP
         value: "scribble-messages"
 
+# Configuration for Exporter Worker
+exporter:
+  enabled: false
 
 cockroachdb:
   # disable cockroachdb as we run it as a service

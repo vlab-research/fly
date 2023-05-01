@@ -6,3 +6,6 @@ cockroachdb:
 
 kakfka:
   enabled: true
+
+exporter:
+  enabled: true

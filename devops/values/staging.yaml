@@ -25,6 +25,7 @@ versionDean: &vdean v0.0.25
 versionScribble: &vscribble v0.0.21
 versionDinersclub: &vdinersclub v0.0.26
 versionFormcentral: &vformcentral v0.0.10
+versionExporter: &vexporter v0.1.0
 
 processingAlerts: []
 laggingAlerts: []
@@ -488,7 +489,7 @@ exporter:
   image:
     repository: "vlabresearch/exporter"
     pullPolicy: Always
-    tag: 0.1.0
+    tag: *vexporter
 
 cockroachdb:
   image:

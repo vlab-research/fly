@@ -8,16 +8,32 @@ DASHBOARD_HOST=dashboard.fly.local
 COCKROACHDB_HOST=cockroachdb.fly.local
 MINIO_HOST=minio.fly.local
 HOST_FILE=/etc/hosts
+TESTRUNNER_VERSION=v0.0.6
 
-dev: create-kind-cluster certs certs-secret create-dev-secret setup-kind-registry setup-ingress-controller bootstrap-fly
+dev: create-kind-cluster certs certs-secret setup-dev-secret setup-kind-registry setup-ingress-controller bootstrap-fly
+
+.PHONY: integration-tests
+integration-tests:	create-integration-secret bootstrap-fly start-testrunner
 
 clean: delete-kind-cluster
 
 start-testrunner:
 	@kubectl apply -f testing/facebot.yaml
 	@kubectl wait --for=condition=available deployment/facebot --timeout 5m
-	@kubectl delete job testrunner || true
-	@envsubst < testing/testrunner.yaml | kubectl apply -f -
+	@ech "RUNNING END TO END TESTS WITH TESTRUNNER VERSION $(TESTRUNNER_VERSION)"
+	@kubectl run testrunner -it \
+		--image vlabresearch/testrunner:$(TESTRUNNER_VERSION) \
+		--pod-running-timeout 10m \
+		--port 80 \
+		--restart=Never \
+		--env="BOTSERVER_URL=http://fly-botserver" \
+		--env="KAFKA_BROKERS=kafka:9092" \
+		--env="CHATBASE_BACKEND=@vlab-research/chatbase-postgres" \
+		--env="CHATBASE_DATABASE=chatroach" \
+		--env="CHATBASE_USER=chatroach" \
+		--env="CHATBASE_PASSWORD=" \
+		--env="CHATBASE_HOST=db-cockroachdb-public" \
+		--env="CHATBASE_PORT=26257"
 
 .PHONY: check-test-status
 check-test-status:
@@ -27,11 +43,6 @@ check-test-status:
 		fi
 	@echo "Test Succesful"
 
-.PHONY: integration-tests
-integration-tests:	create-integration-secret bootstrap-fly start-testrunner
-	@kubectl wait --for=condition=complete job/testrunner --timeout 20m || true
-	@kubectl logs -l app=testrunner --tail -1
-	$(MAKE) check-test-status
 
 create-kind-cluster:
 	@kind create cluster --config dev/kind-cluster.yaml || true
@@ -46,7 +57,14 @@ setup-dev-secret:
 	@kubectl create secret generic bot-envs --from-env-file=./dev/.env || true
 
 bootstrap-fly:
-	@bash ./scripts/bootstrap-fly.sh
+	@bash ./scripts/bootstrap-fly.sh || $(MAKE) dump-cluster-on-error
+
+dump-cluster-on-error:
+	# Fetch All The Resources To Help Debug
+	@kubectl get svc,ing,pods,secrets,cm -A -o wide --show-labels
+	@kubectl -n kube-system describe pod -l k8s-app=kube-proxy
+	@kubectl -n kube-system logs -l k8s-app=kube-proxy
+	@exit 1
 
 setup-kind-registry:
 	@bash ./dev/kind-with-registry.sh || true
