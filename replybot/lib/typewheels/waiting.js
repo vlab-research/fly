@@ -1,6 +1,6 @@
 const _ = require('lodash')
 const parse = require('parse-duration')
-const {getTimeoutDate} = require('@vlab-research/utils')
+const { getTimeoutDate } = require('@vlab-research/utils')
 
 function _waitFulfilled(value, events, waitStart) {
   const now = _(events).map(e => new Date(e.value)).max()
@@ -25,13 +25,13 @@ function _matches(v1, v2) {
 }
 
 const funs = {
-  'and': (...args) => args.reduce((a,b) => a && b, true),
-  'or': (...args) => args.reduce((a,b) => a || b, false)
+  'and': (...args) => args.reduce((a, b) => a && b, true),
+  'or': (...args) => args.reduce((a, b) => a || b, false)
 }
 
 function waitConditionFulfilled(wait, events, waitStart) {
 
-  const {type, value, op, vars} = wait
+  const { type, value, op, vars } = wait
 
   if (op) {
     const fn = funs[op]
@@ -39,8 +39,8 @@ function waitConditionFulfilled(wait, events, waitStart) {
   }
 
   const relevant = events
-        .map(e => e.event)
-        .filter(e => e.type === type)
+    .map(e => e.event)
+    .filter(e => e.type === type)
 
   if (type === 'timeout') {
     return _waitFulfilled(value, relevant, waitStart)

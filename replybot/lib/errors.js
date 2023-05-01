@@ -13,7 +13,7 @@ async function iowrap(msg, tag, fn, ...args) {
   try {
     const res = await fn(...args)
     return res
-  } catch(e) {
+  } catch (e) {
 
     if (e instanceof MachineIOError) {
       throw e

@@ -1,7 +1,7 @@
-const {Responser} = require('./responser')
+const { Responser } = require('./responser')
 const Chatbase = require(process.env.CHATBASE_BACKEND)
-const {PromiseStream} = require('@vlab-research/steez')
-const {DBStream, messagesQuery} = require('./pgstream')
+const { PromiseStream } = require('@vlab-research/steez')
+const { DBStream, messagesQuery } = require('./pgstream')
 
 const chatbase = new Chatbase()
 const emptyBase = { get: () => [], pool: chatbase.pool }
@@ -22,9 +22,9 @@ stream
       await chatbase.pool.end()
     }, 5000)
   })
-  .pipe(new PromiseStream(({userid, content}) => {
+  .pipe(new PromiseStream(({ userid, content }) => {
     i++
-    return responser.write({key:userid, value:content})
+    return responser.write({ key: userid, value: content })
   }))
   .on('error', (err) => {
     console.log('emitted error...')

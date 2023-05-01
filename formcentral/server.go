@@ -30,7 +30,7 @@ func (s *Server) GetTranslator(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, msg)
 	}
 
-	translator, err := trans.MakeTranslatorByShape(src, dest)
+	translator, err := trans.MakeTranslatorByRef(src, dest)
 	if err != nil {
 		msg := err.Error()
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Could not create translation mapping. Failed with the following error: %v", msg))
@@ -42,8 +42,8 @@ func (s *Server) GetTranslator(c echo.Context) error {
 func (s *Server) CreateTranslator(c echo.Context) error {
 	type TranslatorRequest struct {
 		Form        *trans.Form `json:"form"`
-		Destination string          `json:"destination"`
-		Self        bool            `json:"self"`
+		Destination string      `json:"destination"`
+		Self        bool        `json:"self"`
 	}
 	req := new(TranslatorRequest)
 	if err := c.Bind(req); err != nil {

@@ -1,13 +1,13 @@
 const Cacheman = require('cacheman')
-const {getState} = require('./machine')
-const {parseEvent} = require('@vlab-research/utils')
+const { getState } = require('./machine')
+const { parseEvent } = require('@vlab-research/utils')
 
 function _resolve(li, e) {
   if (!e) return li
   if (!li) return [e]
 
   const i = li.indexOf(e)
-  return i === -1 ? [...li, e] : li.slice(0,i+1)
+  return i === -1 ? [...li, e] : li.slice(0, i + 1)
 }
 
 
@@ -16,7 +16,7 @@ class StateStore {
     if (!db) throw new TypeError('StateStore must be given a db')
 
     this.db = db
-    this.cache = new Cacheman({ttl})
+    this.cache = new Cacheman({ ttl })
   }
 
   _makeKey(user) {
@@ -31,7 +31,7 @@ class StateStore {
     const res = await this.db.get(user)
     return _resolve(res, event)
       .map(this.parseEvent)
-      .slice(0,-1)
+      .slice(0, -1)
   }
 
   // get state UP TO BUT NOT INCLUDING this event

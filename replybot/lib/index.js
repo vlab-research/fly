@@ -1,11 +1,11 @@
 const util = require('util')
 const r2 = require('r2')
-const {Machine} = require('./typewheels/transition')
-const {StateStore} = require('./typewheels/statestore')
-const {BotSpine} = require('@vlab-research/botspine')
-const {pipeline} = require('stream')
-const {TokenStore} = require('./typewheels/tokenstore')
-const {producer, producerReady} = require('./producer')
+const { Machine } = require('./typewheels/transition')
+const { StateStore } = require('./typewheels/statestore')
+const { BotSpine } = require('@vlab-research/botspine')
+const { pipeline } = require('stream')
+const { TokenStore } = require('./typewheels/tokenstore')
+const { producer, producerReady } = require('./producer')
 
 
 const REPLYBOT_STATESTORE_TTL = process.env.REPLYBOT_STATESTORE_TTL || '24h'
@@ -16,9 +16,11 @@ const REPLYBOT_MACHINE_TTL = process.env.REPLYBOT_MACHINE_TTL || '60m'
 
 async function publishReport(report) {
   const url = process.env.BOTSERVER_URL
-  const json = { user: report.user,
-                 page: report.page,
-                 event: {type: 'machine_report', value: report }}
+  const json = {
+    user: report.user,
+    page: report.page,
+    event: { type: 'machine_report', value: report }
+  }
 
   // TODO: secure!!
   const headers = {}
@@ -48,7 +50,7 @@ function publishPayment(message) {
 
 // Does all the work
 function processor(machine, stateStore) {
-  return async function _processor ({ key:userId, value:event }) {
+  return async function _processor({ key: userId, value: event }) {
 
     try {
       console.log('EVENT: ', event)
@@ -78,8 +80,8 @@ function processor(machine, stateStore) {
     catch (e) {
 
       console.error('Error from ReplyBot: \n',
-                    e.message,
-                    '\n Error occured during event: ', util.inspect(JSON.parse(event), null, 8))
+        e.message,
+        '\n Error occured during event: ', util.inspect(JSON.parse(event), null, 8))
       console.error(e.stack)
     }
   }
@@ -101,6 +103,6 @@ function handle(err) {
 // Create multiple spines for parallelism within container?
 const spine = new BotSpine('replybot')
 pipeline(spine.source(),
-         spine.transform(processor(machine, stateStore)),
-         spine.sink(),
-         handle)
+  spine.transform(processor(machine, stateStore)),
+  spine.sink(),
+  handle)

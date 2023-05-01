@@ -1,10 +1,10 @@
 const util = require('util')
 const _ = require('lodash')
-const {pipeline} = require('stream')
-const {BotSpine} = require('@vlab-research/botspine')
-const {Machine} = require('../typewheels/transition')
-const {StateStore} = require('../typewheels/statestore')
-const {TokenStore} = require('../typewheels/tokenstore')
+const { pipeline } = require('stream')
+const { BotSpine } = require('@vlab-research/botspine')
+const { Machine } = require('../typewheels/transition')
+const { StateStore } = require('../typewheels/statestore')
+const { TokenStore } = require('../typewheels/tokenstore')
 const Chatbase = require(process.env.CHATBASE_BACKEND)
 
 class Stateman {
@@ -15,7 +15,7 @@ class Stateman {
     this.machine = new Machine('600s', this.tokenStore)
   }
 
-  async write ({key:userId, value}) {
+  async write({ key: userId, value }) {
     try {
       const vals = await this.updateStore(userId, value)
       if (vals) await this.put(vals)
@@ -32,7 +32,7 @@ class Stateman {
   async updateStore(userId, e) {
     const state = await this.stateStore.getState(userId, e)
     const { newState, pageId, timestamp } =
-          await this.machine.transition(state, userId, e)
+      await this.machine.transition(state, userId, e)
 
     if (_.isEqual(state, newState)) return null
 
@@ -40,7 +40,7 @@ class Stateman {
     return [userId, pageId, timestamp, newState.state, newState]
   }
 
-  async put (vals) {
+  async put(vals) {
     const query = `UPSERT INTO states(userid,
                                       pageid,
                                       updated,
@@ -60,7 +60,7 @@ for (let i = 0; i < 24; i++) {
 
   const spine = new BotSpine('stateman')
   pipeline(spine.source(),
-           spine.transform(stateman.write.bind(stateman)),
-           spine.sink(),
-           err => console.error(err))
+    spine.transform(stateman.write.bind(stateman)),
+    spine.sink(),
+    err => console.error(err))
 }

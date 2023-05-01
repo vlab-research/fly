@@ -1,5 +1,5 @@
-const {BotSpine} = require('@vlab-research/botspine')
-const {Responser} = require('./responser')
+const { BotSpine } = require('@vlab-research/botspine')
+const { Responser } = require('./responser')
 const Chatbase = require(process.env.CHATBASE_BACKEND)
 
 

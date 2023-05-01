@@ -3,7 +3,7 @@ const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const m = require('./index')
-const {MachineIOError} = require('../errors')
+const { MachineIOError } = require('../errors')
 
 const BASE_URL = "https://graph.facebook.com"
 const V = "v8.0"
@@ -14,14 +14,14 @@ describe('messenger', () => {
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
       .times(4)
-      .replyWithError({code: 'ETIMEDOUT', connect: false});
+      .replyWithError({ code: 'ETIMEDOUT', connect: false });
 
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
-      .reply(200, {foo: 'bar'});
+      .reply(200, { foo: 'bar' });
 
     const res = await m.sendMessage('foo', '{ "blah": "blah" }')
-    res.should.deep.equal({foo: 'bar'})
+    res.should.deep.equal({ foo: 'bar' })
   })
 
   it('should error if ETIMEDOUT from Facebook after 5 times', async () => {
@@ -30,7 +30,7 @@ describe('messenger', () => {
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
       .times(6)
-      .replyWithError({code: 'ETIMEDOUT', connect: false});
+      .replyWithError({ code: 'ETIMEDOUT', connect: false });
 
     try {
       const res = await m.sendMessage('foo', '{ "blah": "blah" }')
@@ -48,7 +48,7 @@ describe('messenger', () => {
 
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
-      .replyWithError({code: 'FOO', connect: true});
+      .replyWithError({ code: 'FOO', connect: true });
 
     try {
       const res = await m.sendMessage('foo', '{ "blah": "blah" }')
@@ -66,7 +66,7 @@ describe('messenger', () => {
 
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
-      .reply(401, { error: { code: 5 }});
+      .reply(401, { error: { code: 5 } });
 
     try {
       const res = await m.sendMessage('foo', '{ "blah": "blah" }')
@@ -85,14 +85,14 @@ describe('messenger', () => {
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
       .times(3)
-      .reply(200, { error: {code: 1200}});
+      .reply(200, { error: { code: 1200 } });
 
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
-      .reply(200, {foo: 'bar'});
+      .reply(200, { foo: 'bar' });
 
     const res = await m.sendMessage('foo', '{ "blah": "blah" }')
-    res.should.deep.equal({foo: 'bar'})
+    res.should.deep.equal({ foo: 'bar' })
   })
 
 
@@ -102,7 +102,7 @@ describe('messenger', () => {
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
       .times(6)
-      .reply(200, { error: {code: 1200}});
+      .reply(200, { error: { code: 1200 } });
 
     try {
       const res = await m.sendMessage('foo', '{ "blah": "blah" }')
@@ -121,14 +121,14 @@ describe('messenger', () => {
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
       .times(3)
-      .reply(200, { error: {code: 551 }});
+      .reply(200, { error: { code: 551 } });
 
     nock(BASE_URL)
       .post(`/${V}/me/messages`)
-      .reply(200, {foo: 'bar'});
+      .reply(200, { foo: 'bar' });
 
     const res = await m.sendMessage('foo', '{ "blah": "blah" }')
-    res.should.deep.equal({foo: 'bar'})
+    res.should.deep.equal({ foo: 'bar' })
   })
 })
 
@@ -138,7 +138,7 @@ describe('getUserInfo', () => {
 
     nock(BASE_URL)
       .get(`/${V}/foo?fields=id,name,first_name,last_name`)
-      .reply(401, { error: { code: 5 }});
+      .reply(401, { error: { code: 5 } });
 
 
     const res = await m.getUserInfo('foo', 'token')

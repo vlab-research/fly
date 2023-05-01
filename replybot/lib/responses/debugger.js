@@ -1,10 +1,10 @@
-const {StateStore} = require('../typewheels/statestore')
+const { StateStore } = require('../typewheels/statestore')
 const Chatbase = require(process.env.CHATBASE_BACKEND)
-const {PromiseStream} = require('@vlab-research/steez')
-const {parseEvent} = require('@vlab-research/utils')
-const {DBStream} = require('./pgstream')
-const {TokenStore} = require('../typewheels/tokenstore')
-const {Machine} = require('../typewheels/transition')
+const { PromiseStream } = require('@vlab-research/steez')
+const { parseEvent } = require('@vlab-research/utils')
+const { DBStream } = require('./pgstream')
+const { TokenStore } = require('../typewheels/tokenstore')
+const { Machine } = require('../typewheels/transition')
 
 async function query(pool, userid, lim) {
   const query = `WITH r as
@@ -21,7 +21,7 @@ async function query(pool, userid, lim) {
   const final = res.rows.slice(-1)[0]
   if (!final) return [null, null]
   return [res.rows, final['row_number']]
-}2
+} 2
 
 const userid = process.argv.slice(2)[0]
 if (!userid) throw new Error('GIVE ME USERID!')
@@ -36,7 +36,7 @@ const tokenStore = new TokenStore(chatbase.pool)
 const machine = new Machine('600s', tokenStore)
 
 stream
-  .pipe(new PromiseStream(async ({userid:userId, content:event}) => {
+  .pipe(new PromiseStream(async ({ userid: userId, content: event }) => {
 
     const state = await stateStore.getState(userId, event)
     const { newState, output } = await machine.transition(state, parseEvent(event))

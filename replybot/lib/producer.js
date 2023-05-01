@@ -34,4 +34,4 @@ const producerReady = new Promise((resolve, reject) => {
   setTimeout(() => { throw err })
 })
 
-module.exports = {producer, producerReady}
+module.exports = { producer, producerReady }
