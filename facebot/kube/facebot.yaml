@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gbv-facebot
+  name: facebot
   labels:
-    app: gbv-facebot
+    app: facebot
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: gbv-facebot
+      app: facebot
   template:
     metadata:
       labels:
-        app: gbv-facebot
+        app: facebot
     spec:
       containers:
-      - name: gbv-facebot
+      - name: facebot
         image: localhost:5000/facebot:registry
         imagePullPolicy: Always
         resources:
@@ -27,17 +27,19 @@ spec:
         - containerPort: 4000
         envFrom:
         - secretRef:
-            name: gbv-bot-envs
+            name: bot-envs
 
 ---
 
 kind: Service
 apiVersion: v1
 metadata:
+  # TODO this is hard coded in a couple of places
+  # we should update it
   name: gbv-facebot
 spec:
   selector:
-    app: gbv-facebot
+    app: facebot
   ports:
   - protocol: TCP
     port: 80
