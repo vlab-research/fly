@@ -1,19 +1,19 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gbv-testrunner
+  name: testrunner
   labels:
-    app: gbv-testrunner
+    app: testrunner
 spec:
   backoffLimit: 2
   template:
     metadata:
       labels:
-        app: gbv-testrunner
+        app: testrunner
     spec:
       restartPolicy: OnFailure
       containers:
-      - name: gbv-testrunner
+      - name: testrunner
         image: vlabresearch/testrunner:v0.0.6
         imagePullPolicy: Always
         resources:
@@ -24,12 +24,12 @@ spec:
         - containerPort: 88
         envFrom:
         - secretRef:
-            name: gbv-bot-envs
+            name: bot-envs
         env:
         - name: BOTSERVER_URL
-          value: "http://gbv-botserver"
+          value: "http://fly-botserver"
         - name: KAFKA_BROKERS
-          value: "gbv-kafka:9092"
+          value: "kafka:9092"
         - name: CHATBASE_BACKEND
           value: "@vlab-research/chatbase-postgres"
         - name: CHATBASE_DATABASE
@@ -39,6 +39,6 @@ spec:
         - name: CHATBASE_PASSWORD
           value: ""
         - name: CHATBASE_HOST
-          value: "gbv-cockroachdb-public"
+          value: "db-cockroachdb-public"
         - name: CHATBASE_PORT
           value: "26257"

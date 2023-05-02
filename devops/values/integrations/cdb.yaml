@@ -1,0 +1,19 @@
+image:
+  tag: v21.1.9
+statefulset:
+  replicas: 1
+  args:
+    - --insecure 
+conf:
+  single-node: true
+  budget:
+    maxUnavailable: 0
+tls:
+  enabled: false
+resources:
+  requests:
+    cpu: 25m
+    memory: 256Mi
+storage:
+  persistentVolume:
+    size: 1Gi

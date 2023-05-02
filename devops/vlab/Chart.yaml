@@ -61,12 +61,14 @@ dependencies:
 # add init job to create database and users
   - name: cockroachdb
     version: 10.0.4
+    condition: cockroachdb.enabled
     repository: https://charts.cockroachdb.com/
     tags:
       - cockroach
 
   - name: kafka
-    version: 20.0.6
+    version: 22.0.1
     repository: https://charts.bitnami.com/bitnami
+    condition: kafka.enabled
     tags:
       - kafka

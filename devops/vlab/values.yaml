@@ -1,1 +1,8 @@
 # empty, use deploy values
+#
+#
+cockroachdb:
+  enabled: true
+
+kakfka:
+  enabled: true

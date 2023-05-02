@@ -1,0 +1,46 @@
+chatTopic: &topic chat-events
+stateTopic: &statetopic vlab-state
+responseTopic: &responsetopic vlab-response
+paymentTopic: &paymenttopic vlab-payment
+
+image:
+  tag: 3.4.0-debian-11-r22
+resources:
+  requests:
+    cpu: 25m
+    memory: 200Mi
+zookeeper:
+  resources:
+    requests:
+      cpu: 5m
+      memory: 50Mi
+heapOpts: "-Xmx500M -Xms500M"
+autoCreateTopicsEnable: false
+defaultReplicationFactor: 1
+offsetsTopicReplicationFactor: 1
+persistence:
+  size: 1Gi
+provisioning:
+  enabled: true
+  topics:
+    - name: *topic
+      partitions: 6
+      replicationFactor: 1
+      config:
+        # 14 days
+        retention.ms: "1209600000"
+    - name: *statetopic
+      partitions: 6
+      replicationFactor: 1
+      config:
+        retention.ms: "1209600000"
+    - name: *responsetopic
+      partitions: 6
+      replicationFactor: 1
+      config:
+        retention.ms: "1209600000"
+    - name: *paymenttopic
+      partitions: 2
+      replicationFactor: 1
+      config:
+        retention.ms: "1209600000"

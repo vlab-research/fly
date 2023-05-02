@@ -40,7 +40,7 @@ jobs:
               kubectl config use-context kind-test
       - run:
           name: Run tests
-          command: cd devops && ./integration-test.sh
+          command: cd devops && make integration-tests
 
 workflows:
   version: 2
