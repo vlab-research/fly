@@ -1,0 +1,11 @@
+kafka-python
+gunicorn
+python-dotenv
+vlab-prepro
+pandas
+psycopg2-binary
+sqlalchemy
+sqlalchemy-cockroachdb
+pydantic
+google-cloud-storage
+minio

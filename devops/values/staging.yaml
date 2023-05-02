@@ -15,6 +15,7 @@ responseTopic: &responsetopic "vlab-staging-response"
 paymentTopic: &paymenttopic "vlab-staging-payment"
 botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
+exporterTopic: &exportertopic "vlab-staging-exports"
 
 versionDashboard: &vdashboard v0.0.27
 versionBotserver: &vbotserver v0.0.10
@@ -49,6 +50,12 @@ kafkaTopics:
     replicationFactor: 2
     config:
       "retention.ms": "2678400000" # 31 days
+  - name: *exportertopic
+    partitions: 2
+    replicationFactor: 2
+    config:
+      "retention.ms": "2678400000" # 31 days
+
 
 
 dinersclub:
@@ -393,7 +400,10 @@ dashboard:
       value: 'http://gbv-formcentral'
     - name: FACEBOOK_GRAPH_URL
       value: 'https://graph.facebook.com/v9.0'
-
+    - name: KAFKA_BROKERS
+      value: *kb
+    - name: KAFKA_EXPORTS_TOPIC
+      value: *exportertopic
   resources:
     requests:
       cpu: 10m
@@ -461,6 +471,24 @@ botserver:
     type: ClusterIP
     port: 80
 
+# Configuration for Exporter Worker
+exporter:
+  env:
+    - name: "KAFKA_TOPIC"
+      value: *exportertopic
+    - name: "KAFKA_SERVERS"
+      value: *kb
+    - name: "KAFKA_GROUP_ID"
+      value: "exporter"
+    - name: "APP_NAME"
+      value: "exporter"
+  envSecrets:
+    - exporter
+  
+  image:
+    repository: "vlabresearch/exporter"
+    pullPolicy: Always
+    tag: 0.1.0
 
 cockroachdb:
   image:

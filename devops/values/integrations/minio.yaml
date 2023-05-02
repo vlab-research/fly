@@ -1,0 +1,7 @@
+auth:
+  rootUser: admin
+  rootPassword: "4f01f399-179f-43e4-aec4-b6d59d07d026"
+defaultBuckets: "fly"
+ingress:
+  enabled: true
+  hostname: minio.fly.local

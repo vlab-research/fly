@@ -16,7 +16,7 @@ responseTopic: &responsetopic "vlab-prod-response"
 paymentTopic: &paymenttopic "vlab-prod-payment"
 botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
-
+exporterTopic: &exportertopic "vlab-exports"
 
 versionDashboard: &vdashboard v0.0.31
 versionBotserver: &vbotserver v0.0.10
@@ -74,6 +74,11 @@ kafkaTopics:
   - name: *paymenttopic
     partitions: 2
     replicationFactor: 3
+    config:
+      "retention.ms": "2678400000" # 31 days
+  - name: *exportertopic
+    partitions: 2
+    replicationFactor: 2
     config:
       "retention.ms": "2678400000" # 31 days
 
@@ -507,6 +512,24 @@ botserver:
     type: ClusterIP
     port: 80
 
+
+# Configuration for Exporter Worker
+exporter:
+  env:
+    - name: "KAFKA_TOPIC"
+      value: *exportertopic
+    - name: "KAFKA_SERVERS"
+      value: *kb
+    - name: "KAFKA_GROUP_ID"
+      value: "exporter"
+    - name: "APP_NAME"
+      value: "exporter"
+  envSecrets:
+    - exporter
+  image:
+    repository: "vlabresearch/exporter"
+    pullPolicy: Always
+    tag: 0.1.0
 
 cockroachdb:
   image:

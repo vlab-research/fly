@@ -21,7 +21,9 @@ const envVarsSchema = joi
     AUTH0_DASHBOARD_SECRET: joi.string(),
     FACEBOOK_APP_ID: joi.string(),
     FACEBOOK_APP_SECRET: joi.string(),
-    FACEBOOK_GRAPH_URL: joi.string()
+    FACEBOOK_GRAPH_URL: joi.string(),
+    KAFKA_BROKERS: joi.string(),
+    KAFKA_EXPORTS_TOPIC: joi.string(),
   })
   .unknown()
   .required();
@@ -75,6 +77,10 @@ const config = {
     password: isTest() ? undefined : envVars.DB_PASSWORD || undefined,
     port: isTest() ? 5432 : envVars.DB_PORT || 5432,
   },
+    KAFKA: {
+        BROKERS: envVars.KAFKA_BROKERS.split(","),
+        EXPORTS_TOPIC: envVars.KAFKA_EXPORTS_TOPIC || 'vlabs-exports'
+    }
 };
 
 module.exports = config;

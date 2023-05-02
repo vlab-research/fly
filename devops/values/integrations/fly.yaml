@@ -152,6 +152,8 @@ dashboard:
       value: ''
     - name: DB_HOST
       value: *host
+    - name: KAFKA_BROKERS
+      value: *kb 
     - name: CUBEJS_DB_HOST
       value: *host
     - name: DB_PORT
@@ -169,7 +171,18 @@ dashboard:
       cpu: 10m
       memory: 64Mi
   ingress:
-    enabled: false
+    enabled: true
+    annotations:
+      nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    tls:
+      - hosts: 
+        - dashboard.fly.local
+        secretName: local-certs
+    hosts:
+      - host: dashboard.fly.local
+        paths:
+        - path: /
+          pathType: Prefix
   service:
     type: ClusterIP
     port: 80
