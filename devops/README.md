@@ -2,6 +2,39 @@
 
 ## Setting up dev environment
 
+You will need to install [kind][1] as well as [MkCert][2] in order to run the full development setup
+
+Once installed you can simply run:
+
+```bash
+make dev
+```
+> This takes quite a while, you can watch the pods starting by running `kubectl get pods` in another terminal
+
+
+Once this is done you can run the integration tests by running:
+
+```bash
+make dev-integration-tests
+```
+
+This will create a test runner which you can follow by running
+
+```bash
+kubectl logs -f -l app=testrunner --tail -1
+```
+
+## Running Integration Tests
+**NOTE:** this is a resource intensive process that takes a fair amount of time
+please be patient
+
+In order to run integration tests you will need to have access to a kubernetes
+cluster. All the dependencies will be created in a single namespace
+
+```bash
+make integration-tests
+```
+
 You will need to install [kind][1] in order to run the full development setup
 
 
@@ -86,3 +119,4 @@ helm dependency update
 ```
 
 [1]: https://kind.sigs.k8s.io/docs/user/quick-start/
+[2]: https://github.com/FiloSottile/mkcert#installation 

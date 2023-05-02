@@ -2,7 +2,7 @@
 const { Readable } = require('stream');
 
 const { Response } = require('../../queries');
-const { ResponseUtil } = require('../../utils');
+const { ResponseUtil, KafkaUtil } = require('../../utils');
 
 function handle(err, res) {
   console.error(err);
@@ -71,6 +71,37 @@ exports.getFormDataCSV = async (req, res) => {
     const data = await Response.formData(email, decodeURIComponent(survey));
     const dataStream = Readable.from(data);
     handleCsvResponse(dataStream, survey, res);
+  } catch (err) {
+    handle(err, res);
+  }
+};
+
+
+
+exports.generateExport = async (req, res) => {
+  const { survey, type } = req.query;
+  const { email } = req.user;
+
+  try {
+    const producer = KafkaUtil.Conn.producer({ 
+      createPartitioner: KafkaUtil.Partitioners.DefaultPartitioner 
+    })
+    await producer.connect()
+    const message = { 
+      event: "data-export", 
+      user: email,
+      survey: survey,
+      options: {
+        type: type
+      }
+    }
+
+    await producer.send({
+      topic: "vlab-exports",
+      messages: [{key: "data-exports", value: JSON.stringify(message)}],
+    })
+    await producer.disconnect()
+    return res.status(200).send({status: "success"})
   } catch (err) {
     handle(err, res);
   }

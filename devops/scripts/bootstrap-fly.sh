@@ -1,6 +1,5 @@
 #!/bin/sh
 set -e
-
 ######################
 # add third party charts
 ######################
@@ -16,6 +15,8 @@ helm upgrade --install db cockroachdb/cockroachdb \
   --timeout 10m \
   --wait
 
+kubectl apply -f dev/cockroachdb.hack.yaml
+
 ######################
 # create database
 ######################
@@ -26,11 +27,21 @@ cat migrations/init.sql | kubectl run -i \
   --restart=Never \
   --command -- ./cockroach sql --insecure --host db-cockroachdb-public
 
+
 ######################
 # install kafka
 ######################
 helm upgrade --install kafka bitnami/kafka \
   --values values/integrations/kafka.yaml \
+  --timeout 10m0s \
+  --wait
+
+
+######################
+# install minio
+######################
+helm upgrade --install minio oci://registry-1.docker.io/bitnamicharts/minio \
+  --values values/integrations/minio.yaml \
   --timeout 10m0s \
   --wait
 

@@ -9,6 +9,7 @@ import { FormConfig } from '..';
 import { groupBy } from '../../helpers';
 import { CreateBtn, PrimaryBtn } from '../../components/UI';
 import getCsv from '../../services/api/getCSV';
+import startExport from '../../services/api/startExport';
 
 const Survey = ({ forms, selected }) => {
   const [downloading, setDownloading] = useState(false);
@@ -87,6 +88,14 @@ const Survey = ({ forms, selected }) => {
     }
   }
 
+  const exportSurvey = () => {
+    return async () => {
+      setDownloading(true)
+      await startExport(selected)
+      setDownloading(false)
+    }
+  }
+
   return (
     <Spin spinning={downloading}>
       <div className="survey-table">
@@ -94,6 +103,7 @@ const Survey = ({ forms, selected }) => {
           <CreateBtn to={`/surveys/create?survey_name=${encodeURIComponent(selected)}`}> NEW FORM </CreateBtn>
           <span classsName="download-buttons">
             <PrimaryBtn onClick={onDownload('/responses/csv')}> DOWNLOAD CSV </PrimaryBtn>
+            <PrimaryBtn onClick={exportSurvey()}> EXPORT </PrimaryBtn>
             <PrimaryBtn onClick={onDownload('/responses/form-data')}> DOWNLOAD METADATA </PrimaryBtn>
           </span>
         </div>

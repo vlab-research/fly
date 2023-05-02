@@ -2,6 +2,7 @@ const router = require('express').Router();
 
 router
   .use('/responses', require('./responses'))
+  .use('/exports', require('./exports'))
   .use('/users', require('./users'))
   .use('/surveys', require('./surveys'))
   .use('/typeform', require('./typeform'))

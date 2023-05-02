@@ -1,5 +1,5 @@
 image:
-  tag: v21.1.9
+  tag: v21.2.17
 statefulset:
   replicas: 1
   args:
@@ -8,6 +8,10 @@ conf:
   single-node: true
   budget:
     maxUnavailable: 0
+ingress:
+  enabled: true
+  hosts:
+  - cockroachdb.fly.local
 tls:
   enabled: false
 resources:

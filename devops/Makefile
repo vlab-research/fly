@@ -1,8 +1,17 @@
 DB_VERSION=v21.1.9
 PORT=5432
 DATABASE=chatroach
+KAFKA_CLIENT_VERSION=7.4.0
+KAFKA_TOPIC=vlab-exports
+KAFKA_HOST=kafka.local
+DASHBOARD_HOST=dashboard.fly.local
+COCKROACHDB_HOST=cockroachdb.fly.local
+MINIO_HOST=minio.fly.local
+HOST_FILE=/etc/hosts
 
-dev: create-kind-cluster create-dev-secret setup-kind-registry bootstrap-fly
+dev: create-kind-cluster certs certs-secret create-dev-secret setup-kind-registry setup-ingress-controller bootstrap-fly
+
+clean: delete-kind-cluster
 
 start-testrunner:
 	@kubectl apply -f testing/facebot.yaml
@@ -20,24 +29,34 @@ check-test-status:
 
 .PHONY: integration-tests
 integration-tests:	create-integration-secret bootstrap-fly start-testrunner
-	@kubectl wait --for=condition=complete job/testrunner --timeout 10m
+	@kubectl wait --for=condition=complete job/testrunner --timeout 20m || true
 	@kubectl logs -l app=testrunner --tail -1
 	$(MAKE) check-test-status
 
 create-kind-cluster:
 	@kind create cluster --config dev/kind-cluster.yaml || true
 
+delete-kind-cluster:
+	@kind delete cluster || true
+
 create-integration-secret:
 	@kubectl create secret generic bot-envs --from-env-file=./testing/.test-env || true
 
-create-dev-secret:
+setup-dev-secret:
 	@kubectl create secret generic bot-envs --from-env-file=./dev/.env || true
 
 bootstrap-fly:
 	@bash ./scripts/bootstrap-fly.sh
 
 setup-kind-registry:
-	@bash ./dev/kind-with-registry.sh
+	@bash ./dev/kind-with-registry.sh || true
+
+setup-ingress-controller:
+	@kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+	@kubectl wait --namespace ingress-nginx \
+  	--for=condition=ready pod \
+  	--selector=app.kubernetes.io/component=controller \
+  	--timeout=90s
 
 test-db:
 	@docker stop vlab-cockroach && docker rm vlab-cockroach
@@ -84,8 +103,6 @@ setup-local-networking: clean-local-networking
 	@echo "127.0.0.1  $(DASHBOARD_HOST)" >> $(HOST_FILE)
 	@echo "127.0.0.1  $(COCKROACHDB_HOST)" >> $(HOST_FILE)
 	@echo "Updated $(HOST_FILE) successfully"
-
-
 
 clean-local-networking:
 	@echo "WARN: cleaning up previous hosts, this needs sudo permission"

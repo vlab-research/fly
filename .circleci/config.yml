@@ -36,10 +36,13 @@ jobs:
       - run:
           name: Setup kind cluster
           command: |
-              kind create cluster --name test --wait 5m
+              kind create cluster --config devops/dev/kind-cluster.yaml --name test --wait 5m
               kubectl config use-context kind-test
       - run:
           name: Run tests
+          # E2E tests take quite long and sometimes hit the
+          # default timout of 10 mins. This is for some buffer
+          no_output_timeout: 30m
           command: cd devops && make integration-tests
 
 workflows:

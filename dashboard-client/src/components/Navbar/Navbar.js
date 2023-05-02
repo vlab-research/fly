@@ -17,6 +17,9 @@ const Navbar = ({ auth }) => {
       <Menu.Item>
         <Link to="/settings">Settings</Link>
       </Menu.Item>
+      <Menu.Item>
+        <Link to="/exports">Exports</Link>
+      </Menu.Item>
       <Menu.Item style={{ float: 'right' }}>
         <Button onClick={isAuth ? auth.logout : auth.login} type="normal" size="large">
           {isAuth ? 'Logout' : 'Login'}

@@ -1,4 +1,5 @@
 import App from './App';
+import Exports from './Exports';
 import LoginScreen from './LoginScreen';
 import SurveyScreen from './SurveyScreen';
 import FormConfig from './FormConfig';
@@ -14,6 +15,7 @@ import ApiKeys from './ApiKeys';
 
 export {
   App,
+  Exports,
   LoginScreen,
   Surveys,
   SurveyScreen,

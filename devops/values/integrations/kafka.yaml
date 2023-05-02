@@ -2,9 +2,11 @@ chatTopic: &topic chat-events
 stateTopic: &statetopic vlab-state
 responseTopic: &responsetopic vlab-response
 paymentTopic: &paymenttopic vlab-payment
+exportTopic: &exporttopic vlab-exports
 
 image:
   tag: 3.4.0-debian-11-r22
+  debug: true
 resources:
   requests:
     cpu: 25m
@@ -18,6 +20,16 @@ heapOpts: "-Xmx500M -Xms500M"
 autoCreateTopicsEnable: false
 defaultReplicationFactor: 1
 offsetsTopicReplicationFactor: 1
+externalAccess:
+  enabled: true
+  service:
+    enabled: true
+    type: NodePort
+    ports: 
+      external: 30092
+    nodePorts:
+    - 30092
+    domain: 127.0.0.1
 persistence:
   size: 1Gi
 provisioning:
@@ -40,6 +52,11 @@ provisioning:
       config:
         retention.ms: "1209600000"
     - name: *paymenttopic
+      partitions: 2
+      replicationFactor: 1
+      config:
+        retention.ms: "1209600000"
+    - name: *exporttopic
       partitions: 2
       replicationFactor: 1
       config:

@@ -1,0 +1,24 @@
+# This is used to expose cockroachdb automatically outside of the cluster
+# on port 35432
+# There is currently no way to do this with the cockroachdb helm chart
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: cockroachdb
+    app.kubernetes.io/instance: db
+    app.kubernetes.io/name: cockroachdb
+  name: db-cockroachdb-external
+spec:
+  type: NodePort
+  ports:
+  - name: grpc
+    nodePort: 32432
+    port: 26257
+    protocol: TCP
+    targetPort: grpc
+  selector:
+    app.kubernetes.io/component: cockroachdb
+    app.kubernetes.io/instance: db
+    app.kubernetes.io/name: cockroachdb
