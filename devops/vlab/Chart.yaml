@@ -34,13 +34,13 @@ dependencies:
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
     tags:
       - scribble
-  # TODO: the below charts should be moved to OCI conformant registries
-  # but can not be found
   - name: dumper
     version: 0.0.3
-    repository: https://vlab-research.github.io/fly
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
     tags:
       - backup
+  # TODO: the below charts should be moved to OCI conformant registries
+  # but can not be found
   - name: naughtybot
     version: 0.0.1
     repository: https://vlab-research.github.io/fly

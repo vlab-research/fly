@@ -17,13 +17,13 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 
 versionDashboard: &vdashboard v0.0.27
-versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.126
+versionBotserver: &vbotserver v0.0.10
+versionReplybot: &vreplybot v0.0.141
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.24
+versionDean: &vdean v0.0.25
 versionScribble: &vscribble v0.0.21
-versionDinersclub: &vdinersclub v0.0.19
-versionFormcentral: &vformcentral v0.0.9
+versionDinersclub: &vdinersclub v0.0.26
+versionFormcentral: &vformcentral v0.0.10
 
 processingAlerts: []
 laggingAlerts: []
@@ -123,7 +123,7 @@ dean:
   - name: BOTSERVER_URL
     value: "http://gbv-botserver/synthetic"
   - name: DEAN_ERROR_TAGS
-    value: "NETWORK,INTERNAL"
+    value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
     value: "24 hours"
   - name: DEAN_FB_CODES
@@ -136,6 +136,8 @@ dean:
     value: "1 hour"
   - name: DEAN_SEND_DELAY
     value: "1s"
+  - name: DEAN_TIMEOUT_BLACKLIST
+    value: "bebborsbaseserb"
   - name: DEAN_FOLLOWUP_MIN
     value: "2 minutes"
   - name: DEAN_FOLLOWUP_MAX
@@ -338,7 +340,8 @@ linksniffer:
     hosts:
       - host: gbvlinks-staging.nandan.cloud
         paths:
-          - "/"
+          - path: '/'
+            pathType: Prefix
     tls:
       - secretName: gbv-linksniffer-cert
         hosts:
@@ -404,7 +407,8 @@ dashboard:
     hosts:
       - host: gbv-dashboard-staging.nandan.cloud
         paths:
-          - '/'
+          - path: '/'
+            pathType: Prefix
     tls:
       - secretName: gbv-dashboard-cert
         hosts:
@@ -446,7 +450,8 @@ botserver:
     hosts:
       - host: gbvbot-staging.nandan.cloud
         paths:
-          - "/"
+          - path: '/'
+            pathType: Prefix
     tls:
       - secretName: gbv-botserver-cert
         hosts:
@@ -459,7 +464,7 @@ botserver:
 
 cockroachdb:
   image:
-    tag: v20.1.4
+    tag: v21.2.17
   statefulset:
     replicas: 1
     resources:

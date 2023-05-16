@@ -19,16 +19,12 @@ helm upgrade --install db cockroachdb/cockroachdb \
 ######################
 # create database
 ######################
-cat ./sql/* > tmp.sql
-
-# Note we skip this if it fails as 
-# currently migrations are not idempotent
-cat tmp.sql | kubectl run -i \
+# Migrations should be idempotent
+cat migrations/init.sql | kubectl run -i \
   --rm cockroach-client \
   --image=cockroachdb/cockroach:v2.1.4 \
   --restart=Never \
-  --command -- ./cockroach sql --insecure --host db-cockroachdb-public || true
-rm -f tmp.sql
+  --command -- ./cockroach sql --insecure --host db-cockroachdb-public
 
 ######################
 # install kafka
