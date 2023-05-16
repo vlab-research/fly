@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -28,11 +29,13 @@ func getTableNames(pool *pgxpool.Pool) ([]string, error) {
 
 	tableNames := []string{}
 	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
+		var tableName, schemaName, tableType, owner, locality sql.NullString
+		var estimatedRowCount int
+		if err := rows.Scan(&schemaName, &tableName, &tableType, &owner, &estimatedRowCount, &locality); err != nil {
+
 			return nil, err
 		}
-		tableNames = append(tableNames, tableName)
+		tableNames = append(tableNames, tableName.String)
 	}
 	return tableNames, nil
 }

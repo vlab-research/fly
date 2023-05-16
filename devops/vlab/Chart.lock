@@ -24,7 +24,7 @@ dependencies:
   repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.1
 - name: dumper
-  repository: https://vlab-research.github.io/fly
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.3
 - name: naughtybot
   repository: https://vlab-research.github.io/fly
@@ -41,5 +41,5 @@ dependencies:
 - name: kafka
   repository: https://charts.bitnami.com/bitnami
   version: 22.0.1
-digest: sha256:577f3ff578567e6fd264178fa16c62f7185ae7d17472f7a52f035b556cdd9947
-generated: "2023-06-09T10:25:23.611405297+02:00"
+digest: sha256:010faa4846fe19cdd39a868960266f06b82bb5c1e1ab33357857bb6a1cdf03e5
+generated: "2023-06-14T15:30:04.550261407+02:00"

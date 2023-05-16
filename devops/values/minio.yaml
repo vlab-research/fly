@@ -1,0 +1,25 @@
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  hostname: storage.vlab.digital
+  tls: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+apiIngress:
+  enabled: true
+  hostname: storage-api.vlab.digital
+  ingressClassName: nginx
+  tls: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+metrics:
+  serviceMonitor:
+    enabled: true
+    namespace: "monitoring"
+extraEnvVars:
+  - name: MINIO_PROMETHEUS_URL
+    value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+persistence:
+  storageClass: standard-rwo
+auth:
+  existingSecret: minio-auth
