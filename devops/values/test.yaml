@@ -21,7 +21,7 @@ chatbaseHost: &host gbv-cockroachdb-public
 
 
 versionDashboard: &vdashboard v0.0.31
-versionBotserver: &vbotserver 0.0.9
+versionBotserver: &vbotserver v0.0.10
 versionReplybot: &vreplybot v0.0.141
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.25
