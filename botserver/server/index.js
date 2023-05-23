@@ -4,9 +4,9 @@ const cors = require('@koa/cors')
 const http = require('http')
 const Router = require('koa-router')
 const util = require('util')
-const {getUserFromEvent} = require('@vlab-research/utils')
+const { getUserFromEvent } = require('@vlab-research/utils')
 
-const {producer, producerReady} = require('./producer')
+const { producer, producerReady } = require('./producer')
 
 const EVENT_TOPIC = process.env.BOTSERVER_EVENT_TOPIC
 
@@ -20,6 +20,16 @@ const verifyToken = ctx => {
   }
 }
 
+const normalizeTimestamp = (t) => {
+  // 2020 in milliseconds
+  if (t < 1577836800000) {
+
+    // Assume it's in seconds, so make it milliseconds
+    return t * 1000
+  }
+  return t
+}
+
 // TODO: Add validation with APP SECRET!!!
 const handleMessengerEvents = async (ctx) => {
   await producerReady
@@ -29,9 +39,10 @@ const handleMessengerEvents = async (ctx) => {
       console.log(util.inspect(entry, null, 8))
 
       // abstraction layer??
-      const message = {...entry.messaging[0], source: 'messenger'}
+      const message = { ...entry.messaging[0], source: 'messenger' }
 
       // add getPageFromEvent(message)
+      message.timestamp = normalizeTimestamp(message.timestamp)
       const user = getUserFromEvent(message)
       const data = Buffer.from(JSON.stringify(message))
 
@@ -50,7 +61,7 @@ const handleSyntheticEvents = async (ctx) => {
   await producerReady
 
   try {
-    const {body} = ctx.request
+    const { body } = ctx.request
     console.log(util.inspect(body, null, 8))
 
 
@@ -62,7 +73,7 @@ const handleSyntheticEvents = async (ctx) => {
 
     // but then what should report.timestamp have?
 
-    const message = {...body, source: 'synthetic', timestamp: Date.now()}
+    const message = { ...body, source: 'synthetic', timestamp: Date.now() }
     const data = Buffer.from(JSON.stringify(message))
 
     if (!message.user) {
