@@ -19,8 +19,8 @@ chatbaseHost: &host "gbv-cockroachdb-public"
 
 
 versionDashboard: &vdashboard v0.0.31
-versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.139
+versionBotserver: &vbotserver v0.0.10
+versionReplybot: &vreplybot v0.0.141
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.25
 versionScribble: &vscribble v0.0.22-temp-fix
@@ -168,7 +168,7 @@ dean:
   - name: DEAN_FOLLOWUP_MAX
     value: "24 hours"
   - name: DEAN_TIMEOUT_BLACKLIST
-    value: ""
+    value: "bebborsbaseserb,bebbobg2basebul"
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"
@@ -327,6 +327,7 @@ linksniffer:
     enabled: true
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
     hosts:
       - host: links.vlab.digital
         paths:
@@ -396,6 +397,7 @@ dashboard:
     enabled: true
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
     hosts:
       - host: gbv-dashboard.nandan.cloud
         paths:
@@ -426,7 +428,7 @@ replybot:
       memory: 100Mi
   env:
   - name: FAKE
-    value: "NOTHIN"
+    value: "NOTHING"
   - name: CHATBASE_BACKEND
     value: "@vlab-research/chatbase-postgres"
   - name: CHATBASE_DATABASE
@@ -489,6 +491,7 @@ botserver:
     enabled: true
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
     hosts:
       - host: gbvbot.nandan.cloud
         paths:
