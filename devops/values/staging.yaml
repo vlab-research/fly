@@ -334,6 +334,7 @@ linksniffer:
     enabled: true
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
     hosts:
       - host: gbvlinks-staging.nandan.cloud
         paths:
@@ -399,6 +400,7 @@ dashboard:
     enabled: true
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
     hosts:
       - host: gbv-dashboard-staging.nandan.cloud
         paths:
@@ -440,6 +442,7 @@ botserver:
     enabled: true
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
     hosts:
       - host: gbvbot-staging.nandan.cloud
         paths:
