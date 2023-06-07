@@ -1,31 +1,31 @@
 dependencies:
 - name: replybot
-  repository: https://vlab-research.github.io/fly
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.1
 - name: botserver
-  repository: https://vlab-research.github.io/fly
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.2
 - name: linksniffer
-  repository: https://vlab-research.github.io/fly
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.2
 - name: dashboard
-  repository: https://vlab-research.github.io/fly
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.2
 - name: formcentral
-  repository: https://vlab-research.github.io/fly
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+  version: 0.0.1
+- name: dinersclub
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+  version: 0.0.1
+- name: dean
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+  version: 0.0.3
+- name: scribble
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.1
 - name: dumper
   repository: https://vlab-research.github.io/fly
   version: 0.0.3
-- name: dinersclub
-  repository: https://vlab-research.github.io/fly
-  version: 0.0.1
-- name: dean
-  repository: https://vlab-research.github.io/fly
-  version: 0.0.3
-- name: scribble
-  repository: https://vlab-research.github.io/fly
-  version: 0.0.1
 - name: naughtybot
   repository: https://vlab-research.github.io/fly
   version: 0.0.1
@@ -41,5 +41,5 @@ dependencies:
 - name: kafka
   repository: https://charts.bitnami.com/bitnami
   version: 20.0.6
-digest: sha256:238e6670fb4456a6a23011caf1ae9e459a0004b49b65cdb0b1df086620d2b0f3
-generated: "2023-02-15T10:37:03.232780983+01:00"
+digest: sha256:955d3b5794a27cfcdf7e312c3452b3d2b74b67eeda0979accd9e929e7579df98
+generated: "2023-06-08T09:33:13.037460567+02:00"
