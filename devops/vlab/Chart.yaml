@@ -6,39 +6,41 @@ version: 0.0.1
 dependencies:
   - name: replybot
     version: 0.0.1
-    repository: https://vlab-research.github.io/fly
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   - name: botserver
     version: 0.0.2
-    repository: https://vlab-research.github.io/fly
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   - name: linksniffer
     version: 0.0.2
-    repository: https://vlab-research.github.io/fly
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   - name: dashboard
     version: 0.0.2
-    repository: https://vlab-research.github.io/fly
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   - name: formcentral
     version: 0.0.1
-    repository: https://vlab-research.github.io/fly
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+  - name: dinersclub
+    version: 0.0.1
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+    tags:
+      - payments
+  - name: dean
+    version: 0.0.3
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+    tags:
+      - dean
+  - name: scribble
+    version: 0.0.1
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+    tags:
+      - scribble
+  # TODO: the below charts should be moved to OCI conformant registries
+  # but can not be found
   - name: dumper
     version: 0.0.3
     repository: https://vlab-research.github.io/fly
     tags:
       - backup
-  - name: dinersclub
-    version: 0.0.1
-    repository: https://vlab-research.github.io/fly
-    tags:
-      - payments
-  - name: dean
-    version: 0.0.3
-    repository: https://vlab-research.github.io/fly
-    tags:
-      - dean
-  - name: scribble
-    version: 0.0.1
-    repository: https://vlab-research.github.io/fly
-    tags:
-      - scribble
   - name: naughtybot
     version: 0.0.1
     repository: https://vlab-research.github.io/fly
