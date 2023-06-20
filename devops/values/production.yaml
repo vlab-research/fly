@@ -510,7 +510,7 @@ botserver:
 
 cockroachdb:
   image:
-    tag: v20.1.4
+    tag: v21.2.17
   statefulset:
     replicas: 4
     resources:
