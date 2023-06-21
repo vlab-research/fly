@@ -19,14 +19,6 @@ def export_data(conn, user, survey):
         # process data using the vlab prepro library
         p = Preprocessor()
         dd = p.add_form_data(form_data, responses)
-# TODO: we should add this as another export
-#        dd = pipe(responses,
-#            p.add_form_data(form_data),
-#            p.keep_final_answer,
-#            p.add_duration(),
-#            p.add_metadata(["creative", "stratum_gender", "stratum_age", "stratum_location", "seed"]),
-#            p.drop_duplicated_users(["shortcode"]),
-#        )
 
         # store as csv on configured backend
         storage_backend.save_to_csv(dd)

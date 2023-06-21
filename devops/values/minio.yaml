@@ -12,6 +12,7 @@ apiIngress:
   tls: true
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
 metrics:
   serviceMonitor:
     enabled: true
