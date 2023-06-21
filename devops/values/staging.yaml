@@ -17,7 +17,7 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-staging-exports"
 
-versionDashboard: &vdashboard v0.0.27
+versionDashboard: &vdashboard v0.0.32
 versionBotserver: &vbotserver v0.0.10
 versionReplybot: &vreplybot v0.0.141
 versionLinksniffer: &vlinksniffer v0.0.4
