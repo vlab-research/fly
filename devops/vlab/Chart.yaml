@@ -42,6 +42,8 @@ dependencies:
   - name: exporter
     version: 0.1.0
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+    tags:
+      - exporter
   # TODO: the below charts should be moved to OCI conformant registries
   # but can not be found
   - name: naughtybot

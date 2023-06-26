@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fly-exporter
+  labels:
+    app: fly-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fly-exporter
+  template:
+    metadata:
+      labels:
+        app: fly-exporter
+    spec:
+      containers:
+        - name: fly-exporter
+          image: localhost:5000/exporter:registry
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: '10m'
+              memory: '10Mi'
+          envFrom:
+            - secretRef:
+                name: exporter
+          env:
+            - name: KAFKA_BROKERS
+              value: 'kafka:9092'
+            - name: KAFKA_TOPC
+              value: "exporter"
+            - name: KAFKA_GROUP_ID
+              value: "exporter"
+            - name: APP_NAME
+              value: "exporter"

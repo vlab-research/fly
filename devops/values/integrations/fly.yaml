@@ -6,6 +6,7 @@ tags:
   naughtybot: false
   botscribe: false
   scratchbot: false
+  exporter: true
 
 processingAlerts: []
 laggingAlerts: []
@@ -18,7 +19,7 @@ paymentTopic: &paymenttopic vlab-payment
 kafkabrokers: &kb kafka:9092
 botEnvs: &botenvs bot-envs
 chatbaseHost: &host db-cockroachdb-public
-
+exporterTopic: &exportertopic "vlab-exports"
 
 versionDashboard: &vdashboard v0.0.31
 versionBotserver: &vbotserver 0.0.9
@@ -153,7 +154,7 @@ dashboard:
     - name: DB_HOST
       value: *host
     - name: KAFKA_BROKERS
-      value: *kb 
+      value: *kb
     - name: CUBEJS_DB_HOST
       value: *host
     - name: DB_PORT
@@ -175,7 +176,7 @@ dashboard:
     annotations:
       nginx.ingress.kubernetes.io/cors-allow-origin: "*"
     tls:
-      - hosts: 
+      - hosts:
         - dashboard.fly.local
         secretName: local-certs
     hosts:
@@ -369,6 +370,22 @@ scribble:
       - name: KAFKA_GROUP
         value: "scribble-messages"
 
+exporter:
+  env:
+    - name: "KAFKA_TOPIC"
+      value: *exportertopic
+    - name: "KAFKA_BROKERS"
+      value: *kb
+    - name: "KAFKA_GROUP_ID"
+      value: "exporter"
+    - name: "APP_NAME"
+      value: "exporter"
+  envSecrets:
+    - exporter
+  image:
+    repository: "vlabresearch/exporter"
+    pullPolicy: Always
+    tag: 0.1.0
 
 cockroachdb:
   # disable cockroachdb as we run it as a service
