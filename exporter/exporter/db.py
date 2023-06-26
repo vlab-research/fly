@@ -1,4 +1,4 @@
-from log import log
+from .log import log
 from sqlalchemy import create_engine
 
 def setup_database_connection(db_url):

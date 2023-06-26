@@ -1,5 +1,5 @@
 import os
-from log import log
+from .log import log
 from io import BytesIO
 from minio import Minio
 from pydantic import BaseSettings, validator, Field, ValidationError
@@ -101,5 +101,3 @@ class S3StorageBackend(BaseStorageBackend):
             object_name=self.file_path,
             expires=timedelta(hours=7),
         )
-
-

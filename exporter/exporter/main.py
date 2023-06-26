@@ -1,11 +1,11 @@
 import os
 import json
-from log import log
+from .log import log
 from dotenv import load_dotenv
-from db import setup_database_connection
+from .db import setup_database_connection
 from pydantic import BaseModel
 from kafka import KafkaConsumer, admin,TopicPartition
-from exporter import export_data
+from .exporter import export_data, ExportOptions
 
 # load the env file into the environment
 load_dotenv()
@@ -20,7 +20,7 @@ class KafkaMessage(BaseModel):
     event: str
     survey: str
     user: str
-    options: dict
+    options: ExportOptions
 
 def app():
     """
@@ -40,7 +40,7 @@ def app():
             conn = setup_database_connection(DATABASE_URL)
             process(conn, message.value)
             conn.close()
-        # catch all uncaught exceptions and 
+        # catch all uncaught exceptions and
         # print out error
         except Exception as e:
             log.error(e)
@@ -60,7 +60,7 @@ def process(conn, data: KafkaMessage):
     The main message processor
     """
     log.info(f'processing export for study {data.survey}')
-    export_data(conn, data.user, data.survey)
+    export_data(conn, data.user, data.survey, data.options)
 
 def setup_kafka_consumer():
     """
@@ -78,4 +78,3 @@ def setup_kafka_consumer():
 
 if __name__=="__main__":
     app()
-

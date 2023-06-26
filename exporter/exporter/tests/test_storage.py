@@ -1,5 +1,5 @@
 import pytest
-from ..storage import *
+from exporter.storage import *
 import unittest
 from unittest.mock import Mock
 from unittest import mock
