@@ -213,7 +213,7 @@ const CreateForm = ({ surveys }) => {
                   }}
                   >
                     <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                    Add Metadata
+                      Add Metadata
                     </Button>
                   </Form.Item>
                 </>
@@ -225,7 +225,7 @@ const CreateForm = ({ surveys }) => {
 
         <Form.Item style={{ marginTop: '4em' }} wrapperCol={{ offset: 8, span: 16 }}>
           <PrimaryBtn> CREATE </PrimaryBtn>
-        </Form.Item>
+        </Form.Item>b
       </Form>
     </Spin>
   );

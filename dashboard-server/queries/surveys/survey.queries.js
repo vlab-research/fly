@@ -22,9 +22,22 @@ async function create({
 }
 
 async function retrieve({ email }) {
-  const RETRIEVE_ALL = `SELECT s.created, s.shortcode, s.id, s.title, s.survey_name, s.metadata, s.translation_conf, s.formid
+  const RETRIEVE_ALL = `SELECT 
+                          s.created,
+                          s.shortcode,
+                          s.id,
+                          s.title,
+                          s.survey_name,
+                          s.metadata,
+                          s.translation_conf,
+                          s.formid,
+                          settings.timeouts,
+                          settings.off_time
                         FROM surveys s
-                        LEFT JOIN users on s.userid = users.id
+                        LEFT JOIN users ON s.userid = users.id
+                        LEFT JOIN survey_settings settings
+                          ON s.userid = settings.userid
+                          AND s.shortcode = settings.shortcode
                         WHERE email=$1
                         ORDER BY created DESC`;
   const values = [email];
@@ -32,10 +45,25 @@ async function retrieve({ email }) {
   return rows;
 }
 
+async function update({ email, shortcode, timeouts, off_time }) {
+  const UPDATE_SETTINGS = `INSERT INTO survey_settings(userid, shortcode, timeouts, off_time)
+                        VALUES(
+                        (SELECT id FROM users WHERE email=$1 LIMIT 1),
+                        $2, $3, $4)
+                        ON CONFLICT(userid, shortcode)
+                        DO UPDATE SET timeouts = $3, off_time= $4
+                        RETURNING *`;
+
+  const values = [email, shortcode, JSON.stringify(timeouts), off_time];
+  const { rows } = await this.query(UPDATE_SETTINGS, values);
+  return rows[0];
+}
+
 module.exports = {
   name: 'Survey',
   queries: pool => ({
     create: create.bind(pool),
     retrieve: retrieve.bind(pool),
+    update: update.bind(pool),
   }),
 };

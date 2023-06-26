@@ -13,5 +13,6 @@ const controller = require('./survey.controller');
 
 router.post('/', controller.postOne);
 router.get('/', controller.getAll);
+router.put('/:shortcode/settings', controller.putSettings)
 
 module.exports = router;

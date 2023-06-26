@@ -77,10 +77,10 @@ const config = {
     password: isTest() ? undefined : envVars.DB_PASSWORD || undefined,
     port: isTest() ? 5432 : envVars.DB_PORT || 5432,
   },
-    KAFKA: {
-        BROKERS: envVars.KAFKA_BROKERS.split(","),
-        EXPORTS_TOPIC: envVars.KAFKA_EXPORTS_TOPIC || 'vlabs-exports'
-    }
+  KAFKA: {
+    BROKERS: isTest() ? "" : envVars.KAFKA_BROKERS.split(","),
+    EXPORTS_TOPIC: envVars.KAFKA_EXPORTS_TOPIC || 'vlabs-exports'
+  }
 };
 
 module.exports = config;
