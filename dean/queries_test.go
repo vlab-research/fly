@@ -11,12 +11,14 @@ import (
 
 const (
 	insertUserSql = `
-		INSERT INTO users(id, email) 
+		INSERT INTO users(id, email)
 		VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', 'test@test.com');
 	`
 	pageInsertSql = `INSERT INTO credentials(entity, key, userid, details) VALUES ('facebook_page', ($1)->>'id', 'e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', $1)`
 
 	surveyInsertSql = `INSERT INTO surveys(userid, formid, form, title, shortcode, created, messages) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', 'formid', '{}', 'title', $1, $2, $3);`
+
+	settingsInsertSql = `INSERT INTO survey_settings(userid, shortcode, timeouts) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', $1, $2)`
 
 	insertQuery = `INSERT INTO
                    states(userid, pageid, updated, current_state, state_json)
@@ -210,7 +212,7 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 		ts,
 		"WAIT_EXTERNAL_EVENT",
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
-                      "forms": ["short1", "short2"], 
+                      "forms": ["short1", "short2"],
                       "waitStart": %v,
                       "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
 
@@ -277,6 +279,98 @@ func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
 
+}
+
+func TestGetTimeouts_WithRelativeVariableTimeout(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-30 * time.Minute)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "foo_var"}}}`, ms))
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "bar_var"}}}`, ms))
+
+	mustExec(t, pool, settingsInsertSql, "short2", `[{"name": "foo_var", "type": "relative", "value": "20 minutes"}, {"name": "bar_var", "type": "relative", "value": "40 minutes"}]`)
+
+	cfg := &Config{}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "foo", events[0].User)
+	assert.Equal(t, "timeout", events[0].Event.Type)
+
+	ev, _ := json.Marshal(events[0].Event)
+	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
+}
+
+func TestGetTimeouts_WithAbsoluteVariableTimeout(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	now := time.Now().UTC()
+	ts := now.Add(-30 * time.Minute)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "wait": { "type": "timeout", "value": { "type": "absolute", "variable": "foo_var"}}}`, ms))
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "wait": { "type": "timeout", "value": { "type": "absolute", "variable": "bar_var"}}}`, ms))
+
+	mustExec(t, pool, settingsInsertSql, "short2",
+		fmt.Sprintf(`[{"name": "foo_var", "type": "absolute", "value": "%v"}, {"name": "bar_var", "type": "absolute", "value": "%v"}]`, now.Format(time.RFC3339), now.Add(1*time.Minute).Format(time.RFC3339)))
+
+	cfg := &Config{}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "foo", events[0].User)
+	assert.Equal(t, "timeout", events[0].Event.Type)
+
+	ev, _ := json.Marshal(events[0].Event)
+	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
 }
 
 func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *testing.T) {

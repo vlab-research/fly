@@ -114,11 +114,34 @@ func Blocked(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 }
 
 func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
-	query := `SELECT (state_json->>'waitStart')::int, userid, pageid
-              FROM states
+	query := `
+              with unrolled_settings as (
+                SELECT
+                  userid,
+                  shortcode,
+                  json_array_elements(timeouts)->>'name' AS name,
+                  json_array_elements(timeouts)->>'type' AS type,
+                  json_array_elements(timeouts)->>'value' AS value
+                FROM survey_settings
+              )
+              SELECT (state_json->>'waitStart')::int, s.userid, s.pageid
+              FROM states s
+              LEFT JOIN unrolled_settings settings
+                ON settings.shortcode = s.current_form
+                AND settings.userid = (SELECT userid
+                                       FROM credentials
+                                       WHERE facebook_page_id = s.pageid
+                                       LIMIT 1)
+                AND settings.name = s.state_json->'wait'->'value'->>'variable'
               WHERE
                 current_state = 'WAIT_EXTERNAL_EVENT' AND
-                timeout_date < $1 `
+                (s.timeout_date < $1
+                 OR
+                   (settings.type = 'relative' AND (timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + (settings.value)::INTERVAL)) < $1 ))
+                 OR
+                   (settings.type = 'absolute' AND (timezone('UCT',parse_timestamp(settings.value))) < $1)
+                 )
+        `
 	d := time.Now().UTC()
 
 	if len(cfg.TimeoutBlacklist) > 0 {
