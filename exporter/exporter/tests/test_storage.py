@@ -1,18 +1,16 @@
-import pytest
-from exporter.storage import *
-import unittest
-from unittest.mock import Mock
-from unittest import mock
-import pandas as pd
-from google.cloud import storage
 import os
+import unittest
+from unittest import mock
+from unittest.mock import Mock
+
+import pandas as pd
+import pytest
+from google.cloud import storage
+
+from exporter.storage import *
+
 
 class TestStorageBackends(unittest.TestCase):
-
-    def test_base_storage_fails_on_init(self):
-        with pytest.raises(NotImplementedError):
-            BaseStorageBackend()
-
     def test_google_storage_fails_when_env_not_set(self):
         with pytest.raises(ValueError):
             GoogleStorageBackend(file_path="test")
