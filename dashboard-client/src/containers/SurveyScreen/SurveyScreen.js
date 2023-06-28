@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import PropTypes from 'prop-types';
 import {
   Switch, Route, useRouteMatch, Link
@@ -7,10 +7,9 @@ import { Table, Spin } from 'antd';
 import './SurveyScreen.css';
 import { FormScreen } from '..';
 import { groupBy } from '../../helpers';
-import { CreateBtn, PrimaryBtn } from '../../components/UI';
+import { CreateBtn } from '../../components/UI';
 
 const Survey = ({ forms, selected }) => {
-  const [downloading, setDownloading] = useState(false);
   const nameLookup = Object.fromEntries(forms.map(f => [f.id, f.prettyName]));
 
   const match = useRouteMatch();
@@ -80,7 +79,7 @@ const Survey = ({ forms, selected }) => {
 
 
   return (
-    <Spin spinning={downloading}>
+    <Spin spinning={false}>
       <div className="survey-table">
         <div className="buttons">
           <CreateBtn to={`/surveys/create?survey_name=${encodeURIComponent(selected)}`}> NEW FORM </CreateBtn>

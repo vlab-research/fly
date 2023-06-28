@@ -2,10 +2,10 @@ import React, { useState, useContext } from 'react';
 import moment from 'moment';
 import PropTypes from 'prop-types';
 import { useParams, useHistory } from 'react-router-dom';
-import { CreateBtn, PrimaryBtn } from '../../components/UI';
+import { PrimaryBtn } from '../../components/UI';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import {
-  Form, Input, Button, Checkbox, Space, Spin, DatePicker, Select
+  Form, Input, Button, Space, Spin, DatePicker, Select
 } from 'antd';
 import ApiClient from '../../services/api';
 import { Survey } from '../Surveys/Surveys';
@@ -80,11 +80,6 @@ const Timeout = ({ field, remove, initialValues }) => {
 
 const Timeouts = ({ initialValues }) => {
 
-  const disabled = false;
-
-  // onSubmit
-  // update survey metadata 
-
   return (
     <>
       <Form.Item label="  " colon={false}>
@@ -107,8 +102,6 @@ const Timeouts = ({ initialValues }) => {
           )}
         </Form.List>
       </Form.Item>
-
-
     </>
   );
 };
@@ -119,7 +112,6 @@ const OffTime = ({ initialValues }) => {
 
   return (
     <>
-
       <Form.Item
         style={{
           display: 'flex', maxWidth: '800px', marginBottom: 8, marginRight: 'auto', marginLeft: 'auto',
@@ -129,7 +121,6 @@ const OffTime = ({ initialValues }) => {
       >
         <DatePicker disabledDate={disabledDate} disabled={disabled} showTime placeholder="No current end time" />
       </Form.Item>
-
     </>
   );
 };

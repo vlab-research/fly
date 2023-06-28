@@ -1,15 +1,15 @@
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { useLocation, useHistory } from 'react-router-dom';
-import { CreateBtn, PrimaryBtn } from '../../components/UI';
+import { PrimaryBtn } from '../../components/UI';
 import {
-  Form, Select, Input, Button, Checkbox, Space, Spin, Switch
+  Form, Select, Input, Switch, Spin
 } from 'antd';
 
 import startExport from '../../services/api/startExport';
 const { Option } = Select;
 
-const CreateExport = ({}) => {
+const CreateExport = () => {
   const history = useHistory();
   const location = useLocation();
   const query = new URLSearchParams(location.search);
