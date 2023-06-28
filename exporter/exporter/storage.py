@@ -52,7 +52,9 @@ class GoogleStorageBackend(BaseStorageBackend):
     def save_to_csv(self, df: pd.DataFrame):
         client = storage.Client()
         bucket = client.get_bucket(self.bucket_name)
-        bucket.blob(self.file_path).upload_from_string(df.to_csv(), "text/csv")
+        bucket.blob(self.file_path).upload_from_string(
+            df.to_csv(index=False), "text/csv"
+        )
 
 
 class S3StorageBackend(BaseStorageBackend):
@@ -83,7 +85,7 @@ class S3StorageBackend(BaseStorageBackend):
         if not found:
             client.make_bucket(self.bucket_name)
 
-        csv = df.to_csv().encode("utf-8")
+        csv = df.to_csv(index=False).encode("utf-8")
         # Put the object into bucket
         res = client.put_object(
             bucket_name=self.bucket_name,
