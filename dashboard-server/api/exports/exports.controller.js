@@ -1,6 +1,7 @@
 'use strict';
 const { Exports } = require('../../queries');
 const { KafkaUtil } = require('../../utils');
+const { EXPORTS_TOPIC } = require('../../config').KAFKA;
 
 function handle(err, res) {
   console.error(err);
@@ -44,7 +45,7 @@ exports.generateExport = async (req, res) => {
     }
 
     await producer.send({
-      topic: "vlab-exports",
+      topic: EXPORTS_TOPIC,
       messages: [{ key: "data-exports", value: JSON.stringify(message) }],
     })
     await producer.disconnect()
