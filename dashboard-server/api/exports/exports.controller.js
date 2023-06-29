@@ -1,6 +1,7 @@
 'use strict';
 const { Exports } = require('../../queries');
 const { KafkaUtil } = require('../../utils');
+const { EXPORTS_TOPIC } = require('../../config').KAFKA;
 
 function handle(err, res) {
   console.error(err);
@@ -26,29 +27,29 @@ exports.getAll = async (req, res) => {
 // creates a message on Kafka that will start an export
 // the job will update the database with the status of the export
 exports.generateExport = async (req, res) => {
-  const { survey, type } = req.query;
+  const { survey } = req.query;
+  const options = req.body;
+
   const { email } = req.user;
 
   try {
-    const producer = KafkaUtil.Conn.producer({ 
-      createPartitioner: KafkaUtil.Partitioners.DefaultPartitioner 
+    const producer = KafkaUtil.Conn.producer({
+      createPartitioner: KafkaUtil.Partitioners.DefaultPartitioner
     })
     await producer.connect()
-    const message = { 
-      event: "data-export", 
+    const message = {
+      event: "data-export",
       user: email,
       survey: survey,
-      options: {
-        type: type
-      }
+      options: options
     }
 
     await producer.send({
-      topic: "vlab-exports",
-      messages: [{key: "data-exports", value: JSON.stringify(message)}],
+      topic: EXPORTS_TOPIC,
+      messages: [{ key: "data-exports", value: JSON.stringify(message) }],
     })
     await producer.disconnect()
-    return res.status(200).send({status: "success"})
+    return res.status(201).send({ status: "success" })
   } catch (err) {
     handle(err, res);
   }

@@ -1,9 +1,9 @@
 import ApiClient from '.';
 
-export default function startExport(selected) {
-  return ApiClient.fetcher({ path: `/exports?survey=${encodeURIComponent(selected)}` })
+export default function startExport(selected, body) {
+  return ApiClient.fetcher({ method: 'POST', path: `/exports?survey=${encodeURIComponent(selected)}`, body })
     .then(async (res) => {
-      if (res.status !== 200) {
+      if (res.status !== 201) {
         throw new Error(`Error starting export: ${selected} Error: ${res.statusText}`);
       }
 
@@ -12,4 +12,4 @@ export default function startExport(selected) {
     .catch((err) => {
       console.error(err); // eslint-disable-line no-console
     });
-}
+} 

@@ -26,12 +26,12 @@ spec:
             - containerPort: 3000
           envFrom:
             - secretRef:
-                name: gbv-bot-envs
+                name: bot-envs
           env:
             - name: TYPEFORM_URL
               value: 'https://api.typeform.com'
             - name: FORMCENTRAL_URL
-              value: 'http://gbv-formcentral'
+              value: 'http://fly-formcentral'
             - name: CUBEJS_API_SECRET
               value: 'notasecret'
             - name: CUBEJS_DB_TYPE
@@ -49,9 +49,11 @@ spec:
             - name: CUBEJS_DB_PASS
               value: ''
             - name: DB_HOST
-              value: 'gbv-cockroachdb-public.default'
+              value: 'db-cockroachdb-public'
+            - name: KAFKA_BROKERS
+              value: 'kafka:9092'
             - name: CUBEJS_DB_HOST
-              value: 'gbv-cockroachdb-public.default'
+              value: 'db-cockroachdb-public'
             - name: DB_PORT
               value: '26257'
             - name: CUBEJS_DB_PORT

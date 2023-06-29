@@ -1,18 +1,15 @@
-import React, { useState } from 'react';
+import React from 'react';
 import PropTypes from 'prop-types';
 import {
-  Switch, Route, useRouteMatch, useParams, Link,
+  Switch, Route, useRouteMatch, Link
 } from 'react-router-dom';
 import { Table, Spin } from 'antd';
 import './SurveyScreen.css';
-import { FormConfig } from '..';
+import { FormScreen } from '..';
 import { groupBy } from '../../helpers';
-import { CreateBtn, PrimaryBtn } from '../../components/UI';
-import getCsv from '../../services/api/getCSV';
-import startExport from '../../services/api/startExport';
+import { CreateBtn } from '../../components/UI';
 
 const Survey = ({ forms, selected }) => {
-  const [downloading, setDownloading] = useState(false);
   const nameLookup = Object.fromEntries(forms.map(f => [f.id, f.prettyName]));
 
   const match = useRouteMatch();
@@ -39,7 +36,7 @@ const Survey = ({ forms, selected }) => {
     .map(f => ({ title: f, dataIndex: f, sorter: { compare: (a, b) => (a[f] > b[f] ? 1 : -1) } }));
 
   const ShortCodeLink = (text, record) => (
-    <Link to={`${match.url}/data?shortcode=${record.shortcode}`}>
+    <Link to={`${match.url}/form/${record.shortcode}`}>
       {' '}
       {text}
       {' '}
@@ -59,14 +56,14 @@ const Survey = ({ forms, selected }) => {
   const ActionLink = (text, record) => (<Link to={`create?from=${record.id}`}> new version </Link>);
 
   columns = [...columns,
-    { title: 'translation', dataIndex: 'translation_conf', render: (text, record) => getTranslationInfo(record) },
-    { title: 'actions', dataIndex: 'id', render: ActionLink },
+  { title: 'translation', dataIndex: 'translation_conf', render: (text, record) => getTranslationInfo(record) },
+  { title: 'actions', dataIndex: 'id', render: ActionLink },
   ];
 
   const PrettyNameLink = (text, record) => (
-    <Link to={`${match.url}/data?surveyid=${record.id}`}>
+    <Link to="">
       {record.prettyName}
-    </Link>
+    </Link >
   );
 
   const expandedRowRender = (row) => {
@@ -80,31 +77,14 @@ const Survey = ({ forms, selected }) => {
     return (<Table columns={cols} dataSource={expanded} pagination={false} showHeader />);
   };
 
-  const onDownload = (path) => {
-    return async () => {
-      setDownloading(true)
-      await getCsv(path, selected)
-      setDownloading(false)
-    }
-  }
-
-  const exportSurvey = () => {
-    return async () => {
-      setDownloading(true)
-      await startExport(selected)
-      setDownloading(false)
-    }
-  }
 
   return (
-    <Spin spinning={downloading}>
+    <Spin spinning={false}>
       <div className="survey-table">
         <div className="buttons">
           <CreateBtn to={`/surveys/create?survey_name=${encodeURIComponent(selected)}`}> NEW FORM </CreateBtn>
-          <span classsName="download-buttons">
-            <PrimaryBtn onClick={onDownload('/responses/csv')}> DOWNLOAD CSV </PrimaryBtn>
-            <PrimaryBtn onClick={exportSurvey()}> EXPORT </PrimaryBtn>
-            <PrimaryBtn onClick={onDownload('/responses/form-data')}> DOWNLOAD METADATA </PrimaryBtn>
+          <span className="download-buttons">
+            <CreateBtn to={`/exports/create?survey_name=${encodeURIComponent(selected)}`}> EXPORT </CreateBtn>
           </span>
         </div>
         <Table
@@ -119,18 +99,6 @@ const Survey = ({ forms, selected }) => {
 };
 
 
-const FormScreen = ({ forms }) => {
-  const { surveyid } = useParams();
-  const form = forms.find(s => s.id === surveyid);
-
-  if (!form) {
-    // redirect to 404 page
-    return ('404!');
-  }
-
-  return (<FormConfig form={form} />);
-};
-
 
 const SurveyScreen = ({ forms, selected }) => {
   const match = useRouteMatch();
@@ -141,7 +109,7 @@ const SurveyScreen = ({ forms, selected }) => {
         <Route exact path={match.path}>
           <Survey forms={forms} selected={selected} />
         </Route>
-        <Route exact path={`${match.path}/form/:surveyid`}>
+        <Route exact path={`${match.path}/form/:shortcode`}>
           <FormScreen forms={forms} />
         </Route>
       </Switch>
@@ -154,9 +122,6 @@ Survey.propTypes = {
   selected: PropTypes.string.isRequired,
 };
 
-FormScreen.propTypes = {
-  forms: PropTypes.arrayOf(PropTypes.object).isRequired,
-};
 
 SurveyScreen.propTypes = {
   forms: PropTypes.arrayOf(PropTypes.object).isRequired,

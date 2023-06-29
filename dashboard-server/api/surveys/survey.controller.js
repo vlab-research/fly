@@ -24,14 +24,14 @@ exports.postOne = async (req, res) => {
       return res.status(404).json({ error: `User ${email} does not exist!` });
     const { id: userid } = user;
 
-    const cred = await Credential.getOne({email, entity: 'typeform_token', key: TypeformUtil.makeKey(email)});
+    const cred = await Credential.getOne({ email, entity: 'typeform_token', key: TypeformUtil.makeKey(email) });
     const token = cred.details.access_token;
 
     const form = await TypeformUtil.TypeformForm(token, formid);
     const messages = await TypeformUtil.TypeformMessages(token, formid);
 
     // check if translation is possible with formcentral
-    const err = await SurveyUtil.validateTranslation({form, translation_conf})
+    const err = await SurveyUtil.validateTranslation({ form, translation_conf })
     if (err) {
       return res.status(400).send('Translation config not valid. Error: ' + err)
     }
@@ -72,6 +72,27 @@ exports.getAll = async (req, res) => {
 
     const surveys = await Survey.retrieve({ email });
     res.status(200).send(surveys);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send(err);
+  }
+};
+
+
+exports.putSettings = async (req, res) => {
+  try {
+    const { email } = req.user;
+
+    if (!email) {
+      return res.status(400).send('No user!');
+    }
+
+    const { shortcode } = req.params;
+    const { timeouts, off_time } = req.body;
+
+    const settings = await Survey.update({ email, shortcode, timeouts, off_time })
+    res.status(200).send(settings);
+
   } catch (err) {
     console.error(err);
     res.status(500).send(err);

@@ -2,8 +2,10 @@ import App from './App';
 import Exports from './Exports';
 import LoginScreen from './LoginScreen';
 import SurveyScreen from './SurveyScreen';
+import FormScreen from './FormScreen';
 import FormConfig from './FormConfig';
 import CreateForm from './CreateForm';
+import CreateExport from './CreateExport';
 import Surveys from './Surveys';
 import DataScreen from './Data';
 import StartTimeReport from './StartTimeReport';
@@ -19,8 +21,10 @@ export {
   LoginScreen,
   Surveys,
   SurveyScreen,
+  FormScreen,
   FormConfig,
   CreateForm,
+  CreateExport,
   DataScreen,
   StartTimeReport,
   DurationReport,

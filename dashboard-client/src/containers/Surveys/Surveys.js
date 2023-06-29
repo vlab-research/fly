@@ -5,7 +5,7 @@ import {
 import { Layout, Menu } from 'antd';
 import { CreateBtn, Loading } from '../../components/UI';
 import { Hook } from '../../services';
-import { SurveyScreen, CreateForm, DataScreen } from '..';
+import { SurveyScreen, CreateForm } from '..';
 import './Surveys.css';
 import { groupBy } from '../../helpers';
 
@@ -46,7 +46,7 @@ const Surveys = () => {
 
   return (
     <Layout style={{ height: '100%' }}>
-      <Survey.Provider value={{ setSurveys }}>
+      <Survey.Provider value={{ setSurveys, surveys: survs }}>
         <Sider width="300" style={{ background: '#fff', overflowX: 'hidden', overflowY: 'scroll' }}>
           <CreateBtn to="/surveys/create"> NEW SURVEY </CreateBtn>
           <Menu
@@ -69,9 +69,6 @@ const Surveys = () => {
             </Route>
             <Route path={`/${match.path.split('/')[1]}/create`}>
               <CreateForm surveys={surveys} />
-            </Route>
-            <Route path={`${match.path}/data`}>
-              <DataScreen surveys={surveys} />
             </Route>
             <Route path={match.path}>
               {forms ? (<SurveyScreen forms={forms} selected={selected} />) : null}
