@@ -21,7 +21,7 @@ kubectl apply -f dev/cockroachdb.hack.yaml
 # create database
 ######################
 # Migrations should be idempotent
-cat migrations/init.sql | kubectl run -i \
+cat migrations/* | kubectl run -i \
   --rm cockroach-client \
   --image=cockroachdb/cockroach:v2.1.4 \
   --restart=Never \

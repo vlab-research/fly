@@ -1,4 +1,4 @@
-DB_VERSION=v21.1.9
+DB_VERSION=v21.2.17
 PORT=5432
 DATABASE=chatroach
 KAFKA_CLIENT_VERSION=7.4.0
@@ -8,8 +8,9 @@ DASHBOARD_HOST=dashboard.fly.local
 COCKROACHDB_HOST=cockroachdb.fly.local
 MINIO_HOST=minio.fly.local
 HOST_FILE=/etc/hosts
+DEV_USER=nandanmarkrao@gmail.com
 
-dev: create-kind-cluster certs certs-secret create-dev-secret setup-kind-registry setup-ingress-controller bootstrap-fly
+dev: create-kind-cluster certs certs-secret setup-dev-secret setup-kind-registry setup-ingress-controller bootstrap-fly
 
 clean: delete-kind-cluster
 
@@ -51,19 +52,23 @@ bootstrap-fly:
 setup-kind-registry:
 	@bash ./dev/kind-with-registry.sh || true
 
+.PHONY: swap-test-user
+swap-test-user:
+	@bash ./scripts/swap-test-user.sh $(DEV_USER)
+
 setup-ingress-controller:
 	@kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 	@kubectl wait --namespace ingress-nginx \
-  	--for=condition=ready pod \
-  	--selector=app.kubernetes.io/component=controller \
-  	--timeout=90s
+	--for=condition=ready pod \
+	--selector=app.kubernetes.io/component=controller \
+	--timeout=90s
 
 test-db:
-	@docker stop vlab-cockroach && docker rm vlab-cockroach
+	-@docker stop vlab-cockroach && docker rm vlab-cockroach
 	@docker run --name vlab-cockroach -d \
 		-p $(PORT):26257 \
 		cockroachdb/cockroach:$(DB_VERSION) start-single-node --insecure
-	@cat ./sql/* | docker run -i \
+	@cat ./migrations/* | docker run -i \
 		--net=host \
 		--rm cockroachdb/cockroach:$(DB_VERSION) \
 		sql --insecure --host localhost --port $(PORT) --database chatroach
