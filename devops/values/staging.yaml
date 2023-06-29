@@ -17,14 +17,15 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-staging-exports"
 
-versionDashboard: &vdashboard v0.0.32
+versionDashboard: &vdashboard latest
 versionBotserver: &vbotserver v0.0.10
 versionReplybot: &vreplybot v0.0.141
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.25
+versionDean: &vdean latest
 versionScribble: &vscribble v0.0.21
 versionDinersclub: &vdinersclub v0.0.26
 versionFormcentral: &vformcentral v0.0.10
+versionExporter: &vexporter latest
 
 processingAlerts: []
 laggingAlerts: []
@@ -62,7 +63,7 @@ dinersclub:
   image:
     repository: vlabresearch/dinersclub
     tag: *vdinersclub
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       cpu: 5m
@@ -115,7 +116,7 @@ dean:
   image:
     repository: vlabresearch/dean
     tag: *vdean
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   env:
   - name: CHATBASE_DATABASE
     value: "chatroach"
@@ -169,7 +170,7 @@ scribble:
   image:
     repository: vlabresearch/scribble
     tag: *vscribble
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       cpu: 40m
@@ -226,7 +227,7 @@ dumper:
   image:
     repository: vlabresearch/dumper
     tag: 0.0.1
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 
   completions: 1
   parallelism: 1
@@ -255,7 +256,7 @@ replybot:
   image:
     repository: vlabresearch/replybot
     tag: *vreplybot
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 
   envFrom: *botenvs
   resources:
@@ -328,7 +329,7 @@ linksniffer:
   image:
     repository: vlabresearch/linksniffer
     tag: *vlinksniffer
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 
   env:
   - name: BOTSERVER_URL
@@ -364,7 +365,7 @@ dashboard:
   image:
     repository: vlabresearch/dashboard
     tag: *vdashboard
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 
   envFrom: *botenvs
   env:
@@ -435,7 +436,7 @@ botserver:
   image:
     repository: vlabresearch/botserver
     tag: *vbotserver
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 
   envFrom: *botenvs
 
@@ -473,10 +474,15 @@ botserver:
 
 # Configuration for Exporter Worker
 exporter:
+  image:
+    repository: vlabresearch/exporter
+    tag: *vexporter
+    pullPolicy: Always
+
   env:
     - name: "KAFKA_TOPIC"
       value: *exportertopic
-    - name: "KAFKA_SERVERS"
+    - name: "KAFKA_BROKERS"
       value: *kb
     - name: "KAFKA_GROUP_ID"
       value: "exporter"
@@ -484,11 +490,7 @@ exporter:
       value: "exporter"
   envSecrets:
     - exporter
-  
-  image:
-    repository: "vlabresearch/exporter"
-    pullPolicy: Always
-    tag: 0.1.0
+
 
 cockroachdb:
   image:

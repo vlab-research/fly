@@ -18,14 +18,15 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 
-versionDashboard: &vdashboard v0.0.32
+versionDashboard: &vdashboard v0.0.33
 versionBotserver: &vbotserver v0.0.10
 versionReplybot: &vreplybot v0.0.141
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.25
+versionDean: &vdean v0.0.26
 versionScribble: &vscribble v0.0.22-temp-fix
 versionDinersclub: &vdinersclub v0.0.26
 versionFormcentral: &vformcentral v0.0.10
+versionExporter: &vexporter v0.2.0
 
 processingAlerts:
   - consumergroup: replybot
@@ -519,6 +520,10 @@ botserver:
 
 # Configuration for Exporter Worker
 exporter:
+  image:
+    repository: "vlabresearch/exporter"
+    pullPolicy: Always
+    tag: *vexporter
   env:
     - name: "KAFKA_TOPIC"
       value: *exportertopic
@@ -530,10 +535,6 @@ exporter:
       value: "exporter"
   envSecrets:
     - exporter
-  image:
-    repository: "vlabresearch/exporter"
-    pullPolicy: Always
-    tag: 0.1.0
 
 cockroachdb:
   image:
