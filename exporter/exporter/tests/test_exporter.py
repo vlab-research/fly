@@ -62,11 +62,12 @@ def form_df():
     return pd.DataFrame(data, columns=columns)
 
 
-def test_format_data_with_no_options_just_adds_form_data(df, form_df):
+def test_format_data_with_no_options_adds_form_data_with_prefix(df, form_df):
     dat = {}
     options = ExportOptions(**dat)
     res = format_data(df, form_df, options)
     assert res.shape == (12, 12)
+    assert "form_wave" in res.columns
 
 
 def test_format_data_with_just_duration(df, form_df):

@@ -56,7 +56,7 @@ def format_data(
 
     return pipe(
         responses,
-        p.add_form_data(form_data),
+        p.add_form_data(form_data, prefix="form"),
         *fns,
     )
 
