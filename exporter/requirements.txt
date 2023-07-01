@@ -6,6 +6,6 @@ pandas
 psycopg2-binary
 sqlalchemy
 sqlalchemy-cockroachdb
-pydantic
+pydantic==1.10.10
 google-cloud-storage
 minio
