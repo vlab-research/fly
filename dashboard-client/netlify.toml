@@ -1,6 +1,6 @@
 [[redirects]]
-  from = "https://app.vlab.digital"
-  to = "https://fly.vlab.digital"
+  from = "https://app.vlab.digital/*"
+  to = "https://fly.vlab.digital/:splat"
   status = 301
   force = true
 
