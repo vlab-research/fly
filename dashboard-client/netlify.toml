@@ -4,6 +4,12 @@
   status = 301
   force = true
 
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+
 [context.production.environment]
   REACT_APP_SERVER_URL="https://gbv-dashboard.nandan.cloud"
   REACT_APP_TYPEFORM_REDIRECT_URL="https://fly.vlab.digital/surveys/auth"
