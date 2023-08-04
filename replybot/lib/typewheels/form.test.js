@@ -323,6 +323,23 @@ describe('getCondition', () => {
     f.getCondition({ form, md }, qa, '', { ...cond, op: 'not_equal' }).should.be.false
   })
 
+
+  it('works with double hidden', () => {
+    const cond = {
+      op: 'is',
+      vars: [{ type: 'hidden', value: 'baz' },
+      { type: 'hidden', value: 'id' }]
+    }
+
+    const qa = []
+    const md = { baz: '325345', id: '325345' }
+
+    f.getCondition({ form, md }, qa, '', cond).should.be.true
+    f.getCondition({ form, md }, qa, '', { ...cond, op: 'equal' }).should.be.true
+    f.getCondition({ form, md }, qa, '', { ...cond, op: 'is_not' }).should.be.false
+    f.getCondition({ form, md }, qa, '', { ...cond, op: 'not_equal' }).should.be.false
+  })
+
   it('works with lower_equal_than operator on numbers', () => {
     const cond = {
       op: 'lower_equal_than',
