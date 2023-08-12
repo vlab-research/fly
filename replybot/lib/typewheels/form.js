@@ -34,7 +34,7 @@ function getFromMetadata(ctx, key) {
   const meta = { ...user, ...md }
 
   if (meta[key] === undefined) {
-    throw new TypeError(`Cannot create field text as the value ${key} does not exist in metadata ${util.inspect(meta)}`)
+      return ""
   }
 
   return meta[key]
@@ -199,7 +199,9 @@ const funs = {
   'is': (a, b) => a === b,
   'equal': (a, b) => a === b,
   'is_not': (a, b) => a !== b,
-  'not_equal': (a, b) => a !== b
+  'not_equal': (a, b) => a !== b,
+  'contains': (a, b) => a !== undefined && a.includes(b),
+  'not_contains': (a, b) => a === undefined || !a.includes(b),
 }
 
 
@@ -215,7 +217,7 @@ function getCondition(ctx, qa, ref, { op, vars }) {
   // wrap in yaml safe-load to perform type-casting
   // from form data (strings) to js native types
   // i.e. boolean, null, etc.
-  const fn = (a, b) => f(yaml.safeLoad(a), yaml.safeLoad(b))
+  const fn = (a, b) => f(yaml.safeLoad(a), yaml.safeLoad(b)) 
 
   // getChoiceValue needs to ref from the "field" type,
   // which it is always paired with....

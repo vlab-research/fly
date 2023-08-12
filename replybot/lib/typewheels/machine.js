@@ -130,7 +130,7 @@ function _blankStart(event) {
 // form: getForm(event)
 // + initialState...
 
-function _stitch(state, form, nxt) {
+function _stitch(state, stitch, nxt) {
 
   // retains metadata (seed)
   // and metadata (form) -- which is the initial form
@@ -140,8 +140,8 @@ function _stitch(state, form, nxt) {
   return tokenWrap(state, nxt, {
     action: 'SWITCH_FORM',
     stateUpdate: { tokens: state.tokens },
-    form: form,
-    md: { ...state.md, startTime: nxt.timestamp }
+    form: stitch.form,
+    md: { ...state.md, ...stitch.metadata, startTime: nxt.timestamp }
   })
 }
 
@@ -284,7 +284,7 @@ function exec(state, nxt) {
 
     case 'BAILOUT': {
       // { event: { type: 'bailout', value: {form: 'foo' }}
-      return _stitch(state, nxt.event.value.form, nxt)
+      return _stitch(state, nxt.event.value, nxt)
     }
 
     case 'UNBLOCK': {
@@ -316,9 +316,8 @@ function exec(state, nxt) {
         return { action: 'END', question: nxt.message.metadata.ref }
       }
 
-      if (md.stitch) {
-
-        return _stitch(state, md.stitch.form, nxt)
+      if (md.stitch) {        
+        return _stitch(state, md.stitch, nxt)
       }
 
       if (md.wait) {

@@ -353,6 +353,50 @@ describe('getCondition', () => {
     f.getCondition({ form }, qa, '', { ...cond, op: 'greater_equal_than' }).should.be.true
   })
 
+
+  it('works with contains', () => {
+    const cond = {
+      op: 'contains',
+        vars: [{ type: 'field', value: 'baz' },
+               { type: 'constant', value:  'bar'}]
+    }
+
+    const qa = [['baz', 'hello bar again']]
+
+    f.getCondition({ form }, qa, '', cond).should.be.true
+    f.getCondition({ form }, qa, '', { ...cond, op: 'not_contains' }).should.be.false
+  })
+
+
+  it('works with contains and missing values', () => {
+    const cond = {
+      op: 'contains',
+        vars: [{ type: 'hidden', value: 'baz' },
+               { type: 'constant', value:  'bar'}]
+    }
+
+    const qa = []
+    const md = { id: '325345' }
+
+    f.getCondition({ form }, qa, '', cond).should.be.false
+    f.getCondition({ form }, qa, '', { ...cond, op: 'not_contains' }).should.be.true
+  })
+
+  it('works with missing values and equals', () => {
+    const cond = {
+      op: 'equal',
+        vars: [{ type: 'hidden', value: 'baz' },
+               { type: 'constant', value:  0}]
+    }
+
+    const qa = []
+    const md = { id: '325345' }
+
+    f.getCondition({ form }, qa, '', cond).should.be.false
+    f.getCondition({ form }, qa, '', { ...cond, op: 'not_equal' }).should.be.true
+  })
+
+
   it('works with "and" and "or" operators', () => {
 
     const cond = {

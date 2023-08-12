@@ -475,6 +475,18 @@ describe('getState', () => {
   })
 
 
+  it('It switches forms after a form stitch message is sent and includes new metadata', () => {
+
+    const metadata = { "type": "stitch", "stitch": { "form": "BAR", "metadata": {"bar_md": "hello metadata"} }, "ref": "foo" }
+    const log = [referral, { ...echo, message: { ...echo.message, metadata } }]
+
+    const oldState = getState([referral])
+    const state = getState(log)
+    state.state.should.equal('RESPONDING')
+    state.forms[1].should.equal('BAR')
+    state.md.form.should.equal('FOO')
+    state.md.bar_md.should.equal('hello metadata')      
+  })
 
 
   it('It keeps tokens when it stitches forms together', () => {
