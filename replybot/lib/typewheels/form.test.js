@@ -392,8 +392,8 @@ describe('getCondition', () => {
     const qa = []
     const md = { id: '325345' }
 
-    f.getCondition({ form }, qa, '', cond).should.be.false
-    f.getCondition({ form }, qa, '', { ...cond, op: 'not_equal' }).should.be.true
+    f.getCondition({ form, md }, qa, '', cond).should.be.false
+    f.getCondition({ form, md }, qa, '', { ...cond, op: 'not_equal' }).should.be.true
   })
 
 

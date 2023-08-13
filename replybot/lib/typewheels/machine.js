@@ -252,13 +252,18 @@ function exec(state, nxt) {
     }
 
     case 'EXTERNAL_EVENT': {
-      if (state.state !== 'WAIT_EXTERNAL_EVENT') {
-        return _noop()
-      }
-
       const md = makeEventMetadata(nxt)
 
       const externalEvents = [...(state.externalEvents || []), nxt]
+
+      if (state.state !== 'WAIT_EXTERNAL_EVENT') {
+
+        return {
+            action: 'UPDATE_STATE',
+            stateUpdate: { md: { ...state.md, ...md}, externalEvents: externalEvents }
+        }
+      }
+
       const fulfilled = waitConditionFulfilled(state.wait, externalEvents, state.waitStart)
 
       if (!fulfilled) {
@@ -436,6 +441,12 @@ function apply(state, output) {
 
     case 'WATERMARK':
       return { ...state, ...output.update }
+
+    case 'UPDATE_STATE':
+      return {
+        ...state,
+        ...output.stateUpdate
+      }
 
     case 'RESPOND':
 

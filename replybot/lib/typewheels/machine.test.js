@@ -415,20 +415,20 @@ describe('getState', () => {
 
 
 
-  it('Does not add event to metadata if not waiting external event', () => {
-
+  it('Adds event to metadata if not waiting external event and leaves the rest the same', () => {
     const externalEvent = {
       source: 'synthetic',
       timestamp: Date.now(),
       event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
     }
 
-
     const log = [referral, echo, text, externalEvent]
     const state = getState(log)
 
     state.state.should.equal('RESPONDING')
-    state.md.should.not.have.property('e_moviehouse_play_id')
+    state.md.should.have.property('e_moviehouse_play_id')
+    state.md.form.should.eql("FOO")
+    state.externalEvents.should.contain(externalEvent)
   })
 
 
