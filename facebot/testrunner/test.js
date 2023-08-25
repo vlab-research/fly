@@ -1,13 +1,13 @@
 require('chai').should()
 var parallel = require('mocha.parallel');
 const sender = require('./sender.js')
-const {makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, makeNotify} = require('@vlab-research/mox')
+const { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, makeNotify } = require('@vlab-research/mox')
 const uuid = require('uuid');
 const farmhash = require('farmhash');
-const {seed} = require('./seed-db');
-const {flowMaster} = require('./socket');
-const {snooze} = require('./utils')
-const {getResponses, getState} = require('./responses')
+const { seed } = require('./seed-db');
+const { flowMaster } = require('./socket');
+const { snooze } = require('./utils')
+const { getResponses, getState } = require('./responses')
 const mustache = require('mustache')
 const fs = require('fs')
 
@@ -18,12 +18,14 @@ const chatbase = new Chatbase()
 
 function makeRepeat(field, text) {
   const ref = JSON.parse(field.metadata).ref
-  return { text: text,
-           metadata: JSON.stringify({ repeat: true, ref  }) }
+  return {
+    text: text,
+    metadata: JSON.stringify({ repeat: true, ref })
+  }
 }
 
 function makeRepeated(field) {
-    return {...field, metadata: JSON.stringify({isRepeat: true, ...JSON.parse(field.metadata)})}
+  return { ...field, metadata: JSON.stringify({ isRepeat: true, ...JSON.parse(field.metadata) }) }
 }
 
 const ok = { res: 'success' }
@@ -51,14 +53,14 @@ describe('Test Bot flow Survey Integration Testing', () => {
   parallel('Basic Functionality', function () {
     this.timeout(45000);
 
-    it('Recieves bailout event and switches forms',  async () => {
+    it('Recieves bailout event and switches forms', async () => {
       const userId = uuid()
       const fieldsA = getFields('forms/v7R942.json')
       const fieldsB = getFields('forms/BhaV5G.json')
-      const err = { error: { code: 555 }}
+      const err = { error: { code: 555 } }
 
       const testFlow = [
-        [err, fieldsA[0], [makeSynthetic(userId, { type: 'bailout', value: { form: 'BhaV5G'}})]],
+        [err, fieldsA[0], [makeSynthetic(userId, { type: 'bailout', value: { form: 'BhaV5G' } })]],
         [ok, fieldsB[0], []],
         [ok, fieldsB[1], []],
       ]
@@ -67,7 +69,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Follows logic jumps based on external events: payment success',  async () => {
+    it('Follows logic jumps based on external events: payment success', async () => {
       const userId = uuid()
       const fields = getFields('forms/SNomCIYT.json')
 
@@ -82,9 +84,9 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Follows logic jumps based on external events: payment failure',  async () => {
+    it('Follows logic jumps based on external events: payment failure', async () => {
       const userId = uuid()
-      const vals = {'hidden:e_payment_fake_error_message': 'you fake'}
+      const vals = { 'hidden:e_payment_fake_error_message': 'you fake' }
       const form = fs.readFileSync('forms/gk3gt9ag.json', 'utf-8')
       const f = interpolate(form, vals)
       fs.writeFileSync('forms/temp.json', f)
@@ -104,7 +106,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Test chat flow with logic jump "Yes"',  async () => {
+    it('Test chat flow with logic jump "Yes"', async () => {
       const userId = uuid()
       const fields = getFields('forms/LDfNCy.json')
 
@@ -120,7 +122,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Test chat flow with logic jump "No"',  async () => {
+    it('Test chat flow with logic jump "No"', async () => {
       const userId = uuid()
       const fields = getFields('forms/LDfNCy.json')
 
@@ -136,10 +138,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
     })
 
 
-    it('Puts user into blocked state when given facebook error',  async () => {
+    it('Puts user into blocked state when given facebook error', async () => {
       const userId = uuid()
       const fields = getFields('forms/LDfNCy.json')
-      const err = { error: { code: 555 }}
+      const err = { error: { code: 555 } }
 
       const testFlow = [
         [err, fields[0], []]
@@ -155,7 +157,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       state.fb_error_code.should.equal('555')
     })
 
-    it('Puts user into error state when given a bad form',  async () => {
+    it('Puts user into error state when given a bad form', async () => {
       const userId = uuid()
       sender(makeReferral(userId, 'DOESNTEXIST'))
 
@@ -168,7 +170,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
     })
 
 
-    it('Test chat flow with logic jump from previous question',  async () => {
+    it('Test chat flow with logic jump from previous question', async () => {
       const userId = uuid()
       const fields = getFields('forms/jISElk.json')
 
@@ -207,7 +209,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
     })
 
-    it('Test chat flow with validation failures',  async () => {
+    it('Test chat flow with validation failures', async () => {
       const userId = uuid()
       const fields = getFields('forms/ciX4qo.json')
 
@@ -228,7 +230,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Test chat flow with custom validation error messages',  async () => {
+    it('Test chat flow with custom validation error messages', async () => {
       const userId = uuid()
 
       const fields = getFields('forms/KAvzEUWn.json')
@@ -250,7 +252,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Test chat flow with stitched forms: stitches and maintains seed"',  async () => {
+    it('Test chat flow with stitched forms: stitches and maintains seed', async () => {
       const makeId = () => {
         const uid = uuid()
         const suitable = farmhash.fingerprint32('Llu24B' + uid) % 5 === 0;
@@ -281,7 +283,54 @@ describe('Test Bot flow Survey Integration Testing', () => {
       res.map(r => r['parent_shortcode']).should.eql(['Llu24B', 'Llu24B'])
     })
 
-    it('Test chat flow on forms with translated responses',  async () => {
+
+    it('Test chat flow with stitched forms, does not allow first form to be retaken', async () => {
+      const makeId = () => {
+        const uid = uuid()
+        const suitable = farmhash.fingerprint32('Llu24B' + uid) % 5 === 0;
+        return suitable ? uid : makeId();
+      }
+
+      const userId = makeId()
+      const fieldsA = getFields('forms/Llu24B.json')
+      const fieldsB = getFields('forms/tKG55U.json')
+
+      const testFlow = [
+        [ok, fieldsA[0], [makeTextResponse(userId, 'LOL')]],
+        [ok, fieldsA[1], []],
+
+        // second referral is ignored
+        [ok, fieldsB[0], [makeReferral(userId, 'Llu24B')]],
+
+        // repeat previous question 
+        [ok, makeRepeat(fieldsB[0], "Sorry, that answer is not valid. Please try to answer the question again."), []],
+      ]
+
+      sender(makeReferral(userId, 'Llu24B'))
+      await flowMaster(userId, testFlow)
+    })
+
+
+    it('Test chat flow - does not allow retaking of forms even after switching', async () => {
+      const userId = uuid()
+      const fieldsA = getFields('forms/LDfNCy.json')
+      const fieldsB = getFields('forms/tKG55U.json')
+
+      const testFlow = [
+        [ok, fieldsA[0], [makePostback(fieldsA[0], userId, 0)]],
+        [ok, fieldsA[1], [makeReferral(userId, 'tKG55U')]],
+        [ok, fieldsB[0], [makeReferral(userId, 'LDfNCy')]],
+
+        [ok, makeRepeat(fieldsB[0], "Sorry, that answer is not valid. Please try to answer the question again."), []],
+      ];
+
+      sender(makeReferral(userId, 'LDfNCy'));
+      await flowMaster(userId, testFlow)
+    })
+
+
+
+    it('Test chat flow on forms with translated responses', async () => {
       const userId = uuid()
       const [source, dest] = ['hc2slBXH', 'mzs7qmvZ']
 
@@ -309,7 +358,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       res.map(r => r['translated_response']).should.include('Bien')
     })
 
-    it('Test chat flow with multiple links and keepMoving tag',  async () => {
+    it('Test chat flow with multiple links and keepMoving tag', async () => {
       const userId = uuid()
       const fields = getFields('forms/B6cIAn.json')
 
@@ -324,13 +373,13 @@ describe('Test Bot flow Survey Integration Testing', () => {
     })
 
 
-    it('Waits for external event and continues after event',  async () => {
+    it('Waits for external event and continues after event', async () => {
       const userId = uuid()
       const fields = getFields('forms/Ep5wnS.json')
 
       const testFlow = [
         [ok, fields[0], [makePostback(fields[0], userId, 0)]],
-        [ok, fields[1], [makeSynthetic(userId, { type: 'external', value: {type: 'moviehouse:play', id: 164118668 }})]],
+        [ok, fields[1], [makeSynthetic(userId, { type: 'external', value: { type: 'moviehouse:play', id: 164118668 } })]],
         [ok, fields[2], [makePostback(fields[2], userId, 0)]],
         [ok, fields[3], []]
       ]
@@ -339,7 +388,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Works with multiple or clauses - india endline seed_16 bug',  async () => {
+    it('Works with multiple or clauses - india endline seed_16 bug', async () => {
       const fields = getFields('forms/UGqDwc.json')
 
       const makeId = () => {
@@ -374,13 +423,13 @@ describe('Test Bot flow Survey Integration Testing', () => {
   parallel('Timeouts', function () {
     this.timeout(180000)
 
-    it('Sends timeout message response when interrupted in a timeout, then waits',  async () => {
+    it('Sends timeout message response when interrupted in a timeout, then waits', async () => {
       const userId = uuid()
       const fields = getFields('forms/vHXzrh.json')
 
       const testFlow = [
         [ok, fields[0], [makeTextResponse(userId, 'LOL')]],
-        [ok, { text: 'Please wait!', metadata: '{"repeat":true,"ref":"bd2b2376-d722-4b51-8e1e-c2000ce6ec55"}'}, []],
+        [ok, { text: 'Please wait!', metadata: '{"repeat":true,"ref":"bd2b2376-d722-4b51-8e1e-c2000ce6ec55"}' }, []],
         [ok, makeRepeated(fields[0]), []],
         [ok, fields[1], [makeTextResponse(userId, 'LOL')]],
         [ok, fields[2], []],
@@ -391,11 +440,11 @@ describe('Test Bot flow Survey Integration Testing', () => {
     })
 
 
-    it('Sends message after timeout absolute timeout',  async () => {
+    it('Sends message after timeout absolute timeout', async () => {
       const userId = uuid()
-      const timeoutDate = (new Date(Math.floor(Date.now()/1000 + 60)*1000)).toISOString()
+      const timeoutDate = (new Date(Math.floor(Date.now() / 1000 + 60) * 1000)).toISOString()
 
-      const vals = {'hidden:timeout_date': timeoutDate}
+      const vals = { 'hidden:timeout_date': timeoutDate }
       const form = fs.readFileSync('forms/j1sp7ffL.json', 'utf-8')
       const f = interpolate(form, vals)
       fs.writeFileSync('forms/temp-j1sp7ffL.json', f)
@@ -411,7 +460,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow)
     })
 
-    it('Sends messages with notify token after timeout',  async () => {
+    it('Sends messages with notify token after timeout', async () => {
       const userId = uuid()
 
       const fields = getFields('forms/dbFwhd.json')
@@ -430,7 +479,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
     })
 
 
-    it('Sends follow ups when the user does not respond',  async () => {
+    it('Sends follow ups when the user does not respond', async () => {
       const userId = uuid()
       const fields = getFields('forms/ulrtpfSQ.json')
 
@@ -448,10 +497,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
     })
 
 
-    it('Retries sending the message when it fails with a proper code',  async () => {
+    it('Retries sending the message when it fails with a proper code', async () => {
       const userId = uuid()
       const fields = getFields('forms/LDfNCy.json')
-      const err = { error: { code: -1 }}
+      const err = { error: { code: -1 } }
 
       const testFlow = [
         [err, fields[0], []],
@@ -475,10 +524,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
   parallel('Waits', function () {
     this.timeout(300000)
 
-    it('Retries sending the message only up to a point',  async () => {
+    it('Retries sending the message only up to a point', async () => {
       const userId = uuid()
       const fields = getFields('forms/LDfNCy.json')
-      const err = { error: { code: -1 }}
+      const err = { error: { code: -1 } }
 
       const testFlow = [
         [err, fields[0], []],
