@@ -42,6 +42,17 @@ function repeatResponse(question, text) {
   }
 }
 
+function resetResponse(reset) {
+  return {
+    message: {
+      text: reset.message,
+
+      // TODO: cleanup this is random
+      metadata: JSON.stringify({})
+    }
+  }
+}
+
 function getWatermark(event) {
   if (!event.read && !event.delivery) return undefined
 
@@ -51,8 +62,9 @@ function getWatermark(event) {
   return { type, mark }
 }
 
-function _currentForm(state) {
-  return state.md && state.md.form
+
+function _hasForm(state, form) {
+  return state.forms.indexOf(form) !== -1
 }
 
 function _currentUserIsReferrer(event) {
@@ -162,19 +174,20 @@ function exec(state, nxt) {
   switch (categorizeEvent(nxt)) {
 
     case 'REFERRAL': {
+
+      // if reset code is set...
+      // check reset code...
+      // reset can be an ACTION
+      // without any side effect / outp
+
       const form = getForm(nxt)
 
+      if (form === "reset") {
+        return { action: "RESET", reset: { message: "Your survey state has been reset" } }
+      }
 
-      // ignore referral to same form
-      // (should repeat previous question)
-
-      // if current form in entire history of forms, ignore.
-
-      // then create "reset process" - which resets all state to 0
-      // for a given user.
-      // Could be as simple as making "reset" the secret shortcode.
-
-      if (form === _currentForm(state)) {
+      // if current form in entire history of forms, repeat previous question
+      if (_hasForm(state, form)) {
         if (state.state === 'QOUT') return _repeat(state)
         return _noop()
       }
@@ -227,6 +240,10 @@ function exec(state, nxt) {
     }
 
     case 'REDO': {
+
+      // TODO: Handle a special case with async func redos ( not user-facing redo needed)
+      // --> different action... side effect only...
+
       const dontRedo = ['QOUT', 'END']
 
       if (dontRedo.includes(state.state)) return _noop()
@@ -259,8 +276,8 @@ function exec(state, nxt) {
       if (state.state !== 'WAIT_EXTERNAL_EVENT') {
 
         return {
-            action: 'UPDATE_STATE',
-            stateUpdate: { md: { ...state.md, ...md}, externalEvents: externalEvents }
+          action: 'UPDATE_STATE',
+          stateUpdate: { md: { ...state.md, ...md }, externalEvents: externalEvents }
         }
       }
 
@@ -308,6 +325,11 @@ function exec(state, nxt) {
       // it shouldn't happen but it does and indicates
       // an error
 
+      // handles reset scenario
+      if (state.state === 'START') {
+        return _noop()
+      }
+
       const md = nxt.message.metadata
 
       // If it hasn't been sent by the bot, ignore it
@@ -321,7 +343,7 @@ function exec(state, nxt) {
         return { action: 'END', question: nxt.message.metadata.ref }
       }
 
-      if (md.stitch) {        
+      if (md.stitch) {
         return _stitch(state, md.stitch, nxt)
       }
 
@@ -472,8 +494,12 @@ function apply(state, output) {
         state: 'RESPONDING'
       }
 
-    // reset
-    // _initialState() + some md? Same seed? New seed?
+    case 'RESET':
+      return {
+
+        // NOTE: keep anything?
+        ..._initialState(),
+      }
 
     case 'SWITCH_FORM':
       return {
@@ -536,6 +562,10 @@ function act(ctx, state, output) {
       return respond({ ...ctx, md: output.md }, [], output)
     }
 
+    case 'RESET': {
+      return respond({ ...ctx }, [], output)
+    }
+
     default:
       return []
   }
@@ -585,7 +615,12 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   return [...previous, q]
 }
 
-function _response(ctx, qa, { question, validation, response, token, followUp }) {
+function _response(ctx, qa, { question, validation, response, token, followUp, reset }) {
+
+  // first check if we're resetting everything
+  if (reset) {
+    return resetResponse(reset)
+  }
 
   // if we haven't asked anything, it must be the first question!
   if (!question) {
@@ -597,6 +632,7 @@ function _response(ctx, qa, { question, validation, response, token, followUp })
 
     return message
   }
+
 
   if (followUp) {
     return repeatResponse(question, followUpMessage(ctx.form.custom_messages))

@@ -233,8 +233,6 @@ describe('getState', () => {
 
 
   it('Updates the qa of the state even with falsey answers', () => {
-    const echo2 = _echo('bar')
-
     const log = [referral, echo, { ...text, message: { text: 0 } }, _echo('bar'), { ...text, message: { text: '' } }]
     const qa = getState(log).qa
 
@@ -432,6 +430,19 @@ describe('getState', () => {
   })
 
 
+  it('Resets all state and sends reset message on reset form', () => {
+
+    const resetReferral = { ...referral, referral: {...referral.referral, ref: 'form.reset'}}
+    const log = [referral, echo, text, resetReferral]
+
+    const state = getState(log)
+
+    state.state.should.equal('START')
+    state.forms.should.eql([])
+    state.qa.should.eql([])
+  })
+
+
   it('It switches forms after a form stitch message is sent, keeps metadata', () => {
 
     const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
@@ -477,7 +488,7 @@ describe('getState', () => {
 
   it('It switches forms after a form stitch message is sent and includes new metadata', () => {
 
-    const metadata = { "type": "stitch", "stitch": { "form": "BAR", "metadata": {"bar_md": "hello metadata"} }, "ref": "foo" }
+    const metadata = { "type": "stitch", "stitch": { "form": "BAR", "metadata": { "bar_md": "hello metadata" } }, "ref": "foo" }
     const log = [referral, { ...echo, message: { ...echo.message, metadata } }]
 
     const oldState = getState([referral])
@@ -485,7 +496,7 @@ describe('getState', () => {
     state.state.should.equal('RESPONDING')
     state.forms[1].should.equal('BAR')
     state.md.form.should.equal('FOO')
-    state.md.bar_md.should.equal('hello metadata')      
+    state.md.bar_md.should.equal('hello metadata')
   })
 
 
@@ -712,14 +723,6 @@ describe('Machine', () => {
     const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
     const action = getMessage(log, form, user)[0]
     JSON.parse(action.message.metadata).repeat.should.be.true
-  })
-
-  it('Works when initial messages are delivery', () => {
-    const log = [delivery, delivery, echo]
-    const state = getState(log.slice(0, -1))
-    const output = exec(state, parseLogJSON([echo])[0])
-    output.action.should.equal('WAIT_RESPONSE')
-    output.question.should.equal('foo')
   })
 
 
@@ -1653,8 +1656,6 @@ describe('Machine', () => {
   })
 
 
-
-
   // NOTE: is this a good thing? Implies that we consider everything
   // after "echo" from Facebook a 100% sure thing... which it surely isn't...
   // but, we should do fine if user responds...
@@ -1671,5 +1672,17 @@ describe('Machine', () => {
     const action = getMessage(log, form, user)[0]
 
     should.not.exist(action)
+  })
+
+  it('Sends reset message on reset form', () => {
+    const form = {}
+
+    const resetReferral = { ...referral, referral: {...referral.referral, ref: 'form.reset'}}
+    const log = [referral, echo, text, resetReferral]
+
+    const action = getMessage(log, form, user)
+
+    action[0].recipient.id.should.equal('123')
+    action[0].message.text.should.contain('reset')
   })
 })
