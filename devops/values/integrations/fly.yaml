@@ -6,7 +6,7 @@ tags:
   naughtybot: false
   botscribe: false
   scratchbot: false
-  exporter: true
+  exporter: false
 
 processingAlerts: []
 laggingAlerts: []
@@ -21,11 +21,11 @@ botEnvs: &botenvs bot-envs
 chatbaseHost: &host db-cockroachdb-public
 exporterTopic: &exportertopic "vlab-exports"
 
-versionDashboard: &vdashboard v0.0.31
-versionBotserver: &vbotserver 0.0.9
-versionReplybot: &vreplybot v0.0.141
+versionDashboard: &vdashboard v0.0.33
+versionBotserver: &vbotserver v0.0.10
+versionReplybot: &vreplybot v0.0.144
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.25
+versionDean: &vdean v0.0.26
 versionScribble: &vscribble v0.0.23
 versionDinersclub: &vdinersclub v0.0.26
 versionFormcentral: &vformcentral v0.0.10
