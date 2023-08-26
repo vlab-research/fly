@@ -18,6 +18,7 @@ jobs:
   test_e2e:
     machine:
       image: ubuntu-2204:2022.04.1
+    resource_class: large
     steps:
       - checkout
       - run:
@@ -44,7 +45,7 @@ jobs:
           # default timout of 10 mins. This is for some buffer
           no_output_timeout: 30m
           command: cd devops && make integration-tests
-
+      
 workflows:
   version: 2
   test:
