@@ -10,12 +10,21 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4/pgxpool"
+
+	"fmt"
 )
 
 type TestTransport func(req *http.Request) (*http.Response, error)
 
 func (r TestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return r(req)
+}
+
+func before(t *testing.T, pool *pgxpool.Pool) {
+	tables := []string{"users", "credentials"}
+	for _, table := range tables {
+		mustExec(t, pool, fmt.Sprintf("delete from %s;", table))
+	}
 }
 
 func TestClient(statusCode int, body string, err error) *http.Client {

@@ -2,8 +2,6 @@ version: '3'
 
 services:
   main:
-    depends_on:
-      - system
     image: ${APP_NAME}_dev
     build:
       context: .
@@ -43,22 +41,6 @@ services:
       '
     volumes:
       - ./:/app
-    networks:
-      - fly
-  system:
-    build:
-      context: ../system
-    environment:
-      CHATBASE_DATABASE: chatroach
-      CHATBASE_HOST: cockroachdb
-      CHATBASE_PORT: 26257
-      CHATBASE_USER: root
-      PORT: 80
-    command: go run .
-    ports:
-      - 80:80
-    volumes:
-      - ../system:/app
     networks:
       - fly
   initdb:

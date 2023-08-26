@@ -201,7 +201,11 @@ func getProvider(pool *pgxpool.Pool, event *PaymentEvent) (Provider, error) {
 
 func monitor(errs <-chan error) {
 	e := <-errs
-	log.Fatalf("DinersClub failed with error: %v", e)
+	log.Fatalf("DinersClub failed from Kafka error: %v", e)
+}
+
+func checkError(err error) {
+	log.Fatalf("DinersClub failed with processing error: %v", err)
 }
 
 func main() {
@@ -225,6 +229,6 @@ func main() {
 	go monitor(errs)
 
 	for {
-		c.SideEffect(dc.Process, errs)
+		c.SideEffect(dc.Process, checkError, errs)
 	}
 }

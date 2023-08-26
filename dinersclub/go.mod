@@ -20,7 +20,7 @@ require (
 	github.com/tidwall/gjson v1.14.0
 	github.com/vlab-research/botparty v0.0.0-20200917171250-abbbd36eb095
 	github.com/vlab-research/go-reloadly v0.0.20
-	github.com/vlab-research/spine v0.0.4
+	github.com/vlab-research/spine v0.0.6
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5 // indirect
 	golang.org/x/sys v0.0.0-20211205182925-97ca703d548d // indirect
 	golang.org/x/text v0.3.7 // indirect

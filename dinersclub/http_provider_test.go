@@ -38,11 +38,10 @@ func TestIntepolate_ErrorsIfValueMissing(t *testing.T) {
 }
 
 func TestHttpProviderAuth_GetsSecrets(t *testing.T) {
-	before()
-
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
+	before(t, pool)
 
 	insertUserSql := `
 		INSERT INTO users(id, email)
@@ -154,7 +153,7 @@ func TestHttpProviderPayout_MakesGetRequestsWithoutBodyOrHeaders(t *testing.T) {
 }
 
 func TestHttpProviderPayout_RetrievesErrorMessage(t *testing.T) {
-	response := `{"foo": {"bar": "hello error"}, "baz": "hello error"`
+	response := `{"foo": {"bar": "hello error"}, "baz": "hello error"}`
 	tc := TestClient(400, response, nil)
 
 	p := &HttpProvider{
@@ -180,6 +179,9 @@ func TestHttpProviderPayout_RetrievesErrorMessage(t *testing.T) {
 	assert.Equal(t, "400", res.Error.Code)
 	assert.Equal(t, "hello error", res.Error.Message)
 
+	// response is nil when there is an error
+	assert.Nil(t, res.Response)
+
 	// get directly from root of json
 	details = json.RawMessage([]byte(
 		`{
@@ -194,10 +196,47 @@ func TestHttpProviderPayout_RetrievesErrorMessage(t *testing.T) {
 	assert.Equal(t, false, res.Success)
 	assert.Equal(t, "400", res.Error.Code)
 	assert.Equal(t, "hello error", res.Error.Message)
-	assert.Equal(t, json.RawMessage([]byte(response)), *res.Response)
+
+	// response is nil when there is an error
+	assert.Nil(t, res.Response)
 }
 
-func TestHttpProviderPayout_RetrievesResponseFromPath(t *testing.T) {
+func TestHttpProviderPayout_ErrorsWithNoMessageOnFailingToRetrieveErrorMessage(t *testing.T) {
+	response := `text response to error, not json`
+
+	tc := TestClient(400, response, nil)
+
+	p := &HttpProvider{
+		client: tc,
+	}
+
+	// get nested message
+	details := json.RawMessage([]byte(
+		`{
+                  "method": "POST",
+                  "url": "https://foo.com",
+                  "responsePath": "foo.bar",
+		  "errorMessage": "not.a.path"}`,
+	))
+
+	event := &PaymentEvent{Details: &details}
+
+	res, err := p.Payout(event)
+
+	assert.Nil(t, err)
+	assert.Equal(t, false, res.Success)
+	assert.Equal(t, "400", res.Error.Code)
+	assert.Equal(t, "", res.Error.Message)
+
+	// response is nil when there is an error
+	assert.Nil(t, res.Response)
+
+	// can marshal response
+	_, err = json.Marshal(res)
+	assert.Nil(t, err)
+}
+
+func TestHttpProviderPayout_RetrievesStringResponseFromPath(t *testing.T) {
 	response := `{"foo": {"bar": [{"baz": "hello response"}]}}`
 	tc := TestClient(200, response, nil)
 
@@ -218,7 +257,95 @@ func TestHttpProviderPayout_RetrievesResponseFromPath(t *testing.T) {
 
 	assert.Nil(t, err)
 	assert.Equal(t, true, res.Success)
-	assert.Equal(t, "hello response", string(*res.Response))
+	assert.Equal(t, `"hello response"`, string(*res.Response))
+
+	// can marshal response
+	_, err = json.Marshal(res)
+	assert.Nil(t, err)
+}
+
+func TestHttpProviderPayout_RetrievesJsonResponseFromPath(t *testing.T) {
+	response := `{"foo": {"bar": [{"baz": "hello response"}]}}`
+	tc := TestClient(200, response, nil)
+
+	p := &HttpProvider{
+		client: tc,
+	}
+
+	// get nested message
+	details := json.RawMessage([]byte(
+		`{
+                  "method": "POST",
+                  "url": "https://foo.com",
+		  "responsePath": "foo.bar"}`,
+	))
+	event := &PaymentEvent{Details: &details}
+
+	res, err := p.Payout(event)
+
+	assert.Nil(t, err)
+	assert.Equal(t, true, res.Success)
+	assert.Equal(t, `[{"baz": "hello response"}]`, string(*res.Response))
+
+	// can marshal response
+	_, err = json.Marshal(res)
+	assert.Nil(t, err)
+}
+
+func TestHttpProviderPayout_DoesNotErrorIfResponseDoesNotExist(t *testing.T) {
+	response := `{"foo": {"bar": [{"baz": "hello response"}]}}`
+	tc := TestClient(200, response, nil)
+
+	p := &HttpProvider{
+		client: tc,
+	}
+
+	// get nested message
+	details := json.RawMessage([]byte(
+		`{
+                  "method": "POST",
+                  "url": "https://foo.com",
+		  "responsePath": "not.a.path"}`,
+	))
+	event := &PaymentEvent{Details: &details}
+
+	res, err := p.Payout(event)
+
+	assert.Nil(t, err)
+	assert.Equal(t, true, res.Success)
+	assert.Equal(t, `""`, string(*res.Response))
+
+	// can marshal response
+	_, err = json.Marshal(res)
+	assert.Nil(t, err)
+}
+
+func TestHttpProviderPayout_DoesNotErrorIfResponseIsNotJson(t *testing.T) {
+	response := `Pure text response`
+	tc := TestClient(200, response, nil)
+
+	p := &HttpProvider{
+		client: tc,
+	}
+
+	// get nested message
+	details := json.RawMessage([]byte(
+		`{
+                  "method": "POST",
+                  "url": "https://foo.com",
+		  "responsePath": "not.a.path"}`,
+	))
+	event := &PaymentEvent{Details: &details}
+
+	res, err := p.Payout(event)
+
+	assert.Nil(t, err)
+	assert.Equal(t, true, res.Success)
+	assert.Equal(t, `""`, string(*res.Response))
+
+	// can marshal response
+	_, err = json.Marshal(res)
+	assert.Nil(t, err)
 }
 
 func TestHttpProviderPayout_GeneratesErrorForUserIfMissingSecrets(t *testing.T) {

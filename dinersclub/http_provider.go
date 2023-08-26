@@ -89,12 +89,16 @@ func formatError(result *Result, event *PaymentEvent, message, code string) (*Re
 	return result, nil
 }
 
-func GetFromJson(json []byte, path string) string {
+func GetFromJson(json []byte, path string, raw bool) string {
 	if path == "" {
 		return string(json)
 	}
+	rr := gjson.GetBytes(json, path)
 
-	return gjson.GetBytes(json, path).String()
+	if raw {
+		return rr.Raw
+	}
+	return rr.String()
 }
 
 func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
@@ -156,24 +160,33 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 		return nil, err
 	}
 
+	success := resp.StatusCode >= 200 && resp.StatusCode <= 299
+
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err // transient???
 	}
 
-	responseString := GetFromJson(bodyBytes, order.ResponsePath)
-	response := json.RawMessage([]byte(responseString))
+	responseString := GetFromJson(bodyBytes, order.ResponsePath, true)
 
-	result.Response = &response
+	// response must be valid json, can't be empty string
+	if responseString == "" {
+		responseString = `""`
+	}
 
-	if (resp.StatusCode >= 200) && (resp.StatusCode <= 299) {
+	if success {
+
+		// convert response into json
+		response := json.RawMessage([]byte(responseString))
+		result.Response = &response
 		result.Success = true
 		result.PaymentDetails = event.Details
 		return result, nil
 	}
 
-	errorMessage := GetFromJson(bodyBytes, order.ErrorMessage)
+	errorMessage := GetFromJson(bodyBytes, order.ErrorMessage, false)
+
 	code := fmt.Sprintf("%d", resp.StatusCode)
 	return formatError(result, event, errorMessage, code)
 }

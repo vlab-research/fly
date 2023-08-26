@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/vlab-research/go-reloadly/reloadly"
 	"io/ioutil"
@@ -10,10 +11,6 @@ import (
 	"testing"
 	"time"
 )
-
-func before() {
-	http.Get("http://system/resetdb")
-}
 
 func TestReloadlyResultsOnErrorIfBadDetails(t *testing.T) {
 	ts := JSTimestamp(time.Now().UTC())
@@ -69,11 +66,12 @@ func TestReloadlyReportsAPIErrorsInResult(t *testing.T) {
 }
 
 func TestReloadlyReportsSuccessResult(t *testing.T) {
-	before()
 
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
+
+	before(t, pool)
 
 	insertUserSql := `
 		INSERT INTO users(id, email)
@@ -121,11 +119,12 @@ func TestReloadlyReportsSuccessResult(t *testing.T) {
 }
 
 func TestReloadlyResultsOnMissingUser(t *testing.T) {
-	before()
 
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
+
+	before(t, pool)
 
 	svc := &reloadly.Service{}
 	provider := &ReloadlyProvider{pool, svc, ""}
@@ -138,11 +137,12 @@ func TestReloadlyResultsOnMissingUser(t *testing.T) {
 }
 
 func TestReloadlyResultsOnMissingCredentials(t *testing.T) {
-	before()
 
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
+
+	before(t, pool)
 
 	insertUserSql := `
 		INSERT INTO users(id, email)
@@ -169,11 +169,11 @@ func TestReloadlyResultsOnMissingCredentials(t *testing.T) {
 }
 
 func TestReloadlyResultsOnMissingKey(t *testing.T) {
-	before()
 
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
+	before(t, pool)
 
 	svc := &reloadly.Service{}
 	provider := &ReloadlyProvider{pool, svc, ""}
@@ -183,11 +183,11 @@ func TestReloadlyResultsOnMissingKey(t *testing.T) {
 }
 
 func TestReloadlyAuthsWithCredsBasedOnKey(t *testing.T) {
-	before()
 
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
+	before(t, pool)
 
 	insertUserSql := `
 		INSERT INTO users(id, email)

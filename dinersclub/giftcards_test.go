@@ -85,11 +85,10 @@ func TestFormatOrderAddsRandomUUIDEvenIfCustomIdentifierPresent(t *testing.T) {
 }
 
 func TestGiftCardsReportsSuccessResult(t *testing.T) {
-	before()
-
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
+	before(t, pool)
 
 	insertUserSql := `
 		INSERT INTO users(id, email)
