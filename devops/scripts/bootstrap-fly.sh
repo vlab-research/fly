@@ -23,7 +23,7 @@ kubectl apply -f dev/cockroachdb.hack.yaml
 # Migrations should be idempotent
 cat migrations/* | kubectl run -i \
   --rm cockroach-client \
-  --image=cockroachdb/cockroach:v2.1.4 \
+  --image=cockroachdb/cockroach:v21.1.9 \
   --restart=Never \
   --command -- ./cockroach sql --insecure --host db-cockroachdb-public
 
@@ -33,6 +33,7 @@ cat migrations/* | kubectl run -i \
 ######################
 helm upgrade --install kafka bitnami/kafka \
   --values values/integrations/kafka.yaml \
+  --version 22.1.6 \
   --timeout 10m0s \
   --wait
 
