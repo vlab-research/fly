@@ -42,16 +42,6 @@ function repeatResponse(question, text) {
   }
 }
 
-function resetResponse(reset) {
-  return {
-    message: {
-      text: reset.message,
-
-      // TODO: cleanup this is random
-      metadata: JSON.stringify({})
-    }
-  }
-}
 
 function getWatermark(event) {
   if (!event.read && !event.delivery) return undefined
@@ -175,15 +165,11 @@ function exec(state, nxt) {
 
     case 'REFERRAL': {
 
-      // if reset code is set...
-      // check reset code...
-      // reset can be an ACTION
-      // without any side effect / outp
-
       const form = getForm(nxt)
 
+      // TODO: improve this, make it an env var code, for example? 
       if (form === "reset") {
-        return { action: "RESET", reset: { message: "Your survey state has been reset" } }
+        return { action: "RESET" }
       }
 
       // if current form in entire history of forms, repeat previous question
@@ -498,7 +484,7 @@ function apply(state, output) {
       return {
 
         // NOTE: keep anything?
-        ..._initialState(),
+        ..._initialState("RESET"),
       }
 
     case 'SWITCH_FORM':
@@ -562,10 +548,6 @@ function act(ctx, state, output) {
       return respond({ ...ctx, md: output.md }, [], output)
     }
 
-    case 'RESET': {
-      return respond({ ...ctx }, [], output)
-    }
-
     default:
       return []
   }
@@ -615,12 +597,8 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   return [...previous, q]
 }
 
-function _response(ctx, qa, { question, validation, response, token, followUp, reset }) {
+function _response(ctx, qa, { question, validation, response, token, followUp }) {
 
-  // first check if we're resetting everything
-  if (reset) {
-    return resetResponse(reset)
-  }
 
   // if we haven't asked anything, it must be the first question!
   if (!question) {
@@ -669,8 +647,8 @@ function respond(ctx, qa, output) {
     .map(r => r.recipient ? r : addRecipient(r)) // ducktype has recipient
 }
 
-function _initialState() {
-  return { state: 'START', qa: [], forms: [] }
+function _initialState(state) {
+  return { state: state || 'START', qa: [], forms: [] }
 }
 
 function getState(log) {

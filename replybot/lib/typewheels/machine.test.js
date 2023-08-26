@@ -430,14 +430,14 @@ describe('getState', () => {
   })
 
 
-  it('Resets all state and sends reset message on reset form', () => {
+  it('Resets all state on reset form', () => {
 
-    const resetReferral = { ...referral, referral: {...referral.referral, ref: 'form.reset'}}
+    const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
     const log = [referral, echo, text, resetReferral]
 
     const state = getState(log)
 
-    state.state.should.equal('START')
+    state.state.should.equal('RESET')
     state.forms.should.eql([])
     state.qa.should.eql([])
   })
@@ -1677,12 +1677,11 @@ describe('Machine', () => {
   it('Sends reset message on reset form', () => {
     const form = {}
 
-    const resetReferral = { ...referral, referral: {...referral.referral, ref: 'form.reset'}}
+    const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
     const log = [referral, echo, text, resetReferral]
 
-    const action = getMessage(log, form, user)
+    const actions = getMessage(log, form, user)
 
-    action[0].recipient.id.should.equal('123')
-    action[0].message.text.should.contain('reset')
+    actions.should.eql([])
   })
 })

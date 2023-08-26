@@ -10,6 +10,8 @@ const Cacheman = require('cacheman')
 
 
 function getPayment(userid, pageid, timestamp, event) {
+  // TODO: some way to get a payment without a response? 
+
   const payment = _.get(event, 'message.metadata.payment')
   if (!payment) return
 
@@ -103,6 +105,19 @@ class Machine {
         // if not action, don't publish report, because the state doesn't change
         return {
           publish: false,
+          timestamp,
+          user,
+          page,
+          newState,
+          payment
+        }
+      }
+
+      if (output.action === 'RESET') {
+
+        // publish a report, but don't do anything else, state is reset, no actions or responses
+        return {
+          publish: true,
           timestamp,
           user,
           page,

@@ -75,8 +75,6 @@ describe('machine.run', () => {
   })
 
 
-
-
   it('returns a report with actions if all goes well', async () => {
     const m = new Machine()
     m.transition = () => ({ newState: {}, output: {} })
@@ -232,6 +230,25 @@ describe('Machine integrated', () => {
     report.publish.should.be.false
     report.newState.should.eql(state)
     should.not.exist(report.actions)
+  })
+
+
+  it('returns a report with publish true when there is a reset state', async () => {
+    const m = new Machine()
+    const state = { state: 'RESPONDING', qa: [], forms: ['foo'] }
+    const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
+    const report = await m.run(state, 'bar', resetReferral)
+
+    report.user.should.equal('bar')
+
+    should.not.exist(report.error)
+
+    report.timestamp.should.equal(referral.timestamp)
+    report.publish.should.be.true
+
+    report.newState.state.should.eql("RESET")
+    should.not.exist(report.actions)
+
   })
 
 
