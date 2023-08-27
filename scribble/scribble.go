@@ -32,6 +32,11 @@ func monitor(errs <-chan error) {
 	log.Fatalf("Scribble failed with error: %v", e)
 }
 
+func checkError(err error) {
+	// TODO: add acceptable errors?
+	log.Fatalf("Scribble failed with error: %v", err)
+}
+
 func handle(err error) {
 	if err != nil {
 		log.Fatal(err)
@@ -95,6 +100,6 @@ func main() {
 	// getwriter takes the struct, not marshalwriteable
 	writer := GetWriter(getMarshaller(&cfg, pool))
 	for {
-		c.SideEffect(writer.Write, errs)
+		c.SideEffect(writer.Write, checkError, errs)
 	}
 }
