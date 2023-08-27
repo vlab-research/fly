@@ -127,28 +127,30 @@ describe('Machine integrated', () => {
 
     m.getForm = () => Promise.resolve([{
       logic: [],
-      fields: [{ type: 'statement', title: 'foo', ref: 'foo' },
-      { type: 'short_text', title: 'bar', ref: 'bar' }]
+      fields: [
+        { type: 'short_text', title: 'foo', ref: 'foo' },
+        { type: 'short_text', title: 'bar', ref: 'bar', properties: { description: JSON.stringify({ payment: { provider: 'reloadly', details: { foo: 'bar' } } }) } }
+      ]
     }, 'foo'])
 
-    const md = { ref: 'foo', type: 'payment', payment: { provider: 'reloadly', details: { foo: 'bar' } } }
-
-    const event = _echo(md)
+    const event = text
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-    m.sendMessage = () => Promise.resolve({})
 
-    const report = await m.run({ state: 'RESPONDING', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
+    m.sendMessage = () => Promise.resolve({})
+    const report = await m.run({ state: 'QOUT', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
     report.user.should.equal('bar')
+
     should.not.exist(report.error)
     report.timestamp.should.equal(event.timestamp)
-    report.actions.should.eql([])
+    report.actions[0].message.text.should.eql('bar')
     report.publish.should.be.true
+
     report.payment.should.eql({
       userid: 'bar',
       pageid: '1051551461692797',
-      timestamp: 5,
+      timestamp: event.timestamp,
       provider: 'reloadly',
       details: { foo: 'bar' }
     })
@@ -182,7 +184,6 @@ describe('Machine integrated', () => {
 
     report.user.should.equal('bar')
 
-    console.log(report)
     should.not.exist(report.error)
     report.timestamp.should.equal(event.timestamp)
     report.actions.should.eql([])

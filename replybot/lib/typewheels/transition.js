@@ -9,23 +9,6 @@ const util = require('util')
 const Cacheman = require('cacheman')
 
 
-function getPayment(userid, pageid, timestamp, event) {
-  // TODO: some way to get a payment without a response? 
-
-  const payment = _.get(event, 'message.metadata.payment')
-  if (!payment) return
-
-  const repeat = _.get(event, 'message.metadata.isRepeat')
-  if (repeat) return
-
-  // todo: handle errors from bad forms until
-  // form validation exists
-  const { provider } = payment
-  if (!provider) return
-
-  return { userid, pageid, timestamp, ...payment }
-}
-
 class Machine {
   constructor(ttl, tokenStore) {
     const cache = new Cacheman()
@@ -69,22 +52,25 @@ class Machine {
 
     const user = await this.getUser(userId, pageToken)
 
-    const actions = act({ form, user }, state, output)
+    const { messages, payments } = act({ form, user, page: { id: pageId }, timestamp }, state, output)
+
     const responses = responseVals(newState, upd, form, surveyId, pageId, userId, timestamp)
 
-    return { actions, responses, pageToken, timestamp }
+    return { actions: messages, responses, pageToken, timestamp, payments }
   }
 
-  async act(actions, pageToken) {
+  async act(messages, pageToken) {
 
-    for (const action of actions) {
+    for (const action of messages) {
+
       await this.sendMessage(action, pageToken)
+
     }
   }
 
 
   async run(state, user, rawEvent) {
-    let newState, output, page, payment
+    let newState, output, page
     const event = parseEvent(rawEvent)
     const timestamp = event.timestamp
 
@@ -98,8 +84,6 @@ class Machine {
       output = t.output
       page = t.page
 
-      payment = getPayment(user, page, timestamp, event)
-
       if (output.action === 'NONE') {
 
         // if not action, don't publish report, because the state doesn't change
@@ -108,21 +92,19 @@ class Machine {
           timestamp,
           user,
           page,
-          newState,
-          payment
+          newState
         }
       }
 
       if (output.action === 'RESET') {
 
-        // publish a report, but don't do anything else, state is reset, no actions or responses
+        // publish a report, but don't do anything else, state is reset, no messages or responses
         return {
           publish: true,
           timestamp,
           user,
           page,
-          newState,
-          payment
+          newState
         }
       }
 
@@ -138,8 +120,14 @@ class Machine {
     try {
 
       // Create successful report
-      const { actions, pageToken, responses } = await this.actionsResponses(state, user, timestamp, page, newState, output)
+      const { actions, pageToken, responses, payments } = await this.actionsResponses(state, user, timestamp, page, newState, output)
+
       await this.act(actions, pageToken)
+
+      // TODO: clean up --> currently we assume one payment
+      // make more generic when you rename as side_effect
+      const payment = payments && payments[0]
+
       return {
         publish: true,
         timestamp,
@@ -158,7 +146,6 @@ class Machine {
           timestamp,
           user,
           page,
-          payment,
           newState,
           error: { ...e.details, tag: e.tag, message: e.message, stack: e.stack }
         }
@@ -168,7 +155,6 @@ class Machine {
           timestamp,
           user,
           page,
-          payment,
           newState,
           error: { tag: 'STATE_ACTIONS', message: e.message, stack: e.stack }
         }

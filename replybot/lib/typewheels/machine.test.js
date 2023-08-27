@@ -662,11 +662,11 @@ describe('getState', () => {
 
     const state = getState(log)
     const output = exec(state, externalEvent)
-    const action = act({ form, user: {} }, state, output)[0]
+    const actions = act({ form, user: {} }, state, output)
     output.action.should.equal('SWITCH_FORM')
     output.form.should.equal('BAR')
-    action.recipient.one_time_notif_token.should.equal('FOOBAR')
-    action.message.text.should.equal('barbaz')
+    actions.messages[0].recipient.one_time_notif_token.should.equal('FOOBAR')
+    actions.messages[0].message.text.should.equal('barbaz')
   })
 })
 
@@ -676,15 +676,15 @@ describe('Machine', () => {
 
   it('gets the correct start field even with no referral', () => {
     const output = exec(_initialState(), text)
-    const action = act({ user, form, log: [text] }, _initialState(), output)[0]
-    action.message.text.should.equal(form.fields[0].title)
+    const actions = act({ user, form, log: [text] }, _initialState(), output)
+    actions.messages[0].message.text.should.equal(form.fields[0].title)
   })
 
   it('sends the first message when it gets a referral', () => {
     const output = exec(_initialState(), referral)
-    const action = act({ user, form, log: [referral] }, _initialState(), output)[0]
+    const actions = act({ user, form, log: [referral] }, _initialState(), output)
 
-    action.message.text.should.equal(form.fields[0].title)
+    actions.messages[0].message.text.should.equal(form.fields[0].title)
   })
 
   it('Validates answers via postback', () => {
@@ -695,8 +695,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, delivery, multipleChoice]
-    const action = getMessage(log, form, user)[0]
-    action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
   })
 
   it('Invalidates answers to legal when not in set', () => {
@@ -707,8 +707,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
-    JSON.parse(action.message.metadata).repeat.should.be.true
+    const actions = getMessage(log, form, user)
+    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
   })
 
 
@@ -721,8 +721,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
-    const action = getMessage(log, form, user)[0]
-    JSON.parse(action.message.metadata).repeat.should.be.true
+    const actions = getMessage(log, form, user)
+    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
   })
 
 
@@ -816,8 +816,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
-    action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
   })
 
   it('Responds to opening text without referral', () => {
@@ -830,8 +830,8 @@ describe('Machine', () => {
 
     const log = [text]
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(2)
-    actions.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
+    actions.messages.length.should.equal(2)
+    actions.messages.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
   })
 
   it('Keeps metadata from opening form switch', () => {
@@ -843,8 +843,8 @@ describe('Machine', () => {
 
     const log = [referral, echo, text]
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(1)
-    actions[0].message.text.should.equal('bar')
+    actions.messages.length.should.equal(1)
+    actions.messages[0].message.text.should.equal('bar')
   })
 
   it('Responds to opening sticker without referral', () => {
@@ -857,8 +857,8 @@ describe('Machine', () => {
 
     const log = [text]
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(2)
-    actions.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
+    actions.messages.length.should.equal(2)
+    actions.messages.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
   })
 
   it('Sends multiple questions if first is statement', () => {
@@ -872,8 +872,8 @@ describe('Machine', () => {
 
     const log = [referral]
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(3)
-    actions.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
+    actions.messages.length.should.equal(3)
+    actions.messages.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
   })
 
   it('Sends multiple questions if first is moveOn', () => {
@@ -886,9 +886,9 @@ describe('Machine', () => {
 
     const log = [referral]
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(2)
-    actions[0].message.attachment.payload.buttons[0].url.should.equal('foo.com')
-    actions[1].message.text.should.equal('foo')
+    actions.messages.length.should.equal(2)
+    actions.messages[0].message.attachment.payload.buttons[0].url.should.equal('foo.com')
+    actions.messages[1].message.text.should.equal('foo')
   })
 
   it('Ignores responses to a statement if it is moving on to another question', () => {
@@ -899,8 +899,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, statementEcho, delivery, text]
-    const action = getMessage(log, form, user)[0]
-    should.not.exist(action)
+    const actions = getMessage(log, form, user)
+    should.not.exist(actions.messages[0])
   })
 
   it('Responds to 0 as a text input', () => {
@@ -911,8 +911,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, delivery, { ...text, message: { text: 0 } }]
-    const action = getMessage(log, form, user)[0]
-    action.message.text.should.equal('bar')
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('bar')
   })
 
 
@@ -926,8 +926,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, statementEcho, delivery, echo2]
-    const action = getMessage(log, form, user)[0]
-    should.not.exist(action)
+    const actions = getMessage(log, form, user)
+    should.not.exist(actions.messages[0])
   })
 
   it('Sends a repeat message after an answer to a statement in the end', () => {
@@ -939,8 +939,8 @@ describe('Machine', () => {
 
     const log = [referral, tyEcho, delivery, text]
     const actions = getMessage(log, form, user)
-    JSON.parse(actions[0].message.metadata).repeat.should.be.true
-    JSON.parse(actions[1].message.metadata).isRepeat.should.be.true
+    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
+    JSON.parse(actions.messages[1].message.metadata).isRepeat.should.be.true
   })
 
   it('Responds to is_echos that come after the delivery watermark', () => {
@@ -952,8 +952,8 @@ describe('Machine', () => {
 
 
     const log = [referral, delivery, { ...echo, timestamp: delivery.delivery.watermark }, text]
-    const action = getMessage(log, form, user)[0]
-    action.message.text.should.equal('baz')
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('baz')
   })
 
   it('Responds to is_echos that come before the delivery watermark', () => {
@@ -965,8 +965,8 @@ describe('Machine', () => {
 
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
-    action.message.text.should.equal('baz')
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('baz')
   })
 
 
@@ -995,8 +995,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
-    action.message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
   })
 
   it('it follows logic jumps from postbacks', () => {
@@ -1027,8 +1027,8 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, multipleChoice]
-    const action = getMessage(log, form, user)[0]
-    action.message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
   })
 
 
@@ -1062,8 +1062,8 @@ describe('Machine', () => {
 
     const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: { type: 'external', value: { type: 'payment:reloadly' } } }), event]
 
-    const action = getMessage(log, form, user)[1]
-    action.message.should.deep.equal({ text: 'qux', metadata: '{"ref":"qux"}' })
+    const actions = getMessage(log, form, user)
+    actions.messages[1].message.should.deep.equal({ text: 'qux', metadata: '{"ref":"qux"}' })
   })
 
   it('repeats when it misses validation', () => {
@@ -1079,10 +1079,10 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    actions[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions[0].message.text.should.contain('Sorry')
+    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions.messages[0].message.text.should.contain('Sorry')
 
-    actions[1].message.metadata.should.equal('{"isRepeat":true,"ref":"foo"}')
+    actions.messages[1].message.metadata.should.equal('{"isRepeat":true,"ref":"foo"}')
   })
 
 
@@ -1097,10 +1097,10 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    actions[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions[0].message.text.should.contain('No response')
+    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions.messages[0].message.text.should.contain('No response')
 
-    actions[1].message.metadata.should.equal('{"isRepeat":true,"type":"wait","ref":"foo"}')
+    actions.messages[1].message.metadata.should.equal('{"isRepeat":true,"type":"wait","ref":"foo"}')
   })
 
   it('uses custom_messages when they exist', () => {
@@ -1114,11 +1114,11 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    action.message.text.should.equal('baz error')
+    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions.messages[0].message.text.should.equal('baz error')
   })
 
 
@@ -1133,11 +1133,11 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, delivery, text]
-    const action = getMessage(log, form, user)[0]
+    const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    action.message.text.should.equal('baz error')
+    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions.messages[0].message.text.should.equal('baz error')
   })
 
   it('If a wait is a statement, it does not send multiple items', () => {
@@ -1151,8 +1151,8 @@ describe('Machine', () => {
     const wait = { type: 'timeout', value: '1 minute', response: 'baz' }
     const log = [referral]
 
-    const action = getMessage(log, form, user)
-    action.length.should.equal(1)
+    const actions = getMessage(log, form, user)
+    actions.messages.length.should.equal(1)
   })
 
   it('repeats with custom response when responding to a wait ', () => {
@@ -1166,12 +1166,12 @@ describe('Machine', () => {
     const log = [referral, echo, text]
 
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(2)
+    actions.messages.length.should.equal(2)
 
     // repeat ref foo with sorry message...
-    actions[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions[0].message.text.should.contain('baz')
-    actions[1].message.text.should.contain('foo')
+    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions.messages[0].message.text.should.contain('baz')
+    actions.messages[1].message.text.should.contain('foo')
   })
 
   it('repeats with default response when responding to a wait without response', () => {
@@ -1188,12 +1188,12 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user)
 
-    actions.length.should.equal(2)
+    actions.messages.length.should.equal(2)
 
     // repeat ref foo with sorry message...
-    actions[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions[0].message.text.should.contain('No response is necessary')
-    actions[1].message.text.should.contain('foo')
+    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions.messages[0].message.text.should.contain('No response is necessary')
+    actions.messages[1].message.text.should.contain('foo')
   })
 
   it('sends the messages to the token if a token is needed', () => {
@@ -1217,10 +1217,10 @@ describe('Machine', () => {
 
     const log = [referral, optin, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, externalEvent]
 
-    const action = getMessage(log, form, user)
-    action.length.should.equal(1)
-    action[0].recipient.one_time_notif_token.should.equal('FOOBAR')
-    action[0].message.text.should.equal('bar')
+    const actions = getMessage(log, form, user)
+    actions.messages.length.should.equal(1)
+    actions.messages[0].recipient.one_time_notif_token.should.equal('FOOBAR')
+    actions.messages[0].message.text.should.equal('bar')
   })
 
 
@@ -1232,13 +1232,13 @@ describe('Machine', () => {
     }
 
     const log = [referral]
-    const action = getMessage(log, form, user)
-    action.length.should.equal(1)
+    const actions = getMessage(log, form, user)
+    actions.messages.length.should.equal(1)
 
-    action[0].messaging_type.should.equal("MESSAGE_TAG")
-    action[0].tag.should.equal("CONFIRMED_EVENT_UPDATE")
-    action[0].recipient.id.should.equal('123')
-    action[0].message.text.should.equal('bar')
+    actions.messages[0].messaging_type.should.equal("MESSAGE_TAG")
+    actions.messages[0].tag.should.equal("CONFIRMED_EVENT_UPDATE")
+    actions.messages[0].recipient.id.should.equal('123')
+    actions.messages[0].message.text.should.equal('bar')
   })
 
 
@@ -1253,9 +1253,9 @@ describe('Machine', () => {
     }
 
     const log = [referral]
-    const action = getMessage(log, form, user)[0]
-    JSON.parse(action.message.metadata)['type'].should.equal('stitch')
-    JSON.parse(action.message.metadata)['stitch']['form'].should.equal('BAR')
+    const actions = getMessage(log, form, user)
+    JSON.parse(actions.messages[0].message.metadata)['type'].should.equal('stitch')
+    JSON.parse(actions.messages[0].message.metadata)['stitch']['form'].should.equal('BAR')
   })
 
 
@@ -1268,9 +1268,9 @@ describe('Machine', () => {
     }
 
     const log = [payloadReferral]
-    const action = getMessage(log, form, user)[0]
+    const actions = getMessage(log, form, user)
 
-    action.message.text.should.equal('foo')
+    actions.messages[0].message.text.should.equal('foo')
   })
 
 
@@ -1283,8 +1283,8 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
 
-    const action = getMessage(log, form, user)[0]
-    action.message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
   })
 
 
@@ -1295,8 +1295,8 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    should.not.exist(getMessage([referral, referral], form, user)[0])
-    should.not.exist(getMessage([referral, delivery, echo, text, referral], form, user)[0])
+    should.not.exist(getMessage([referral, referral], form, user).messages[0])
+    should.not.exist(getMessage([referral, delivery, echo, text, referral], form, user).messages[0])
   })
 
 
@@ -1309,8 +1309,8 @@ describe('Machine', () => {
 
     const wait = { type: 'timeout', value: '1 minute' }
     const log = [referral, { ...echo, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, referral]
-
-    should.not.exist(getMessage(log, form, user)[0])
+    const actions = getMessage(log, form, user)
+    should.not.exist(actions.messages[0])
   })
 
 
@@ -1321,9 +1321,9 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const messages = getMessage([referral, delivery, echo, referral], form, user)
-    JSON.parse(messages[0].message.metadata).repeat.should.be.true
-    messages[1].message.text.should.equal('foo')
+    const actions = getMessage([referral, delivery, echo, referral], form, user)
+    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
+    actions.messages[1].message.text.should.equal('foo')
   })
 
   it('ignores referrals when the person is the referrer ', () => {
@@ -1348,8 +1348,8 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
     const log = [referral, delivery, echo, qr, qr]
-    const action = getMessage(log, form, user)[0]
-    should.not.exist(action)
+    const actions = getMessage(log, form, user)
+    should.not.exist(actions.messages[0])
   })
 
 
@@ -1362,8 +1362,8 @@ describe('Machine', () => {
 
     const response = { ...qr, message: { quick_reply: { payload: { value: "quux", ref: "foo" } } } }
     const log = [referral, echo, delivery, response]
-    const action = getMessage(log, form, user)[0]
-    action.message.text.should.equal('bar')
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('bar')
   })
 
   it('Validates a quick reply with 0 value', () => {
@@ -1375,8 +1375,8 @@ describe('Machine', () => {
 
     const response = { ...qr, message: { quick_reply: { payload: { value: 0, ref: "foo" } } } }
     const log = [referral, echo, delivery, response]
-    const action = getMessage(log, form, user)[0]
-    action.message.text.should.equal('bar')
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('bar')
   })
 
   it('Validates a quick reply when payload is string (as in email)', () => {
@@ -1388,8 +1388,8 @@ describe('Machine', () => {
 
     const response = { ...qr, message: { quick_reply: { payload: "foo@gmail.com" } } }
     const log = [referral, echo, delivery, response]
-    const action = getMessage(log, form, user)[0]
-    action.message.text.should.equal('bar')
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('bar')
   })
 
 
@@ -1406,8 +1406,8 @@ describe('Machine', () => {
 
     const log = [referral, del1, echo, delivery, response]
 
-    const action = getMessage(log, form, user)[0]
-    JSON.parse(action.message.metadata).repeat.should.be.true
+    const actions = getMessage(log, form, user)
+    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
   })
 
 
@@ -1424,8 +1424,8 @@ describe('Machine', () => {
 
     const log = [referral, echo, optin]
 
-    const action = getMessage(log, form, user)[0]
-    action.message.text.should.equal('bar')
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('bar')
   })
 
   it('Invalidates an optin when it comes from nowhere', () => {
@@ -1438,8 +1438,8 @@ describe('Machine', () => {
 
     const log = [referral, _echo('bar'), optin]
 
-    const action = getMessage(log, form, user)[0]
-    JSON.parse(action.message.metadata).repeat.should.be.true
+    const actions = getMessage(log, form, user)
+    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
   })
 
 
@@ -1453,9 +1453,9 @@ describe('Machine', () => {
     const log = [referral, echo, fu]
 
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(2)
-    actions[0].message.text.should.equal(followUpMessage({}))
-    actions[1].message.text.should.equal('foo')
+    actions.messages.length.should.equal(2)
+    actions.messages[0].message.text.should.equal(followUpMessage({}))
+    actions.messages[1].message.text.should.equal('foo')
   })
 
 
@@ -1469,7 +1469,7 @@ describe('Machine', () => {
     const log = [referral, echo, text, fu]
 
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(0)
+    actions.messages.length.should.equal(0)
   })
 
 
@@ -1484,7 +1484,7 @@ describe('Machine', () => {
     const log = [referral, _echo('foo'), text, _echo('bar'), fu]
 
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(0)
+    actions.messages.length.should.equal(0)
   })
 
   it('Resends a waiting message with a redo event', () => {
@@ -1496,8 +1496,8 @@ describe('Machine', () => {
 
     const log = [referral, synthetic({ type: 'redo' })]
     const actions = getMessage(log, form, user)
-    actions[0].message.text.should.equal('foo')
-    actions[1].message.text.should.equal('bar')
+    actions.messages[0].message.text.should.equal('foo')
+    actions.messages[1].message.text.should.equal('bar')
 
     const state = getState(log)
     state.retries.should.eql([20])
@@ -1515,7 +1515,7 @@ describe('Machine', () => {
     const log = [referral, echo, text, report, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
-    actions[0].message.text.should.equal('bar')
+    actions.messages[0].message.text.should.equal('bar')
 
     const state = getState(log)
     state.retries.should.eql([20])
@@ -1544,7 +1544,7 @@ describe('Machine', () => {
     ]
 
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(1)
+    actions.messages.length.should.equal(1)
 
     const state = getState(log)
     should.not.exist(state.retries)
@@ -1563,8 +1563,8 @@ describe('Machine', () => {
     const log = [referral, statementEcho, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
-    actions[0].message.text.should.equal('foo')
-    actions[1].message.text.should.equal('bar')
+    actions.messages[0].message.text.should.equal('foo')
+    actions.messages[1].message.text.should.equal('bar')
   })
 
 
@@ -1588,11 +1588,11 @@ describe('Machine', () => {
 
     const log = [referral, optin, _echo({ wait, ref: 'foo' }), externalEvent, synthetic({ type: 'redo' })]
 
-    const action = getMessage(log, form, user)
+    const actions = getMessage(log, form, user)
 
-    action.length.should.equal(1)
-    action[0].recipient.one_time_notif_token.should.equal('FOOBAR')
-    action[0].message.text.should.equal('bar')
+    actions.messages.length.should.equal(1)
+    actions.messages[0].recipient.one_time_notif_token.should.equal('FOOBAR')
+    actions.messages[0].message.text.should.equal('bar')
   })
 
 
@@ -1604,10 +1604,10 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, text, synthetic({ type: 'redo' })]
-    const action = getMessage(log, form, user)[0]
+    const actions = getMessage(log, form, user)
 
-    action.message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    action.message.text.should.contain('Sorry')
+    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
+    actions.messages[0].message.text.should.contain('Sorry')
   })
 
 
@@ -1633,9 +1633,9 @@ describe('Machine', () => {
     const log = [referral, _echo(metadata), synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(2)
-    actions[0].message.text.should.equal('foo')
-    actions[1].message.text.should.equal('bar')
+    actions.messages.length.should.equal(2)
+    actions.messages[0].message.text.should.equal('foo')
+    actions.messages[1].message.text.should.equal('bar')
   })
 
 
@@ -1650,9 +1650,9 @@ describe('Machine', () => {
     const log = [referral, echo, pr, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
-    actions.length.should.equal(2)
-    actions[0].message.text.should.equal('foo')
-    actions[1].message.text.should.equal('bar')
+    actions.messages.length.should.equal(2)
+    actions.messages[0].message.text.should.equal('foo')
+    actions.messages[1].message.text.should.equal('bar')
   })
 
 
@@ -1669,19 +1669,72 @@ describe('Machine', () => {
     const echoBar = _.set(echo, 'message.metadata.ref', 'bar')
 
     const log = [referral, statementEcho, echoBar, synthetic({ type: 'redo' })]
-    const action = getMessage(log, form, user)[0]
+    const actions = getMessage(log, form, user)
 
-    should.not.exist(action)
+    should.not.exist(actions.messages[0])
   })
 
   it('Sends reset message on reset form', () => {
     const form = {}
 
     const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
+
     const log = [referral, echo, text, resetReferral]
 
     const actions = getMessage(log, form, user)
 
-    actions.should.eql([])
+    actions.messages.should.eql([])
+  })
+
+  it('Sends a payment event when payment in the description', () => {
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'bar', ref: 'bar' },
+
+        { type: 'statement', title: 'foo', ref: 'foo', properties: { description: JSON.stringify({ payment: { type: 'reloadly', details: { foo: 'bar' } } }) } },
+      ]
+    }
+
+    const log = [referral, _echo('bar'), text]
+    const actions = getMessage(log, form, user, { id: 'bar' })
+
+    actions.messages.length.should.equal(1)
+    const md = JSON.parse(actions.messages[0].message.metadata)
+
+    // NOTE: do we still need the payment in the metadata? Doesn't hurt...
+    md.should.eql({ ref: 'foo', type: 'statement', payment: { type: 'reloadly', details: { foo: 'bar' } } })
+    actions.messages[0].message.text.should.equal('foo')
+
+    actions.payments[0].details.should.eql({ foo: 'bar' })
+    actions.payments[0].userid.should.eql(user.id)
+
+    const state = getState(log)
+    state.state.should.equal('RESPONDING')
+    state.question.should.equal('bar')
+  })
+
+  it('Resends a payment event on repeat_payment synthetic event, without sending message', () => {
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'statement', title: 'foo', ref: 'foo', properties: { description: JSON.stringify({ payment: { type: 'reloadly', details: { foo: 'bar' } } }) } },
+        { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
+
+    const log = [referral, _echo('foo'), synthetic({ type: 'repeat_payment', value: { question: "foo" } })]
+
+    const actions = getMessage(log, form, user, { id: 'bar' })
+
+    should.not.exist(actions.messages[0])
+
+    actions.payments[0].details.should.eql({ foo: 'bar' })
+    actions.payments[0].userid.should.eql(user.id)
+
+    const state = getState(log)
+
+    // keeps the same state question p
+    state.state.should.equal('QOUT')
+    state.question.should.equal('foo')
   })
 })

@@ -86,6 +86,7 @@ function categorizeEvent(nxt) {
   if (nxt.optin) return 'OPTIN'
   if (_synth('unblock', nxt)) return 'UNBLOCK'
   if (_synth('follow_up', nxt)) return 'FOLLOW_UP'
+  if (_synth('repeat_payment', nxt)) return 'REPEAT_PAYMENT'
   if (_synth('redo', nxt)) return 'REDO'
   if (_synth('platform_response', nxt)) return 'PLATFORM_RESPONSE'
   if (_synth('machine_report', nxt)) return 'MACHINE_REPORT'
@@ -167,7 +168,7 @@ function exec(state, nxt) {
 
       const form = getForm(nxt)
 
-      // TODO: improve this, make it an env var code, for example? 
+      // TODO: improve this, make it an env var code, for example?
       if (form === "reset") {
         return { action: "RESET" }
       }
@@ -240,6 +241,14 @@ function exec(state, nxt) {
         ...state.previousOutput,
         action: 'RESPOND_AGAIN',
         stateUpdate: { retries: newRetries }
+      }
+    }
+
+    case 'REPEAT_PAYMENT': {
+
+      return {
+        action: 'MAKE_PAYMENT',
+        question: nxt.event.value.question
       }
     }
 
@@ -531,26 +540,65 @@ function apply(state, output) {
   }
 }
 
+// change what is returned
+// actions can be: responses, payments, reports...?
 function act(ctx, state, output) {
   switch (output.action) {
 
+    // on the echo?? events??
+
     case 'RESPOND': {
+
       const qa = apply(state, output).qa
-      return respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
+      const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
+      const payments = messages.map(m => getPaymentFromMessage(ctx, m)).filter(x => !!x)
+
+      return { messages, payments }
     }
 
     case 'RESPOND_AGAIN': {
       const qa = state.qa
-      return respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
+      return {
+        messages: respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output),
+        payments: []
+      }
     }
 
     case 'SWITCH_FORM': {
-      return respond({ ...ctx, md: output.md }, [], output)
+      return {
+        messages: respond({ ...ctx, md: output.md }, [], output),
+        payments: []
+      }
+    }
+
+    case 'MAKE_PAYMENT': {
+      const qa = state.qa
+      const payment = _wrapPayment(ctx, getPayment(ctx, qa, output.question))
+      return { messages: [], payments: [payment] }
     }
 
     default:
-      return []
+      return { messages: [], payments: [] }
   }
+}
+
+function getPayment(ctx, qa, ref) {
+  const f = getField(ctx, ref)
+  const message = translateField(ctx, qa, f)
+  const md = JSON.parse(message.message.metadata)
+  const { payment } = md || {} // TODO: defensive??
+
+  return payment
+}
+
+function _wrapPayment(ctx, payment) {
+  if (!payment) return
+  return { userid: ctx.user.id, pageid: ctx.page.id, timestamp: ctx.timestamp, ...payment }
+}
+
+function getPaymentFromMessage(ctx, message) {
+  const { payment } = JSON.parse(message.message.metadata)
+  return _wrapPayment(ctx, payment)
 }
 
 function updateQA(qa, u) {
@@ -658,10 +706,10 @@ function getState(log) {
   return log.reduce((s, e) => apply(s, exec(s, e)), _initialState())
 }
 
-function getMessage(log, form, user) {
+function getMessage(log, form, user, page) {
   const event = log.slice(-1)[0]
   const state = getState(log.slice(0, -1))
-  return act({ form, user }, state, exec(state, event))
+  return act({ form, user, page }, state, exec(state, event))
 }
 
 
