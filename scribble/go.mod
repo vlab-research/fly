@@ -12,5 +12,5 @@ require (
 	github.com/jackc/pgx/v4 v4.8.1
 	github.com/stretchr/testify v1.8.2
 	github.com/vlab-research/spine v0.1.0
-	github.com/vlab-research/trans v0.0.10
+	github.com/vlab-research/trans v0.0.12
 )

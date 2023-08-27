@@ -1627,6 +1627,8 @@ github.com/vlab-research/spine v0.1.0 h1:j+/eXMc9UNettqt7DOQ2AHyHqa3BH4D9mtnq0Yd
 github.com/vlab-research/spine v0.1.0/go.mod h1:ReNd2JC7m3+n43Qm/cgJppbCYBOpMsor7JP7zMVy3+I=
 github.com/vlab-research/trans v0.0.10 h1:FdFz+mwrxuceJo/cjCbZ4vqAuJwgxrAjKpFvFfCxaMY=
 github.com/vlab-research/trans v0.0.10/go.mod h1:760R69NitmG7XcxEOF0OuuQjxvZiLGqG5sL493lmfjw=
+github.com/vlab-research/trans v0.0.12 h1:rO6NQ6puUFkELSTx5Fdm5GBBBer6dDvlNuuQ7Nnz8IM=
+github.com/vlab-research/trans v0.0.12/go.mod h1:760R69NitmG7XcxEOF0OuuQjxvZiLGqG5sL493lmfjw=
 github.com/willf/bitset v1.1.11-0.20200630133818-d5bec3311243/go.mod h1:RjeCKbqT1RxIR/KWY6phxZiaY1IyutSBfGjNPySAYV4=
 github.com/willf/bitset v1.1.11/go.mod h1:83CECat5yLh5zVOf4P1ErAgKA5UDvKtgyUABdr3+MjI=
 github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f/go.mod h1:N2zxlSyiKSe5eX1tZViRH5QA0qijqEDrYZiPEAiq3wU=
