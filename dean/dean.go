@@ -60,6 +60,7 @@ type Config struct {
 	FollowUpMin        string        `env:"DEAN_FOLLOWUP_MIN,required"`
 	FollowUpMax        string        `env:"DEAN_FOLLOWUP_MAX,required"`
 	PaymentGrace       string        `env:"DEAN_PAYMENT_GRACE,required"`
+	PaymentInterval    string        `env:"DEAN_PAYMENT_INTERVAL,required"`
 }
 
 func send(cfg *Config, client *http.Client, e *ExternalEvent) error {

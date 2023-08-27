@@ -136,11 +136,12 @@ func Payments(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	      FROM states
 	      WHERE current_state = 'WAIT_EXTERNAL_EVENT'
 	      AND state_json->'wait'->>'type' != 'timeout'
-	      AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($1)::INTERVAL)) < $2
+	      AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($1)::INTERVAL)) < $3
+              AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($2)::INTERVAL)) > $3
         `
 	d := time.Now().UTC()
 
-	return get(conn, getPayment, query, cfg.PaymentGrace, d)
+	return get(conn, getPayment, query, cfg.PaymentGrace, cfg.PaymentInterval, d)
 }
 
 func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {

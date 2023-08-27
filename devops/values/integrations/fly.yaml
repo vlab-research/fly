@@ -25,7 +25,7 @@ versionDashboard: &vdashboard v0.0.33
 versionBotserver: &vbotserver v0.0.10
 versionReplybot: &vreplybot v0.0.146
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.27
+versionDean: &vdean v0.0.28
 versionScribble: &vscribble v0.0.23
 versionDinersclub: &vdinersclub v0.0.27
 versionFormcentral: &vformcentral v0.0.10
@@ -290,8 +290,10 @@ dean:
     value: "24 hours"
   - name: DEAN_RESPONDING_INTERVAL
     value: "23 hours"
-  - name: DEAN_RESPONDING_GRACE
-    value: "1 hour"
+  - name: DEAN_PAYMENT_GRACE
+    value: "2 minutes"
+  - name: DEAN_PAYMENT_INTERVAL
+    value: "24 hours"
   - name: DEAN_SEND_DELAY
     value: "1ms"
   - name: DEAN_FOLLOWUP_MIN

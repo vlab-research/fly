@@ -443,15 +443,18 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 
 }
 
-func TestGetPaymentsGetsOnlyThoseWhovePassedGrace(t *testing.T) {
+func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
 	before(pool)
 
 	tsA := time.Now().UTC().Add(-10 * time.Hour)
 	tsB := time.Now().UTC().Add(-4 * time.Hour)
+	tsC := time.Now().UTC().Add(-50 * time.Hour)
+
 	msA := tsA.Unix() * 1000
 	msB := tsB.Unix() * 1000
+	msC := tsC.Unix() * 1000
 
 	mustExec(t, pool, insertQuery,
 		"foo",
@@ -475,7 +478,21 @@ func TestGetPaymentsGetsOnlyThoseWhovePassedGrace(t *testing.T) {
                       "question": "foo_bar",
                       "wait": { "type": "external:reloadly", "value": {"type": "foo", "id": "payment_id"}}}`, msB))
 
-	cfg := &Config{PaymentGrace: "8 hours"}
+	mustExec(t, pool, insertQuery,
+		"qux",
+		"bar",
+		tsC,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "question": "foo_bar",
+                      "wait": { "type": "external:reloadly", "value": {"type": "foo", "id": "payment_id"}}}`, msC))
+
+	cfg := &Config{
+		PaymentGrace:    "8 hours",
+		PaymentInterval: "2 days",
+	}
 
 	ch := Payments(cfg, pool)
 	events := getEvents(ch)
