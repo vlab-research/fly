@@ -290,6 +290,8 @@ dean:
     value: "24 hours"
   - name: DEAN_RESPONDING_INTERVAL
     value: "23 hours"
+  - name: DEAN_RESPONDING_GRACE
+    value: "1 hour"
   - name: DEAN_PAYMENT_GRACE
     value: "2 minutes"
   - name: DEAN_PAYMENT_INTERVAL
