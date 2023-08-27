@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/dgraph-io/ristretto"
 	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v4/pgxpool"

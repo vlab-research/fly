@@ -3,12 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"testing"
-
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"testing"
 )
 
 func makeMessages(vals []string) []*kafka.Message {

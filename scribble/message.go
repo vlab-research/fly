@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
-	"time"
-
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"time"
 )
 
 type Message struct {

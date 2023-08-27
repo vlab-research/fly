@@ -3,12 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
-
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/dgraph-io/ristretto"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/vlab-research/trans"
+	"log"
 )
 
 // quick hack to keep nulls in db
@@ -127,7 +126,7 @@ func (r ResponseScribbler) cachedTranslator(response *Response) (*trans.FormTran
 		return nil, nil
 	}
 
-	translator, err := trans.MakeTranslatorByRef(src, dest) 
+	translator, err := trans.MakeTranslatorByRef(src, dest)
 	if err != nil {
 		// This shouldn't happen, it's an error!
 		return nil, err

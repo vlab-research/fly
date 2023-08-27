@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"testing"
-
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/stretchr/testify/assert"
+	"testing"
 )
 
 type StringData struct {

@@ -1,11 +1,10 @@
 package main
 
 import (
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
-
-	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestMessageWriterWritesGoodData(t *testing.T) {
