@@ -59,6 +59,7 @@ type Config struct {
 	SendDelay          time.Duration `env:"DEAN_SEND_DELAY,required"`
 	FollowUpMin        string        `env:"DEAN_FOLLOWUP_MIN,required"`
 	FollowUpMax        string        `env:"DEAN_FOLLOWUP_MAX,required"`
+	PaymentGrace       string        `env:"DEAN_PAYMENT_GRACE,required"`
 }
 
 func send(cfg *Config, client *http.Client, e *ExternalEvent) error {
@@ -115,6 +116,7 @@ func getQueries(cfg *Config, pool *pgxpool.Pool) []<-chan *ExternalEvent {
 		"errored":     Errored,
 		"timeouts":    Timeouts,
 		"followups":   FollowUps,
+		"payments":    Payments,
 	}
 	queries := strings.Split(cfg.Queries, ",")
 	chans := []<-chan *ExternalEvent{}

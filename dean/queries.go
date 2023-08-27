@@ -61,6 +61,23 @@ func getTimeout(rows pgx.Rows) *ExternalEvent {
 	return &ExternalEvent{userid, pageid, &Event{"timeout", &value}}
 }
 
+func getPayment(rows pgx.Rows) *ExternalEvent {
+	var userid, pageid, question string
+	err := rows.Scan(&userid, &pageid, &question)
+	handle(err)
+
+	v := struct {
+		Question string `json:"question"`
+	}{
+		Question: question,
+	}
+
+	b, _ := json.Marshal(v)
+	value := json.RawMessage(b)
+
+	return &ExternalEvent{userid, pageid, &Event{"repeat_payment", &value}}
+}
+
 func getFollowUp(rows pgx.Rows) *ExternalEvent {
 	var question string
 	var userid, pageid string
@@ -111,6 +128,19 @@ func Blocked(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
 	d := time.Now().UTC()
 	return get(conn, getRedo, query, cfg.Codes, cfg.BlockedInterval, d)
+}
+
+func Payments(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
+	query := `
+	      SELECT userid, pageid, state_json->>'question' as question
+	      FROM states
+	      WHERE current_state = 'WAIT_EXTERNAL_EVENT'
+	      AND state_json->'wait'->>'type' != 'timeout'
+	      AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($1)::INTERVAL)) < $2
+        `
+	d := time.Now().UTC()
+
+	return get(conn, getPayment, query, cfg.PaymentGrace, d)
 }
 
 func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {

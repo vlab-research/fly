@@ -442,3 +442,49 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 	assert.Equal(t, string(ev), `{"type":"follow_up","value":"foo"}`)
 
 }
+
+func TestGetPaymentsGetsOnlyThoseWhovePassedGrace(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	tsA := time.Now().UTC().Add(-10 * time.Hour)
+	tsB := time.Now().UTC().Add(-4 * time.Hour)
+	msA := tsA.Unix() * 1000
+	msB := tsB.Unix() * 1000
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		tsA,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "question": "foo_bar",
+                      "wait": { "type": "external:reloadly", "value": {"type": "foo", "id": "payment_id"}}}`, msA))
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		tsB,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1", "short2"],
+                      "waitStart": %v,
+                      "question": "foo_bar",
+                      "wait": { "type": "external:reloadly", "value": {"type": "foo", "id": "payment_id"}}}`, msB))
+
+	cfg := &Config{PaymentGrace: "8 hours"}
+
+	ch := Payments(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "foo", events[0].User)
+
+	assert.Equal(t, "repeat_payment", events[0].Event.Type)
+
+	ev, _ := json.Marshal(events[0].Event)
+	assert.Equal(t, string(ev), `{"type":"repeat_payment","value":{"question":"foo_bar"}}`)
+}
