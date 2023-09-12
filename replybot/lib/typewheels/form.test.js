@@ -50,9 +50,17 @@ describe('getFromMetadata', () => {
     f.getFromMetadata(ctx, 'event__foo_success').should.equal(false)
   })
 
-  it('works with unicode Facebook names', () => {
+  it('gets the random seed properly', () => {
     const ctx = { md: { seed: 125 } }
     f.getFromMetadata(ctx, 'seed_5').should.equal(1)
+    f.getFromMetadata(ctx, 'seed_1').should.equal(1)
+    f.getFromMetadata(ctx, 'seed_4').should.equal(2)
+    f.getFromMetadata(ctx, 'seed_3').should.equal(3)
+  })
+
+  it('gets the random seed from metadata if passed in m.me link', () => {
+    const ctx = { md: { seed: 125, seed_5: 2 } }
+    f.getFromMetadata(ctx, 'seed_5').should.equal(2) // just this one overwritten
     f.getFromMetadata(ctx, 'seed_1').should.equal(1)
     f.getFromMetadata(ctx, 'seed_4').should.equal(2)
     f.getFromMetadata(ctx, 'seed_3').should.equal(3)
@@ -357,8 +365,8 @@ describe('getCondition', () => {
   it('works with contains', () => {
     const cond = {
       op: 'contains',
-        vars: [{ type: 'field', value: 'baz' },
-               { type: 'constant', value:  'bar'}]
+      vars: [{ type: 'field', value: 'baz' },
+      { type: 'constant', value: 'bar' }]
     }
 
     const qa = [['baz', 'hello bar again']]
@@ -371,8 +379,8 @@ describe('getCondition', () => {
   it('works with contains and missing values', () => {
     const cond = {
       op: 'contains',
-        vars: [{ type: 'hidden', value: 'baz' },
-               { type: 'constant', value:  'bar'}]
+      vars: [{ type: 'hidden', value: 'baz' },
+      { type: 'constant', value: 'bar' }]
     }
 
     const qa = []
@@ -385,8 +393,8 @@ describe('getCondition', () => {
   it('works with missing values and equals', () => {
     const cond = {
       op: 'equal',
-        vars: [{ type: 'hidden', value: 'baz' },
-               { type: 'constant', value:  0}]
+      vars: [{ type: 'hidden', value: 'baz' },
+      { type: 'constant', value: 0 }]
     }
 
     const qa = []

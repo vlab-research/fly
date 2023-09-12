@@ -29,12 +29,14 @@ function getSeed(md, key) {
 function getFromMetadata(ctx, key) {
   const { user, md } = ctx
 
-  if (/seed_/.test(key)) return getSeed(md, key)
-
   const meta = { ...user, ...md }
 
   if (meta[key] === undefined) {
-      return ""
+
+    if (/seed_/.test(key)) {
+      return getSeed(md, key)
+    }
+    return ""
   }
 
   return meta[key]
@@ -217,7 +219,7 @@ function getCondition(ctx, qa, ref, { op, vars }) {
   // wrap in yaml safe-load to perform type-casting
   // from form data (strings) to js native types
   // i.e. boolean, null, etc.
-  const fn = (a, b) => f(yaml.safeLoad(a), yaml.safeLoad(b)) 
+  const fn = (a, b) => f(yaml.safeLoad(a), yaml.safeLoad(b))
 
   // getChoiceValue needs to ref from the "field" type,
   // which it is always paired with....
