@@ -36,17 +36,17 @@ def app():
 
     log.info("ready to start receiving messages")
     for message in consumer:
+        if not message.value:
+            continue
+
+        # setup database connection
+        conn = setup_database_connection(DATABASE_URL)
         try:
-            if not message.value:
-                continue
-            # setup database connection
-            conn = setup_database_connection(DATABASE_URL)
             process(conn, message.value)
-            conn.close()
-        # catch all uncaught exceptions and
-        # print out error
         except BaseException as e:
             log.error(e)
+        finally:
+            conn.close()
 
 
 def deserializer(data):
