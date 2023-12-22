@@ -356,6 +356,7 @@ describe('getState', () => {
     state.md.should.have.property('form', 'FOO')
   })
 
+
   it('continues to wait when it gets external events that partially fulfill conditions', () => {
 
     const wait = {

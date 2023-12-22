@@ -4,7 +4,7 @@ const { getForm, getMetadata } = require('./utils')
 const { validator, defaultMessage, followUpMessage } = require('@vlab-research/translate-typeform')
 const { translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const { waitConditionFulfilled } = require('./waiting')
-
+ 
 
 
 function _eventMetadata(prefix, value) {

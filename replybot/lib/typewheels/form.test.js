@@ -315,6 +315,24 @@ describe('getCondition', () => {
     f.getCondition({ form }, qa, '', { ...cond, op: 'not_equal' }).should.be.false
   })
 
+
+  it('foo works with number equals and not equals is and is not - casts types from strings', () => {
+    const cond = {
+      op: 'is',
+      vars: [{ type: 'hidden', value: 'baz' },
+      { type: 'constant', value: '10' }]
+    }
+
+    const qa = []
+    const md = { baz: 10 }
+
+    f.getCondition({ form, md }, qa, '', cond).should.be.true
+    f.getCondition({ form, md }, qa, '', { ...cond, op: 'equal' }).should.be.true
+    f.getCondition({ form, md }, qa, '', { ...cond, op: 'is_not' }).should.be.false
+    f.getCondition({ form, md }, qa, '', { ...cond, op: 'not_equal' }).should.be.false
+  })
+
+
   it('works with boolean strings in form and true boolean in metadata', () => {
     const cond = {
       op: 'is',

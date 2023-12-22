@@ -21,6 +21,15 @@ describe('waitConditionFulfilled', () => {
     res.should.be.true
   })
 
+
+  it('Is true when event fulfilled even though not fully specified', () => {
+    const res = w.waitConditionFulfilled(
+      { type: 'external', value: { type: 'moviehouse:play' } },
+      [{ event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobaz' } } }],
+      Date.now())
+    res.should.be.true
+  })
+
   it('Is true when timeout fulfilled', () => {
     const res = w.waitConditionFulfilled(
       { type: 'timeout', value: '1 hour' },
