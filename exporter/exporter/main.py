@@ -15,6 +15,7 @@ load_dotenv()
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "vlab-exports")
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "")
 KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "exporter")
+KAFKA_MAX_POLL_INTERVAL = os.getenv("KAFKA_MAX_POLL_INTERVAL", "1200000")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
@@ -80,7 +81,7 @@ def setup_kafka_consumer():
             "group.id": KAFKA_GROUP_ID,
             "auto.offset.reset": "earliest",
             "enable.auto.commit": "false",
-            "max.poll.interval.ms": "600000",  # 10min processing time max
+            "max.poll.interval.ms": KAFKA_MAX_POLL_INTERVAL,
             "session.timeout.ms": "30000",  # 30s heartbeat
         }
     )
