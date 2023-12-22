@@ -46,7 +46,7 @@ exports.generateExport = async (req, res) => {
 
     await producer.send({
       topic: EXPORTS_TOPIC,
-      messages: [{ key: "data-exports", value: JSON.stringify(message) }],
+      messages: [{ key: survey, value: JSON.stringify(message) }],
     })
     await producer.disconnect()
     return res.status(201).send({ status: "success" })
