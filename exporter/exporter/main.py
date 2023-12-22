@@ -1,11 +1,10 @@
 import json
 import os
 
+from confluent_kafka import Consumer
 from dotenv import load_dotenv
-from kafka import KafkaConsumer, TopicPartition, admin
 from pydantic import BaseModel
 
-from .db import setup_database_connection
 from .exporter import ExportOptions, export_data
 from .log import log
 
@@ -14,7 +13,7 @@ load_dotenv()
 
 # Settings
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "vlab-exports")
-KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "").split(",")
+KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "")
 KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "exporter")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -35,51 +34,59 @@ def app():
     consumer = setup_kafka_consumer()
 
     log.info("ready to start receiving messages")
-    for message in consumer:
-        if not message.value:
+
+    while True:
+        msg = consumer.poll(1.0)
+
+        if msg is None:
+            continue
+        if msg.error():
+
+            log.error("Consumer error: {}".format(msg.error()))
             continue
 
-        # setup database connection
-        conn = setup_database_connection(DATABASE_URL)
+        value = parse_message(msg)
+
         try:
-            process(conn, message.value)
+            process(DATABASE_URL, value)
         except BaseException as e:
             log.error(e)
-        finally:
-            conn.close()
 
 
-def deserializer(data):
-    """
-    try to deserialize message from json if it
-    fails we ignore message and return None
-    """
+def parse_message(msg):
     try:
+        data = msg.value().decode("utf-8")
         return KafkaMessage(**json.loads(data))
     except BaseException as e:
-        log.error(f"serilizer - {e}")
+        log.error(f"Error parsing Kafka message: {e}")
 
 
-def process(conn, data: KafkaMessage):
+def process(cnf, data: KafkaMessage):
     """
     The main message processor
     """
     log.info(f"processing export for study {data.survey}")
-    export_data(conn, data.user, data.survey, data.options)
+    export_data(cnf, data.user, data.survey, data.options)
 
 
 def setup_kafka_consumer():
     """
     setting up the Kafka consumer to subscriber to the KAFKA_TOPIC
     """
-    consumer = KafkaConsumer(
-        bootstrap_servers=KAFKA_BROKERS,
-        group_id=KAFKA_GROUP_ID,
-        value_deserializer=deserializer,
+
+    consumer = Consumer(
+        {
+            "bootstrap.servers": KAFKA_BROKERS,
+            "group.id": KAFKA_GROUP_ID,
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": "false",
+            "max.poll.interval.ms": "600000",  # 10min processing time max
+            "session.timeout.ms": "30000",  # 30s heartbeat
+        }
     )
-    log.info("connecting to kafka")
-    consumer.subscribe(KAFKA_TOPIC)
-    consumer.poll(timeout_ms=10000)
+
+    consumer.subscribe([KAFKA_TOPIC])
+
     return consumer
 
 
