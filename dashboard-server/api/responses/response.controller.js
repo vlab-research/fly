@@ -16,18 +16,18 @@ exports.getAll = async (req, res) => {
     const { email } = req.user;
 
     if (!email) {
-      return res.status(400).send('No user, no responses!');
+      return res.status(400).send({ error: {message: 'No user, no responses!'}});
     }
 
     if (!survey) {
-      return res.status(400).send('No survey, no responses!');
+      return res.status(400).send({ error: {message: 'No user, no responses!'}});
     }
 
     const responses = await Response.all(email, survey, after, pageSize);
     res.status(200).send(responses);
   } catch (err) {
     console.error(err);
-    res.status(500).send(err);
+    res.status(500).json({ error: {message: err}});
   }
 };
 
@@ -83,12 +83,12 @@ exports.generateExport = async (req, res) => {
   const { email } = req.user;
 
   try {
-    const producer = KafkaUtil.Conn.producer({ 
-      createPartitioner: KafkaUtil.Partitioners.DefaultPartitioner 
+    const producer = KafkaUtil.Conn.producer({
+      createPartitioner: KafkaUtil.Partitioners.DefaultPartitioner
     })
     await producer.connect()
-    const message = { 
-      event: "data-export", 
+    const message = {
+      event: "data-export",
       user: email,
       survey: survey,
       options: {

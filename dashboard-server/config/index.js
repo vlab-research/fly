@@ -75,7 +75,7 @@ const config = {
     host: isTest() ? 'localhost' : envVars.DB_HOST || 'localhost',
     database: isTest() ? 'chatroach' : envVars.DB_DATABASE || 'postgres',
     password: isTest() ? undefined : envVars.DB_PASSWORD || undefined,
-    port: isTest() ? 5432 : envVars.DB_PORT || 5432,
+    port: isTest() ? 5433 : envVars.DB_PORT || 5432,
   },
   KAFKA: {
     BROKERS: isTest() ? "" : envVars.KAFKA_BROKERS.split(","),

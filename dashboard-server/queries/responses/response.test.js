@@ -314,6 +314,17 @@ describe('Response queries', () => {
         responses = response.body.responses;
         responses.length.should.equal(2);
       });
+
+      it('responds with json error on bad token', async () => {
+        let response = await request(app)
+          .get(`/api/v1/responses?survey=${surveyName}&pageSize=25`) // no token needed here
+          .set('Authorization', `Bearer notatoken`)
+          .set('Accept', 'application/json')
+          .expect('Content-Type', /json/)
+          .expect(401);
+
+        response.body.error.message.should.equal('Invalid Token.')
+      });
     });
   });
 });
