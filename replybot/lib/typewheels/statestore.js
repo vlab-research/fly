@@ -2,6 +2,8 @@ const Cacheman = require('cacheman')
 const { getState } = require('./machine')
 const { parseEvent } = require('@vlab-research/utils')
 
+const STATE_STORE_LIMIT = process.env.STATE_STORE_LIMIT; // can be undefined 
+
 function _resolve(li, e) {
   if (!e) return li
   if (!li) return [e]
@@ -28,7 +30,7 @@ class StateStore {
   }
 
   async _getEvents(user, event) {
-    const res = await this.db.get(user, 100000) // limit 100000
+    const res = await this.db.get(user, STATE_STORE_LIMIT)
     return _resolve(res, event)
       .map(this.parseEvent)
       .slice(0, -1)
