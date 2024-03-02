@@ -30,7 +30,7 @@ class StateStore {
   }
 
   async _getEvents(user, event) {
-    const res = await this.db.get(user, STATE_STORE_LIMIT)
+    const res = await this.db.get(user, +STATE_STORE_LIMIT)
     return _resolve(res, event)
       .map(this.parseEvent)
       .slice(0, -1)
