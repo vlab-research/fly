@@ -1,24 +1,28 @@
 const mustache = require('mustache')
 const util = require('util')
 const _ = require('lodash')
+const { hash } = require('./utils')
 const { translator, addCustomType } = require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
 class FieldError extends Error {}
 
-// TODO: move this to VALIDATORS somewhere
-// function formValidator(form){
-//   if (!form.fields.length) {
-//     throw new TypeError('This Typeform does not have any fields!')
-//   }
-// }
-
-
 
 function getSeed(md, key) {
-  const [__, match] = /seed_(\d+)/.exec(key)
-  const seeds = +match
-  return md.seed % seeds + 1
+  // format: seed_12 or seed_12_1 or seed_12_2
+  // can be used to create distinct seeds 
+  const [__, match, multiple] = /_(\d+)_?(\d+)?/g.exec(key)
+
+  let seed = md.seed;
+
+  if (multiple) {
+    const m = +multiple
+    for (let i = 0; i < m; i++) {
+      seed = hash(seed)
+    }
+  }
+
+  return seed % (+match) + 1
 }
 
 // METADATA consists of:

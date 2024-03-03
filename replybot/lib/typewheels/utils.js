@@ -22,6 +22,10 @@ function _group(pairs) {
   return d
 }
 
+function hash (s) {
+  return farmhash.fingerprint32(s + '')
+}
+
 
 function randomSeed(event, md) {
   const userId = event.sender.id
@@ -30,7 +34,7 @@ function randomSeed(event, md) {
   if (!form || !userId) return null
 
   const s = form + userId
-  return { seed: farmhash.fingerprint32(s) }
+  return { seed: hash(s) }
 }
 
 function getMetadata(event) {
@@ -71,5 +75,6 @@ module.exports = {
   recursiveJSONParser,
   parseLogJSON,
   getForm,
+  hash,
   _group,
   getMetadata }

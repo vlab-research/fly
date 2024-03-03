@@ -6,7 +6,7 @@ const util = require('util')
 const f = require('./form')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const formGame = JSON.parse(fs.readFileSync('mocks/sample-game.json'))
-const { parseLogJSON, getMetadata } = require('./utils')
+const { parseLogJSON, getMetadata, hash } = require('./utils')
 const { echo, statementEcho, repeatEcho, delivery, qr, text, multipleChoice, referral } = require('./events.test')
 
 
@@ -56,6 +56,15 @@ describe('getFromMetadata', () => {
     f.getFromMetadata(ctx, 'seed_1').should.equal(1)
     f.getFromMetadata(ctx, 'seed_4').should.equal(2)
     f.getFromMetadata(ctx, 'seed_3').should.equal(3)
+  })
+
+  it('gets additional random seeds by hashing multiple times', () => {
+    const ctx = { md: { seed: 125 } }
+    const h = hash(125)
+     
+    f.getFromMetadata(ctx, 'seed_25').should.equal(1)
+    f.getFromMetadata(ctx, 'seed_25_1').should.equal(h % 25 + 1)
+    f.getFromMetadata(ctx, 'seed_25_2').should.equal(hash(h) % 25 + 1)
   })
 
   it('gets the random seed from metadata if passed in m.me link', () => {
