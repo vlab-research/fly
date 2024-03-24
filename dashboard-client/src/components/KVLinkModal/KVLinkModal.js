@@ -5,9 +5,9 @@ import { Form } from 'antd';
 import LinkModal from '../LinkModal';
 
 
-const KVLinkModal = ({ items, title, description, successText, handleCreate, loading }) => {
+const KVLinkModal = ({ items, title, description, successText, handleCreate, loading, back }) => {
   const history = useHistory();
-  const back = () => history.go(-1);
+  const localBack = back || (() => history.go(-1));
   const [form] = Form.useForm();
 
   items.forEach(i => form.setFieldsValue({ [i.name]: i.initialValue }));
@@ -44,7 +44,7 @@ const KVLinkModal = ({ items, title, description, successText, handleCreate, loa
     <LinkModal
       successText={successText}
       title={title}
-      back={back}
+      back={localBack}
       loading={loading}
       content={content}
       success={success}

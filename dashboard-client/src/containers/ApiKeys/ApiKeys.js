@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useHistory } from 'react-router-dom';
 import { Input } from 'antd';
 import api from '../../services/api';
 import KVLinkModal from '../../components/KVLinkModal'
 
 const ApiKeys = () => {
+  const history = useHistory();
   const location = useLocation();
   const query = new URLSearchParams(location.search);
   const key = query.get('key');
 
   const [items, setItems] = useState([])
+
+  const [token, setToken] = useState(null)
 
   const getCredentials = async () => {
     let value = '';
@@ -56,20 +59,44 @@ const ApiKeys = () => {
 
     const b = await res.json();
     const { token } = b;
-    alert(`Your new token (keep it safe): \n\n${token}`);
+
+    setToken(token)
+  }
+
+  const onFinish = () => {
+    console.log("how's this? now finish")
+    history.go(-1);
   }
 
   const description = `To create a new API Key.`
 
+
+  if (token) {
+    return (
+      <KVLinkModal
+        items={[]}
+        title="Your new token (keep it safe)"
+        description={token}
+        successText={"OK"}
+        handleCreate={() => true}
+        back={onFinish}
+      />
+    )
+  }
+
   return (
-    <KVLinkModal
-      items={items}
-      title="Create new API key"
-      description={description}
-      successText={"Create"}
-      handleCreate={handleCreate}
-      loading={items === []}
-    />
+    <>
+      <KVLinkModal
+        items={items}
+        title="Create new API key"
+        description={description}
+        successText={"Create"}
+        handleCreate={handleCreate}
+        loading={items === []} 
+        back={() => true}
+      />
+    </> 
+
   );
 };
 
