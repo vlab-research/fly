@@ -36,30 +36,33 @@ def app():
 
     log.info("ready to start receiving messages")
 
-    while True:
-        msg = consumer.poll(1.0)
+    try:
 
-        if msg is None:
-            continue
-        if msg.error():
+        while True:
+            msg = consumer.poll(1.0)
 
-            log.error("Consumer error: {}".format(msg.error()))
-            continue
+            if msg is None:
+                continue
 
-        value = parse_message(msg)
+            if msg.error():
+                log.error("Consumer error: {}".format(msg.error()))
+                continue
 
-        try:
-            process(DATABASE_URL, value)
-        except BaseException as e:
-            log.error(e)
+            try:
+                value = parse_message(msg)
+                process(DATABASE_URL, value)
+                consumer.commit(asynchronous=False)
+
+            except BaseException as e:
+                log.error(e)
+
+    finally:
+        consumer.close()
 
 
 def parse_message(msg):
-    try:
-        data = msg.value().decode("utf-8")
-        return KafkaMessage(**json.loads(data))
-    except BaseException as e:
-        log.error(f"Error parsing Kafka message: {e}")
+    data = msg.value().decode("utf-8")
+    return KafkaMessage(**json.loads(data))
 
 
 def process(cnf, data: KafkaMessage):
