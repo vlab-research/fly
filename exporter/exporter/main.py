@@ -82,7 +82,7 @@ def setup_kafka_consumer():
         {
             "bootstrap.servers": KAFKA_BROKERS,
             "group.id": KAFKA_GROUP_ID,
-            "auto.offset.reset": "earliest",
+            "auto.offset.reset": "latest",
             "enable.auto.commit": "false",
             "max.poll.interval.ms": KAFKA_MAX_POLL_INTERVAL,
             "session.timeout.ms": "30000",  # 30s heartbeat
