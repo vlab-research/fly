@@ -156,8 +156,9 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		// redo, hopefully transient
-		return nil, err
+		// Fail if any http request fails
+		// TODO: redo if transient and return error instead
+		return formatError(result, event, err.Error(), "HTTP_REQUEST_FAILED")
 	}
 
 	success := resp.StatusCode >= 200 && resp.StatusCode <= 299
