@@ -41,8 +41,8 @@ const loadSDK = () => {
 };
 
 
-const getPages = (access_token) => new Promise((resolve, reject) => {
-  const params = { access_token };
+const getPages = (access_token, cursor) => new Promise((resolve, reject) => {
+  const params = { access_token, cursor };
 
   window.FB.api('/me/accounts', params, (res) => {
     if (res.error) return reject(new Error(JSON.stringify(res.error)));
@@ -52,7 +52,7 @@ const getPages = (access_token) => new Promise((resolve, reject) => {
 
 const fb = () => new Promise((resolve, reject) => {
   const cnf = {
-    scope: 'public_profile,pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement',
+    scope: 'pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,business_management',
     return_scopes: true,
   };
 
@@ -77,7 +77,11 @@ const fb = () => new Promise((resolve, reject) => {
         const { access_token } = res;
         return getPages(access_token).then(result => ({ result, access_token }));
       })
-      .then(res => resolve(res))
+      .then(res => {
+        getPages(res.access_token, res.result.paging.cursors.after).then(f => console.log('hello: ', f));
+
+        resolve(res)
+      })
       .catch(err => reject(err));
   }, cnf);
 });
@@ -176,8 +180,9 @@ const FacebookPages = () => {
         .then((res) => {
           setPages(res.result.data);
 
+          console.log(res.result.paging.cursors.after)
           // TODO: build UI to page though pages.
-          // getPages(res.access_token, 3, res.result.paging.cursors.after).then(console.log);
+
         })
         .catch((err) => {
           alert(`There was an error in the FB login attempt: ${err}`);
