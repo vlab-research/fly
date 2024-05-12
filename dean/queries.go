@@ -168,9 +168,9 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 current_state = 'WAIT_EXTERNAL_EVENT' AND
                 (s.timeout_date < $1
                  OR
-                   (settings.type = 'relative' AND (timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + (settings.value)::INTERVAL)) < $1 ))
+                   (settings.type = 'relative' AND (timezone('UTC', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + (settings.value)::INTERVAL)) < $1 ))
                  OR
-                   (settings.type = 'absolute' AND (timezone('UCT',parse_timestamp(settings.value))) < $1)
+                   (settings.type = 'absolute' AND (timezone('UTC',parse_timestamp(settings.value))) < $1)
                  )
         `
 	d := time.Now().UTC()
@@ -213,3 +213,24 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
 	return get(conn, getFollowUp, query, cfg.FollowUpMin, cfg.FollowUpMax)
 }
+
+// func offs(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
+// 	query := `
+//               SELECT s.userid, s.pageid, s.current_form
+//               FROM states s
+//               INNER JOIN survey_settings settings
+//                 ON settings.shortcode = s.current_form
+//                 AND settings.userid = (SELECT userid
+//                                        FROM credentials
+//                                        WHERE facebook_page_id = s.pageid
+//                                        LIMIT 1)
+//               WHERE
+//                 off_time < $1 AND
+//                 s.current_state != 'OFF'
+//         `
+
+// 	// get these users and create OFF event,
+// 	// which tells machine to move to OFF state
+// }
+
+// TODO: add query to get spamming users and send BLOCK_USER event

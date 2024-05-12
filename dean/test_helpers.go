@@ -33,7 +33,7 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 }
 
 func testPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5432/chatroach") 
+	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/chatroach")
 	handle(err)
 
 	ctx := context.Background()
@@ -42,7 +42,6 @@ func testPool() *pgxpool.Pool {
 
 	return pool
 }
-
 
 func resetDb(pool *pgxpool.Pool, tableNames []string) error {
 	query := ""
