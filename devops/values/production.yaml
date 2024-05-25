@@ -8,7 +8,6 @@ tags:
   scribble: true
   dean: true
 
-
 kafkabrokers: &kb "kafka-headless.default.svc.cluster.local:29092"
 chatTopic: &topic "vlab-prod-chat-events"
 stateTopic: &statetopic "vlab-prod-state"
@@ -18,15 +17,15 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 
-versionDashboard: &vdashboard v0.0.33
+versionDashboard: &vdashboard v0.0.35
 versionBotserver: &vbotserver v0.0.10
-versionReplybot: &vreplybot v0.0.144
+versionReplybot: &vreplybot v0.0.151
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.26
-versionScribble: &vscribble v0.0.22-temp-fix
-versionDinersclub: &vdinersclub v0.0.26
-versionFormcentral: &vformcentral v0.0.10
-versionExporter: &vexporter v0.2.2
+versionDean: &vdean v0.0.29
+versionScribble: &vscribble v0.0.25
+versionDinersclub: &vdinersclub v0.0.29
+versionFormcentral: &vformcentral v0.0.11
+versionExporter: &vexporter v0.3.4
 
 processingAlerts:
   - consumergroup: replybot
@@ -167,6 +166,10 @@ dean:
     value: "48 hours"
   - name: DEAN_RESPONDING_GRACE
     value: "20 minutes"
+  - name: DEAN_PAYMENT_GRACE
+    value: "2 hours"
+  - name: DEAN_PAYMENT_INTERVAL
+    value: "14 days"
   - name: DEAN_SEND_DELAY
     value: "3s"
   - name: DEAN_FOLLOWUP_MIN
@@ -193,6 +196,13 @@ dean:
     - name: timeouts
       queries: "timeouts"
       schedule: "*/10 * * * *"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 10Mi
+    - name: payments
+      queries: "payments"
+      schedule: "0 */6 * * *"
       resources:
         requests:
           cpu: 10m
@@ -409,15 +419,15 @@ dashboard:
       cert-manager.io/cluster-issuer: letsencrypt-prod
       kubernetes.io/ingress.class: nginx
     hosts:
-      - host: gbv-dashboard.nandan.cloud
+      - host: fly-dashboard-api.vlab.digital
         paths:
           - path: '/'
             pathType: Prefix
 
     tls:
-      - secretName: gbv-dashboard-cert
+      - secretName: fly-dashboard-cert
         hosts:
-          - gbv-dashboard.nandan.cloud
+          - fly-dashboard-api.vlab.digital
 
   service:
     type: ClusterIP
@@ -455,12 +465,12 @@ replybot:
     value: "305"
   - name: REPLYBOT_EVENT_TOPIC
     value: *topic
-  - name: BOTSPINE_KAFKA_BROKERS
-    value: *kb
   - name: KAFKA_BROKERS
     value: *kb
   - name: BOTSPINE_MESSAGE_TOPIC
     value: *topic
+  - name: BOTSPINE_KAFKA_BROKERS
+    value: *kb
   - name: VLAB_STATE_TOPIC
     value: *statetopic
   - name: VLAB_RESPONSE_TOPIC
@@ -473,6 +483,8 @@ replybot:
     value: "https://graph.facebook.com/v11.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
+  - name: STATE_STORE_LIMIT
+    value: "30000"
 
 botserver:
   replicaCount: 3
@@ -503,15 +515,15 @@ botserver:
       cert-manager.io/cluster-issuer: letsencrypt-prod
       kubernetes.io/ingress.class: nginx
     hosts:
-      - host: gbvbot.nandan.cloud
+      - host: fly-botserver.vlab.digital
         paths:
           - path: '/'
             pathType: Prefix
 
     tls:
-      - secretName: gbv-botserver-cert
+      - secretName: fly-botserver-cert
         hosts:
-          - gbvbot.nandan.cloud
+          - fly-botserver.vlab.digital
 
   service:
     type: ClusterIP
@@ -520,6 +532,7 @@ botserver:
 
 # Configuration for Exporter Worker
 exporter:
+  replicaCount: 2
   image:
     repository: "vlabresearch/exporter"
     pullPolicy: Always
@@ -533,6 +546,8 @@ exporter:
       value: "exporter"
     - name: "APP_NAME"
       value: "exporter"
+    - name: "KAFKA_MAX_POLL_INTERVAL"
+      value: "1200000"
   envSecrets:
     - exporter
 
