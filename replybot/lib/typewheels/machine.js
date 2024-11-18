@@ -1,10 +1,10 @@
 const util = require('util')
 const _ = require('lodash')
 const { getForm, getMetadata } = require('./utils')
-const { validator, defaultMessage, followUpMessage } = require('@vlab-research/translate-typeform')
+const { validator, defaultMessage, followUpMessage, offMessage } = require('@vlab-research/translate-typeform')
 const { translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const { waitConditionFulfilled } = require('./waiting')
- 
+
 
 
 function _eventMetadata(prefix, value) {
@@ -178,6 +178,8 @@ function exec(state, nxt) {
         if (state.state === 'QOUT') return _repeat(state)
         return _noop()
       }
+
+      // if form is in ignore_form, ignore the referral.
 
 
       // ignore referral if the person is the referrer
@@ -427,10 +429,14 @@ function exec(state, nxt) {
         return _blankStart(nxt)
       }
 
+      // Recieve first attachment only
+
+      const attachment = nxt.message.attachments && nxt.message.attachments[0]
+
       return {
         action: 'RESPOND',
-        response: '[STICKER]',
-        responseValue: null,
+        response: attachment,
+        responseValue: attachment && attachment.payload && attachment.payload.url,
         question: state.question
       }
     }
@@ -645,6 +651,10 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   return [...previous, q]
 }
 
+// OFF:
+// Dean sends message to change to change state to OFF
+// Maybe not a state? Loses history...
+// if someone writes in state OFF, then send OFF MESSAGE
 function _response(ctx, qa, { question, validation, response, token, followUp }) {
 
 

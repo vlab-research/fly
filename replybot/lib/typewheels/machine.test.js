@@ -47,7 +47,7 @@ describe('makeEventMetadata', () => {
     })
   })
 
-  it('shoudl work with array values and key them out by index', () => {
+  it('should work with array values and key them out by index', () => {
     const event = { event: { type: 'external', value: { type: 'random', list: ['foo', 'bar'] } } }
 
     const md = makeEventMetadata(event)
@@ -1393,6 +1393,20 @@ describe('Machine', () => {
     actions.messages[0].message.text.should.equal('bar')
   })
 
+  it('Invalidates an attachment as a respones to a quick reply', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'email', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
+
+    const response = { ...qr, message: { "mid": "m_xrl3G6Dt409ZEYrWWxfAEarfHyV7iKF62Oi5m6M4iPT8ncaQlpcbTZfyaM8MPmYp8VCBHfPYiQY5WrQ4xX-2QQ", "attachments": [{ "type": "image", "payload": { "url": "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34" } }] } }
+
+    const log = [referral, echo, delivery, response]
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('Sorry, please enter a valid email address.')
+  })
+
 
   it('Invalidates a quick reply when invalid', () => {
     const del1 = { ...delivery, delivery: { watermark: 5 } }
@@ -1521,6 +1535,24 @@ describe('Machine', () => {
     const state = getState(log)
     state.retries.should.eql([20])
     state.qa.should.eql([['foo', 'foo']])
+  })
+
+
+  it('Adds the URL given an attachment as responseValue', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: JSON.stringify({ type: 'upload', upload: { 'type': 'image' } }) } },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
+
+    const response = { ...qr, message: { "mid": "m_xrl3G6Dt409ZEYrWWxfAEarfHyV7iKF62Oi5m6M4iPT8ncaQlpcbTZfyaM8MPmYp8VCBHfPYiQY5WrQ4xX-2QQ", "attachments": [{ "type": "image", "payload": { "url": "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34" } }] } }
+
+    const log = [referral, echo, delivery, response]
+    const actions = getMessage(log, form, user)
+    actions.messages[0].message.text.should.equal('bar')
+
+    const state = getState(log)
+    state.qa.should.eql([["foo", "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34"]])
   })
 
 
