@@ -38,7 +38,8 @@ func (dc *DC) Process(messages []*kafka.Message) error {
 		pe := new(PaymentEvent)
 		err := json.Unmarshal(m.Value, pe)
 		if err != nil {
-			return err
+			e := fmt.Errorf("Error parsing kakfa message: %s. Error: %s", string(m.Value), err)
+			return e
 		}
 		tasks = append(tasks, pe)
 	}
