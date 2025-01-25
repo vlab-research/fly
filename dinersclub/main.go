@@ -71,7 +71,8 @@ func (dc *DC) sendResult(pe *PaymentEvent, res *Result) error {
 	b, err := json.Marshal(res)
 	jm := json.RawMessage(b)
 	if err != nil {
-		return err
+		e := fmt.Errorf("Error marshalling result into json: %s. Error: %s", res.Error, err)
+		return e
 	}
 
 	op := func() error {
@@ -206,6 +207,7 @@ func monitor(errs <-chan error) {
 }
 
 func checkError(err error) {
+	// TODO: don't fail unless necessary here... Could skip?
 	log.Fatalf("DinersClub failed with processing error: %v", err)
 }
 

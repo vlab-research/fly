@@ -60,6 +60,10 @@ func (p *ReloadlyProvider) formatError(res *Result, err error, details *json.Raw
 		res.Error = &PaymentError{e.Error(), p.valErrMsg, details}
 		return res, nil
 	}
+	if e, ok := err.(*json.SyntaxError); ok {
+		res.Error = &PaymentError{fmt.Sprintf(`We had an unknown issue with the mobile topups service. Please try again later. Error: %s.`, e.Error()), "JSON_SYNTAX_ERROR", details}
+		return res, nil
+	}
 
 	// any other type of error should be considered a
 	// system error and should be retried/logged.
@@ -112,7 +116,8 @@ func (p *ReloadlyProvider) Payout(event *PaymentEvent) (*Result, error) {
 	job := new(reloadly.TopupJob)
 	err := json.Unmarshal(*event.Details, &job)
 	if err != nil {
-		return nil, err
+		e := fmt.Errorf("Error unmarshalling from json: %s. Error: %s", string(*event.Details), err)
+		return nil, e
 	}
 
 	result := &Result{}

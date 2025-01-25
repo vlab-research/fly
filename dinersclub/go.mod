@@ -17,6 +17,6 @@ require (
 	github.com/stretchr/testify v1.8.2
 	github.com/tidwall/gjson v1.14.0
 	github.com/vlab-research/botparty v0.0.0-20200917171250-abbbd36eb095
-	github.com/vlab-research/go-reloadly v0.0.20
+	github.com/vlab-research/go-reloadly v0.0.21
 	github.com/vlab-research/spine v0.1.0
 )
