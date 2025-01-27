@@ -155,6 +155,22 @@ describe('getCurrentForm', () => {
     state.md.seed.should.not.equal(state2.md.seed)
   })
 
+
+  it('Gets default form state after block_user, but keeps forms and pointer', () => {
+
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+
+    const state = getState(log)
+    state.forms.should.eql(['FOO'])
+    state.state.should.equal('START')
+    state.pointer.should.equal(20)
+
+    const state1 = getState([...log, text])
+    state1.forms.should.eql(['FOO', 'fallback'])
+    state1.state.should.equal('RESPONDING')
+    state1.pointer.should.equal(20)
+  })
+
   it('Changes form with new referral', () => {
     const ref2 = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
 

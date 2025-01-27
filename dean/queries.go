@@ -104,6 +104,15 @@ func getSurveyOff(rows pgx.Rows) *ExternalEvent {
 	return &ExternalEvent{userid, pageid, &Event{"survey_off", &value}}
 }
 
+func getBlockUser(rows pgx.Rows) *ExternalEvent {
+	var userid, pageid string
+	err := rows.Scan(&userid, &pageid)
+	handle(err)
+
+	value := json.RawMessage([]byte(`null`))
+	return &ExternalEvent{userid, pageid, &Event{"block_user", &value}}
+}
+
 func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `SELECT userid, pageid
               FROM states
@@ -248,4 +257,15 @@ func Offs(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	return get(conn, getSurveyOff, query, now)
 }
 
-// TODO: add query to get spamming users and send BLOCK_USER event
+// Spamming users and send BLOCK_USER event
+// if the past 50 questions are all the same, block the user.
+func Spammers(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
+	query := `
+              SELECT s.userid, s.pageid
+              FROM states s
+              WHERE
+                s.state_json->'qa'->-1->>0 = state_json->'qa'->-50->>0
+        `
+
+	return get(conn, getBlockUser, query)
+}

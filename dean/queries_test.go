@@ -545,5 +545,51 @@ func TestGetOffsGetsThoseCurrentlyOnOffedSurveysOnly(t *testing.T) {
 
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), `{"type":"survey_off","value":{"form":"closed"}}`)
+}
 
+func TestGetSpammersGetsTheSpammer(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	now := time.Now().UTC()
+	ts := now.Add(-30 * time.Minute)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"QOUT",
+		fmt.Sprintf(`{"state": "QOUT", "qa": ["foo", "bar"],
+                      "forms": ["open", "closed"]}`))
+
+	// This user repeated the same question/answer f50 times
+	qa := make([][]string, 50)
+	for i := range qa {
+		qa[i] = []string{"foo", fmt.Sprintf(`bar %d`, i)}
+	}
+	b, _ := json.Marshal(qa)
+	qaString := string(b)
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		ts,
+		"QOUT",
+		fmt.Sprintf(`{"state": "QOUT", "qa": %s,
+                      "forms": ["closed", "open"]}`, qaString))
+
+	cfg := &Config{}
+	ch := Spammers(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "baz", events[0].User)
+
+	assert.Equal(t, "block_user", events[0].Event.Type)
+	ev, _ := json.Marshal(events[0].Event)
+	assert.Equal(t, string(ev), `{"type":"block_user","value":null}`)
 }

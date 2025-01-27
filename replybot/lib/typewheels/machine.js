@@ -108,6 +108,7 @@ function categorizeEvent(nxt) {
   if (_synth('machine_report', nxt)) return 'MACHINE_REPORT'
   if (_synth('bailout', nxt)) return 'BAILOUT'
   if (_synth('survey_off', nxt)) return 'SURVEY_OFF'
+  if (_synth('block_user', nxt)) return 'BLOCK_USER'
   if (_externalEvent(nxt)) return 'EXTERNAL_EVENT'
   if (getWatermark(nxt)) return 'WATERMARK'
   if (nxt.message && nxt.message.is_echo) return 'ECHO'
@@ -121,7 +122,6 @@ function categorizeEvent(nxt) {
         	       \nEvent: ${util.inspect(nxt, null, 8)}`)
 
   return 'UNKNOWN'
-
 
 }
 
@@ -345,6 +345,18 @@ function exec(state, nxt) {
         question: state.question, // needed for all response
         surveyOff: true,
         stateUpdate: { pointer: nxt.timestamp },
+      }
+    }
+
+    case 'BLOCK_USER': {
+      if (state.state === 'START') {
+        return _noop()
+      }
+
+      return {
+        action: 'RESET',
+        pointer: nxt.timestamp,
+        forms: state.forms,
       }
     }
 
