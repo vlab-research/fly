@@ -43,6 +43,17 @@ function repeatResponse(question, text) {
 }
 
 
+function offResponse(text) {
+
+  return {
+    message: {
+      text,
+      metadata: JSON.stringify({ ref: 'off_message' })
+    }
+  }
+}
+
+
 function getWatermark(event) {
   if (!event.read && !event.delivery) return undefined
 
@@ -55,6 +66,11 @@ function getWatermark(event) {
 
 function _hasForm(state, form) {
   return state.forms.indexOf(form) !== -1
+}
+
+
+function _currentForm(state) {
+  return state.forms[state.forms.length - 1]
 }
 
 function _currentUserIsReferrer(event) {
@@ -91,6 +107,7 @@ function categorizeEvent(nxt) {
   if (_synth('platform_response', nxt)) return 'PLATFORM_RESPONSE'
   if (_synth('machine_report', nxt)) return 'MACHINE_REPORT'
   if (_synth('bailout', nxt)) return 'BAILOUT'
+  if (_synth('survey_off', nxt)) return 'SURVEY_OFF'
   if (_externalEvent(nxt)) return 'EXTERNAL_EVENT'
   if (getWatermark(nxt)) return 'WATERMARK'
   if (nxt.message && nxt.message.is_echo) return 'ECHO'
@@ -168,9 +185,8 @@ function exec(state, nxt) {
 
       const form = getForm(nxt)
 
-      // TODO: improve this, make it an env var code, for example?
-      if (form === "reset") {
-        return { action: "RESET" }
+      if (form === process.env.REPLYBOT_RESET_SHORTCODE) {
+        return { action: "RESET", pointer: nxt.timestamp }
       }
 
       // if current form in entire history of forms, repeat previous question
@@ -317,17 +333,39 @@ function exec(state, nxt) {
       }
     }
 
+    case 'SURVEY_OFF': {
+      // ignore if the off event is not for current form
+      if (_currentForm(state) !== nxt.event.value.form) {
+        return _noop()
+      }
+
+      // send off message and reset pointer
+      return {
+        action: 'RESPOND',
+        question: state.question, // needed for all response
+        surveyOff: true,
+        stateUpdate: { pointer: nxt.timestamp },
+      }
+    }
+
     case 'ECHO': {
       // what happens when you're not in responding state?
       // it shouldn't happen but it does and indicates
       // an error
+      const md = nxt.message.metadata
 
       // handles reset scenario
       if (state.state === 'START') {
         return _noop()
       }
 
-      const md = nxt.message.metadata
+      if (md && (md.ref === 'off_message')) {
+        return {
+          action: 'RESET',
+          pointer: state.pointer,
+          forms: state.forms,
+        }
+      }
 
       // If it hasn't been sent by the bot, ignore it
       // If it's a repeat or a statement, ignore it
@@ -459,6 +497,7 @@ function exec(state, nxt) {
   }
 }
 
+
 function apply(state, output) {
   switch (output.action) {
 
@@ -478,8 +517,8 @@ function apply(state, output) {
       // the user responds. I think this is reasonable. But it's implicit here.
       return {
         ...state,
-        ...output.stateUpdate,
         state: 'RESPONDING',
+        ...output.stateUpdate,
         md: { ...state.md, ...output.md },
         question: output.question,
         previousOutput: output,
@@ -497,9 +536,7 @@ function apply(state, output) {
 
     case 'RESET':
       return {
-
-        // NOTE: keep anything?
-        ..._initialState("RESET"),
+        ..._initialState("START", output.pointer, output.forms),
       }
 
     case 'SWITCH_FORM':
@@ -508,6 +545,7 @@ function apply(state, output) {
         ...output.stateUpdate,
         state: 'RESPONDING',
         forms: [...state.forms, output.form],
+        pointer: state.pointer, // keep pointer always!
         md: output.md
       }
 
@@ -551,8 +589,6 @@ function apply(state, output) {
 function act(ctx, state, output) {
   switch (output.action) {
 
-    // on the echo?? events??
-
     case 'RESPOND': {
 
       const qa = apply(state, output).qa
@@ -571,6 +607,7 @@ function act(ctx, state, output) {
     }
 
     case 'SWITCH_FORM': {
+
       return {
         messages: respond({ ...ctx, md: output.md }, [], output),
         payments: []
@@ -651,12 +688,10 @@ function _gatherResponses(ctx, qa, q, previous = []) {
   return [...previous, q]
 }
 
-// OFF:
-// Dean sends message to change to change state to OFF
-// Maybe not a state? Loses history...
-// if someone writes in state OFF, then send OFF MESSAGE
-function _response(ctx, qa, { question, validation, response, token, followUp }) {
 
+function _response(
+  ctx, qa, { question, validation, response, token, followUp, surveyOff }
+) {
 
   // if we haven't asked anything, it must be the first question!
   if (!question) {
@@ -669,6 +704,9 @@ function _response(ctx, qa, { question, validation, response, token, followUp })
     return message
   }
 
+  if (surveyOff) {
+    return offResponse(offMessage(ctx.form.custom_messages))
+  }
 
   if (followUp) {
     return repeatResponse(question, followUpMessage(ctx.form.custom_messages))
@@ -705,8 +743,10 @@ function respond(ctx, qa, output) {
     .map(r => r.recipient ? r : addRecipient(r)) // ducktype has recipient
 }
 
-function _initialState(state) {
-  return { state: state || 'START', qa: [], forms: [] }
+
+function _initialState(state, pointer, forms = []) {
+
+  return { state: state || 'START', qa: [], forms: forms, pointer: pointer }
 }
 
 function getState(log) {

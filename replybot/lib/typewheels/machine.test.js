@@ -4,12 +4,15 @@ const should = chai.should()
 const fs = require('fs')
 const _ = require('lodash')
 const { parseLogJSON } = require('./utils')
-const { followUpMessage } = require('@vlab-research/translate-typeform')
+const { followUpMessage, offMessage } = require('@vlab-research/translate-typeform')
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
 const _echo = md => ({ ...echo, message: { ...echo.message, metadata: md.ref ? md : { ref: md } } })
+
+process.env.FALLBACK_FORM = 'fallback'
+process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
 
 describe('getWatermark', () => {
   it('should work with both marks', () => {
@@ -128,6 +131,28 @@ describe('getCurrentForm', () => {
     const log = [text, text, text]
     const state = getState(log)
     state.forms[0].should.equal('fallback')
+  })
+
+  it('Gets default form state when survey_off, but keeps forms and pointer', () => {
+
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'survey_off', value: { form: 'FOO' } })]
+
+    const state = getState(log)
+    state.forms.should.eql(['FOO'])
+
+    const state1 = getState([...log, _echo('off_message')])
+    state1.state.should.equal('START')
+    state1.pointer.should.equal(20)
+
+    const state2 = getState([...log, _echo('off_message'), text])
+    state2.state.should.equal('RESPONDING')
+
+    // Keep the forms to avoid users repeating on OFF, only on RESET 
+    state2.forms.should.eql(['FOO', 'fallback'])
+    state2.pointer.should.equal(20)
+
+    // state is not necessarily the same
+    state.md.seed.should.not.equal(state2.md.seed)
   })
 
   it('Changes form with new referral', () => {
@@ -431,16 +456,17 @@ describe('getState', () => {
   })
 
 
-  it('Resets all state on reset form', () => {
+  it('Resets all state on reset form and adds pointer', () => {
 
     const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
     const log = [referral, echo, text, resetReferral]
 
     const state = getState(log)
 
-    state.state.should.equal('RESET')
+    state.state.should.equal('START')
     state.forms.should.eql([])
     state.qa.should.eql([])
+    state.pointer.should.equal(resetReferral.timestamp)
   })
 
 
@@ -1707,7 +1733,8 @@ describe('Machine', () => {
     should.not.exist(actions.messages[0])
   })
 
-  it('Sends reset message on reset form', () => {
+  // TODO: it would be good to add a reset message...
+  it('Sends no reset message on reset form', () => {
     const form = {}
 
     const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
@@ -1716,6 +1743,52 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user)
 
+    actions.messages.should.eql([])
+  })
+
+  it('Sends off message when given off event', () => {
+    const form = {}
+
+    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
+
+    const log = [referral, echo, text, off]
+
+    const actions = getMessage(log, form, user)
+
+    actions.messages.length.should.equal(1)
+    actions.messages[0].message.text.should.eql(offMessage())
+
+    const state = getState(log)
+    state.pointer.should.equal(off.timestamp)
+    state.state.should.equal('RESPONDING')
+  })
+
+
+  it('Ignores an initial off event', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
+
+    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
+
+    const log = [off, referral]
+
+    const actions = getMessage(log, form, user)
+
+    getMessage([referral], form, user).should.eql(actions)
+    getState(log).should.eql(getState([referral]))
+  })
+
+
+  it('Ignores off message when given wrong form', () => {
+    const form = {}
+
+    const off = synthetic({ type: 'survey_off', value: { form: 'NOTFOO' } })
+
+    const log = [referral, echo, text, off]
+
+    const actions = getMessage(log, form, user)
     actions.messages.should.eql([])
   })
 

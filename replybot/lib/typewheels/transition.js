@@ -52,6 +52,8 @@ class Machine {
 
     const user = await this.getUser(userId, pageToken)
 
+    // TODO: add user to metadata???
+
     const { messages, payments } = act({ form, user, page: { id: pageId }, timestamp }, state, output)
 
     const responses = responseVals(newState, upd, form, surveyId, pageId, userId, timestamp)

@@ -247,9 +247,8 @@ describe('Machine integrated', () => {
     report.timestamp.should.equal(referral.timestamp)
     report.publish.should.be.true
 
-    report.newState.state.should.eql("RESET")
+    report.newState.state.should.eql("START")
     should.not.exist(report.actions)
-
   })
 
 

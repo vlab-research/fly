@@ -90,6 +90,20 @@ func getFollowUp(rows pgx.Rows) *ExternalEvent {
 	return &ExternalEvent{userid, pageid, &Event{"follow_up", &value}}
 }
 
+func getSurveyOff(rows pgx.Rows) *ExternalEvent {
+	var userid, pageid, shortcode string
+	err := rows.Scan(&userid, &pageid, &shortcode)
+	handle(err)
+
+	val := struct {
+		Form string `json:"form"`
+	}{Form: shortcode}
+	b, _ := json.Marshal(val)
+	value := json.RawMessage(b)
+
+	return &ExternalEvent{userid, pageid, &Event{"survey_off", &value}}
+}
+
 func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `SELECT userid, pageid
               FROM states
@@ -214,23 +228,24 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	return get(conn, getFollowUp, query, cfg.FollowUpMin, cfg.FollowUpMax)
 }
 
-// func offs(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
-// 	query := `
-//               SELECT s.userid, s.pageid, s.current_form
-//               FROM states s
-//               INNER JOIN survey_settings settings
-//                 ON settings.shortcode = s.current_form
-//                 AND settings.userid = (SELECT userid
-//                                        FROM credentials
-//                                        WHERE facebook_page_id = s.pageid
-//                                        LIMIT 1)
-//               WHERE
-//                 off_time < $1 AND
-//                 s.current_state != 'OFF'
-//         `
+func Offs(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
+	query := `
+              SELECT s.userid, s.pageid, s.current_form
+              FROM states s
+              INNER JOIN survey_settings settings
+                ON settings.shortcode = s.current_form
+                AND settings.userid = (SELECT userid
+                                       FROM credentials
+                                       WHERE facebook_page_id = s.pageid
+                                       LIMIT 1)
+              WHERE
+                off_time < $1 AND
+                s.current_state != 'OFF'
+        `
 
-// 	// get these users and create OFF event,
-// 	// which tells machine to move to OFF state
-// }
+	now := time.Now().UTC()
+
+	return get(conn, getSurveyOff, query, now)
+}
 
 // TODO: add query to get spamming users and send BLOCK_USER event

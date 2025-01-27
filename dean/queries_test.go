@@ -18,7 +18,7 @@ const (
 
 	surveyInsertSql = `INSERT INTO surveys(userid, formid, form, title, shortcode, created, messages) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', 'formid', '{}', 'title', $1, $2, $3);`
 
-	settingsInsertSql = `INSERT INTO survey_settings(userid, shortcode, timeouts) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', $1, $2)`
+	settingsInsertSql = `INSERT INTO survey_settings(userid, shortcode, timeouts, off_time) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', $1, $2, $3)`
 
 	insertQuery = `INSERT INTO
                    states(userid, pageid, updated, current_state, state_json)
@@ -312,7 +312,7 @@ func TestGetTimeouts_WithRelativeVariableTimeout(t *testing.T) {
                       "waitStart": %v,
                       "wait": { "type": "timeout", "value": { "type": "relative", "variable": "bar_var"}}}`, ms))
 
-	mustExec(t, pool, settingsInsertSql, "short2", `[{"name": "foo_var", "type": "relative", "value": "20 minutes"}, {"name": "bar_var", "type": "relative", "value": "40 minutes"}]`)
+	mustExec(t, pool, settingsInsertSql, "short2", `[{"name": "foo_var", "type": "relative", "value": "20 minutes"}, {"name": "bar_var", "type": "relative", "value": "40 minutes"}]`, ts)
 
 	cfg := &Config{}
 	ch := Timeouts(cfg, pool)
@@ -359,7 +359,7 @@ func TestGetTimeouts_WithAbsoluteVariableTimeout(t *testing.T) {
                       "wait": { "type": "timeout", "value": { "type": "absolute", "variable": "bar_var"}}}`, ms))
 
 	mustExec(t, pool, settingsInsertSql, "short2",
-		fmt.Sprintf(`[{"name": "foo_var", "type": "absolute", "value": "%v"}, {"name": "bar_var", "type": "absolute", "value": "%v"}]`, now.Format(time.RFC3339), now.Add(1*time.Minute).Format(time.RFC3339)))
+		fmt.Sprintf(`[{"name": "foo_var", "type": "absolute", "value": "%v"}, {"name": "bar_var", "type": "absolute", "value": "%v"}]`, now.Format(time.RFC3339), now.Add(1*time.Minute).Format(time.RFC3339)), ts)
 
 	cfg := &Config{}
 	ch := Timeouts(cfg, pool)
@@ -504,4 +504,46 @@ func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {
 
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), `{"type":"repeat_payment","value":{"question":"foo_bar"}}`)
+}
+
+func TestGetOffsGetsThoseCurrentlyOnOffedSurveysOnly(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	now := time.Now().UTC()
+	ts := now.Add(-30 * time.Minute)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"QOUT",
+		fmt.Sprintf(`{"state": "QOUT",
+                      "forms": ["open", "closed"]}`))
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		ts,
+		"QOUT",
+		fmt.Sprintf(`{"state": "QOUT",
+                      "forms": ["closed", "open"]}`))
+
+	mustExec(t, pool, settingsInsertSql, "closed", `[]`, ts)
+
+	cfg := &Config{}
+	ch := Offs(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "foo", events[0].User)
+	assert.Equal(t, "survey_off", events[0].Event.Type)
+
+	ev, _ := json.Marshal(events[0].Event)
+	assert.Equal(t, string(ev), `{"type":"survey_off","value":{"form":"closed"}}`)
+
 }

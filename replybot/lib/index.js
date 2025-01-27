@@ -47,7 +47,6 @@ function publishPayment(message) {
   return produce(process.env.VLAB_PAYMENT_TOPIC, message, message.userid)
 }
 
-
 // Does all the work
 function processor(machine, stateStore) {
   return async function _processor({ key: userId, value: event }) {

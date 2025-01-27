@@ -54,5 +54,5 @@ func resetDb(pool *pgxpool.Pool, tableNames []string) error {
 }
 
 func before(pool *pgxpool.Pool) {
-	resetDb(pool, []string{"states", "surveys", "users"})
+	resetDb(pool, []string{"states", "survey_settings", "surveys", "users"})
 }

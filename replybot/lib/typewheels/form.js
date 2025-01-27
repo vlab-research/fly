@@ -5,7 +5,7 @@ const { hash } = require('./utils')
 const { translator, addCustomType } = require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
-class FieldError extends Error {}
+class FieldError extends Error { }
 
 
 function getSeed(md, key) {
