@@ -64,7 +64,7 @@ func TestGetRespondingsGetsOnlyThoseInGivenInterval(t *testing.T) {
 		"RESPONDING",
 		`{"state": "RESPONDING"}`)
 
-	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RespondingMaxAttempts: 20}
+	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RetryMaxAttempts: 20}
 	ch := Respondings(cfg, pool)
 	events := getEvents(ch)
 
@@ -92,7 +92,7 @@ func TestGetRespondingsOnlyGetsThoseOutsideOfGracePeriod(t *testing.T) {
 		"RESPONDING",
 		`{"state": "RESPONDING"}`)
 
-	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RespondingMaxAttempts: 20}
+	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RetryMaxAttempts: 20}
 	ch := Respondings(cfg, pool)
 	events := getEvents(ch)
 
@@ -127,7 +127,7 @@ func TestGetRespondingsIgnoresThoseWithTooManyRetries(t *testing.T) {
 		"RESPONDING",
 		`{"state": "RESPONDING"}`)
 
-	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RespondingMaxAttempts: 3}
+	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RetryMaxAttempts: 3}
 	ch := Respondings(cfg, pool)
 	events := getEvents(ch)
 
@@ -160,7 +160,7 @@ func TestGetBlockedOnlyGetsThoseWithCodesInsideWindow(t *testing.T) {
 		"BLOCKED",
 		`{"state": "BLOCKED", "error": {"code": 2020}}`)
 
-	cfg := &Config{BlockedInterval: "1 hour", Codes: []string{"2020", "-1"}}
+	cfg := &Config{BlockedInterval: "1 hour", Codes: []string{"2020", "-1"}, RetryMaxAttempts: 3}
 	ch := Blocked(cfg, pool)
 	events := getEvents(ch)
 
@@ -197,7 +197,7 @@ func TestGetBlockedOnlyGetsThoseWithNextRetryPassed(t *testing.T) {
 			makeMs(-10*time.Minute),
 			makeMs(-6*time.Minute)))
 
-	cfg := &Config{BlockedInterval: "1 hour", Codes: []string{"2020", "-1"}}
+	cfg := &Config{BlockedInterval: "1 hour", Codes: []string{"2020", "-1"}, RetryMaxAttempts: 3}
 	ch := Blocked(cfg, pool)
 	events := getEvents(ch)
 
@@ -224,7 +224,7 @@ func TestGetErroredGetsByTag(t *testing.T) {
 		"ERROR",
 		`{"state": "ERROR", "error": {"tag": "NOTNET"}}`)
 
-	cfg := &Config{ErrorInterval: "1 hour", ErrorTags: []string{"NETWORK"}}
+	cfg := &Config{ErrorInterval: "1 hour", ErrorTags: []string{"NETWORK"}, RetryMaxAttempts: 3}
 	ch := Errored(cfg, pool)
 	events := getEvents(ch)
 

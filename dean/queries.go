@@ -123,7 +123,7 @@ func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 (state_json->'retries' IS NULL OR JSON_ARRAY_LENGTH(state_json->'retries') < $3)`
 
 	d := time.Now().UTC()
-	return get(conn, getRedo, query, cfg.RespondingInterval, cfg.RespondingGrace, cfg.RespondingMaxAttempts, d)
+	return get(conn, getRedo, query, cfg.RespondingInterval, cfg.RespondingGrace, cfg.RetryMaxAttempts, d)
 }
 
 func Errored(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
@@ -133,11 +133,12 @@ func Errored(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
               WHERE
                 current_state = 'ERROR' AND
                 error_tag = ANY($1) AND
-                updated + ($2)::INTERVAL > $3 AND
-                ($3 > next_retry OR next_retry IS NULL)`
+                updated + ($2)::INTERVAL > $4 AND
+                ($4 > next_retry OR next_retry IS NULL) AND
+                (state_json->'retries' IS NULL OR JSON_ARRAY_LENGTH(state_json->'retries') < $3)`
 
 	d := time.Now().UTC()
-	return get(conn, getRedo, query, cfg.ErrorTags, cfg.ErrorInterval, d)
+	return get(conn, getRedo, query, cfg.ErrorTags, cfg.ErrorInterval, cfg.RetryMaxAttempts, d)
 }
 
 func Blocked(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
@@ -147,11 +148,12 @@ func Blocked(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
               WHERE
                 current_state = 'BLOCKED' AND
                 fb_error_code = ANY($1) AND
-                updated + ($2)::INTERVAL > $3 AND
-                ($3 > next_retry OR next_retry IS NULL)`
+                updated + ($2)::INTERVAL > $4 AND
+                ($4 > next_retry OR next_retry IS NULL) AND 
+                (state_json->'retries' IS NULL OR JSON_ARRAY_LENGTH(state_json->'retries') < $3)`
 
 	d := time.Now().UTC()
-	return get(conn, getRedo, query, cfg.Codes, cfg.BlockedInterval, d)
+	return get(conn, getRedo, query, cfg.Codes, cfg.BlockedInterval, cfg.RetryMaxAttempts, d)
 }
 
 func Payments(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
