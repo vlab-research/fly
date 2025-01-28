@@ -226,6 +226,12 @@ function exec(state, nxt) {
         return _noop()
       }
 
+      // If newState is START, we're resetting, so we ignore any error
+      // NOTE: this could swallow a lot of internal errors, but shouldn't matter? 
+      if (report.newState && (report.newState.state === 'START')) {
+        return _noop()
+      }
+
       if (report.error && report.error.tag === 'FB') {
         return { action: 'BLOCKED', error: report.error }
       }
@@ -344,7 +350,7 @@ function exec(state, nxt) {
         action: 'RESPOND_AND_RESET',
         question: state.question, // needed for all response
         surveyOff: true,
-        stateUpdate: { pointer: nxt.timestamp, forms: state.forms },
+        stateUpdate: { pointer: nxt.timestamp, forms: state.forms, md: { startTime: state.md.startTime } }, // startTime needed to get form and off message
       }
     }
 
@@ -709,6 +715,12 @@ function _response(
   ctx, qa, { question, validation, response, token, followUp, surveyOff }
 ) {
 
+
+  if (surveyOff) {
+    return offResponse(offMessage(ctx.form.custom_messages))
+  }
+
+
   // if we haven't asked anything, it must be the first question!
   if (!question) {
     const message = translateField(ctx, qa, ctx.form.fields[0])
@@ -718,10 +730,6 @@ function _response(
     }
 
     return message
-  }
-
-  if (surveyOff) {
-    return offResponse(offMessage(ctx.form.custom_messages))
   }
 
   if (followUp) {

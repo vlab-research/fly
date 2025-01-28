@@ -156,6 +156,23 @@ describe('getCurrentForm', () => {
   })
 
 
+  it('Ignores error report when resetting due to off message', () => {
+
+    const offMessage = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
+
+    const log = [referral, text, echo, multipleChoice, offMessage]
+    const newState = getState(log)
+
+    const report = synthetic({ type: 'machine_report', value: { newState, error: { tag: 'FB', code: 200, message: 'foo' } } })
+
+    const state = getState([...log, report])
+    state.forms.should.eql(['FOO']) 
+
+    state.state.should.equal('START')
+    state.pointer.should.equal(20)    
+  })
+
+
   it('Gets default form state after block_user, but keeps forms and pointer', () => {
 
     const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
@@ -577,6 +594,7 @@ describe('getState', () => {
 
   it('gets into a blocked state when given a report with a FB error', () => {
     const report = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200, message: 'foo' } } })
+
     const log = [referral, echo, text, report]
     const state = getState(log)
     state.state.should.equal('BLOCKED')

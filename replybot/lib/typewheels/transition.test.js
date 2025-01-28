@@ -236,7 +236,7 @@ describe('Machine integrated', () => {
 
   it('returns a report with publish true when there is a reset state', async () => {
     const m = new Machine()
-    const state = { state: 'RESPONDING', qa: [], forms: ['foo'] }
+    const state = { state: 'QOUT', qa: [], forms: ['foo'] }
     const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
     const report = await m.run(state, 'bar', resetReferral)
 
@@ -249,6 +249,35 @@ describe('Machine integrated', () => {
 
     report.newState.state.should.eql("START")
     should.not.exist(report.actions)
+  })
+
+
+  it('returns a report with publish true when there is an off event', async () => {
+    const m = new Machine()
+    m.getPageToken = () => Promise.resolve('footoken')
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }]
+    }, 'foo'])
+
+    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
+    m.sendMessage = () => Promise.resolve({})
+
+    const state = { state: 'RESPONDING', qa: [], forms: ['foo'], md: { startTime: 123 } }
+    const offEvent = synthetic({ type: 'survey_off', value: { form: 'foo' } })
+
+    const report = await m.run(state, 'bar', offEvent)
+
+    report.user.should.equal('bar')
+    should.not.exist(report.error)
+
+    report.timestamp.should.equal(offEvent.timestamp)
+    report.publish.should.be.true
+
+    report.newState.state.should.eql("START")
+    report.actions.length.should.equal(1)
+    report.actions[0].message.text.should.eql("We're sorry, but this survey is now over and closed.")
   })
 
 
