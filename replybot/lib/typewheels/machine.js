@@ -186,7 +186,7 @@ function exec(state, nxt) {
       const form = getForm(nxt)
 
       if (form === process.env.REPLYBOT_RESET_SHORTCODE) {
-        return { action: "RESET", pointer: nxt.timestamp }
+        return { action: "RESET", stateUpdate: { pointer: nxt.timestamp } }
       }
 
       // if current form in entire history of forms, repeat previous question
@@ -226,9 +226,9 @@ function exec(state, nxt) {
         return _noop()
       }
 
-      // If newState is START, we're resetting, so we ignore any error
+      // If newState is OFF, we're resetting, so we ignore any error
       // NOTE: this could swallow a lot of internal errors, but shouldn't matter? 
-      if (report.newState && (report.newState.state === 'START')) {
+      if (report.newState && (report.newState.state === 'OFF')) {
         return _noop()
       }
 
@@ -350,7 +350,7 @@ function exec(state, nxt) {
         action: 'RESPOND_AND_RESET',
         question: state.question, // needed for all response
         surveyOff: true,
-        stateUpdate: { pointer: nxt.timestamp, forms: state.forms, md: { startTime: state.md.startTime } }, // startTime needed to get form and off message
+        stateUpdate: { state: "OFF", pointer: nxt.timestamp, forms: state.forms, md: { startTime: state.md.startTime } }, // startTime needed to get form and off message
       }
     }
 
@@ -361,8 +361,7 @@ function exec(state, nxt) {
 
       return {
         action: 'RESET',
-        pointer: nxt.timestamp,
-        forms: state.forms,
+        stateUpdate: { state: "USER_BLOCKED", pointer: nxt.timestamp, forms: state.forms }
       }
     }
 
@@ -452,11 +451,11 @@ function exec(state, nxt) {
     }
 
     case 'TEXT': {
-      if (state.state === 'RESPONDING') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
 
-      // Handles the odd case (testers) where they begin
-      // texting without any other previous state
-      if (state.state === 'START') {
+      // Handles the case (testers) where they begin
+      // texting without any other previous state or when off
+      if (state.state === 'START' || state.state === 'OFF') {
         return _blankStart(nxt)
       }
 
@@ -469,11 +468,11 @@ function exec(state, nxt) {
 
     }
     case 'MEDIA': {
-      if (state.state === 'RESPONDING') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
 
       // Handles the odd case (testers) where they begin
       // texting without any other previous state
-      if (state.state === 'START') {
+      if (state.state === 'START' || state.state === 'OFF') {
         return _blankStart(nxt)
       }
 
@@ -539,7 +538,13 @@ function apply(state, output) {
 
     case 'RESPOND_AND_RESET':
       return {
-        ..._initialState("START"),
+        ..._initialState(),
+        ...output.stateUpdate,
+      }
+
+    case 'RESET':
+      return {
+        ..._initialState(),
         ...output.stateUpdate,
       }
 
@@ -550,10 +555,6 @@ function apply(state, output) {
         state: 'RESPONDING'
       }
 
-    case 'RESET':
-      return {
-        ..._initialState("START", output.pointer, output.forms),
-      }
 
     case 'SWITCH_FORM':
       return {
@@ -768,9 +769,8 @@ function respond(ctx, qa, output) {
 }
 
 
-function _initialState(state, pointer, forms = []) {
-
-  return { state: state || 'START', qa: [], forms: forms, pointer: pointer }
+function _initialState() {
+  return { state: 'START', qa: [], forms: [] }
 }
 
 function getState(log) {

@@ -141,10 +141,11 @@ describe('getCurrentForm', () => {
     state.forms.should.eql(['FOO'])
 
     const state1 = getState([...log, synthetic({ type: 'survey_off', value: { form: 'FOO' } })])
-    state1.state.should.equal('START')
+    state1.state.should.equal('OFF')
     state1.pointer.should.equal(20)
 
     const state2 = getState([...log, synthetic({ type: 'survey_off', value: { form: 'FOO' } }), text])
+
     state2.state.should.equal('RESPONDING')
 
     // Keep the forms to avoid users repeating on OFF, only on RESET 
@@ -166,25 +167,25 @@ describe('getCurrentForm', () => {
     const report = synthetic({ type: 'machine_report', value: { newState, error: { tag: 'FB', code: 200, message: 'foo' } } })
 
     const state = getState([...log, report])
-    state.forms.should.eql(['FOO']) 
+    state.forms.should.eql(['FOO'])
 
-    state.state.should.equal('START')
-    state.pointer.should.equal(20)    
+    state.state.should.equal('OFF')
+    state.pointer.should.equal(20)
   })
 
 
-  it('Gets default form state after block_user, but keeps forms and pointer', () => {
+  it('Gets ignores texts after block_user, but keeps forms and pointer', () => {
 
     const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
 
     const state = getState(log)
     state.forms.should.eql(['FOO'])
-    state.state.should.equal('START')
+    state.state.should.equal('USER_BLOCKED')
     state.pointer.should.equal(20)
 
     const state1 = getState([...log, text])
-    state1.forms.should.eql(['FOO', 'fallback'])
-    state1.state.should.equal('RESPONDING')
+    state1.forms.should.eql(['FOO'])
+    state1.state.should.equal('USER_BLOCKED')
     state1.pointer.should.equal(20)
   })
 
@@ -1794,8 +1795,47 @@ describe('Machine', () => {
 
     const state = getState(log)
     state.pointer.should.equal(off.timestamp)
-    state.state.should.equal('START')
+    state.state.should.equal('OFF')
     state.forms.should.eql(['FOO'])
+  })
+
+
+  it('Does not allow OFF users to start a previous survey', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
+    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
+
+    const log = [referral, echo, text, off, referral]
+
+    const actions = getMessage(log, form, user)
+    actions.messages.length.should.equal(0)
+
+    const state = getState(log)
+    state.pointer.should.equal(off.timestamp)
+    state.state.should.equal('OFF')
+  })
+
+
+  it('Allows OFF users to start a new survey', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
+    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
+
+    const ref2 = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
+    const log = [referral, echo, text, off, ref2]
+
+    const actions = getMessage(log, form, user)
+    actions.messages.length.should.equal(1)
+    actions.messages[0].message.text.should.equal('bar')
+
+    const state = getState(log)
+    state.pointer.should.equal(off.timestamp)
+    state.state.should.equal('RESPONDING')
+    state.forms.should.eql(['FOO', 'BAR'])
   })
 
 

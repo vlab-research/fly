@@ -1,4 +1,4 @@
-const {recursiveJSONParser, getPageFromEvent} = require('@vlab-research/utils')
+const { recursiveJSONParser, getPageFromEvent } = require('@vlab-research/utils')
 const farmhash = require('farmhash')
 const _ = require('lodash')
 
@@ -7,29 +7,29 @@ function parseLogJSON(log) {
 }
 
 function _group(pairs) {
-  const arr = pairs.reduce((a,b,i) => {
-      if (i%2) {
-      a[a.length-1].push(b)
+  const arr = pairs.reduce((a, b, i) => {
+    if (i % 2) {
+      a[a.length - 1].push(b)
       return a
     }
     return [...a, [b]]
   }, [])
 
   const d = {}
-  for (let [k,v] of arr) {
+  for (let [k, v] of arr) {
     d[k] = v
   }
   return d
 }
 
-function hash (s) {
+function hash(s) {
   return farmhash.fingerprint32(s + '')
 }
 
 
 function randomSeed(event, md) {
   const userId = event.sender.id
-  const {form} = md
+  const { form } = md
 
   if (!form || !userId) return null
 
@@ -43,9 +43,9 @@ function getMetadata(event) {
   try {
 
     const r = event.referral ||
-          _.get(event, ['postback', 'referral']) ||
-          _.get(event, ['postback', 'payload', 'referral']) ||
-          _.get(event, ['message', 'quick_reply', 'payload', 'referral'])
+      _.get(event, ['postback', 'referral']) ||
+      _.get(event, ['postback', 'payload', 'referral']) ||
+      _.get(event, ['message', 'quick_reply', 'payload', 'referral'])
 
     const pairs = r.ref.split('.')
     md = _group(pairs.map(decodeURIComponent))
@@ -60,12 +60,14 @@ function getMetadata(event) {
   md.startTime = event.timestamp
   md.pageid = getPageFromEvent(event)
 
-  return {...md,
-          ...randomSeed(event, md)}
+  return {
+    ...md,
+    ...randomSeed(event, md)
+  }
 }
 
 function getForm(event) {
-  const {form} = getMetadata(event)
+  const { form } = getMetadata(event)
   return form
 }
 
@@ -77,4 +79,5 @@ module.exports = {
   getForm,
   hash,
   _group,
-  getMetadata }
+  getMetadata
+}

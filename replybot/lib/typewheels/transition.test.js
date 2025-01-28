@@ -275,7 +275,7 @@ describe('Machine integrated', () => {
     report.timestamp.should.equal(offEvent.timestamp)
     report.publish.should.be.true
 
-    report.newState.state.should.eql("START")
+    report.newState.state.should.eql("OFF")
     report.actions.length.should.equal(1)
     report.actions[0].message.text.should.eql("We're sorry, but this survey is now over and closed.")
   })
