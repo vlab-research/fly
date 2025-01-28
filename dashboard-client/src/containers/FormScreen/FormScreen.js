@@ -193,12 +193,8 @@ const FormScreen = ({ forms }) => {
 form = { form }
 size = "large"
   >
-  <section>
-  <h2>Testing </h2>
-  < p > foo </p>
-  </section>
 
-  < section >
+  <section>
   <h2>Timeouts </h2>
   < Timeouts initialValues = { initialValues.timeouts } />
     </section>
