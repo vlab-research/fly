@@ -135,16 +135,16 @@ describe('getCurrentForm', () => {
 
   it('Gets default form state when survey_off, but keeps forms and pointer', () => {
 
-    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'survey_off', value: { form: 'FOO' } })]
+    const log = [referral, text, echo, multipleChoice]
 
     const state = getState(log)
     state.forms.should.eql(['FOO'])
 
-    const state1 = getState([...log, _echo('off_message')])
+    const state1 = getState([...log, synthetic({ type: 'survey_off', value: { form: 'FOO' } })])
     state1.state.should.equal('START')
     state1.pointer.should.equal(20)
 
-    const state2 = getState([...log, _echo('off_message'), text])
+    const state2 = getState([...log, synthetic({ type: 'survey_off', value: { form: 'FOO' } }), text])
     state2.state.should.equal('RESPONDING')
 
     // Keep the forms to avoid users repeating on OFF, only on RESET 
@@ -1776,7 +1776,8 @@ describe('Machine', () => {
 
     const state = getState(log)
     state.pointer.should.equal(off.timestamp)
-    state.state.should.equal('RESPONDING')
+    state.state.should.equal('START')
+    state.forms.should.eql(['FOO'])
   })
 
 

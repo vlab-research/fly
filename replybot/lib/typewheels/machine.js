@@ -341,10 +341,10 @@ function exec(state, nxt) {
 
       // send off message and reset pointer
       return {
-        action: 'RESPOND',
+        action: 'RESPOND_AND_RESET',
         question: state.question, // needed for all response
         surveyOff: true,
-        stateUpdate: { pointer: nxt.timestamp },
+        stateUpdate: { pointer: nxt.timestamp, forms: state.forms },
       }
     }
 
@@ -369,14 +369,6 @@ function exec(state, nxt) {
       // handles reset scenario
       if (state.state === 'START') {
         return _noop()
-      }
-
-      if (md && (md.ref === 'off_message')) {
-        return {
-          action: 'RESET',
-          pointer: state.pointer,
-          forms: state.forms,
-        }
       }
 
       // If it hasn't been sent by the bot, ignore it
@@ -539,6 +531,12 @@ function apply(state, output) {
         qa: updateQA(state.qa, update(output))
       }
 
+    case 'RESPOND_AND_RESET':
+      return {
+        ..._initialState("START"),
+        ...output.stateUpdate,
+      }
+
     case 'RESPOND_AGAIN':
       return {
         ...state,
@@ -608,6 +606,12 @@ function act(ctx, state, output) {
       const payments = messages.map(m => getPaymentFromMessage(ctx, m)).filter(x => !!x)
 
       return { messages, payments }
+    }
+
+    case 'RESPOND_AND_RESET': {
+      const qa = state.qa
+      const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
+      return { messages, payments: [] }
     }
 
     case 'RESPOND_AGAIN': {
