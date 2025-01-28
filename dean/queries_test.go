@@ -64,7 +64,7 @@ func TestGetRespondingsGetsOnlyThoseInGivenInterval(t *testing.T) {
 		"RESPONDING",
 		`{"state": "RESPONDING"}`)
 
-	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour"}
+	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RespondingMaxAttempts: 20}
 	ch := Respondings(cfg, pool)
 	events := getEvents(ch)
 
@@ -92,13 +92,48 @@ func TestGetRespondingsOnlyGetsThoseOutsideOfGracePeriod(t *testing.T) {
 		"RESPONDING",
 		`{"state": "RESPONDING"}`)
 
-	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour"}
+	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RespondingMaxAttempts: 20}
 	ch := Respondings(cfg, pool)
 	events := getEvents(ch)
 
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "baz", events[0].User)
 
+}
+
+func TestGetRespondingsIgnoresThoseWithTooManyRetries(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		time.Now().Add(-90*time.Minute),
+		"RESPONDING",
+		`{"state": "RESPONDING", "retries": [123, 1234, 12345, 123456]}`)
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		time.Now().Add(-90*time.Minute),
+		"RESPONDING",
+		`{"state": "RESPONDING", "retries": [123]}`)
+
+	mustExec(t, pool, insertQuery,
+		"qux",
+		"bar",
+		time.Now().Add(-90*time.Minute),
+		"RESPONDING",
+		`{"state": "RESPONDING"}`)
+
+	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RespondingMaxAttempts: 3}
+	ch := Respondings(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 2, len(events))
+	assert.NotEqual(t, "foo", events[0].User)
+	assert.NotEqual(t, "foo", events[0].User)
 }
 
 func TestGetBlockedOnlyGetsThoseWithCodesInsideWindow(t *testing.T) {

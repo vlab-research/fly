@@ -118,11 +118,12 @@ func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
               FROM states
               WHERE
                 current_state = 'RESPONDING' AND
-                updated + ($1)::INTERVAL > $3 AND
-                ($3 - updated) > ($2)::INTERVAL`
+                updated + ($1)::INTERVAL > $4 AND
+                ($4 - updated) > ($2)::INTERVAL AND
+                (state_json->'retries' IS NULL OR JSON_ARRAY_LENGTH(state_json->'retries') < $3)`
 
 	d := time.Now().UTC()
-	return get(conn, getRedo, query, cfg.RespondingInterval, cfg.RespondingGrace, d)
+	return get(conn, getRedo, query, cfg.RespondingInterval, cfg.RespondingGrace, cfg.RespondingMaxAttempts, d)
 }
 
 func Errored(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
