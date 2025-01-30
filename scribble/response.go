@@ -23,7 +23,7 @@ func nullify(s string) *string {
 // OR
 // B) Just validate the fields exist in the JSON (rawmessage, check all fields)
 type Response struct {
-	ParentShortcode    *CastString     `json:"parent_shortcode" validate:"required"`
+	ParentShortcode    *CastString     `json:"parent_shortcode"`
 	Surveyid           string          `json:"surveyid" validate:"required"`
 	Shortcode          *CastString     `json:"shortcode" validate:"required"`
 	Flowid             int32           `json:"flowid" validate:"required"`
@@ -34,7 +34,7 @@ type Response struct {
 	QuestionText       string          `json:"question_text" validate:"required"`
 	Response           *CastString     `json:"response" validate:"required"`
 	TranslatedResponse *string         `json:"translatedResponse"`
-	Seed               int64           `json:"seed" validate:"required"`
+	Seed               int64           `json:"seed"`
 	Timestamp          *JSTimestamp    `json:"timestamp" validate:"required"`
 	Metadata           json.RawMessage `json:"metadata" validate:"required"`
 }
