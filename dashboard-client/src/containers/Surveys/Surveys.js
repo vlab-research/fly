@@ -13,7 +13,7 @@ const { Content, Sider } = Layout;
 export const Survey = React.createContext(null);
 
 function sortForms(fo) {
-  let forms = fo.map(f => ({ ...f, created: new Date(f.created) }));
+  let forms = fo.map(f => ({ ...f, created: new Date(f.created), off_time: f.off_time && new Date(f.off_time) }));
   forms.sort((a, b) => (a.created > b.created ? 1 : -1));
   forms = forms
     .map((f, i) => ({ ...f, version: i + 1 }))

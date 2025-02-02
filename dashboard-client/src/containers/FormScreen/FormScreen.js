@@ -5,7 +5,7 @@ import { useParams, useHistory } from 'react-router-dom';
 import { PrimaryBtn } from '../../components/UI';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import {
-  Form, Input, Button, Space, Spin, DatePicker, Select
+  Form, Input, Button, Space, Spin, DatePicker, Select, Switch
 } from 'antd';
 import ApiClient from '../../services/api';
 import { Survey } from '../Surveys/Surveys';
@@ -18,57 +18,57 @@ const Timeout = ({ field, remove, initialValues }) => {
 
   return (
     <Space
-    key= { field.key }
-  style = {{
-    display: 'flex',
-      maxWidth: '800px',
+      key= { field.key }
+      style = {{
+        display: 'flex',
+        maxWidth: '800px',
         marginBottom: 8,
-          marginRight: 'auto',
-            marginLeft: 'auto',
-    }
-}
-align = "baseline"
-  >
+        marginRight: 'auto',
+        marginLeft: 'auto',
+      }
+              }
+      align = "baseline"
+    >
 
-  <Form.Item
-    { ...field }
-name = { [field.name, 'name']}
-fieldKey = { [field.fieldKey, 'name']}
-wrapperCol = {{ span: 100 }}
-rules = { [{ required: true, message: 'Missing name' }]}
-  >
-  <Input placeholder="Name" />
-    </Form.Item>
+      <Form.Item
+        { ...field }
+        name = { [field.name, 'name']}
+        fieldKey = { [field.fieldKey, 'name']}
+        wrapperCol = {{ span: 100 }}
+        rules = { [{ required: true, message: 'Missing name' }]}
+      >
+        <Input placeholder="Name" />
+      </Form.Item>
 
-    < Form.Item
-{...field }
-wrapperCol = {{ span: 100 }}
-name = { [field.name, 'type']}
-fieldKey = { [field.fieldKey, 'type']}
-rules = { [{ required: true, message: 'Missing type' }]}
-  >
-  <Select placeholder="Timeout Type" onChange = { setType } >
-    <Option value="relative" > Relative </Option>
-      < Option value = "absolute" > Absolute </Option>
+      < Form.Item
+        {...field }
+        wrapperCol = {{ span: 100 }}
+        name = { [field.name, 'type']}
+        fieldKey = { [field.fieldKey, 'type']}
+        rules = { [{ required: true, message: 'Missing type' }]}
+      >
+        <Select placeholder="Timeout Type" onChange = { setType } >
+          <Option value="relative" > Relative </Option>
+          < Option value = "absolute" > Absolute </Option>
         </Select>
-        </Form.Item>
+      </Form.Item>
 
 
-        < Form.Item
-{...field }
-wrapperCol = {{ span: 100 }}
-name = { [field.name, 'value']}
-fieldKey = { [field.fieldKey, 'value']}
-rules = { [{ required: true, message: 'Missing value' }]}
-  >
-  { type === 'absolute' ?
-  <DatePicker showTime placeholder = "Timeout Date" />
-      : <Input placeholder="Timeout Value" />}
+      < Form.Item
+        {...field }
+        wrapperCol = {{ span: 100 }}
+        name = { [field.name, 'value']}
+        fieldKey = { [field.fieldKey, 'value']}
+        rules = { [{ required: true, message: 'Missing value' }]}
+      >
+        { type === 'absolute' ?
+          <DatePicker showTime placeholder = "Timeout Date" />
+          : <Input placeholder="Timeout Value" />}
 
 
-</Form.Item>
+      </Form.Item>
 
-  < MinusCircleOutlined onClick = {() => remove(field.name)} />
+      < MinusCircleOutlined onClick = {() => remove(field.name)} />
     </Space>
   )
 }
@@ -78,30 +78,30 @@ const Timeouts = ({ initialValues }) => {
 
   return (
     <>
-    <Form.Item label= "  " colon = { false} >
-      <Form.List name="timeouts" >
-        {(fields, { add, remove }) => (
-          <>
-          {
-            fields.map(field => (
-              <Timeout key= { field.key } remove = { remove } field = { field } initialValues = { initialValues && initialValues[field.key]} />
+      <Form.Item label= "  " colon = { false} >
+        <Form.List name="timeouts" >
+          {(fields, { add, remove }) => (
+            <>
+              {
+                fields.map(field => (
+                  <Timeout key= { field.key } remove = { remove } field = { field } initialValues = { initialValues && initialValues[field.key]} />
                 ))}
 
-<Form.Item style={
-  {
-    display: 'flex', maxWidth: '800px', marginBottom: 8, marginRight: 'auto', marginLeft: 'auto',
+              <Form.Item style={
+                           {
+                             display: 'flex', maxWidth: '800px', marginBottom: 8, marginRight: 'auto', marginLeft: 'auto',
                            }
-}
+                         }
               >
-  <Button type="dashed" onClick = {() => add()} block icon = {< PlusOutlined />}>
-    Add Timeout
-      </Button>
-      </Form.Item>
-      </>
+                <Button type="dashed" onClick = {() => add()} block icon = {< PlusOutlined />}>
+                  Add Timeout
+                </Button>
+              </Form.Item>
+            </>
           )}
-</Form.List>
-  </Form.Item>
-  </>
+        </Form.List>
+      </Form.Item>
+    </>
   );
 };
 
@@ -109,22 +109,24 @@ const OffTime = ({ initialValues }) => {
 
   return (
     <>
-    <Form.Item
+      
+      <Form.Item
         style= {{
-    display: 'flex', maxWidth: '800px', marginBottom: 8, marginRight: 'auto', marginLeft: 'auto',
+          display: 'flex', maxWidth: '800px', marginBottom: 8, marginRight: 'auto', marginLeft: 'auto',
         }
-}
-name = "off_time"
-rules = { [{ required: false, message: 'You did not pick an end time' }]}
-  >
-  <DatePicker showTime placeholder = "No current end time" />
-    </Form.Item>
+               }
+        name = "killed"
+        rules = { [{ required: false, message: 'You did not pick an end time' }]}
+      >
+        <Switch disabled={!!initialValues} />
+      </Form.Item>
     </>
   );
 };
 
 const FormScreen = ({ forms }) => {
-  const { shortcode } = useParams();
+
+  const { surveyid } = useParams();
   const history = useHistory();
   const { setSurveys } = useContext(Survey);
   const [loading, setLoading] = useState(false);
@@ -140,7 +142,10 @@ const FormScreen = ({ forms }) => {
   const onFinish = async (body) => {
     setLoading(true)
 
-    await ApiClient.fetcher({ method: 'PUT', path: `/surveys/${shortcode}/settings`, body })
+    body.off_time = body.killed ? new Date() : undefined;
+
+    // use surveyid instead 
+    await ApiClient.fetcher({ method: 'PUT', path: `/surveys/${surveyid}/settings`, body })
       .then(handle);
 
     await ApiClient.fetcher({ method: 'GET', path: `/surveys` })
@@ -164,53 +169,56 @@ const FormScreen = ({ forms }) => {
   // create testing links for each page
   // create a component which shows all the links for each page...
 
+  const { off_time, timeouts, shortcode, survey_name } = forms.find(s => s.id === surveyid);
 
-  const { off_time, timeouts, survey_name } = forms.filter(s => s.shortcode === shortcode)[0];
+  const version = forms.reverse().filter(s => s.shortcode === shortcode).map(s => s.id).indexOf(surveyid) + 1;
+
   const data = { off_time, timeouts };
 
   const initialValues = {
-    off_time: data.off_time && moment(data.off_time),
-    timeouts: data.timeouts && data.timeouts.map(hydrateTimeout)
+    killed: !!data.off_time,
+    timeouts: data.timeouts ? data.timeouts.map(hydrateTimeout) : [],
   };
-
+ 
   const [form] = Form.useForm();
   return (
     <div className= "FormScreen" >
-    <div>
+      <div>
 
-    <h2>
-    { shortcode }
-    </h2>
-    </div>
+        <h2>
+          { `${shortcode} v${version}` }
+        </h2>
+      </div>
 
 
-    < Spin spinning = { loading } >
-      <Form
+      < Spin spinning = { loading } >
+        <Form
           onFinish={ onFinish }
-  initialValues = { initialValues }
-  style = {{ maxWidth: '1000px', marginLeft: 'auto', marginRight: 'auto' }
-}
-form = { form }
-size = "large"
-  >
+          initialValues = { initialValues }
+          style = {{ maxWidth: '1000px', marginLeft: 'auto', marginRight: 'auto' }
+                  }
+          form = { form }
+          size = "large"
+        >
 
-  <section>
-  <h2>Timeouts </h2>
-  < Timeouts initialValues = { initialValues.timeouts } />
-    </section>
+          <section>
+            <h2>Timeouts </h2>
+            < Timeouts initialValues = { initialValues.timeouts } />
+          </section>
 
-    < section >
-    <h2>End Time </h2>
-      < OffTime initialValues = { initialValues.off_time } />
-        </section>
-        < Form.Item style = {{ marginTop: '4em' }} wrapperCol = {{ offset: 8, span: 16 }}>
-          <PrimaryBtn>UPDATE </PrimaryBtn>
+          < section >
+            <h2>Kill Switch </h2>
+            <p> Warning: once you flip this switch, you can never go back. It's over, rover. </p>
+            < OffTime initialValues = { initialValues.off_time } />
+          </section>
+          < Form.Item style = {{ marginTop: '4em' }} wrapperCol = {{ offset: 8, span: 16 }}>
+            <PrimaryBtn>UPDATE </PrimaryBtn>
           </Form.Item>
 
-          </Form>
-          </Spin>
+        </Form>
+      </Spin>
 
-          </div>
+    </div>
   );
 };
 

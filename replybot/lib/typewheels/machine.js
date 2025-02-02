@@ -107,7 +107,6 @@ function categorizeEvent(nxt) {
   if (_synth('platform_response', nxt)) return 'PLATFORM_RESPONSE'
   if (_synth('machine_report', nxt)) return 'MACHINE_REPORT'
   if (_synth('bailout', nxt)) return 'BAILOUT'
-  if (_synth('survey_off', nxt)) return 'SURVEY_OFF'
   if (_synth('block_user', nxt)) return 'BLOCK_USER'
   if (_externalEvent(nxt)) return 'EXTERNAL_EVENT'
   if (getWatermark(nxt)) return 'WATERMARK'
@@ -226,12 +225,6 @@ function exec(state, nxt) {
         return _noop()
       }
 
-      // If newState is OFF, we're resetting, so we ignore any error
-      // NOTE: this could swallow a lot of internal errors, but shouldn't matter? 
-      if (report.newState && (report.newState.state === 'OFF')) {
-        return _noop()
-      }
-
       if (report.error && report.error.tag === 'FB') {
         return { action: 'BLOCKED', error: report.error }
       }
@@ -339,21 +332,6 @@ function exec(state, nxt) {
       }
     }
 
-    case 'SURVEY_OFF': {
-      // ignore if the off event is not for current form
-      if (_currentForm(state) !== nxt.event.value.form) {
-        return _noop()
-      }
-
-      // send off message and reset pointer
-      return {
-        action: 'RESPOND_AND_RESET',
-        question: state.question, // needed for all response
-        surveyOff: true,
-        stateUpdate: { state: "OFF", pointer: nxt.timestamp, forms: state.forms, md: { startTime: state.md.startTime } }, // startTime needed to get form and off message
-      }
-    }
-
     case 'BLOCK_USER': {
       if (state.state === 'START') {
         return _noop()
@@ -440,7 +418,9 @@ function exec(state, nxt) {
     case 'QUICK_REPLY': {
       if (state.state === 'RESPONDING') return _noop()
 
-      const qrResponse = nxt.message.quick_reply.payload.value === undefined ? nxt.message.quick_reply.payload : nxt.message.quick_reply.payload.value
+      const qrResponse = nxt.message.quick_reply.payload.value === undefined ?
+        nxt.message.quick_reply.payload :
+        nxt.message.quick_reply.payload.value
 
       return {
         action: 'RESPOND',
@@ -455,7 +435,7 @@ function exec(state, nxt) {
 
       // Handles the case (testers) where they begin
       // texting without any other previous state or when off
-      if (state.state === 'START' || state.state === 'OFF') {
+      if (state.state === 'START') {
         return _blankStart(nxt)
       }
 
@@ -465,14 +445,13 @@ function exec(state, nxt) {
         responseValue: nxt.message.text,
         question: state.question
       }
-
     }
     case 'MEDIA': {
       if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
 
       // Handles the odd case (testers) where they begin
       // texting without any other previous state
-      if (state.state === 'START' || state.state === 'OFF') {
+      if (state.state === 'START') {
         return _blankStart(nxt)
       }
 
@@ -607,11 +586,9 @@ function act(ctx, state, output) {
   switch (output.action) {
 
     case 'RESPOND': {
-
       const qa = apply(state, output).qa
       const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
       const payments = messages.map(m => getPaymentFromMessage(ctx, m)).filter(x => !!x)
-
       return { messages, payments }
     }
 
@@ -717,7 +694,8 @@ function _response(
 ) {
 
 
-  if (surveyOff) {
+  // Check if form is off based on timestamp
+  if (ctx.form.offTime && ctx.timestamp > ctx.form.offTime) {
     return offResponse(offMessage(ctx.form.custom_messages))
   }
 
@@ -783,10 +761,8 @@ function getState(log) {
 function getMessage(log, form, user, page) {
   const event = log.slice(-1)[0]
   const state = getState(log.slice(0, -1))
-  return act({ form, user, page }, state, exec(state, event))
+  return act({ form, user, page, timestamp: event.timestamp }, state, exec(state, event))
 }
-
-
 
 module.exports = {
   makeEventMetadata,

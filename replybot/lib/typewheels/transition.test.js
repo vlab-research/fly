@@ -102,7 +102,8 @@ describe('Machine integrated', () => {
     m.getForm = () => Promise.resolve([{
       logic: [],
       fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
-      { type: 'short_text', title: 'bar', ref: 'bar' }]
+      { type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: referral.timestamp + 1000 * 60 * 60 * 24
     }, 'foo'])
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
@@ -252,30 +253,32 @@ describe('Machine integrated', () => {
   })
 
 
-  it('returns a report with publish true when there is an off event', async () => {
+  it('returns a report with publish true and responds to message correctly if offTime past', async () => {
+
+    const now = Date.now()
     const m = new Machine()
     m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.resolve([{
       logic: [],
-      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }]
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }],
+      offTime: now - 1000 * 60,
     }, 'foo'])
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
     m.sendMessage = () => Promise.resolve({})
 
-    const state = { state: 'RESPONDING', qa: [], forms: ['foo'], md: { startTime: 123 } }
-    const offEvent = synthetic({ type: 'survey_off', value: { form: 'foo' } })
+    const state = { state: 'START', qa: [], forms: ['foo'], md: { startTime: 123 } }
 
-    const report = await m.run(state, 'bar', offEvent)
+    const report = await m.run(state, 'bar', { ...text, timestamp: now })
 
     report.user.should.equal('bar')
     should.not.exist(report.error)
 
-    report.timestamp.should.equal(offEvent.timestamp)
+    report.timestamp.should.equal(now)
     report.publish.should.be.true
 
-    report.newState.state.should.eql("OFF")
+    report.newState.state.should.eql("RESPONDING")
     report.actions.length.should.equal(1)
     report.actions[0].message.text.should.eql("We're sorry, but this survey is now over and closed.")
   })

@@ -133,46 +133,6 @@ describe('getCurrentForm', () => {
     state.forms[0].should.equal('fallback')
   })
 
-  it('Gets default form state when survey_off, but keeps forms and pointer', () => {
-
-    const log = [referral, text, echo, multipleChoice]
-
-    const state = getState(log)
-    state.forms.should.eql(['FOO'])
-
-    const state1 = getState([...log, synthetic({ type: 'survey_off', value: { form: 'FOO' } })])
-    state1.state.should.equal('OFF')
-    state1.pointer.should.equal(20)
-
-    const state2 = getState([...log, synthetic({ type: 'survey_off', value: { form: 'FOO' } }), text])
-
-    state2.state.should.equal('RESPONDING')
-
-    // Keep the forms to avoid users repeating on OFF, only on RESET 
-    state2.forms.should.eql(['FOO', 'fallback'])
-    state2.pointer.should.equal(20)
-
-    // state is not necessarily the same
-    state.md.seed.should.not.equal(state2.md.seed)
-  })
-
-
-  it('Ignores error report when resetting due to off message', () => {
-
-    const offMessage = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
-
-    const log = [referral, text, echo, multipleChoice, offMessage]
-    const newState = getState(log)
-
-    const report = synthetic({ type: 'machine_report', value: { newState, error: { tag: 'FB', code: 200, message: 'foo' } } })
-
-    const state = getState([...log, report])
-    state.forms.should.eql(['FOO'])
-
-    state.state.should.equal('OFF')
-    state.pointer.should.equal(20)
-  })
-
 
   it('Gets ignores texts after block_user, but keeps forms and pointer', () => {
 
@@ -1781,91 +1741,7 @@ describe('Machine', () => {
     actions.messages.should.eql([])
   })
 
-  it('Sends off message when given off event', () => {
-    const form = {}
 
-    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
-
-    const log = [referral, echo, text, off]
-
-    const actions = getMessage(log, form, user)
-
-    actions.messages.length.should.equal(1)
-    actions.messages[0].message.text.should.eql(offMessage())
-
-    const state = getState(log)
-    state.pointer.should.equal(off.timestamp)
-    state.state.should.equal('OFF')
-    state.forms.should.eql(['FOO'])
-  })
-
-
-  it('Does not allow OFF users to start a previous survey', () => {
-    const form = {
-      logic: [],
-      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
-
-    const log = [referral, echo, text, off, referral]
-
-    const actions = getMessage(log, form, user)
-    actions.messages.length.should.equal(0)
-
-    const state = getState(log)
-    state.pointer.should.equal(off.timestamp)
-    state.state.should.equal('OFF')
-  })
-
-
-  it('Allows OFF users to start a new survey', () => {
-    const form = {
-      logic: [],
-      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
-
-    const ref2 = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
-    const log = [referral, echo, text, off, ref2]
-
-    const actions = getMessage(log, form, user)
-    actions.messages.length.should.equal(1)
-    actions.messages[0].message.text.should.equal('bar')
-
-    const state = getState(log)
-    state.pointer.should.equal(off.timestamp)
-    state.state.should.equal('RESPONDING')
-    state.forms.should.eql(['FOO', 'BAR'])
-  })
-
-
-  it('Ignores an initial off event', () => {
-    const form = {
-      logic: [],
-      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-
-    const off = synthetic({ type: 'survey_off', value: { form: 'FOO' } })
-
-    const log = [off, referral]
-
-    const actions = getMessage(log, form, user)
-
-    getMessage([referral], form, user).should.eql(actions)
-    getState(log).should.eql(getState([referral]))
-  })
-
-
-  it('Ignores off message when given wrong form', () => {
-    const form = {}
-
-    const off = synthetic({ type: 'survey_off', value: { form: 'NOTFOO' } })
-
-    const log = [referral, echo, text, off]
-
-    const actions = getMessage(log, form, user)
-    actions.messages.should.eql([])
-  })
 
   it('Sends a payment event when payment in the description', () => {
     const form = {
@@ -1918,4 +1794,64 @@ describe('Machine', () => {
     state.state.should.equal('QOUT')
     state.question.should.equal('foo')
   })
+
+  it('sends the off message if the form has an off_time that is past', () => {
+
+    const now = Date.now()
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: now - 1000 * 60,
+    }
+
+    const log = [referral, _echo('bar'), { ...text, timestamp: now }]
+
+    const actions = getMessage(log, form, user, { id: 'bar' })
+
+    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")
+
+    const state = getState(log)
+    state.state.should.equal('RESPONDING')
+    state.question.should.equal('bar')
+  });
+
+  it('does not send an off message if the form has an off_time that is not past', () => {
+    const now = Date.now()
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }, { type: 'short_text', title: 'foo', ref: 'foo' }],
+      offTime: now + 1000 * 60,
+    }
+
+    const log = [referral, _echo('bar'), { ...text, timestamp: now }]
+
+    const actions = getMessage(log, form, user, { id: 'bar' })
+
+    actions.messages[0].message.text.should.equal("foo")
+
+    const state = getState(log)
+    state.state.should.equal('RESPONDING')
+  });
+
+
+  it('allows off users to start a new survey', () => {
+
+    const now = Date.now()
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: now + 1000 * 60,
+    }
+
+    const newReferral = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
+
+    const log = [referral, _echo('bar'), { ...text, timestamp: now }, newReferral]
+
+    const actions = getMessage(log, form, user, { id: 'bar' })
+
+    actions.messages[0].message.text.should.equal("bar")
+    const state = getState(log)
+    state.state.should.equal('RESPONDING')
+    state.md.form.should.equal('BAR')
+  });
 })

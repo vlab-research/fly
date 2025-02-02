@@ -31,13 +31,12 @@ async function retrieve({ email }) {
                           s.metadata,
                           s.translation_conf,
                           s.formid,
-                          settings.timeouts,
-                          settings.off_time
+                          settings.off_time,
+                          settings.timeouts
                         FROM surveys s
                         LEFT JOIN users ON s.userid = users.id
                         LEFT JOIN survey_settings settings
-                          ON s.userid = settings.userid
-                          AND s.shortcode = settings.shortcode
+                          ON s.id = settings.surveyid
                         WHERE email=$1
                         ORDER BY created DESC`;
   const values = [email];
@@ -45,16 +44,14 @@ async function retrieve({ email }) {
   return rows;
 }
 
-async function update({ email, shortcode, timeouts, off_time }) {
-  const UPDATE_SETTINGS = `INSERT INTO survey_settings(userid, shortcode, timeouts, off_time)
-                        VALUES(
-                        (SELECT id FROM users WHERE email=$1 LIMIT 1),
-                        $2, $3, $4)
-                        ON CONFLICT(userid, shortcode)
-                        DO UPDATE SET timeouts = $3, off_time= $4
+async function update({ surveyid, timeouts, off_time }) {
+  const UPDATE_SETTINGS = `INSERT INTO survey_settings(surveyid, timeouts, off_time)
+                        VALUES($1, $2, $3)
+                        ON CONFLICT(surveyid)
+                        DO UPDATE SET timeouts = $2, off_time= $3
                         RETURNING *`;
 
-  const values = [email, shortcode, JSON.stringify(timeouts), off_time];
+  const values = [surveyid, JSON.stringify(timeouts), off_time];
   const { rows } = await this.query(UPDATE_SETTINGS, values);
   return rows[0];
 }

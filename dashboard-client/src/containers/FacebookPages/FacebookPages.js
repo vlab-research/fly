@@ -115,6 +115,11 @@ const FacebookPages = () => {
 
   const formatPage = (res) => {
     const { name, id, access_token } = res;
+
+    if (id.trim() === '') {
+      throw new Error("You did not select a page to connect! Please try again and select a page.")
+    }
+
     return { entity: 'facebook_page', key: id, details: { name, id, access_token } };
   };
 
@@ -137,9 +142,8 @@ const FacebookPages = () => {
   });
 
   const callback = async (res) => {
-    const body = formatPage(res);
-
     try {
+      const body = formatPage(res);
       const res = await api.fetcher({
         path: '/credentials', method: 'POST', body, raw: true,
       });

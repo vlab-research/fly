@@ -50,8 +50,14 @@ async function getForm(pageid, shortcode, timestamp) {
     throw e
   }
 
-  const { id: surveyId, form, messages } = f
-  return [translateForm(JSON.parse(form), JSON.parse(messages)), surveyId]
+  const { id: surveyId, form: rawForm, messages, off_time } = f
+
+  const form = JSON.parse(rawForm)
+
+  // parse offTime as date manually...
+  form.offTime = +(new Date(off_time))
+
+  return [translateForm(form, JSON.parse(messages)), surveyId]
 }
 
 module.exports = { getForm }

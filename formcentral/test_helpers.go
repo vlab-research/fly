@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgconn"
@@ -14,4 +15,22 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 		t.Fatalf("Exec unexpectedly failed with %v: %v", sql, err)
 	}
 	return
+}
+
+func before(t *testing.T, pool *pgxpool.Pool) {
+	tables := []string{"users", "credentials", "surveys", "survey_settings"}
+	for _, table := range tables {
+		mustExec(t, pool, fmt.Sprintf("delete from %s;", table))
+	}
+}
+
+func testConfig() *Config {
+	return &Config{
+		DbName:     "chatroach",
+		DbHost:     "localhost",
+		DbPort:     5433,
+		DbUser:     "root",
+		DbMaxConns: 10,
+		Port:       8000,
+	}
 }

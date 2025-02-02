@@ -18,3 +18,9 @@
   background-color: #EEE;
   border-bottom: 1px solid #DDD;
 }
+
+.survey-table .skull {
+  font-weight: 700;
+  margin: -10px -10px -10px -10px;
+  font-size: 1.2em;
+}

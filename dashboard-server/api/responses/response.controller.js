@@ -16,18 +16,18 @@ exports.getAll = async (req, res) => {
     const { email } = req.user;
 
     if (!email) {
-      return res.status(400).send({ error: {message: 'No user, no responses!'}});
+      return res.status(400).send({ error: { message: 'No user, no responses!' } });
     }
 
     if (!survey) {
-      return res.status(400).send({ error: {message: 'No user, no responses!'}});
+      return res.status(400).send({ error: { message: 'No user, no responses!' } });
     }
 
     const responses = await Response.all(email, survey, after, pageSize);
     res.status(200).send(responses);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: {message: err}});
+    res.status(500).json({ error: { message: err } });
   }
 };
 

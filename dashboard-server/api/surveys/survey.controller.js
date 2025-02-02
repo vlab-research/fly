@@ -71,6 +71,7 @@ exports.getAll = async (req, res) => {
     }
 
     const surveys = await Survey.retrieve({ email });
+
     res.status(200).send(surveys);
   } catch (err) {
     console.error(err);
@@ -87,10 +88,10 @@ exports.putSettings = async (req, res) => {
       return res.status(400).send('No user!');
     }
 
-    const { shortcode } = req.params;
+    const { surveyid } = req.params;
     const { timeouts, off_time } = req.body;
 
-    const settings = await Survey.update({ email, shortcode, timeouts, off_time })
+    const settings = await Survey.update({ surveyid, timeouts, off_time })
     res.status(200).send(settings);
 
   } catch (err) {

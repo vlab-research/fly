@@ -33,6 +33,11 @@ const (
  		INSERT INTO credentials(userid, entity, key, details)
  		VALUES ($1, 'facebook_page', '', '{"id": "page-test"}');
  	`
+
+	insertSurveySettingsSql = `
+ 		INSERT INTO survey_settings(surveyid, userid, shortcode, off_time) VALUES ($1, $2, $3, $4);
+ 	`
+
 	formA = `
 		{
 			"fields": [
@@ -113,13 +118,6 @@ const (
 	`
 )
 
-func before() {
-	_, err := http.Get("http://system/resetdb")
-	if err != nil {
-		panic(err)
-	}
-}
-
 func request(pool *pgxpool.Pool, method string, uri string, params string) (*httptest.ResponseRecorder, echo.Context, *Server) {
 	data := bytes.NewReader([]byte(params))
 	req := httptest.NewRequest(method, uri, data)
@@ -131,10 +129,9 @@ func request(pool *pgxpool.Pool, method string, uri string, params string) (*htt
 }
 
 func TestTranslatorReturns404IfDestinationNotFound(t *testing.T) {
-	before()
-
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	params := fmt.Sprintf(`{"destination": "foo", "form": %v}`, formA)
@@ -145,10 +142,9 @@ func TestTranslatorReturns404IfDestinationNotFound(t *testing.T) {
 }
 
 func TestTranslatorReturns400IfNotTranslatable(t *testing.T) {
-	before()
-
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	mustExec(t, pool, insertUser, userid)
@@ -189,10 +185,9 @@ func TestTranslatorReturns400IfNotTranslatable(t *testing.T) {
 }
 
 func TestTranslatorReturnsTranslator(t *testing.T) {
-	before()
-
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	mustExec(t, pool, insertUser, userid)
@@ -212,10 +207,10 @@ func TestTranslatorReturnsTranslator(t *testing.T) {
 }
 
 func TestTranslatorWorksWithSelf(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	params := fmt.Sprintf(`{"self": true, "form": %v}`, formA)
@@ -232,10 +227,10 @@ func TestTranslatorWorksWithSelf(t *testing.T) {
 }
 
 func TestGetTranslatorGetsFromID(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	mustExec(t, pool, insertUser, userid)
@@ -258,10 +253,10 @@ func TestGetTranslatorGetsFromID(t *testing.T) {
 }
 
 func TestGetTranslatorGetsSelf(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	mustExec(t, pool, insertUser, userid)
@@ -284,10 +279,10 @@ func TestGetTranslatorGetsSelf(t *testing.T) {
 }
 
 func TestGetTranslatorReturns404OnRawTranslationConf(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	mustExec(t, pool, insertUser, userid)
@@ -303,10 +298,10 @@ func TestGetTranslatorReturns404OnRawTranslationConf(t *testing.T) {
 }
 
 func TestGetTranslatorReturns404OnMissingSourceForm(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	_, c, s := request(pool, http.MethodGet, "/translators/foo", "")
@@ -318,10 +313,10 @@ func TestGetTranslatorReturns404OnMissingSourceForm(t *testing.T) {
 }
 
 func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	mustExec(t, pool, insertUser, userid)
@@ -364,11 +359,12 @@ func TestGetTranslatorReturns500OnTranslationError(t *testing.T) {
 }
 
 func TestGetSurveyByParams(t *testing.T) {
-	before()
-
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
+
+	offTimeStr := "2022-02-10 10:00:00.000-0000"
 
 	mustExec(t, pool, insertUser, userid)
 	mustExec(t, pool, insertCredentialsSql, userid)
@@ -383,9 +379,11 @@ func TestGetSurveyByParams(t *testing.T) {
 	later, _ := time.Parse("2006-01-02", "2022-02-07")
 	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000001", userid, later)
 
+	mustExec(t, pool, insertSurveySettingsSql, "00000000-0000-0000-0000-000000000001", userid, "a1234", offTimeStr)
+
 	timestamp := 1644356479749 // 2022-02-08
 
-	wayLater, _ := time.Parse("2006-01-02", "2022-02-09")
+	wayLater, _ := time.Parse("2006-01-02", "2022-02-12")
 	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000002", userid, wayLater)
 
 	q := make(url.Values)
@@ -410,13 +408,16 @@ func TestGetSurveyByParams(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, resSurvey.ID, survey.ID)
 
+	format := "2006-01-02T15:04:05.000-0700"
+	offTime, _ := time.Parse(format, "2022-02-10T10:00:00.000-0000")
+	assert.Equal(t, offTime.UTC(), resSurvey.OffTime.UTC())
 }
 
 func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	ts := time.Time{}
@@ -431,10 +432,10 @@ func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {
 }
 
 func TestGetSurveyByParamsReturns400IfMissingParameters(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	q := make(url.Values)
@@ -446,10 +447,10 @@ func TestGetSurveyByParamsReturns400IfMissingParameters(t *testing.T) {
 }
 
 func TestGetSurveyByParamsReturns500OnServerError(t *testing.T) {
-	before()
 
-	cfg := getConfig()
+	cfg := testConfig()
 	pool := getPool(cfg)
+	before(t, pool)
 	defer pool.Close()
 
 	q := make(url.Values)

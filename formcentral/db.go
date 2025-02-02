@@ -11,14 +11,15 @@ import (
 )
 
 type Survey struct {
-   ID               string         `json:"id"`
-   Userid           string         `json:"userid"`
-   Form_json        trans.Form `json:"form_json"`
-   Form             string         `json:"form"`
-   Shortcode        string         `json:"shortcode"`
-   Translation_conf string         `json:"translation_conf"`
-   Messages         string         `json:"messages"`
-   Created          time.Time      `json:"created"`
+	ID               string     `json:"id"`
+	Userid           string     `json:"userid"`
+	Form_json        trans.Form `json:"form_json"`
+	Form             string     `json:"form"`
+	Shortcode        string     `json:"shortcode"`
+	Translation_conf string     `json:"translation_conf"`
+	Messages         string     `json:"messages"`
+	Created          *time.Time `json:"created"`
+	OffTime          *time.Time `json:"off_time"`
 }
 
 func getPool(cfg *Config) *pgxpool.Pool {
@@ -69,22 +70,24 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.Form, *tra
 }
 
 func getSurveyByParams(pool *pgxpool.Pool, pageid string, shortcode string, created time.Time) (*Survey, error) {
-   query := `
-      SELECT id, userid, form_json, form, shortcode, translation_conf, messages, created
-      FROM surveys
-      WHERE userid=(SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1)
-      AND shortcode=$2
+	query := `
+      SELECT id, s.userid, form_json, form, s.shortcode, translation_conf, messages, created, off_time
+      FROM surveys s
+      LEFT JOIN survey_settings
+      ON s.id = survey_settings.surveyid
+      WHERE s.userid=(SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1) 
+      AND s.shortcode=$2 
       AND created<=$3
       ORDER BY created DESC
       LIMIT 1
    `
-   s := &Survey{}
-   row := pool.QueryRow(context.Background(), query, pageid, shortcode, created)
-   err := row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Form, &s.Shortcode, &s.Translation_conf, &s.Messages, &s.Created)
+	s := &Survey{}
+	row := pool.QueryRow(context.Background(), query, pageid, shortcode, created)
+	err := row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Form, &s.Shortcode, &s.Translation_conf, &s.Messages, &s.Created, &s.OffTime)
 
-   if err == pgx.ErrNoRows {
-   	return nil, nil
-   }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
 
-   return s, err
+	return s, err
 }

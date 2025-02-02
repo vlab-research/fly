@@ -47,7 +47,7 @@ class Machine {
 
     const pageToken = await iowrap('getPageToken', 'INTERNAL', this.getPageToken, pageId)
 
-    const [form, surveyId] = await iowrap('getForm', 'INTERNAL', this.getForm,
+    const [form, surveyId, formSettings] = await iowrap('getForm', 'INTERNAL', this.getForm,
       pageId, shortcode, startTime)
 
     const user = await this.getUser(userId, pageToken)

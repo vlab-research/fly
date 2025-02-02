@@ -36,7 +36,7 @@ const Survey = ({ forms, selected }) => {
     .map(f => ({ title: f, dataIndex: f, sorter: { compare: (a, b) => (a[f] > b[f] ? 1 : -1) } }));
 
   const ShortCodeLink = (text, record) => (
-    <Link to={`${match.url}/form/${record.shortcode}`}>
+    <Link to={`${match.url}/form/${record.id}`}>
       {' '}
       {text}
       {' '}
@@ -58,10 +58,11 @@ const Survey = ({ forms, selected }) => {
   columns = [...columns,
   { title: 'translation', dataIndex: 'translation_conf', render: (text, record) => getTranslationInfo(record) },
   { title: 'actions', dataIndex: 'id', render: ActionLink },
+  { title: 'killed', dataIndex: 'off_time', render: text => text && (<span className="skull">☠☠☠</span>) },
   ];
 
   const PrettyNameLink = (text, record) => (
-    <Link to="">
+    <Link to={`${match.url}/form/${record.id}`}>
       {record.prettyName}
     </Link >
   );
@@ -74,6 +75,7 @@ const Survey = ({ forms, selected }) => {
       dataIndex: 'prettyName',
       render: PrettyNameLink,
     };
+
     return (<Table columns={cols} dataSource={expanded} pagination={false} showHeader />);
   };
 
@@ -109,7 +111,7 @@ const SurveyScreen = ({ forms, selected }) => {
         <Route exact path={match.path}>
           <Survey forms={forms} selected={selected} />
         </Route>
-        <Route exact path={`${match.path}/form/:shortcode`}>
+        <Route exact path={`${match.path}/form/:surveyid`}> 
           <FormScreen forms={forms} />
         </Route>
       </Switch>
