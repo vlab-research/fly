@@ -119,7 +119,6 @@ func getQueries(cfg *Config, pool *pgxpool.Pool) []<-chan *ExternalEvent {
 		"timeouts":    Timeouts,
 		"followups":   FollowUps,
 		"payments":    Payments,
-		"offs":        Offs,
 		"spammers":    Spammers,
 	}
 	queries := strings.Split(cfg.Queries, ",")
