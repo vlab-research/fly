@@ -27,31 +27,22 @@ type Response struct {
 	QuestionText       string          `json:"question_text" validate:"required"`
 	Response           *CastString     `json:"response" validate:"required"`
 	TranslatedResponse *string         `json:"translatedResponse"`
-	Seed               int64           `json:"seed"`
+	Seed               int64           `json:"seed" validate:"required"`
 	Timestamp          *JSTimestamp    `json:"timestamp" validate:"required"`
 	Metadata           json.RawMessage `json:"metadata" validate:"required"`
 }
 
 func (r *Response) GetRow() []interface{} {
 	// Handle optional fields that should be NULL in postgres
-	var parentShortcode string
-	if r.ParentShortcode != nil {
-		parentShortcode = r.ParentShortcode.String
-	}
 
 	var pageid *string
 	if r.Pageid != "" {
 		pageid = &r.Pageid
 	}
 
-	var seed *int64
-	if r.Seed != 0 {
-		seed = &r.Seed
-	}
-
 	// Required fields are validated by validator, no need for nil checks
 	return []interface{}{
-		parentShortcode,
+		r.ParentShortcode.String,
 		r.Surveyid,
 		r.Shortcode.String,
 		r.Flowid,
@@ -62,7 +53,7 @@ func (r *Response) GetRow() []interface{} {
 		r.QuestionText,
 		r.Response.String,
 		r.TranslatedResponse,
-		seed, // will be NULL in postgres if zero
+		r.Seed,
 		r.Timestamp.Time,
 		r.Metadata,
 	}
