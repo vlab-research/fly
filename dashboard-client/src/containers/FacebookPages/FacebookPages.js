@@ -144,15 +144,15 @@ const FacebookPages = () => {
   const callback = async (res) => {
     try {
       const body = formatPage(res);
-      const res = await api.fetcher({
+      const response = await api.fetcher({
         path: '/credentials', method: 'POST', body, raw: true,
       });
 
-      if (!res.ok) {
-        await handle(res);
+      if (!response.ok) {
+        await handle(response);
         return;
       }
-      const cred = await res.json();
+      const cred = await response.json();
       await addWebhook(cred);
       await addGetStarted(cred);
     } catch (e) {
