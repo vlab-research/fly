@@ -541,47 +541,6 @@ func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {
 	assert.Equal(t, string(ev), `{"type":"repeat_payment","value":{"question":"foo_bar"}}`)
 }
 
-func TestGetOffsGetsThoseCurrentlyOnOffedSurveysOnly(t *testing.T) {
-	pool := testPool()
-	defer pool.Close()
-	before(pool)
-
-	now := time.Now().UTC()
-	ts := now.Add(-30 * time.Minute)
-
-	mustExec(t, pool, insertUserSql)
-	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
-
-	mustExec(t, pool, insertQuery,
-		"foo",
-		"bar",
-		ts,
-		"QOUT",
-		fmt.Sprintf(`{"state": "QOUT",
-                      "forms": ["open", "closed"]}`))
-
-	mustExec(t, pool, insertQuery,
-		"baz",
-		"bar",
-		ts,
-		"QOUT",
-		fmt.Sprintf(`{"state": "QOUT",
-                      "forms": ["closed", "open"]}`))
-
-	mustExec(t, pool, settingsInsertSql, "closed", `[]`, ts)
-
-	cfg := &Config{}
-	ch := Offs(cfg, pool)
-	events := getEvents(ch)
-
-	assert.Equal(t, 1, len(events))
-	assert.Equal(t, "foo", events[0].User)
-	assert.Equal(t, "survey_off", events[0].Event.Type)
-
-	ev, _ := json.Marshal(events[0].Event)
-	assert.Equal(t, string(ev), `{"type":"survey_off","value":{"form":"closed"}}`)
-}
-
 func TestGetSpammersGetsTheSpammer(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()

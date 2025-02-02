@@ -90,20 +90,6 @@ func getFollowUp(rows pgx.Rows) *ExternalEvent {
 	return &ExternalEvent{userid, pageid, &Event{"follow_up", &value}}
 }
 
-func getSurveyOff(rows pgx.Rows) *ExternalEvent {
-	var userid, pageid, shortcode string
-	err := rows.Scan(&userid, &pageid, &shortcode)
-	handle(err)
-
-	val := struct {
-		Form string `json:"form"`
-	}{Form: shortcode}
-	b, _ := json.Marshal(val)
-	value := json.RawMessage(b)
-
-	return &ExternalEvent{userid, pageid, &Event{"survey_off", &value}}
-}
-
 func getBlockUser(rows pgx.Rows) *ExternalEvent {
 	var userid, pageid string
 	err := rows.Scan(&userid, &pageid)
@@ -238,26 +224,6 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 has_followup = TRUE`
 
 	return get(conn, getFollowUp, query, cfg.FollowUpMin, cfg.FollowUpMax)
-}
-
-func Offs(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
-	query := `
-              SELECT s.userid, s.pageid, s.current_form
-              FROM states s
-              INNER JOIN survey_settings settings
-                ON settings.shortcode = s.current_form
-                AND settings.userid = (SELECT userid
-                                       FROM credentials
-                                       WHERE facebook_page_id = s.pageid
-                                       LIMIT 1)
-              WHERE
-                off_time < $1 AND
-                s.current_state != 'OFF'
-        `
-
-	now := time.Now().UTC()
-
-	return get(conn, getSurveyOff, query, now)
 }
 
 // Spamming users and send BLOCK_USER event
