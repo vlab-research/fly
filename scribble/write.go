@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/go-playground/validator/v10"
 )
@@ -37,25 +39,37 @@ func Prep(fn func(*kafka.Message) (Writeable, error), messages []*kafka.Message)
 	return data, nil
 }
 
-func Write(v *validator.Validate, scribbler Scribbler, messages []*kafka.Message) error {
+func Write(v *validator.Validate, scribbler Scribbler, messages []*kafka.Message, strictMode bool) error {
 	data, err := Prep(scribbler.Marshal, messages)
 	if err != nil {
 		return err
 	}
 
+	validData := []Writeable{}
 	for _, d := range data {
 		err := v.Struct(d)
 		if err != nil {
-			return err
+			if strictMode {
+				return err
+			}
+			// Log validation error but continue processing
+			log.Printf("Validation error for record: %v", err)
+			continue
 		}
+		validData = append(validData, d)
 	}
 
-	return scribbler.SendBatch(data)
+	if len(validData) == 0 {
+		return nil
+	}
+
+	return scribbler.SendBatch(validData)
 }
 
 type Writer struct {
-	validate  *validator.Validate
-	scribbler Scribbler
+	validate   *validator.Validate
+	scribbler  Scribbler
+	strictMode bool
 }
 
 type Scribbler interface {
@@ -64,10 +78,14 @@ type Scribbler interface {
 }
 
 func (w *Writer) Write(messages []*kafka.Message) error {
-	return Write(w.validate, w.scribbler, messages)
+	return Write(w.validate, w.scribbler, messages, w.strictMode)
 }
 
-func GetWriter(scribbler Scribbler) *Writer {
+func GetWriter(scribbler Scribbler, config *Config) *Writer {
 	validate := validator.New()
-	return &Writer{validate, scribbler}
+	return &Writer{
+		validate:   validate,
+		scribbler:  scribbler,
+		strictMode: config.StrictMode,
+	}
 }

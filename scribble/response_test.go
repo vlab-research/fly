@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -93,7 +94,7 @@ func TestResponseWriterWritesGoodData(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -134,7 +135,7 @@ func TestResponseWriterWritesNullPageIdIfNone(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -170,7 +171,7 @@ func TestResponseWriterWritesPageIdIfExists(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -233,7 +234,7 @@ func TestResponseWriterHandlesMixedResponseAndShortCodeTypes(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -274,13 +275,57 @@ func TestResponseWriterFailsOnMissingData(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{StrictMode: true})
 	err := writer.Write(msgs)
 	assert.NotNil(t, err)
 
 	res := getCol(pool, "responses", "userid")
 	assert.Equal(t, 0, len(res))
+}
 
+func TestResponseWriterWritesSomeIfStrictModeIsFalse(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, insertSurveySql, "d6c21c81-fcd0-4aa4-8975-8584d8bdb820", formA, `{}`)
+
+	msgs := makeMessages([]string{
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "parent_shortcode":"baz",
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "baz",
+          "question_ref":"bar",
+          "question_idx":1,
+          "response":25,
+          "question_text":"foobar",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",          
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "baz",
+          "question_ref":"baz",
+          "question_idx":1,
+          "question_text":"foobar",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+	})
+
+	writer := GetWriter(NewResponseScribbler(pool), &Config{StrictMode: false})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	res := getCol(pool, "responses", "userid")
+	assert.Equal(t, 1, len(res))
 }
 
 func TestResponseWriterFailsOnMissingMetadata(t *testing.T) {
@@ -307,7 +352,7 @@ func TestResponseWriterFailsOnMissingMetadata(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{StrictMode: true})
 	err := writer.Write(msgs)
 	assert.NotNil(t, err)
 
@@ -341,7 +386,7 @@ func TestResponseWriterWritesPoorlyFormattedMetadata(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -375,7 +420,7 @@ func TestResponseWriterSucceedsIfMetadataEmpty(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -423,7 +468,7 @@ func TestResponseWriterIgnoresRepeatMessages(t *testing.T) {
           "timestamp":1599039840517}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -488,7 +533,7 @@ func TestResponseWriterTranslatesSuccesfullyToOtherForm(t *testing.T) {
           "timestamp":1999099840999}`,
 	})
 
-	writer := GetWriter(NewResponseScribbler(pool))
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
 	err := writer.Write(msgs[:1])
 	assert.Nil(t, err)
 

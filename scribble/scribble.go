@@ -25,6 +25,7 @@ type Config struct {
 	ChunkSize        int           `env:"SCRIBBLE_CHUNK_SIZE,required"`
 	Destination      string        `env:"SCRIBBLE_DESTINATION,required"`
 	Handlers         string        `env:"SCRIBBLE_ERROR_HANDLERS,required"`
+	StrictMode       bool          `env:"SCRIBBLE_STRICT_MODE" envDefault:"true"`
 }
 
 func monitor(errs <-chan error) {
@@ -98,7 +99,7 @@ func main() {
 
 	// Write forever
 	// getwriter takes the struct, not marshalwriteable
-	writer := GetWriter(getMarshaller(&cfg, pool))
+	writer := GetWriter(getMarshaller(&cfg, pool), &cfg)
 	for {
 		c.SideEffect(writer.Write, checkError, errs)
 	}

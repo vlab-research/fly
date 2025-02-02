@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"testing"
+
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 type StringData struct {
@@ -83,7 +84,7 @@ func TestWriteBatchSucceeds(t *testing.T) {
 		{Value: []byte(`{ "foo": "baz"}`)},
 	}
 
-	writer := GetWriter(&StringScribbler{pool})
+	writer := GetWriter(&StringScribbler{pool}, &Config{StrictMode: true})
 
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
@@ -119,7 +120,7 @@ func TestWriteBatchWithFailedLocallyWritesNothing(t *testing.T) {
 		{Value: []byte(`{ "foo": 1}`)},
 	}
 
-	writer := GetWriter(&StringScribbler{pool})
+	writer := GetWriter(&StringScribbler{pool}, &Config{StrictMode: true})
 
 	err := writer.Write(msgs)
 	assert.NotNil(t, err)

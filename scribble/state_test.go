@@ -39,7 +39,7 @@ func TestStateWriterWritesGoodData(t *testing.T) {
           "state_json": { "token": "bar", "state": "QOUT", "tokens": ["foo"]}}`,
 	})
 
-	writer := GetWriter(NewStateScribbler(pool))
+	writer := GetWriter(NewStateScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -70,7 +70,7 @@ func TestStateWriterOverwritesOnePersonsState(t *testing.T) {
           "state_json": { "token": "bar", "state": "QOUT", "tokens": ["foo"]}}`,
 	})
 
-	writer := GetWriter(NewStateScribbler(pool))
+	writer := GetWriter(NewStateScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -100,7 +100,7 @@ func TestStateWriterOverwritesOnePersonsStateIgnoresUpdatedTimeOverwritesWithLat
           "state_json": { "token": "bar", "state": "QOUT", "tokens": ["foo"]}}`,
 	})
 
-	writer := GetWriter(NewStateScribbler(pool))
+	writer := GetWriter(NewStateScribbler(pool), &Config{})
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
@@ -135,7 +135,7 @@ func TestStateWriterFailsOnBadDataInOneRecordValidationHandler(t *testing.T) {
           "state_json": { "token": "bar", "state": "QOUT", "tokens": ["foo"]}}`,
 	})
 
-	writer := GetWriter(NewStateScribbler(pool))
+	writer := GetWriter(NewStateScribbler(pool), &Config{StrictMode: true})
 	err := writer.Write(msgs)
 	assert.NotNil(t, err)
 
