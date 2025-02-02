@@ -107,6 +107,8 @@ const Timeouts = ({ initialValues }) => {
 
 const OffTime = ({ initialValues }) => {
 
+  const isOff = !!initialValues;
+
   return (
     <>
       
@@ -118,7 +120,7 @@ const OffTime = ({ initialValues }) => {
         name = "killed"
         rules = { [{ required: false, message: 'You did not pick an end time' }]}
       >
-        <Switch disabled={!!initialValues} />
+        <Switch disabled={isOff} checked={isOff} />
       </Form.Item>
     </>
   );

@@ -147,7 +147,7 @@ const FacebookPages = () => {
       const response = await api.fetcher({
         path: '/credentials', method: 'POST', body, raw: true,
       });
-
+      
       if (!response.ok) {
         await handle(response);
         return;
