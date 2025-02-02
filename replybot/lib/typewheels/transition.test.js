@@ -274,7 +274,7 @@ describe('Machine integrated', () => {
 
     report.user.should.equal('bar')
     should.not.exist(report.error)
-
+    
     report.timestamp.should.equal(now)
     report.publish.should.be.true
 

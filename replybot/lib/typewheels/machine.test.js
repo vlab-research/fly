@@ -1833,6 +1833,40 @@ describe('Machine', () => {
     state.state.should.equal('RESPONDING')
   });
 
+  it('sends off messages when off before referral', () => {
+    const now = Date.now()
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: now - 1000 * 60,
+    }    
+
+    const log = [{...referral, timestamp: now}]
+
+    const actions = getMessage(log, form, user, { id: 'bar' })
+
+    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")      
+    JSON.parse(actions.messages[0].message.metadata).ref.should.equal('bar')
+    const state = getState(log)
+    state.state.should.equal('RESPONDING')    
+  });
+
+  it('sends multiple off messages if a person keeps writing', () => {
+    const now = Date.now()
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: now - 1000 * 60,
+    }    
+
+    const log = [{...referral, timestamp: now}, _echo('bar'), { ...text, timestamp: now }]
+
+    const actions = getMessage(log, form, user, { id: 'bar' })
+    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")
+    
+    const state = getState(log)
+    state.state.should.equal('RESPONDING')    
+  });
 
   it('allows off users to start a new survey', () => {
 

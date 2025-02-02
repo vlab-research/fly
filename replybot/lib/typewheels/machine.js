@@ -43,12 +43,12 @@ function repeatResponse(question, text) {
 }
 
 
-function offResponse(text) {
+function offResponse(previousQuestion, text) {
 
   return {
     message: {
       text,
-      metadata: JSON.stringify({ ref: 'off_message' })
+      metadata: JSON.stringify({ off: true, ref: previousQuestion })
     }
   }
 }
@@ -693,12 +693,11 @@ function _response(
   ctx, qa, { question, validation, response, token, followUp, surveyOff }
 ) {
 
-
   // Check if form is off based on timestamp
   if (ctx.form.offTime && ctx.timestamp > ctx.form.offTime) {
-    return offResponse(offMessage(ctx.form.custom_messages))
+    let q = question || ctx.form.fields[0].ref; // handles joining after off first question
+    return offResponse(q, offMessage(ctx.form.custom_messages))
   }
-
 
   // if we haven't asked anything, it must be the first question!
   if (!question) {
