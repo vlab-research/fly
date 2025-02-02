@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
-	"testing"
 )
 
 func makeMessages(vals []string) []*kafka.Message {
@@ -49,7 +50,7 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 }
 
 func testPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5432/chatroach")
+	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/chatroach")
 	handle(err)
 
 	ctx := context.Background()

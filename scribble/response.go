@@ -3,20 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log"
+
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/dgraph-io/ristretto"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/vlab-research/trans"
-	"log"
 )
-
-// quick hack to keep nulls in db
-func nullify(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
 
 // TODO:
 // A) JSON Schema validation if you want validation...
@@ -40,20 +33,36 @@ type Response struct {
 }
 
 func (r *Response) GetRow() []interface{} {
+	// Handle optional fields that should be NULL in postgres
+	var parentShortcode string
+	if r.ParentShortcode != nil {
+		parentShortcode = r.ParentShortcode.String
+	}
 
+	var pageid *string
+	if r.Pageid != "" {
+		pageid = &r.Pageid
+	}
+
+	var seed *int64
+	if r.Seed != 0 {
+		seed = &r.Seed
+	}
+
+	// Required fields are validated by validator, no need for nil checks
 	return []interface{}{
-		r.ParentShortcode.String,
+		parentShortcode,
 		r.Surveyid,
 		r.Shortcode.String,
 		r.Flowid,
 		r.Userid,
-		nullify(r.Pageid),
+		pageid, // will be NULL in postgres if empty string
 		r.QuestionRef,
 		r.QuestionIdx,
 		r.QuestionText,
 		r.Response.String,
 		r.TranslatedResponse,
-		r.Seed,
+		seed, // will be NULL in postgres if zero
 		r.Timestamp.Time,
 		r.Metadata,
 	}
