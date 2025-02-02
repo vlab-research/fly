@@ -56,7 +56,7 @@ class Machine {
 
     const { messages, payments } = act({ form, user, page: { id: pageId }, timestamp }, state, output)
 
-    const responses = responseVals(newState, upd, form, surveyId, pageId, userId, timestamp)
+    const responses = responseVals(newState, upd, form, surveyId, pageId, user, timestamp)
 
     return { actions: messages, responses, pageToken, timestamp, payments }
   }

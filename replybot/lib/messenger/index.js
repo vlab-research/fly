@@ -44,10 +44,9 @@ async function getUserInfo(id, pageToken) {
     return user;
 
   } catch (e) {
-
     // TODO: we should be removing getUserInfo anyways.
     console.error(e);
-    return { id, 'name': '_', first_name: '_', last_name: '_' }
+    return { id, name: '_', first_name: '_', last_name: '_' }
   }
 }
 

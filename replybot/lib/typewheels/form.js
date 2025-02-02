@@ -127,6 +127,10 @@ function getField({ form, user }, ref, index = false) {
     throw new FieldError(`This form has no fields: ${form.id}`)
   }
 
+  if (!user || !user.id) {
+    throw new FieldError(`Invalid user object when getting field ${ref} in form ${form.id}`)
+  }
+
   const idx = form.fields.map(({ ref }) => ref).indexOf(ref)
   const field = form.fields[idx]
 

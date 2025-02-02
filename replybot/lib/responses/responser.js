@@ -4,13 +4,13 @@ const { Machine } = require('../typewheels/transition')
 const { TokenStore } = require('../typewheels/tokenstore')
 const util = require('util')
 
-function responseVals(newState, update, form, surveyid, pageid, userid, timestamp) {
+function responseVals(newState, update, form, surveyid, pageid, user, timestamp) {
   if (update) {
     const [q, response] = update
     const shortcode = newState.forms.slice(-1)[0]
 
     const flowid = newState.forms.length
-    const [question_idx, { title: question_text, ref: question_ref }] = getField({ form }, q, true)
+    const [question_idx, { title: question_text, ref: question_ref }] = getField({ form, user }, q, true)
 
     const { seed, form: parent_shortcode } = newState.md
     const metadata = newState.md
@@ -20,7 +20,7 @@ function responseVals(newState, update, form, surveyid, pageid, userid, timestam
       surveyid,
       shortcode,
       flowid,
-      userid,
+      userid: user.id,
       pageid,
       question_ref,
       question_idx,
