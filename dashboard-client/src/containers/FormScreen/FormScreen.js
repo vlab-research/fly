@@ -116,8 +116,9 @@ const OffTime = ({ initialValues }) => {
         valuePropName="checked"
         initialValue={!!initialValues}
         rules={[{ required: false, message: 'You did not pick an end time' }]}
+        disabled={!!initialValues}
       >
-        <Switch disabled={!!initialValues} />
+        <Switch />
       </Form.Item>
     </>
   );
