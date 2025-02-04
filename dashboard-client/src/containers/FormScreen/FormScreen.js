@@ -106,8 +106,11 @@ const Timeouts = ({ initialValues }) => {
 };
 
 const OffTime = ({ initialValues }) => {
+  const [isOff, setIsOff] = useState(!!initialValues);
 
-  const isOff = !!initialValues;
+  const handleToggle = (checked) => {
+    setIsOff(checked);
+  };
 
   return (
     <>
@@ -120,7 +123,11 @@ const OffTime = ({ initialValues }) => {
         name = "killed"
         rules = { [{ required: false, message: 'You did not pick an end time' }]}
       >
-        <Switch disabled={isOff} checked={isOff} />
+        <Switch 
+          checked={isOff} 
+          onChange={handleToggle} 
+          disabled={!!initialValues} 
+        />
       </Form.Item>
     </>
   );
