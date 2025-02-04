@@ -105,20 +105,19 @@ const Timeouts = ({ initialValues }) => {
   );
 };
 
-const OffTime = ({ initialValues }) => {
+const OffTime = ({ initialValues }) => {  
   return (
-    <>
+    <>      
       <Form.Item
-        style={{
+        style= {{
           display: 'flex', maxWidth: '800px', marginBottom: 8, marginRight: 'auto', marginLeft: 'auto',
-        }}
-        name="killed"
-        valuePropName="checked"
-        initialValue={!!initialValues}
-        rules={[{ required: false, message: 'You did not pick an end time' }]}
-        disabled={!!initialValues}
+        }
+               }
+        name = "killed"
+        valuePropName = "checked"
+        rules = { [{ required: false, message: 'You did not pick an end time' }]}
       >
-        <Switch />
+        <Switch disabled={!!initialValues} />
       </Form.Item>
     </>
   );
@@ -131,6 +130,9 @@ const FormScreen = ({ forms }) => {
   const { setSurveys } = useContext(Survey);
   const [loading, setLoading] = useState(false);
 
+  const { off_time, timeouts, shortcode, survey_name } = forms.find(s => s.id === surveyid);
+
+
   const handle = async (res) => {
     if (res.status === 200) {
       return res.json();
@@ -142,7 +144,7 @@ const FormScreen = ({ forms }) => {
   const onFinish = async (body) => {
     setLoading(true)
 
-    body.off_time = body.killed ? new Date() : undefined;
+    body.off_time = !!off_time ? off_time : (body.killed ? new Date() : undefined);
 
     // use surveyid instead 
     await ApiClient.fetcher({ method: 'PUT', path: `/surveys/${surveyid}/settings`, body })
@@ -169,15 +171,11 @@ const FormScreen = ({ forms }) => {
   // create testing links for each page
   // create a component which shows all the links for each page...
 
-  const { off_time, timeouts, shortcode, survey_name } = forms.find(s => s.id === surveyid);
-
   const version = forms.reverse().filter(s => s.shortcode === shortcode).map(s => s.id).indexOf(surveyid) + 1;
 
-  const data = { off_time, timeouts };
-
   const initialValues = {
-    killed: !!data.off_time,
-    timeouts: data.timeouts ? data.timeouts.map(hydrateTimeout) : [],
+    killed: !!off_time,
+    timeouts: timeouts ? timeouts.map(hydrateTimeout) : [],
   };
  
   const [form] = Form.useForm();
@@ -209,10 +207,10 @@ const FormScreen = ({ forms }) => {
           < section >
             <h2>Kill Switch </h2>
             <p> Warning: once you flip this switch, you can never go back. It's over, rover. </p>
-            < OffTime initialValues = { initialValues.off_time } />
+            < OffTime initialValues = { initialValues.killed } />
           </section>
           < Form.Item style = {{ marginTop: '4em' }} wrapperCol = {{ offset: 8, span: 16 }}>
-            <PrimaryBtn>UPDATE </PrimaryBtn>
+            <PrimaryBtn>SAVE </PrimaryBtn>
           </Form.Item>
 
         </Form>
