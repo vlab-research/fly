@@ -134,7 +134,7 @@ func Blocked(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
               WHERE
                 current_state = 'BLOCKED' AND
                 fb_error_code = ANY($1) AND
-                updated + ($2)::INTERVAL > $4 AND
+                updated + ($2)::INTERVAL > $4 AND 
                 ($4 > next_retry OR next_retry IS NULL) AND 
                 (state_json->'retries' IS NULL OR JSON_ARRAY_LENGTH(state_json->'retries') < $3)`
 
@@ -160,8 +160,7 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `
               with unrolled_settings as (
                 SELECT
-                  userid,
-                  shortcode,
+                  surveyid,
                   json_array_elements(timeouts)->>'name' AS name,
                   json_array_elements(timeouts)->>'type' AS type,
                   json_array_elements(timeouts)->>'value' AS value
@@ -169,14 +168,13 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
               )
               SELECT (state_json->>'waitStart')::int, s.userid, s.pageid
               FROM states s
+              LEFT JOIN surveys surv 
+                ON surv.shortcode = s.current_form
               LEFT JOIN unrolled_settings settings
-                ON settings.shortcode = s.current_form
-                AND settings.userid = (SELECT userid
-                                       FROM credentials
-                                       WHERE facebook_page_id = s.pageid
-                                       LIMIT 1)
+                ON settings.surveyid = surv.id
                 AND settings.name = s.state_json->'wait'->'value'->>'variable'
               WHERE
+                surv.created <= s.form_start_time AND
                 current_state = 'WAIT_EXTERNAL_EVENT' AND
                 (s.timeout_date < $1
                  OR
@@ -188,9 +186,11 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	d := time.Now().UTC()
 
 	if len(cfg.TimeoutBlacklist) > 0 {
-		query += `AND current_form != ANY($2)`
+		query += `AND s.current_form != ANY($2)`
 		return get(conn, getTimeout, query, d, cfg.TimeoutBlacklist)
 	}
+
+	query += `ORDER BY surv.created DESC LIMIT 1`
 
 	return get(conn, getTimeout, query, d)
 }

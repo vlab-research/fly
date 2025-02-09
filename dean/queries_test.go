@@ -18,7 +18,7 @@ const (
 
 	surveyInsertSql = `INSERT INTO surveys(userid, formid, form, title, shortcode, created, messages) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', 'formid', '{}', 'title', $1, $2, $3);`
 
-	settingsInsertSql = `INSERT INTO survey_settings(userid, shortcode, timeouts, off_time) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', $1, $2, $3)`
+	settingsInsertSql = `INSERT INTO survey_settings(surveyid, timeouts, off_time) VALUES ((select id from surveys where shortcode = $1 AND created = $2), $3, $4)`
 
 	insertQuery = `INSERT INTO
                    states(userid, pageid, updated, current_state, state_json)
@@ -241,6 +241,13 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 	ts := time.Now().UTC().Add(-30 * time.Minute)
 	ms := ts.Unix() * 1000
 
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	// Add surveys before states with the correct userid
+	mustExec(t, pool, surveyInsertSql, "short1", time.Now().UTC().Add(-1*time.Hour), "{}")
+	mustExec(t, pool, surveyInsertSql, "short2", time.Now().UTC().Add(-1*time.Hour), "{}")
+
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -249,7 +256,8 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
 
 	mustExec(t, pool, insertQuery,
 		"baz",
@@ -259,7 +267,8 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": "40 minutes"}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": "40 minutes"}}`, ms, ms))
 
 	cfg := &Config{}
 	ch := Timeouts(cfg, pool)
@@ -282,6 +291,14 @@ func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
 	ts := time.Now().UTC().Add(-30 * time.Minute)
 	ms := ts.Unix() * 1000
 
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	// Add surveys before states with the correct userid
+	mustExec(t, pool, surveyInsertSql, "short1", time.Now().UTC().Add(-1*time.Hour), "{}")
+	mustExec(t, pool, surveyInsertSql, "short2", time.Now().UTC().Add(-1*time.Hour), "{}")
+	mustExec(t, pool, surveyInsertSql, "short3", time.Now().UTC().Add(-1*time.Hour), "{}")
+
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -290,7 +307,8 @@ func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
 
 	mustExec(t, pool, insertQuery,
 		"baz",
@@ -300,7 +318,8 @@ func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short3"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
 
 	cfg := &Config{TimeoutBlacklist: []string{"short3"}}
 	ch := Timeouts(cfg, pool)
@@ -313,7 +332,6 @@ func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
 
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
-
 }
 
 func TestGetTimeouts_WithRelativeVariableTimeout(t *testing.T) {
@@ -327,6 +345,11 @@ func TestGetTimeouts_WithRelativeVariableTimeout(t *testing.T) {
 	mustExec(t, pool, insertUserSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
 
+	// Add surveys before states
+	surveyTime := time.Now().UTC().Add(-1 * time.Hour)
+	mustExec(t, pool, surveyInsertSql, "short1", surveyTime, "{}")
+	mustExec(t, pool, surveyInsertSql, "short2", surveyTime, "{}")
+
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -335,7 +358,8 @@ func TestGetTimeouts_WithRelativeVariableTimeout(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "foo_var"}}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "foo_var"}}}`, ms, ms))
 
 	mustExec(t, pool, insertQuery,
 		"baz",
@@ -345,9 +369,11 @@ func TestGetTimeouts_WithRelativeVariableTimeout(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "bar_var"}}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "bar_var"}}}`, ms, ms))
 
-	mustExec(t, pool, settingsInsertSql, "short2", `[{"name": "foo_var", "type": "relative", "value": "20 minutes"}, {"name": "bar_var", "type": "relative", "value": "40 minutes"}]`, ts)
+	mustExec(t, pool, settingsInsertSql, "short2", surveyTime,
+		`[{"name": "foo_var", "type": "relative", "value": "20 minutes"}, {"name": "bar_var", "type": "relative", "value": "40 minutes"}]`, ts)
 
 	cfg := &Config{}
 	ch := Timeouts(cfg, pool)
@@ -373,6 +399,11 @@ func TestGetTimeouts_WithAbsoluteVariableTimeout(t *testing.T) {
 	mustExec(t, pool, insertUserSql)
 	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
 
+	// Add surveys before states
+	surveyTime := time.Now().UTC().Add(-1 * time.Hour)
+	mustExec(t, pool, surveyInsertSql, "short1", surveyTime, "{}")
+	mustExec(t, pool, surveyInsertSql, "short2", surveyTime, "{}")
+
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
@@ -381,7 +412,8 @@ func TestGetTimeouts_WithAbsoluteVariableTimeout(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": { "type": "absolute", "variable": "foo_var"}}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "absolute", "variable": "foo_var"}}}`, ms, ms))
 
 	mustExec(t, pool, insertQuery,
 		"baz",
@@ -391,10 +423,14 @@ func TestGetTimeouts_WithAbsoluteVariableTimeout(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
-                      "wait": { "type": "timeout", "value": { "type": "absolute", "variable": "bar_var"}}}`, ms))
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "absolute", "variable": "bar_var"}}}`, ms, ms))
 
-	mustExec(t, pool, settingsInsertSql, "short2",
-		fmt.Sprintf(`[{"name": "foo_var", "type": "absolute", "value": "%v"}, {"name": "bar_var", "type": "absolute", "value": "%v"}]`, now.Format(time.RFC3339), now.Add(1*time.Minute).Format(time.RFC3339)), ts)
+	mustExec(t, pool, settingsInsertSql, "short2", surveyTime,
+		fmt.Sprintf(`[{"name": "foo_var", "type": "absolute", "value": "%v"}, {"name": "bar_var", "type": "absolute", "value": "%v"}]`,
+			now.Format(time.RFC3339),
+			now.Add(1*time.Minute).Format(time.RFC3339)),
+		ts)
 
 	cfg := &Config{}
 	ch := Timeouts(cfg, pool)
@@ -402,6 +438,66 @@ func TestGetTimeouts_WithAbsoluteVariableTimeout(t *testing.T) {
 
 	assert.Equal(t, 1, len(events))
 	assert.Equal(t, "foo", events[0].User)
+	assert.Equal(t, "timeout", events[0].Event.Type)
+
+	ev, _ := json.Marshal(events[0].Event)
+	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
+}
+
+func TestGetTimeouts_OnlyWorksForCorrectSurveyVersion(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	now := time.Now().UTC()
+	t1 := now.Add(-2 * time.Hour) // Earlier survey
+	t2 := now.Add(-1 * time.Hour) // Later survey with timeout settings
+
+	ts := now.Add(-30 * time.Minute)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	// Add two versions of the same survey
+	mustExec(t, pool, surveyInsertSql, "short1", t1, "{}") // Earlier version without timeout
+	mustExec(t, pool, surveyInsertSql, "short1", t2, "{}") // Later version with timeout
+
+	mustExec(t, pool, settingsInsertSql, "short1", t2,
+		`[{"name": "foo_var", "type": "relative", "value": "20 minutes"}]`, ts)
+
+	// User1's form_start_time is between t1 and t2 (should use earlier version without timeout)
+	startTime1 := t1.Add(30*time.Minute).Unix() * 1000
+	mustExec(t, pool, insertQuery,
+		"user1",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "foo_var"}}}`, ms, startTime1))
+
+	// User2's form_start_time is after t2 (should use later version with timeout)
+	startTime2 := t2.Add(10*time.Minute).Unix() * 1000
+	mustExec(t, pool, insertQuery,
+		"user2",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "foo_var"}}}`, ms, startTime2))
+
+	cfg := &Config{}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "user2", events[0].User)
 	assert.Equal(t, "timeout", events[0].Event.Type)
 
 	ev, _ := json.Marshal(events[0].Event)
