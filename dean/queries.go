@@ -227,13 +227,13 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 }
 
 // Spamming users and send BLOCK_USER event
-// if the past 50 questions are all the same, block the user.
+// if the past 25 questions are all the same, block the user.
 func Spammers(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `
               SELECT s.userid, s.pageid
               FROM states s
               WHERE
-                s.state_json->'qa'->-1->>0 = state_json->'qa'->-50->>0
+                s.state_json->'qa'->-1->>0 = state_json->'qa'->-25->>0
         `
 
 	return get(conn, getBlockUser, query)
