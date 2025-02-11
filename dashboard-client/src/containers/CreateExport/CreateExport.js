@@ -20,8 +20,8 @@ const CreateExport = () => {
   const onFinish = async (body) => {
     setLoading(true)
     // quick hack until we have select
-    body.metadata = body.metadata.trim();
-    body.metadata = body.metadata ? body.metadata.split(',').map(x => x.trim()) : null;
+    body.metadata = body?.metadata?.trim();
+    body.metadata = body?.metadata ? body?.metadata?.split(',').map(x => x?.trim()) : null;
     await startExport(survey, body)
 
     // artificial wait, hoping for exporter to catch up
@@ -117,7 +117,7 @@ const CreateExport = () => {
 
 
         <Form.Item
-          label="Metadata to add as columns when pivoting"
+          label="Metadata to add as columns"
           name="metadata"
         >
           <Input placeholder="stratum_age, stratum_gender" />
