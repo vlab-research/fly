@@ -20,8 +20,11 @@ const CreateExport = () => {
   const onFinish = async (body) => {
     setLoading(true)
     // quick hack until we have select
-    body.metadata = body?.metadata?.trim();
-    body.metadata = body?.metadata ? body?.metadata?.split(',').map(x => x?.trim()) : null;
+
+    if (body && body.metadata) {
+      body.metadata = body.metadata.split(',').map(x => x?.trim())
+    }
+
     await startExport(survey, body)
 
     // artificial wait, hoping for exporter to catch up
