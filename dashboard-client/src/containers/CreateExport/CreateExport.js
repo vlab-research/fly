@@ -22,7 +22,7 @@ const CreateExport = () => {
     // quick hack until we have select
 
     if (body && body.metadata) {
-      body.metadata = body.metadata.split(',').map(x => x?.trim())
+      body.metadata = body.metadata.split(',').map(x => x.trim())
     }
 
     await startExport(survey, body)
