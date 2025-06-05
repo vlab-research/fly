@@ -695,7 +695,7 @@ function _response(
 
   // Check if form is off based on timestamp
   if (ctx.form.offTime && ctx.timestamp > ctx.form.offTime) {
-    let q = question || ctx.form.fields[0].ref; // handles joining after off first question
+    const q = question || ctx.form.fields[0].ref; // handles joining after off first question
     return offResponse(q, offMessage(ctx.form.custom_messages))
   }
 

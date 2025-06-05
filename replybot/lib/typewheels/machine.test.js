@@ -913,6 +913,36 @@ describe('Machine', () => {
     actions.messages[1].message.text.should.equal('foo')
   })
 
+
+  it('Parses a webview url properly', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar', properties: { description: '{"type": "webview", url: { "base": "foo.com", "params": {"q": "hello"}}, "buttonText": "Start"}' } }]
+    }
+
+    const log = [referral]
+    const actions = getMessage(log, form, user)
+    actions.messages.length.should.equal(1)
+    actions.messages[0].message.attachment.payload.buttons[0].url.should.equal('https://foo.com/?q=hello')
+  })
+
+/* 
+  it.only('Parses a webview url properly with funkyness from typeform', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'statement', title: 'bar', ref: 'bar', properties: { description: '{\n \"type\": \"webview\",\n \"url\": {\n \"base\": \"[columbiangwu.co1.qualtrics.com/jfe/form/SV\\_8k7acmuWQAZjERE](https://columbiangwu.co1.qualtrics.com/jfe/form/SV_8k7acmuWQAZjERE)\",\n \"params\": {\n \"vlab\\_id\": \"{{hidden:id}}\"\n }\n },\n \"buttonText\": \"Start\",\n \"extensions\": false\n}' } }]
+    }
+
+    const log = [referral]
+    const actions = getMessage(log, form, user)
+    actions.messages.length.should.equal(1)
+
+    console.log(actions.messages[0])
+    actions.messages[0].message.attachment.payload.buttons[0].url.should.equal('https://https//columbiangwu.co1.qualtrics.com/jfe/form/SV_8k7acmuWQAZjERE?vlab_id=123')
+  }) */
+
+
+
   it('Ignores responses to a statement if it is moving on to another question', () => {
     const form = {
       logic: [],
@@ -1120,7 +1150,7 @@ describe('Machine', () => {
 
     // repeat ref foo with sorry message...
     actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.contain('No response')
+    actions.messages[0].message.text.should.contain('Sorry, I can\'t accept any responses')
 
     actions.messages[1].message.metadata.should.equal('{"isRepeat":true,"type":"wait","ref":"foo"}')
   })
@@ -1214,7 +1244,7 @@ describe('Machine', () => {
 
     // repeat ref foo with sorry message...
     actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.contain('No response is necessary')
+    actions.messages[0].message.text.should.contain('Sorry, I can\'t accept any responses')
     actions.messages[1].message.text.should.contain('foo')
   })
 
