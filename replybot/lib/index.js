@@ -6,7 +6,7 @@ const { BotSpine } = require('@vlab-research/botspine')
 const { pipeline } = require('stream')
 const { TokenStore } = require('./typewheels/tokenstore')
 const { producer, producerReady } = require('./producer')
-const { SpineSupervisor } = require('./spine-supervisor')
+const { SpineSupervisor } = require('./spine-supervisor/spine-supervisor')
 
 const REPLYBOT_STATESTORE_TTL = process.env.REPLYBOT_STATESTORE_TTL || '24h'
 const REPLYBOT_MACHINE_TTL = process.env.REPLYBOT_MACHINE_TTL || '60m'
@@ -90,5 +90,10 @@ if (isNaN(numSpines) || numSpines < 1) {
   throw new Error('NUM_SPINES must be a positive integer')
 }
 
-const supervisor = new SpineSupervisor(numSpines, 5, 5 * 60 * 1000)
+// Create a BotSpine constructor that always uses "replybot" as the name
+const ReplyBotSpine = function() {
+  return new BotSpine('replybot')
+}
+
+const supervisor = new SpineSupervisor(numSpines, 5, 5 * 60 * 1000, null, ReplyBotSpine)
 supervisor.start(processor)
