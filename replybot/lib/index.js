@@ -6,7 +6,7 @@ const { BotSpine } = require('@vlab-research/botspine')
 const { pipeline } = require('stream')
 const { TokenStore } = require('./typewheels/tokenstore')
 const { producer, producerReady } = require('./producer')
-
+const { SpineSupervisor } = require('./spine-supervisor')
 
 const REPLYBOT_STATESTORE_TTL = process.env.REPLYBOT_STATESTORE_TTL || '24h'
 const REPLYBOT_MACHINE_TTL = process.env.REPLYBOT_MACHINE_TTL || '60m'
@@ -50,16 +50,11 @@ function publishPayment(message) {
 // Does all the work
 function processor(machine, stateStore) {
   return async function _processor({ key: userId, value: event }) {
-
     try {
       console.log('EVENT: ', event)
-
       const state = await stateStore.getState(userId, event)
       console.log('STATE: ', state)
-
-
       const report = await machine.run(state, userId, event)
-
       console.log('REPORT: ', report)
 
       if (report.publish) {
@@ -77,7 +72,6 @@ function processor(machine, stateStore) {
       }
     }
     catch (e) {
-
       console.error('Error from ReplyBot: \n',
         e.message,
         '\n Error occured during event: ', util.inspect(JSON.parse(event), null, 8))
@@ -86,22 +80,15 @@ function processor(machine, stateStore) {
   }
 }
 
-
-// EventStore with chatbase backend
-const Chatbase = require(process.env.CHATBASE_BACKEND)
-const chatbase = new Chatbase()
-const stateStore = new StateStore(chatbase, REPLYBOT_STATESTORE_TTL)
-const tokenstore = new TokenStore(chatbase.pool)
-const machine = new Machine(REPLYBOT_MACHINE_TTL, tokenstore)
-
-function handle(err) {
-  throw err
+const NUM_SPINES = process.env.NUM_SPINES
+if (!NUM_SPINES) {
+  throw new Error('NUM_SPINES environment variable must be set')
 }
 
-// TODO: handle kafka errors (throw them to force restart!)
-// Create multiple spines for parallelism within container?
-const spine = new BotSpine('replybot')
-pipeline(spine.source(),
-  spine.transform(processor(machine, stateStore)),
-  spine.sink(),
-  handle)
+const numSpines = parseInt(NUM_SPINES)
+if (isNaN(numSpines) || numSpines < 1) {
+  throw new Error('NUM_SPINES must be a positive integer')
+}
+
+const supervisor = new SpineSupervisor(numSpines, 5, 5 * 60 * 1000)
+supervisor.start(processor)
