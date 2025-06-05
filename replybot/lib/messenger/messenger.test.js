@@ -2,6 +2,9 @@ const nock = require('nock')
 const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
+
+process.env.FACEBOOK_BASE_RETRY_TIME = 1
+
 const m = require('./index')
 const { MachineIOError } = require('../errors')
 

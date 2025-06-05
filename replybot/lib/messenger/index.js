@@ -1,12 +1,14 @@
 const r2 = require('r2')
 const { MachineIOError } = require('../errors')
 const BASE_URL = process.env.FACEBOOK_GRAPH_URL || "https://graph.facebook.com/v8.0"
-const RETRIES = process.env.FACEBOOK_RETRIES || 6
+const RETRIES = process.env.FACEBOOK_RETRIES || 5
+const BASE_RETRY_TIME = process.env.FACEBOOK_BASE_RETRY_TIME || 400
 
 // Helper function to create delay
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function facebookRequest(reqFn, retries = 0) {
+  
   let res;
 
   try {
@@ -16,7 +18,7 @@ async function facebookRequest(reqFn, retries = 0) {
     // RETRY ETIMEDOUT ERRORS
     if (e.code === 'ETIMEDOUT' && retries < RETRIES) {
       // Add exponential backoff: 400ms, 800ms, 1600ms, 3200ms, 6400ms
-      await delay(Math.pow(2, retries) * 400)
+      await delay(Math.pow(2, retries) * BASE_RETRY_TIME)
       res = await facebookRequest(reqFn, retries + 1)
     }
     else {
@@ -28,7 +30,7 @@ async function facebookRequest(reqFn, retries = 0) {
     const retryCodes = [1200, 551]
     if (retryCodes.includes(res.error.code) && retries < RETRIES) {
       // Add exponential backoff for Facebook API errors too
-      await delay(Math.pow(2, retries) * 400)
+      await delay(Math.pow(2, retries) * BASE_RETRY_TIME)
       return await facebookRequest(reqFn, retries + 1)
     }
 
