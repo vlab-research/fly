@@ -143,7 +143,7 @@ describe('SpineSupervisor', () => {
   })
 
   describe('start', () => {
-    it('should create and setup correct number of spines', () => {
+    it('should create and setup correct number of spines with replybot name', () => {
       const supervisor = new SpineSupervisor(3, 5, 5 * 60 * 1000, mockChatbase, mockBotSpineCtor)
       // Use real streams for each spine
       for (let i = 0; i < 3; i++) {
@@ -157,6 +157,7 @@ describe('SpineSupervisor', () => {
       }
       supervisor.start(mockProcessor)
       expect(mockBotSpineCtor.callCount).to.equal(3)
+      expect(mockBotSpineCtor.firstCall.args[0]).to.equal('replybot')
     })
 
     it('should throw error if spine creation fails', () => {

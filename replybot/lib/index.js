@@ -90,10 +90,5 @@ if (isNaN(numSpines) || numSpines < 1) {
   throw new Error('NUM_SPINES must be a positive integer')
 }
 
-// Create a BotSpine constructor that always uses "replybot" as the name
-const ReplyBotSpine = function() {
-  return new BotSpine('replybot')
-}
-
-const supervisor = new SpineSupervisor(numSpines, 5, 5 * 60 * 1000, null, ReplyBotSpine)
+const supervisor = new SpineSupervisor(numSpines, 5, 5 * 60 * 1000, null, BotSpine)
 supervisor.start(processor)

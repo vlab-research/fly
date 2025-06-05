@@ -58,7 +58,7 @@ class SpineSupervisor {
 
   start(processor) {
     for (let i = 0; i < this.numSpines; i++) {
-      const spine = new this.BotSpineCtor()
+      const spine = new this.BotSpineCtor('replybot')
       this.setupPipeline(spine, i, processor)
     }
   }
