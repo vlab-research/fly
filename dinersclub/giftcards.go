@@ -2,11 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"time"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/vlab-research/go-reloadly/reloadly"
-	"time"
 )
 
 type GiftCardsProvider struct {
@@ -36,7 +37,7 @@ func (p *GiftCardsProvider) Payout(event *PaymentEvent) (*Result, error) {
 	order := new(reloadly.GiftCardOrder)
 	err := json.Unmarshal(*event.Details, &order)
 	if err != nil {
-		return nil, err
+		return handleJSONUnmarshalError("giftcard", err, event.Details), nil
 	}
 
 	order = FormatOrder(order)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -72,4 +73,18 @@ func GenericGetUser(pool *pgxpool.Pool, event *PaymentEvent) (*User, error) {
 	}
 
 	return &u, err
+}
+
+// handleJSONUnmarshalError creates a standardized error result for JSON unmarshaling failures
+func handleJSONUnmarshalError(providerType string, err error, details *json.RawMessage) *Result {
+	return &Result{
+		Type:      fmt.Sprintf("payment:%s", providerType),
+		Success:   false,
+		Timestamp: time.Now().UTC(),
+		Error: &PaymentError{
+			Message:        fmt.Sprintf("Invalid %s payment details format. Please check your payment configuration. Error: %s", providerType, err.Error()),
+			Code:           "INVALID_JSON_FORMAT",
+			PaymentDetails: details,
+		},
+	}
 }

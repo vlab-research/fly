@@ -116,8 +116,7 @@ func (p *ReloadlyProvider) Payout(event *PaymentEvent) (*Result, error) {
 	job := new(reloadly.TopupJob)
 	err := json.Unmarshal(*event.Details, &job)
 	if err != nil {
-		e := fmt.Errorf("Error unmarshalling from json: %s. Error: %s", string(*event.Details), err)
-		return nil, e
+		return handleJSONUnmarshalError("reloadly", err, event.Details), nil
 	}
 
 	result := &Result{}

@@ -373,3 +373,37 @@ func TestDinersClubAuthError(t *testing.T) {
 	err := dc.Process(msgs)
 	assert.Nil(t, err)
 }
+
+func TestDinersClubHandlesJSONUnmarshalErrorsGracefully(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := ioutil.ReadAll(r.Body)
+		dat := strings.TrimSpace(string(data))
+
+		// Verify that we get a proper payment error response
+		assert.Contains(t, dat, `"code":"INVALID_JSON_FORMAT"`)
+		assert.Contains(t, dat, `"success":false`)
+		assert.Contains(t, dat, `"type":"payment:fake"`)
+		assert.Contains(t, dat, "Invalid fake payment details format")
+
+		assert.Equal(t, "/", r.URL.Path)
+		w.WriteHeader(200)
+	}))
+
+	msgs := makeMessages([]string{
+		`{
+			"userid": "foo",
+			"pageid": "page",
+			"timestamp": 1600558963867,
+			"provider": "fake",
+			"details": {
+				"result": {
+					"type": "foo",
+					"success": "this_should_be_boolean_not_string"
+				}
+			}
+		}`,
+	})
+
+	err := getDC(ts).Process(msgs)
+	assert.Nil(t, err)
+}

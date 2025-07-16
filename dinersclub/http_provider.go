@@ -106,8 +106,7 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 
 	err := json.Unmarshal(*event.Details, &order)
 	if err != nil {
-		e := fmt.Errorf("Error unmarshalling from json: %s. Error: %s", string(*event.Details), err)
-		return nil, e
+		return handleJSONUnmarshalError("http", err, event.Details), nil
 	}
 
 	result := &Result{}

@@ -39,7 +39,7 @@ func (p *FakeProvider) Payout(event *PaymentEvent) (*Result, error) {
 	err := json.Unmarshal(*event.Details, &details)
 
 	if err != nil {
-		return nil, err
+		return handleJSONUnmarshalError("fake", err, event.Details), nil
 	}
 
 	time.Sleep(10 * time.Millisecond)
