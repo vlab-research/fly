@@ -5,7 +5,12 @@ services:
     volumes:
       - ./server:/usr/src/app/server
     env_file: .env
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     command: npm run dev
+    depends_on:
+      - redis
   botserver:
     image: nandanrao/gbv-botserver
     volumes:
@@ -14,4 +19,12 @@ services:
     ports:
       - "3000:80"
   redis:
-    image: redis
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+volumes:
+  redis_data:
