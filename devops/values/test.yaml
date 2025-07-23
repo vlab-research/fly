@@ -1,6 +1,7 @@
 tags:
   kafka: true
   cockroach: true
+  redis: true
   payments: true
   backup: false
   naughtybot: false
@@ -20,14 +21,14 @@ botEnvs: &botenvs bot-envs
 chatbaseHost: &host db-cockroachdb-public
 
 
-versionDashboard: &vdashboard v0.0.33
+versionDashboard: &vdashboard v0.0.35
 versionBotserver: &vbotserver v0.0.10
-versionReplybot: &vreplybot v0.0.145
+versionReplybot: &vreplybot v0.0.152
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.26
-versionScribble: &vscribble v0.0.23
-versionDinersclub: &vdinersclub v0.0.26
-versionFormcentral: &vformcentral v0.0.10
+versionDean: &vdean v0.0.30
+versionScribble: &vscribble v0.0.25
+versionDinersclub: &vdinersclub v0.0.34
+versionFormcentral: &vformcentral v0.0.11
 
 linksniffer:
   replicaCount: 1
@@ -365,7 +366,7 @@ cockroachdb:
   statefulset:
     replicas: 1
     args:
-      - --insecure 
+      - --insecure
   conf:
     single-node: true
     budget:
@@ -420,3 +421,38 @@ kafka:
         replicationFactor: 1
         config:
           retention.ms: "1209600000"
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "6379"
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  networkPolicy:
+    enabled: false
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    runAsUser: 1001
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: true

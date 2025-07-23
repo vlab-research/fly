@@ -2,6 +2,7 @@ tags:
   kafka: false
   backup: true
   cockroach: true
+  redis: true
   naughtybot: false
   botscribe: false
   scratchbot: false
@@ -17,15 +18,15 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 
-versionDashboard: &vdashboard v0.0.35
+versionDashboard: &vdashboard v0.0.37
 versionBotserver: &vbotserver v0.0.10
-versionReplybot: &vreplybot v0.0.151
+versionReplybot: &vreplybot v0.0.164
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.29
-versionScribble: &vscribble v0.0.25
-versionDinersclub: &vdinersclub v0.0.29
-versionFormcentral: &vformcentral v0.0.11
-versionExporter: &vexporter v0.3.4
+versionDean: &vdean v0.0.37
+versionScribble: &vscribble v0.0.27
+versionDinersclub: &vdinersclub v0.0.36
+versionFormcentral: &vformcentral v0.0.12
+versionExporter: &vexporter v0.3.6
 
 processingAlerts:
   - consumergroup: replybot
@@ -159,13 +160,15 @@ dean:
   - name: DEAN_ERROR_INTERVAL
     value: "48 hours"
   - name: DEAN_FB_CODES
-    value: "2022,613,-1,190,80006"
+    value: "2022,613,-1,190,80006,551"
   - name: DEAN_BLOCKED_INTERVAL
     value: "48 hours"
   - name: DEAN_RESPONDING_INTERVAL
     value: "48 hours"
   - name: DEAN_RESPONDING_GRACE
     value: "20 minutes"
+  - name: DEAN_RETRY_MAX_ATTEMPTS
+    value: "30"
   - name: DEAN_PAYMENT_GRACE
     value: "2 hours"
   - name: DEAN_PAYMENT_INTERVAL
@@ -203,6 +206,13 @@ dean:
     - name: payments
       queries: "payments"
       schedule: "0 */6 * * *"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 10Mi
+    - name: spammers
+      queries: "spammers"
+      schedule: "30 3 * * *"
       resources:
         requests:
           cpu: 10m
@@ -247,6 +257,8 @@ scribble:
         value: "128"
       - name: SCRIBBLE_BATCH_SIZE
         value: "128"
+      - name: SCRIBBLE_STRICT_MODE
+        value: "true"
     - destination: "responses"
       replicaCount: 1
       env:
@@ -258,6 +270,8 @@ scribble:
         value: "32"
       - name: SCRIBBLE_BATCH_SIZE
         value: "64"
+      - name: SCRIBBLE_STRICT_MODE
+        value: "false"
     - destination: "messages"
       replicaCount: 1
       env:
@@ -269,6 +283,8 @@ scribble:
         value: "32"
       - name: SCRIBBLE_BATCH_SIZE
         value: "128"
+      - name: SCRIBBLE_STRICT_MODE
+        value: "true"
 
 dumper:
   image:
@@ -465,6 +481,8 @@ replybot:
     value: "305"
   - name: REPLYBOT_EVENT_TOPIC
     value: *topic
+  - name: REPLYBOT_RESET_SHORTCODE
+    value: "reset"
   - name: KAFKA_BROKERS
     value: *kb
   - name: BOTSPINE_MESSAGE_TOPIC
@@ -480,11 +498,13 @@ replybot:
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
-    value: "https://graph.facebook.com/v11.0"
+    value: "https://graph.facebook.com/v22.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
   - name: STATE_STORE_LIMIT
     value: "30000"
+  - name: NUM_SPINES
+    value: "4"
 
 botserver:
   replicaCount: 3
@@ -547,7 +567,7 @@ exporter:
     - name: "APP_NAME"
       value: "exporter"
     - name: "KAFKA_MAX_POLL_INTERVAL"
-      value: "1200000"
+      value: "3600000"
   envSecrets:
     - exporter
 
@@ -572,3 +592,57 @@ cockroachdb:
     persistentVolume:
       size: 140Gi
       storageClass: "pd-ssd"
+
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    sentinel: false
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: "pd-ssd"
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 250m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "6379"
+  replica:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: "pd-ssd"
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 250m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "6379"
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  networkPolicy:
+    enabled: true
+    allowExternal: false
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    runAsUser: 1001
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: true

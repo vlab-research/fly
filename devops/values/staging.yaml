@@ -2,6 +2,7 @@ tags:
   kafka: false
   backup: true
   cockroach: true
+  redis: true
   naughtybot: false
   botscribe: false
   scratchbot: false
@@ -17,15 +18,15 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-staging-exports"
 
-versionDashboard: &vdashboard v0.0.33
+versionDashboard: &vdashboard v0.0.34
 versionBotserver: &vbotserver v0.0.10
-versionReplybot: &vreplybot v0.0.144
+versionReplybot: &vreplybot v0.0.147
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.26
-versionScribble: &vscribble v0.0.23
-versionDinersclub: &vdinersclub v0.0.26
-versionFormcentral: &vformcentral v0.0.10
-versionExporter: &vexporter latest
+versionDean: &vdean v0.0.28
+versionScribble: &vscribble v0.0.25
+versionDinersclub: &vdinersclub v0.0.28
+versionFormcentral: &vformcentral v0.0.11
+versionExporter: &vexporter v0.3.2
 
 processingAlerts: []
 laggingAlerts: []
@@ -109,7 +110,7 @@ dinersclub:
     - name: DINERSCLUB_POOL_SIZE
       value: "1"
     - name: DINERSCLUB_PROVIDERS
-      value: "fake,reloadly,giftcard"
+      value: "fake,reloadly,giftcard,http"
 
 
 dean:
@@ -142,14 +143,18 @@ dean:
     value: "23 hours"
   - name: DEAN_RESPONDING_GRACE
     value: "1 hour"
+  - name: DEAN_PAYMENT_GRACE
+    value: "2 hours"
+  - name: DEAN_PAYMENT_INTERVAL
+    value: "14 days"
   - name: DEAN_SEND_DELAY
     value: "1s"
-  - name: DEAN_TIMEOUT_BLACKLIST
-    value: "bebborsbaseserb"
   - name: DEAN_FOLLOWUP_MIN
     value: "2 minutes"
   - name: DEAN_FOLLOWUP_MAX
     value: "24 hours"
+  - name: DEAN_TIMEOUT_BLACKLIST
+    value: "bebborsbaseserb"
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"
@@ -478,7 +483,6 @@ exporter:
     repository: vlabresearch/exporter
     tag: *vexporter
     pullPolicy: Always
-
   env:
     - name: "KAFKA_TOPIC"
       value: *exportertopic
@@ -488,6 +492,8 @@ exporter:
       value: "exporter"
     - name: "APP_NAME"
       value: "exporter"
+    - name: "KAFKA_MAX_POLL_INTERVAL"
+      value: "1200000"
   envSecrets:
     - exporter
 
@@ -513,3 +519,57 @@ cockroachdb:
     persistentVolume:
       size: 5Gi
       storageClass: "pd-ssd"
+
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    sentinel: false
+  master:
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: "pd-ssd"
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "6379"
+  replica:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: "pd-ssd"
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "6379"
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  networkPolicy:
+    enabled: true
+    allowExternal: false
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    runAsUser: 1001
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: true

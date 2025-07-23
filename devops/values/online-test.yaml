@@ -1,6 +1,7 @@
 tags:
   kafka: false
   cockroach: true
+  redis: true
   backup: false
 
 kafkabrokers: &kb "kafka-headless.default.svc.cluster.local:29092"
@@ -342,3 +343,39 @@ cockroachdb:
     persistentVolume:
       size: 5Gi
       storageClass: "pd-ssd"
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi
+      storageClass: "pd-ssd"
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "6379"
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  networkPolicy:
+    enabled: false
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    runAsUser: 1001
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: true
