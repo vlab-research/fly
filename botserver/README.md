@@ -65,7 +65,8 @@ Now, initialize helm in you minikube cluster and install Kafka using helm:
 
 ``` shell
 helm --kube-context minikube init
-helm --kube-context minikube install --name spinaltap incubator/kafka
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm --kube-context minikube install --name spinaltap bitnami/kafka
 ```
 
 Run this in the shell you will be using
