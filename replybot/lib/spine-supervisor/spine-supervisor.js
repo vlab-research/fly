@@ -14,6 +14,8 @@ class SpineSupervisor {
     this.restarts = []
     this.chatbase = chatbase || new (require(process.env.CHATBASE_BACKEND))()
     this.BotSpineCtor = BotSpineCtor || require('@vlab-research/botspine').BotSpine
+    // Single shared StateStore instance for all spines
+    this.stateStore = new StateStore(this.chatbase, process.env.REPLYBOT_STATESTORE_TTL || '24h')
   }
 
   recordRestart() {
@@ -32,7 +34,6 @@ class SpineSupervisor {
   }
 
   setupPipeline(spine, spineIndex, processor) {
-    const stateStore = new StateStore(this.chatbase, process.env.REPLYBOT_STATESTORE_TTL || '24h')
     const tokenStore = new TokenStore(this.chatbase.pool)
     const machine = new Machine(process.env.REPLYBOT_MACHINE_TTL || '60m', tokenStore)
 
@@ -50,7 +51,7 @@ class SpineSupervisor {
 
     pipeline(
       spine.source(),
-      spine.transform(processor(machine, stateStore)),
+      spine.transform(processor(machine, this.stateStore)),
       spine.sink(),
       handleSpineError
     )
