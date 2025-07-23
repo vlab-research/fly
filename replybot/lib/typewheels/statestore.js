@@ -32,9 +32,11 @@ class StateStore {
         db: process.env.REDIS_DB || 0,
         retryDelayOnFailover: 100,
         maxRetriesPerRequest: 3,
-        lazyConnect: true, // Don't connect immediately
+        lazyConnect: false, // Connect immediately
         retryDelayOnClusterDown: 300,
-        enableOfflineQueue: false
+        enableOfflineQueue: true, // Queue commands when disconnected
+        connectTimeout: 10000, // 10 second timeout
+        commandTimeout: 5000   // 5 second command timeout
       })
     }
   }
