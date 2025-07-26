@@ -90,5 +90,7 @@ if (isNaN(numSpines) || numSpines < 1) {
   throw new Error('NUM_SPINES must be a positive integer')
 }
 
+process.setMaxListeners(numSpines * 3 + 5)
+
 const supervisor = new SpineSupervisor(numSpines, 5, 5 * 60 * 1000, null, BotSpine)
 supervisor.start(processor)
