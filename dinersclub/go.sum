@@ -1657,10 +1657,10 @@ github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae/go.mod h1:DD4vA1
 github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f/go.mod h1:DD4vA1DwXk04H54A1oHXtwZmA0grkVMdPxx/VGLCah0=
 github.com/vlab-research/botparty v0.0.0-20200917171250-abbbd36eb095 h1:vi5UbYAlmOe/d0Jg3RVsYQihgEQEWsXBlWMaSk+izEM=
 github.com/vlab-research/botparty v0.0.0-20200917171250-abbbd36eb095/go.mod h1:UtpX/9Pm3GBQ8cJOTkdZaQGfqjDGGpqiJD3YkxzLP0U=
-github.com/vlab-research/go-reloadly v0.0.21 h1:3F50le0dLxSXvysK6HEHw3SVAGMeZptACWSir4V9+e0=
-github.com/vlab-research/go-reloadly v0.0.21/go.mod h1:bJHsKM3lTjw1tahB6mK0JXJgYtC0zrUmJ7LS1GSaepA=
 github.com/vlab-research/go-reloadly v0.0.22 h1:3YfVmLShYTcsl4QX5DcNP3h2CjC5PNRXreLMnlhd1vI=
 github.com/vlab-research/go-reloadly v0.0.22/go.mod h1:bJHsKM3lTjw1tahB6mK0JXJgYtC0zrUmJ7LS1GSaepA=
+github.com/vlab-research/go-reloadly v0.0.23 h1:faK9AIQUW+u6b/T2JF42rsn8XnPTz6ouKqqmxM0YSlU=
+github.com/vlab-research/go-reloadly v0.0.23/go.mod h1:bJHsKM3lTjw1tahB6mK0JXJgYtC0zrUmJ7LS1GSaepA=
 github.com/vlab-research/gotils v0.0.2 h1:o/LceCxyu7x9xogMDBBc37xAOhzGZoSxyDYkatq8NR0=
 github.com/vlab-research/gotils v0.0.2/go.mod h1:ACGZhkXG9rnKZqUiMgIvR7EeENyoTIZuriv5DXYUH2I=
 github.com/vlab-research/spine v0.1.0 h1:j+/eXMc9UNettqt7DOQ2AHyHqa3BH4D9mtnq0YdLytI=
