@@ -13,7 +13,7 @@ function _eventMetadata(prefix, value) {
   return _.toPairs(value)
     .filter(([k, __]) => k !== 'type')
     .filter(([__, v]) => v !== undefined)
-    .reduce((d, [k, v]) => ({ ...d, ..._eventMetadata(`${prefix}_${k}`, v) }), {})
+    .reduce((d, [k, v]) => ({ ...d, ..._eventMetadata(`${prefix}_${_.snakeCase(k)}`, v) }), {})
 }
 
 function makeEventMetadata(event) {

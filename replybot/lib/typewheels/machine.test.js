@@ -83,6 +83,64 @@ describe('makeEventMetadata', () => {
     const md = makeEventMetadata(event)
     should.not.exist(md)
   })
+
+  it('should convert camelCase keys to snake_case', () => {
+    const event = {
+      event: {
+        type: 'external',
+        value: {
+          type: 'payment:status',
+          userId: '123',
+          paymentMethod: 'card',
+          transactionId: 'tx_456'
+        }
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_payment_status_user_id: '123',
+      e_payment_status_payment_method: 'card',
+      e_payment_status_transaction_id: 'tx_456'
+    })
+  })
+
+  it('should handle nested camelCase keys', () => {
+    const event = {
+      event: {
+        type: 'external',
+        value: {
+          type: 'api:response',
+          errorDetails: {
+            errorCode: 'INVALID_REQUEST',
+            errorMessage: 'Bad input'
+          }
+        }
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_api_response_error_details_error_code: 'INVALID_REQUEST',
+      e_api_response_error_details_error_message: 'Bad input'
+    })
+  })
+
+  it('should leave snake_case keys unchanged', () => {
+    const event = {
+      event: {
+        type: 'external',
+        value: {
+          type: 'existing:event',
+          user_id: '123',
+          already_snake: 'value'
+        }
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_existing_event_user_id: '123',
+      e_existing_event_already_snake: 'value'
+    })
+  })
 })
 
 describe('getCurrentForm', () => {
@@ -1918,4 +1976,100 @@ describe('Machine', () => {
     state.state.should.equal('RESPONDING')
     state.md.form.should.equal('BAR')
   });
+
+  it('should extract payment from first message after referral with empty qa array', () => {
+    // This test replicates the scenario where a payment is not extracted from the first message after a referral
+    const form = {
+      logic: [],
+      fields: [
+        { 
+          type: 'statement', 
+          title: 'We are generating your gift card now. Please wait, this should take several minutes but could take up to 48 hours if your account is flagged as potentially fraudulent (outside of the US, etc.)', 
+          ref: 'generating_gift_card', 
+          properties: { 
+            description: JSON.stringify({ 
+              type: 'wait',
+              responseMessage: 'Sorry, please wait a bit longer, we\'re working on it.',
+              wait: {
+                type: 'external',
+                value: {
+                  type: 'payment:http',
+                  id: 'giftcard_2'
+                }
+              },
+              payment: {
+                provider: 'http',
+                details: {
+                  id: 'giftcard_2',
+                  method: 'POST',
+                  url: 'https://www.tremendous.com/api/v2/orders',
+                  headers: {
+                    'Authorization': 'Bearer << TREMENDOUS_PGP >>',
+                    'Content-Type': 'application/json'
+                  },
+                  body: {
+                    external_id: '1989430067808669_endline_minn_gen_pop',
+                    payment: {
+                      funding_source_id: 'FCHEGSW5S3LL'
+                    },
+                    rewards: [{
+                      value: {
+                        denomination: 5,
+                        currency_code: 'USD'
+                      },
+                      delivery: {
+                        method: 'LINK'
+                      },
+                      recipient: {
+                        name: 'Study Participant'
+                      },
+                      products: ['OKMHM2X2OHYV']
+                    }]
+                  },
+                  errorMessage: 'errors.message',
+                  responsePath: 'order.rewards.0.delivery.link|@tostr'
+                }
+              },
+              ref: 'generating_gift_card'
+            }) 
+          } 
+        }
+      ]
+    }
+
+    // Simulate the first message after a referral with empty qa array
+    const initialState = _initialState()
+    initialState.forms = ['pgpminnen2pay']
+    initialState.md = {
+      form: 'pgpminnen2pay',
+      startTime: 1753250108000,
+      pageid: '1855355231229529',
+      seed: 2765619441
+    }
+
+    // Create a RESPOND output that would be generated for the first field
+    const output = {
+      action: 'RESPOND',
+      question: 'generating_gift_card',
+      stateUpdate: {},
+      md: {}
+    }
+
+    const ctx = {
+      form,
+      user: { id: '1989430067808669' },
+      page: { id: '1855355231229529' },
+      timestamp: 1753250108000
+    }
+
+    // Test the act function directly with empty qa array
+    const actions = act(ctx, initialState, output)
+
+    // The payment should be extracted
+    actions.payments.length.should.equal(1)
+    actions.payments[0].provider.should.equal('http')
+    actions.payments[0].userid.should.equal('1989430067808669')
+    actions.payments[0].pageid.should.equal('1855355231229529')
+    actions.payments[0].details.id.should.equal('giftcard_2')
+  })
 })
