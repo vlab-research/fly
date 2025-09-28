@@ -306,10 +306,33 @@ function exec(state, nxt) {
         }
       }
 
+      // Check if this is a timeout during handoff
+      if (nxt.event.type === 'timeout' &&
+          state.state === 'WAIT_EXTERNAL_EVENT' &&
+          state.handoffContext) {
+
+        console.log('Handoff timeout, taking control back')
+        const { takeThreadControl } = require('../messenger')
+        
+        // Note: This is a fire-and-forget call since we can't await in this context
+        // The timeout handling will be done in the act() function
+        takeThreadControl(
+          nxt.user,
+          {
+            reason: 'timeout',
+            original_target: state.handoffContext.target_app_id,
+            handoff_duration_ms: nxt.timestamp - state.handoffContext.started_at
+          },
+          process.env.FACEBOOK_PAGE_ACCESS_TOKEN
+        ).catch(error => {
+          console.error('Take control failed:', error)
+        })
+      }
+
       return tokenWrap(state, nxt, {
         action: 'RESPOND',
         md,
-        stateUpdate: { wait: null, waitStart: null },
+        stateUpdate: { wait: null, waitStart: null, handoffContext: null },
         question: state.question,
         validation: { valid: true },
         response: null
@@ -376,6 +399,15 @@ function exec(state, nxt) {
           wait: md.wait,
           waitStart: state.waitStart || nxt.timestamp
         } // propogate if repeat
+      }
+
+      if (md.handoff) {
+        return {
+          action: 'HANDOFF',
+          question: md.ref,
+          handoff: md.handoff,
+          waitStart: state.waitStart || nxt.timestamp
+        }
       }
 
       // if we receive the echo, we now assume that
@@ -563,6 +595,21 @@ function apply(state, output) {
         waitStart: output.waitStart
       }
 
+    case 'HANDOFF':
+      return {
+        ...state,
+        state: 'WAIT_EXTERNAL_EVENT',
+        md: { ...state.md, ...output.md },
+        question: output.question,
+        wait: output.handoff.wait,
+        externalEvents: output.externalEvents || state.externalEvents,
+        waitStart: output.waitStart,
+        handoffContext: {
+          target_app_id: output.handoff.target_app_id,
+          started_at: output.waitStart
+        }
+      }
+
     case 'END':
       return { ...state, state: 'END', question: output.question }
 
@@ -618,6 +665,26 @@ function act(ctx, state, output) {
       const qa = state.qa
       const payment = _wrapPayment(ctx, getPayment(ctx, qa, output.question))
       return { messages: [], payments: [payment] }
+    }
+
+    case 'HANDOFF': {
+      const { passThreadControl } = require('../messenger')
+      
+      // Note: This is a fire-and-forget call since we can't await in this context
+      // The handoff will be initiated but we continue with the wait state
+      passThreadControl(
+        ctx.user.id,
+        output.handoff.target_app_id,
+        output.handoff.metadata,
+        process.env.FACEBOOK_PAGE_ACCESS_TOKEN
+      ).then(() => {
+        console.log(`Successfully handed off to app ${output.handoff.target_app_id}`)
+      }).catch(error => {
+        console.error('Handoff failed:', error)
+        // Continue with timeout-only wait as fallback
+      })
+      
+      return { messages: [], payments: [] }
     }
 
     default:

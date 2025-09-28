@@ -2,7 +2,7 @@ const mustache = require('mustache')
 const util = require('util')
 const _ = require('lodash')
 const { hash } = require('./utils')
-const { translator, addCustomType } = require('@vlab-research/translate-typeform')
+const { translator, addCustomType: baseAddCustomType } = require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
 class FieldError extends Error { }
@@ -277,6 +277,38 @@ function getVar(ctx, qa, ref, v, vars) {
   }
 }
 
+
+// Extended addCustomType with handoff support
+function addCustomType(field) {
+  const result = baseAddCustomType(field)
+  
+  // Check if this is a handoff question
+  if (result.properties && result.properties.description) {
+    try {
+      const config = yaml.load(result.properties.description)
+      if (config && config.type === 'handoff') {
+        const wait = config.wait || { type: 'timeout', value: `${config.timeout_minutes || 60}m` }
+        
+        return {
+          ...result,
+          handoff: {
+            target_app_id: config.target_app_id,
+            wait: wait,
+            metadata: {
+              survey_id: config.survey_id,
+              question_ref: result.ref,
+              ...config.metadata
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Not YAML or not handoff type, continue with base result
+    }
+  }
+  
+  return result
+}
 
 module.exports = {
   getCondition,
