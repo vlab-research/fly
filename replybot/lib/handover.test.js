@@ -9,12 +9,24 @@ function convertHandoverToExternal(handoverEvent, userId) {
   try {
     const event = JSON.parse(handoverEvent)
     
-    // Only process handover events where control was passed to our app
-    if (event.source !== 'messenger' || !event.pass_thread_control) {
-      return null
+    // Validate handover event structure - fail fast if malformed
+    if (event.source !== 'messenger') {
+      throw new Error(`Invalid event source: expected 'messenger', got '${event.source}'`)
+    }
+    
+    if (!event.pass_thread_control) {
+      throw new Error('Missing pass_thread_control in handover event')
     }
     
     const { new_owner_app_id, previous_owner_app_id, metadata } = event.pass_thread_control
+    
+    if (!new_owner_app_id) {
+      throw new Error('Missing new_owner_app_id in pass_thread_control')
+    }
+    
+    if (!previous_owner_app_id) {
+      throw new Error('Missing previous_owner_app_id in pass_thread_control')
+    }
     
     // Security check: only process handovers TO our app
     if (new_owner_app_id !== process.env.FACEBOOK_APP_ID) {
@@ -22,28 +34,40 @@ function convertHandoverToExternal(handoverEvent, userId) {
       return null
     }
     
-    // Parse metadata if it's a string
+    // Parse metadata - Facebook API guarantees it's a string
     let parsedMetadata = {}
     if (metadata) {
-      try {
-        parsedMetadata = typeof metadata === 'string' ? JSON.parse(metadata) : metadata
-      } catch (e) {
-        console.warn('Failed to parse handover metadata:', e.message)
+      if (typeof metadata !== 'string') {
+        throw new Error(`Invalid handover metadata type: expected string, got ${typeof metadata}. This violates Facebook API specification.`)
       }
+      try {
+        parsedMetadata = JSON.parse(metadata)
+      } catch (e) {
+        throw new Error(`Invalid JSON in handover metadata: ${e.message}. Metadata: "${metadata}"`)
+      }
+    }
+    
+    // Validate required fields
+    if (!event.timestamp) {
+      throw new Error('Missing timestamp in handover event')
+    }
+    
+    if (!event.recipient || !event.recipient.id) {
+      throw new Error('Missing recipient.id in handover event')
     }
     
     // Create synthetic external event
     const syntheticEvent = {
       source: 'synthetic',
       user: userId,
-      page: event.recipient?.id || 'unknown',
-      timestamp: event.timestamp || Date.now(),
+      page: event.recipient.id,
+      timestamp: event.timestamp,
       event: {
         type: 'external',
         value: {
           type: 'handoff_return',
           target_app_id: previous_owner_app_id,
-          timestamp: event.timestamp || Date.now(),
+          timestamp: event.timestamp,
           ...parsedMetadata
         }
       }
@@ -54,7 +78,7 @@ function convertHandoverToExternal(handoverEvent, userId) {
     
   } catch (error) {
     console.error('Error converting handover event:', error)
-    return null
+    throw error // Re-throw instead of returning null
   }
 }
 
@@ -88,7 +112,7 @@ describe('Handover Event Processing', () => {
       result.event.value.user_intent.should.equal('purchase')
     })
 
-    it('should handle handover event with object metadata', () => {
+    it('should throw error for object metadata (Facebook API violation)', () => {
       const handoverEvent = JSON.stringify({
         source: 'messenger',
         sender: { id: 'user123' },
@@ -97,15 +121,13 @@ describe('Handover Event Processing', () => {
         pass_thread_control: {
           new_owner_app_id: '123456789',
           previous_owner_app_id: '987654321',
-          metadata: { completion_status: 'success', user_intent: 'purchase' }
+          metadata: { completion_status: 'success', user_intent: 'purchase' } // Object instead of string
         }
       })
 
-      const result = convertHandoverToExternal(handoverEvent, 'user123')
-
-      result.should.be.an('object')
-      result.event.value.completion_status.should.equal('success')
-      result.event.value.user_intent.should.equal('purchase')
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Invalid handover metadata type: expected string, got object')
     })
 
     it('should ignore handover events to different apps', () => {
@@ -126,7 +148,7 @@ describe('Handover Event Processing', () => {
       should.not.exist(result)
     })
 
-    it('should return null for non-handover events', () => {
+    it('should throw error for non-handover events', () => {
       const regularEvent = JSON.stringify({
         source: 'messenger',
         sender: { id: 'user123' },
@@ -135,28 +157,28 @@ describe('Handover Event Processing', () => {
         message: { text: 'Hello bot!' }
       })
 
-      const result = convertHandoverToExternal(regularEvent, 'user123')
-
-      should.not.exist(result)
+      should.throw(() => {
+        convertHandoverToExternal(regularEvent, 'user123')
+      }, 'Missing pass_thread_control in handover event')
     })
 
-    it('should return null for non-messenger events', () => {
+    it('should throw error for non-messenger events', () => {
       const syntheticEvent = JSON.stringify({
         source: 'synthetic',
         event: { type: 'external', value: { type: 'handoff_return' } }
       })
 
-      const result = convertHandoverToExternal(syntheticEvent, 'user123')
-
-      should.not.exist(result)
+      should.throw(() => {
+        convertHandoverToExternal(syntheticEvent, 'user123')
+      }, "Invalid event source: expected 'messenger', got 'synthetic'")
     })
 
-    it('should handle malformed JSON gracefully', () => {
+    it('should throw error for malformed JSON', () => {
       const malformedEvent = '{"source": "messenger", "pass_thread_control": {'
 
-      const result = convertHandoverToExternal(malformedEvent, 'user123')
-
-      should.not.exist(result)
+      should.throw(() => {
+        convertHandoverToExternal(malformedEvent, 'user123')
+      }, 'Unexpected end of JSON input')
     })
 
     it('should handle missing metadata gracefully', () => {
@@ -181,7 +203,7 @@ describe('Handover Event Processing', () => {
       should.not.exist(result.event.value.completion_status)
     })
 
-    it('should handle invalid metadata JSON gracefully', () => {
+    it('should throw error for invalid metadata JSON', () => {
       const handoverEvent = JSON.stringify({
         source: 'messenger',
         sender: { id: 'user123' },
@@ -194,16 +216,12 @@ describe('Handover Event Processing', () => {
         }
       })
 
-      const result = convertHandoverToExternal(handoverEvent, 'user123')
-
-      result.should.be.an('object')
-      result.event.value.type.should.equal('handoff_return')
-      result.event.value.target_app_id.should.equal('987654321')
-      // Should not have metadata fields due to parse error
-      should.not.exist(result.event.value.invalid)
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Invalid JSON in handover metadata')
     })
 
-    it('should use current timestamp if missing', () => {
+    it('should throw error for missing timestamp', () => {
       const handoverEvent = JSON.stringify({
         source: 'messenger',
         sender: { id: 'user123' },
@@ -215,16 +233,12 @@ describe('Handover Event Processing', () => {
         }
       })
 
-      const before = Date.now()
-      const result = convertHandoverToExternal(handoverEvent, 'user123')
-      const after = Date.now()
-
-      result.should.be.an('object')
-      result.timestamp.should.be.at.least(before)
-      result.timestamp.should.be.at.most(after)
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Missing timestamp in handover event')
     })
 
-    it('should use unknown page if recipient missing', () => {
+    it('should throw error for missing recipient', () => {
       const handoverEvent = JSON.stringify({
         source: 'messenger',
         sender: { id: 'user123' },
@@ -236,10 +250,92 @@ describe('Handover Event Processing', () => {
         }
       })
 
-      const result = convertHandoverToExternal(handoverEvent, 'user123')
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Missing recipient.id in handover event')
+    })
 
-      result.should.be.an('object')
-      result.page.should.equal('unknown')
+    it('should throw error for non-string metadata', () => {
+      const handoverEvent = JSON.stringify({
+        source: 'messenger',
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000,
+        pass_thread_control: {
+          new_owner_app_id: '123456789',
+          previous_owner_app_id: '987654321',
+          metadata: { completion_status: 'success' } // Object instead of string
+        }
+      })
+
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Invalid handover metadata type: expected string, got object')
+    })
+
+    it('should throw error for missing new_owner_app_id', () => {
+      const handoverEvent = JSON.stringify({
+        source: 'messenger',
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000,
+        pass_thread_control: {
+          previous_owner_app_id: '987654321'
+          // Missing new_owner_app_id
+        }
+      })
+
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Missing new_owner_app_id in pass_thread_control')
+    })
+
+    it('should throw error for missing previous_owner_app_id', () => {
+      const handoverEvent = JSON.stringify({
+        source: 'messenger',
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000,
+        pass_thread_control: {
+          new_owner_app_id: '123456789'
+          // Missing previous_owner_app_id
+        }
+      })
+
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Missing previous_owner_app_id in pass_thread_control')
+    })
+
+    it('should throw error for invalid event source', () => {
+      const handoverEvent = JSON.stringify({
+        source: 'synthetic', // Wrong source
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000,
+        pass_thread_control: {
+          new_owner_app_id: '123456789',
+          previous_owner_app_id: '987654321'
+        }
+      })
+
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, "Invalid event source: expected 'messenger', got 'synthetic'")
+    })
+
+    it('should throw error for missing pass_thread_control', () => {
+      const handoverEvent = JSON.stringify({
+        source: 'messenger',
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000
+        // Missing pass_thread_control
+      })
+
+      should.throw(() => {
+        convertHandoverToExternal(handoverEvent, 'user123')
+      }, 'Missing pass_thread_control in handover event')
     })
   })
 })

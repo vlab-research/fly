@@ -284,4 +284,137 @@ describe('waitConditionFulfilled', () => {
 
     res.should.be.false
   })
+
+  describe('_normalizeEvent', () => {
+    it('should normalize synthetic timeout events', () => {
+      const syntheticEvent = {
+        source: 'synthetic',
+        user: 'user123',
+        page: 'page123',
+        timestamp: 1640995200000,
+        event: {
+          type: 'timeout',
+          value: 1640995200000
+        }
+      }
+
+      const result = w._normalizeEvent(syntheticEvent)
+      
+      result.should.deep.equal({
+        type: 'timeout',
+        value: 1640995200000
+      })
+    })
+
+    it('should normalize synthetic external events', () => {
+      const syntheticEvent = {
+        source: 'synthetic',
+        user: 'user123',
+        page: 'page123',
+        timestamp: 1640995200000,
+        event: {
+          type: 'external',
+          value: {
+            type: 'user_action',
+            action: 'button_click'
+          }
+        }
+      }
+
+      const result = w._normalizeEvent(syntheticEvent)
+      
+      result.should.deep.equal({
+        type: 'external',
+        value: {
+          type: 'user_action',
+          action: 'button_click'
+        }
+      })
+    })
+
+    it('should normalize raw handover events', () => {
+      const handoverEvent = {
+        source: 'messenger',
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000,
+        pass_thread_control: {
+          new_owner_app_id: '123456789',
+          previous_owner_app_id: '987654321',
+          metadata: '{"completion_status": "success", "user_intent": "purchase"}'
+        }
+      }
+
+      const result = w._normalizeEvent(handoverEvent)
+      
+      result.should.deep.equal({
+        type: 'handover',
+        value: {
+          target_app_id: '123456789',
+          timestamp: 1640995200000,
+          completion_status: 'success',
+          user_intent: 'purchase'
+        }
+      })
+    })
+
+    it('should handle handover events without metadata', () => {
+      const handoverEvent = {
+        source: 'messenger',
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000,
+        pass_thread_control: {
+          new_owner_app_id: '123456789',
+          previous_owner_app_id: '987654321'
+          // No metadata
+        }
+      }
+
+      const result = w._normalizeEvent(handoverEvent)
+      
+      result.should.deep.equal({
+        type: 'handover',
+        value: {
+          target_app_id: '123456789',
+          timestamp: 1640995200000
+        }
+      })
+    })
+
+    it('should handle handover events with invalid metadata gracefully', () => {
+      const handoverEvent = {
+        source: 'messenger',
+        sender: { id: 'user123' },
+        recipient: { id: 'page123' },
+        timestamp: 1640995200000,
+        pass_thread_control: {
+          new_owner_app_id: '123456789',
+          previous_owner_app_id: '987654321',
+          metadata: '{"invalid": json}' // Invalid JSON
+        }
+      }
+
+      // This should throw an error due to invalid JSON
+      should.throw(() => {
+        w._normalizeEvent(handoverEvent)
+      }, 'Unexpected token j in JSON at position 12')
+    })
+
+    it('should return null for unrecognized event types', () => {
+      const unknownEvent = {
+        source: 'unknown',
+        someField: 'value'
+      }
+
+      const result = w._normalizeEvent(unknownEvent)
+      
+      should.not.exist(result)
+    })
+
+    it('should handle null/undefined events', () => {
+      should.not.exist(w._normalizeEvent(null))
+      should.not.exist(w._normalizeEvent(undefined))
+    })
+  })
 })

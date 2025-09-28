@@ -287,7 +287,14 @@ function addCustomType(field) {
     try {
       const config = yaml.load(result.properties.description)
       if (config && config.type === 'handoff') {
-        const wait = config.wait || { type: 'timeout', value: `${config.timeout_minutes || 60}m` }
+        // Generate wait condition with handover event type
+        const wait = config.wait || { 
+          op: 'or',
+          vars: [
+            { type: 'handover', value: { target_app_id: config.target_app_id } },
+            { type: 'timeout', value: `${config.timeout_minutes || 60}m` }
+          ]
+        }
         
         return {
           ...result,

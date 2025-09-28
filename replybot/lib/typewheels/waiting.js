@@ -24,6 +24,31 @@ function _matches(v1, v2) {
   return v1 && v2 && (_.isEqual(v1, v2) || _contains(v1, v2))
 }
 
+function _normalizeEvent(event) {
+  // Handle null/undefined events
+  if (!event) {
+    return null
+  }
+
+  // Handle different event structures
+  if (event.event) {
+    // Synthetic events (timeout, external)
+    return event.event
+  } else if (event.pass_thread_control) {
+    // Raw handover events 
+    
+    return {
+      type: 'handover',
+      value: {
+        target_app_id: event.pass_thread_control.new_owner_app_id,
+        timestamp: event.timestamp,
+        ...(event.pass_thread_control.metadata ? JSON.parse(event.pass_thread_control.metadata) : {})
+      }
+    }
+  }
+  return null
+}
+
 const funs = {
   'and': (...args) => args.reduce((a, b) => a && b, true),
   'or': (...args) => args.reduce((a, b) => a || b, false)
@@ -39,15 +64,15 @@ function waitConditionFulfilled(wait, events, waitStart) {
   }
 
   const relevant = events
-    .map(e => e.event)
-    .filter(e => e.type === type)
+    .map(_normalizeEvent)
+    .filter(e => e && e.type === type)
 
   if (type === 'timeout') {
     return _waitFulfilled(value, relevant, waitStart)
   }
-
+  
   return relevant.some(e => _matches(e.value, wait.value))
 }
 
 
-module.exports = { waitConditionFulfilled }
+module.exports = { waitConditionFulfilled, _normalizeEvent }

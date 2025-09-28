@@ -325,4 +325,94 @@ describe('Machine integrated', () => {
     report.error.tag.should.equal('CORRUPTED_MESSAGE')
     report.publish.should.be.true
   })
+
+  describe('handoff functionality', () => {
+    it('should call this.handoff when handoff data is present', async () => {
+      const m = new Machine()
+      m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
+      m.getPageToken = () => Promise.resolve('footoken')
+      m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
+      m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
+      m.sendMessage = () => Promise.resolve({})
+      m.handoff = () => Promise.resolve()
+
+      const handoffData = {
+        userid: 'bar',
+        target_app_id: '987654321',
+        metadata: { reason: 'test' }
+      }
+
+      m.actionsResponses = () => Promise.resolve({
+        actions: [],
+        pageToken: 'footoken',
+        responses: [],
+        payment: undefined,
+        handoff: handoffData
+      })
+
+      const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', { event: 'hello', timestamp: Date.now() })
+      
+      report.user.should.equal('bar')
+      should.not.exist(report.error)
+      report.publish.should.be.true
+      report.handoff.should.eql(handoffData)
+    })
+
+    it('should not call this.handoff when no handoff data is present', async () => {
+      const m = new Machine()
+      m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
+      m.getPageToken = () => Promise.resolve('footoken')
+      m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
+      m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
+      m.sendMessage = () => Promise.resolve({})
+      m.handoff = () => Promise.resolve()
+
+      m.actionsResponses = () => Promise.resolve({
+        actions: [],
+        pageToken: 'footoken',
+        responses: [],
+        payment: undefined,
+        handoff: undefined
+      })
+
+      const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', { event: 'hello', timestamp: Date.now() })
+      
+      report.user.should.equal('bar')
+      should.not.exist(report.error)
+      report.publish.should.be.true
+      should.not.exist(report.handoff)
+    })
+
+    it('should handle handoff errors gracefully', async () => {
+      const m = new Machine()
+      m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
+      m.getPageToken = () => Promise.resolve('footoken')
+      m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
+      m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
+      m.sendMessage = () => Promise.resolve({})
+      m.handoff = () => Promise.reject(new Error('Handoff failed'))
+
+      const handoffData = {
+        userid: 'bar',
+        target_app_id: '987654321',
+        metadata: { reason: 'test' }
+      }
+
+      m.actionsResponses = () => Promise.resolve({
+        actions: [],
+        pageToken: 'footoken',
+        responses: [],
+        payment: undefined,
+        handoff: handoffData
+      })
+
+      const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', { event: 'hello', timestamp: Date.now() })
+      
+      report.user.should.equal('bar')
+      report.error.should.exist
+      report.error.tag.should.equal('STATE_ACTIONS')
+      report.error.message.should.equal('Handoff failed')
+      report.publish.should.be.true
+    })
+  })
 })

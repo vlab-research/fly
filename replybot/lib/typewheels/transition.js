@@ -1,6 +1,6 @@
 const { exec, apply, act, update } = require('./machine')
 const { getForm } = require('./ourform')
-const { getUserInfo, sendMessage } = require('../messenger')
+const { getUserInfo, sendMessage, passThreadControl } = require('../messenger')
 const { responseVals } = require('../responses/responser')
 const { parseEvent, getPageFromEvent } = require('@vlab-research/utils')
 const { MachineIOError, iowrap } = require('../errors')
@@ -27,6 +27,7 @@ class Machine {
     }
 
     this.sendMessage = sendMessage
+    this.passThreadControl = passThreadControl
   }
 
   transition(state, parsedEvent) {
@@ -54,11 +55,11 @@ class Machine {
 
     // TODO: add user to metadata???
 
-    const { messages, payments } = act({ form, user, page: { id: pageId }, timestamp }, state, output)
+    const { messages, payment, handoff } = act({ form, user, page: { id: pageId }, timestamp }, state, output)
 
     const responses = responseVals(newState, upd, form, surveyId, pageId, user, timestamp)
 
-    return { actions: messages, responses, pageToken, timestamp, payments }
+    return { actions: messages, responses, pageToken, timestamp, payment, handoff }
   }
 
   async act(messages, pageToken) {
@@ -68,6 +69,10 @@ class Machine {
       await this.sendMessage(action, pageToken)
 
     }
+  }
+
+  async handoff(handoff, pageToken) {
+    await this.passThreadControl(handoff.userid, handoff.target_app_id, handoff.metadata, pageToken)
   }
 
 
@@ -122,13 +127,15 @@ class Machine {
     try {
 
       // Create successful report
-      const { actions, pageToken, responses, payments } = await this.actionsResponses(state, user, timestamp, page, newState, output)
+      const { actions, pageToken, responses, payment, handoff } = await this.actionsResponses(state, user, timestamp, page, newState, output)
 
       await this.act(actions, pageToken)
+      
 
-      // TODO: clean up --> currently we assume one payment
-      // make more generic when you rename as side_effect
-      const payment = payments && payments[0]
+      // Process handoff
+      if (handoff) {
+        await this.handoff(handoff, pageToken)
+      }
 
       return {
         publish: true,
@@ -138,6 +145,7 @@ class Machine {
         actions,
         responses,
         payment,
+        handoff,
         newState
       }
 

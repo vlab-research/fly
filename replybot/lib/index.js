@@ -47,59 +47,6 @@ function publishPayment(message) {
   return produce(process.env.VLAB_PAYMENT_TOPIC, message, message.userid)
 }
 
-// Convert Facebook handover events to synthetic external events
-function convertHandoverToExternal(handoverEvent, userId) {
-  try {
-    const event = JSON.parse(handoverEvent)
-    
-    // Only process handover events where control was passed to our app
-    if (event.source !== 'messenger' || !event.pass_thread_control) {
-      return null
-    }
-    
-    const { new_owner_app_id, previous_owner_app_id, metadata } = event.pass_thread_control
-    
-    // Security check: only process handovers TO our app
-    if (new_owner_app_id !== process.env.FACEBOOK_APP_ID) {
-      console.log(`Ignoring handover to different app: ${new_owner_app_id}`)
-      return null
-    }
-    
-    // Parse metadata if it's a string
-    let parsedMetadata = {}
-    if (metadata) {
-      try {
-        parsedMetadata = typeof metadata === 'string' ? JSON.parse(metadata) : metadata
-      } catch (e) {
-        console.warn('Failed to parse handover metadata:', e.message)
-      }
-    }
-    
-    // Create synthetic external event
-    const syntheticEvent = {
-      source: 'synthetic',
-      user: userId,
-      page: event.recipient?.id || 'unknown',
-      timestamp: event.timestamp || Date.now(),
-      event: {
-        type: 'external',
-        value: {
-          type: 'handoff_return',
-          target_app_id: previous_owner_app_id,
-          timestamp: event.timestamp || Date.now(),
-          ...parsedMetadata
-        }
-      }
-    }
-    
-    console.log('Converted handover to synthetic external event:', syntheticEvent)
-    return syntheticEvent
-    
-  } catch (error) {
-    console.error('Error converting handover event:', error)
-    return null
-  }
-}
 
 // Does all the work
 function processor(machine, stateStore) {
@@ -107,16 +54,6 @@ function processor(machine, stateStore) {
     try {
       console.log('EVENT: ', event)
       
-      // NEW: Convert handover events to synthetic external events
-      const parsedEvent = JSON.parse(event)
-      if (parsedEvent.source === 'messenger' && parsedEvent.pass_thread_control) {
-        const syntheticEvent = convertHandoverToExternal(event, userId)
-        if (syntheticEvent) {
-          // Recursively process the synthetic event
-          await _processor({ key: userId, value: JSON.stringify(syntheticEvent) })
-        }
-        return
-      }
       
       const state = await stateStore.getState(userId, event)
       console.log('STATE: ', state)

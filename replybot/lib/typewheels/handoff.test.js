@@ -27,7 +27,13 @@ describe('Handoff Question Parsing', () => {
       result.ref.should.equal('customer_service')
       result.handoff.should.be.an('object')
       result.handoff.target_app_id.should.equal(123456789) // YAML parses as number
-      result.handoff.wait.should.deep.equal({ type: 'timeout', value: '30m' })
+      result.handoff.wait.should.deep.equal({ 
+        op: 'or',
+        vars: [
+          { type: 'handover', value: { target_app_id: 123456789 } },
+          { type: 'timeout', value: '30m' }
+        ]
+      })
       result.handoff.metadata.should.be.an('object')
       result.handoff.metadata.question_ref.should.equal('customer_service')
     })
@@ -91,7 +97,13 @@ metadata:
 
       const result = addCustomType(field)
 
-      result.handoff.wait.should.deep.equal({ type: 'timeout', value: '60m' })
+      result.handoff.wait.should.deep.equal({ 
+        op: 'or',
+        vars: [
+          { type: 'handover', value: { target_app_id: 555666777 } },
+          { type: 'timeout', value: '60m' }
+        ]
+      })
     })
 
     it('should include survey_id in metadata if provided', () => {

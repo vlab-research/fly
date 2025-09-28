@@ -76,15 +76,4 @@ async function passThreadControl(userId, targetAppId, metadata, pageToken) {
   return await facebookRequest(fn)
 }
 
-async function takeThreadControl(userId, metadata, pageToken) {
-  const headers = { Authorization: `Bearer ${pageToken}` }
-  const url = `${BASE_URL}/me/take_thread_control`
-  const data = {
-    recipient: { id: userId },
-    metadata: JSON.stringify(metadata || {})
-  }
-  const fn = () => r2.post(url, { headers, json: data }).json
-  return await facebookRequest(fn)
-}
-
-module.exports = { sendMessage, getUserInfo, passThreadControl, takeThreadControl }
+module.exports = { sendMessage, getUserInfo, passThreadControl }

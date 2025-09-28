@@ -89,6 +89,51 @@ function _externalEvent(event) {
       (event.event.type === 'external'))
 }
 
+function _handoverEvent(event) {
+  return (event.source === 'messenger') && event.pass_thread_control
+}
+
+function _handleExternalEvent(state, nxt, includeMetadata = false) {
+  const externalEvents = [...(state.externalEvents || []), nxt]
+  const md = includeMetadata ? makeEventMetadata(nxt) : null
+
+  if (state.state !== 'WAIT_EXTERNAL_EVENT') {
+    const stateUpdate = { externalEvents }
+    if (md) {
+      stateUpdate.md = { ...state.md, ...md }
+    }
+    return {
+      action: 'UPDATE_STATE',
+      stateUpdate
+    }
+  }
+
+  const fulfilled = waitConditionFulfilled(state.wait, externalEvents, state.waitStart)
+
+  if (!fulfilled) {
+    const result = {
+      action: 'WAIT_EXTERNAL_EVENT',
+      question: state.question,
+      wait: state.wait,
+      waitStart: state.waitStart,
+      externalEvents
+    }
+    if (md) {
+      result.md = md
+    }
+    return result
+  }
+
+  return tokenWrap(state, nxt, {
+    action: 'RESPOND',
+    stateUpdate: { wait: null, waitStart: null },
+    question: state.question,
+    validation: { valid: true },
+    response: null,
+    ...(md && { md })
+  })
+}
+
 
 function categorizeEvent(nxt) {
   if (nxt.referral ||
@@ -108,6 +153,7 @@ function categorizeEvent(nxt) {
   if (_synth('machine_report', nxt)) return 'MACHINE_REPORT'
   if (_synth('bailout', nxt)) return 'BAILOUT'
   if (_synth('block_user', nxt)) return 'BLOCK_USER'
+  if (_handoverEvent(nxt)) return 'HANDOVER_EVENT'
   if (_externalEvent(nxt)) return 'EXTERNAL_EVENT'
   if (getWatermark(nxt)) return 'WATERMARK'
   if (nxt.message && nxt.message.is_echo) return 'ECHO'
@@ -280,63 +326,19 @@ function exec(state, nxt) {
       }
     }
 
+    case 'HANDOVER_EVENT': {
+      // Security check: only process handovers TO our app
+      const { new_owner_app_id } = nxt.pass_thread_control
+      if (new_owner_app_id !== process.env.FACEBOOK_APP_ID) {
+        console.log(`Ignoring handover to different app: ${new_owner_app_id}`)
+        return _noop()
+      }
+
+      return _handleExternalEvent(state, nxt, false)
+    }
+
     case 'EXTERNAL_EVENT': {
-      const md = makeEventMetadata(nxt)
-
-      const externalEvents = [...(state.externalEvents || []), nxt]
-
-      if (state.state !== 'WAIT_EXTERNAL_EVENT') {
-
-        return {
-          action: 'UPDATE_STATE',
-          stateUpdate: { md: { ...state.md, ...md }, externalEvents: externalEvents }
-        }
-      }
-
-      const fulfilled = waitConditionFulfilled(state.wait, externalEvents, state.waitStart)
-
-      if (!fulfilled) {
-        return {
-          action: 'WAIT_EXTERNAL_EVENT',
-          question: state.question,
-          wait: state.wait,
-          md,
-          waitStart: state.waitStart,
-          externalEvents
-        }
-      }
-
-      // Check if this is a timeout during handoff
-      if (nxt.event.type === 'timeout' &&
-          state.state === 'WAIT_EXTERNAL_EVENT' &&
-          state.handoffContext) {
-
-        console.log('Handoff timeout, taking control back')
-        const { takeThreadControl } = require('../messenger')
-        
-        // Note: This is a fire-and-forget call since we can't await in this context
-        // The timeout handling will be done in the act() function
-        takeThreadControl(
-          nxt.user,
-          {
-            reason: 'timeout',
-            original_target: state.handoffContext.target_app_id,
-            handoff_duration_ms: nxt.timestamp - state.handoffContext.started_at
-          },
-          process.env.FACEBOOK_PAGE_ACCESS_TOKEN
-        ).catch(error => {
-          console.error('Take control failed:', error)
-        })
-      }
-
-      return tokenWrap(state, nxt, {
-        action: 'RESPOND',
-        md,
-        stateUpdate: { wait: null, waitStart: null, handoffContext: null },
-        question: state.question,
-        validation: { valid: true },
-        response: null
-      })
+      return _handleExternalEvent(state, nxt, true)
     }
 
     case 'BAILOUT': {
@@ -392,6 +394,7 @@ function exec(state, nxt) {
         return _stitch(state, md.stitch, nxt)
       }
 
+
       if (md.wait) {
         return {
           action: 'WAIT_EXTERNAL_EVENT',
@@ -399,15 +402,6 @@ function exec(state, nxt) {
           wait: md.wait,
           waitStart: state.waitStart || nxt.timestamp
         } // propogate if repeat
-      }
-
-      if (md.handoff) {
-        return {
-          action: 'HANDOFF',
-          question: md.ref,
-          handoff: md.handoff,
-          waitStart: state.waitStart || nxt.timestamp
-        }
       }
 
       // if we receive the echo, we now assume that
@@ -595,20 +589,6 @@ function apply(state, output) {
         waitStart: output.waitStart
       }
 
-    case 'HANDOFF':
-      return {
-        ...state,
-        state: 'WAIT_EXTERNAL_EVENT',
-        md: { ...state.md, ...output.md },
-        question: output.question,
-        wait: output.handoff.wait,
-        externalEvents: output.externalEvents || state.externalEvents,
-        waitStart: output.waitStart,
-        handoffContext: {
-          target_app_id: output.handoff.target_app_id,
-          started_at: output.waitStart
-        }
-      }
 
     case 'END':
       return { ...state, state: 'END', question: output.question }
@@ -635,60 +615,45 @@ function act(ctx, state, output) {
     case 'RESPOND': {
       const qa = apply(state, output).qa
       const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
-      const payments = messages.map(m => getPaymentFromMessage(ctx, m)).filter(x => !!x)
-      return { messages, payments }
+      const payment = messages.map(m => getPaymentFromMessage(ctx, m)).find(p => p) // Get first payment
+      const handoff = messages.map(m => getHandoffFromMessage(ctx, m)).find(h => h) // Get first handoff
+      
+      return { messages, payment, handoff }
     }
 
     case 'RESPOND_AND_RESET': {
       const qa = state.qa
       const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
-      return { messages, payments: [] }
+      
+      return { messages }
     }
 
     case 'RESPOND_AGAIN': {
       const qa = state.qa
-      return {
-        messages: respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output),
-        payments: []
-      }
+      const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
+      
+      return { messages }
     }
 
     case 'SWITCH_FORM': {
 
       return {
-        messages: respond({ ...ctx, md: output.md }, [], output),
-        payments: []
+        messages: respond({ ...ctx, md: output.md }, [], output)
       }
     }
 
     case 'MAKE_PAYMENT': {
       const qa = state.qa
-      const payment = _wrapPayment(ctx, getPayment(ctx, qa, output.question))
-      return { messages: [], payments: [payment] }
+      const payment = _wrapSideEffect(ctx, getPayment(ctx, qa, output.question))
+      return { 
+        messages: [], 
+        payment
+      }
     }
 
-    case 'HANDOFF': {
-      const { passThreadControl } = require('../messenger')
-      
-      // Note: This is a fire-and-forget call since we can't await in this context
-      // The handoff will be initiated but we continue with the wait state
-      passThreadControl(
-        ctx.user.id,
-        output.handoff.target_app_id,
-        output.handoff.metadata,
-        process.env.FACEBOOK_PAGE_ACCESS_TOKEN
-      ).then(() => {
-        console.log(`Successfully handed off to app ${output.handoff.target_app_id}`)
-      }).catch(error => {
-        console.error('Handoff failed:', error)
-        // Continue with timeout-only wait as fallback
-      })
-      
-      return { messages: [], payments: [] }
-    }
 
     default:
-      return { messages: [], payments: [] }
+      return { messages: [] }
   }
 }
 
@@ -701,14 +666,30 @@ function getPayment(ctx, qa, ref) {
   return payment
 }
 
-function _wrapPayment(ctx, payment) {
-  if (!payment) return
-  return { userid: ctx.user.id, pageid: ctx.page.id, timestamp: ctx.timestamp, ...payment }
+function _wrapSideEffect(ctx, data) {
+  if (!data) return
+  return { 
+    userid: ctx.user.id, 
+    pageid: ctx.page.id, 
+    timestamp: ctx.timestamp, 
+    ...data 
+  }
+}
+
+function getSideEffectFromMessage(ctx, message, type) {
+  const metadata = JSON.parse(message.message.metadata)
+  if (metadata[type]) {
+    return _wrapSideEffect(ctx, metadata[type])
+  }
+  return undefined
 }
 
 function getPaymentFromMessage(ctx, message) {
-  const { payment } = JSON.parse(message.message.metadata)
-  return _wrapPayment(ctx, payment)
+  return getSideEffectFromMessage(ctx, message, 'payment')
+}
+
+function getHandoffFromMessage(ctx, message) {
+  return getSideEffectFromMessage(ctx, message, 'handoff')
 }
 
 function updateQA(qa, u) {

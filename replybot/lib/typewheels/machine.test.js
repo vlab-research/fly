@@ -11,6 +11,7 @@ const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, stick
 
 const _echo = md => ({ ...echo, message: { ...echo.message, metadata: md.ref ? md : { ref: md } } })
 
+
 process.env.FALLBACK_FORM = 'fallback'
 process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
 
@@ -1851,8 +1852,8 @@ describe('Machine', () => {
     md.should.eql({ ref: 'foo', type: 'statement', payment: { type: 'reloadly', details: { foo: 'bar' } } })
     actions.messages[0].message.text.should.equal('foo')
 
-    actions.payments[0].details.should.eql({ foo: 'bar' })
-    actions.payments[0].userid.should.eql(user.id)
+    actions.payment.details.should.eql({ foo: 'bar' })
+    actions.payment.userid.should.eql(user.id)
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -1873,8 +1874,8 @@ describe('Machine', () => {
 
     should.not.exist(actions.messages[0])
 
-    actions.payments[0].details.should.eql({ foo: 'bar' })
-    actions.payments[0].userid.should.eql(user.id)
+    actions.payment.details.should.eql({ foo: 'bar' })
+    actions.payment.userid.should.eql(user.id)
 
     const state = getState(log)
 
@@ -2066,10 +2067,245 @@ describe('Machine', () => {
     const actions = act(ctx, initialState, output)
 
     // The payment should be extracted
-    actions.payments.length.should.equal(1)
-    actions.payments[0].provider.should.equal('http')
-    actions.payments[0].userid.should.equal('1989430067808669')
-    actions.payments[0].pageid.should.equal('1855355231229529')
-    actions.payments[0].details.id.should.equal('giftcard_2')
+    actions.payment.should.exist
+    actions.payment.provider.should.equal('http')
+    actions.payment.userid.should.equal('1989430067808669')
+    actions.payment.pageid.should.equal('1855355231229529')
+    actions.payment.details.id.should.equal('giftcard_2')
+  })
+})
+
+describe('Handoff functionality', () => {
+  let user = { id: '1989430067808669' }
+
+  it('should extract handoff from message metadata and create handoff action', () => {
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'bar', ref: 'bar' },
+        { 
+          type: 'statement', 
+          title: 'foo', 
+          ref: 'foo', 
+          properties: { 
+            description: JSON.stringify({ 
+              handoff: { 
+                target_app_id: '123456789', 
+                metadata: { reason: 'customer_support' } 
+              } 
+            }) 
+          } 
+        }
+      ]
+    }
+
+    const log = [referral, _echo('bar'), text]
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    actions.messages.length.should.equal(1)
+    const md = JSON.parse(actions.messages[0].message.metadata)
+    md.handoff.should.deep.equal({ target_app_id: '123456789', metadata: { reason: 'customer_support' } })
+
+    // The handoff should be extracted
+    actions.handoff.should.exist
+    actions.handoff.target_app_id.should.equal('123456789')
+    actions.handoff.metadata.should.deep.equal({ reason: 'customer_support' })
+    actions.handoff.userid.should.equal('1989430067808669')
+    actions.handoff.pageid.should.equal('1855355231229529')
+    actions.handoff.timestamp.should.equal(text.timestamp)
+  })
+
+  it('should handle handoff with minimal metadata', () => {
+    const form = {
+      logic: [],
+      fields: [
+        { 
+          type: 'statement', 
+          title: 'foo', 
+          ref: 'foo', 
+          properties: { 
+            description: JSON.stringify({ 
+              handoff: { 
+                target_app_id: '987654321'
+              } 
+            }) 
+          } 
+        }
+      ]
+    }
+
+    const log = [referral, _echo('foo'), text]
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    actions.handoff.should.exist
+    actions.handoff.target_app_id.should.equal('987654321')
+    actions.handoff.userid.should.equal('1989430067808669')
+    actions.handoff.pageid.should.equal('1855355231229529')
+    actions.handoff.timestamp.should.equal(text.timestamp)
+  })
+
+  it('should not create handoff when no handoff metadata exists', () => {
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'statement', title: 'foo', ref: 'foo' }
+      ]
+    }
+
+    const log = [referral, _echo('foo')]
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    should.not.exist(actions.handoff)
+  })
+})
+
+describe('Thread passback functionality', () => {
+  let user = { id: '1989430067808669' }
+  
+  before(() => {
+    process.env.FACEBOOK_APP_ID = '123456789'
+  })
+
+  it('should handle handover event and fulfill wait condition', () => {
+    const wait = { 
+      op: 'or',
+      vars: [
+        { type: 'handover', value: { target_app_id: '123456789' } },
+        { type: 'timeout', value: '60m' }
+      ]
+    }
+    const form = {
+      logic: [],
+      fields: [
+        { 
+          type: 'statement', 
+          title: 'foo', 
+          ref: 'foo', 
+          properties: { 
+            description: JSON.stringify({ wait }) 
+          } 
+        },
+        { type: 'short_text', title: 'bar', ref: 'bar' }
+      ]
+    }
+
+    // Create a handover event (thread passback)
+    const handoverEvent = {
+      source: 'messenger',
+      timestamp: Date.now(),
+      recipient: { id: '1855355231229529' },
+      sender: { id: '1989430067808669' },
+      pass_thread_control: {
+        new_owner_app_id: '123456789',
+        previous_owner_app_id: '987654321',
+        metadata: '{"reason":"customer_support"}'
+      }
+    }
+
+    const log = [referral, _echo({ ref: 'foo', type: 'wait', wait }), handoverEvent]
+    const actions = getMessage(log, form, user)
+
+    // Should proceed to next question after handover
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+  })
+
+  it('should handle handover event with metadata', () => {
+    const wait = { 
+      op: 'or',
+      vars: [
+        { type: 'handover', value: { target_app_id: '123456789' } },
+        { type: 'timeout', value: '60m' }
+      ]
+    }
+    const form = {
+      logic: [],
+      fields: [ 
+        { 
+          type: 'statement', 
+          title: 'foo', 
+          ref: 'foo', 
+          properties: { 
+            description: JSON.stringify({ wait }) 
+          } 
+        },
+        { type: 'short_text', title: 'bar', ref: 'bar' }
+      ]
+    }
+
+    // Create a handover event with metadata
+    const handoverEvent = {
+      source: 'messenger',
+      timestamp: Date.now(),
+      recipient: { id: '1855355231229529' },
+      sender: { id: '1989430067808669' },
+      pass_thread_control: {
+        new_owner_app_id: '123456789',
+        previous_owner_app_id: '987654321',
+        metadata: '{"reason":"escalation","priority":"high"}'
+      }
+    }
+
+    const waitCondition = { 
+      op: 'or', 
+      vars: [
+        { type: 'handover', value: { target_app_id: '123456789' } }, 
+        { type: 'timeout', value: '60m' }
+      ] 
+    }
+    const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: waitCondition }), handoverEvent]
+    const actions = getMessage(log, form, user)
+
+    // Should proceed to next question after handover
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+  })
+
+  it('should not fulfill wait condition for wrong app ID', () => {
+    const wait = { 
+      op: 'or',
+      vars: [
+        { type: 'handover', value: { target_app_id: '123456789' } },
+        { type: 'timeout', value: '60m' }
+      ]
+    }
+    const form = {
+      logic: [],
+      fields: [
+        { 
+          type: 'statement', 
+          title: 'foo', 
+          ref: 'foo', 
+          properties: { 
+            description: JSON.stringify({ wait }) 
+          } 
+        },
+        { type: 'short_text', title: 'bar', ref: 'bar' }
+      ]
+    }
+
+    // Create a handover event with wrong app ID
+    const handoverEvent = {
+      source: 'messenger',
+      timestamp: Date.now(),
+      recipient: { id: '1855355231229529' },
+      sender: { id: '1989430067808669' },
+      pass_thread_control: {
+        new_owner_app_id: '999999999', // Wrong app ID
+        previous_owner_app_id: '987654321',
+        metadata: '{"reason":"customer_support"}'
+      }
+    }
+
+    const waitCondition = { 
+      op: 'or', 
+      vars: [
+        { type: 'handover', value: { target_app_id: '123456789' } }, 
+        { type: 'timeout', value: '60m' }
+      ] 
+    }
+    const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: waitCondition }), handoverEvent]
+    const actions = getMessage(log, form, user)
+
+    // Should not proceed - still waiting
+    should.not.exist(actions.messages[0])
   })
 })
