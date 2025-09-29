@@ -148,3 +148,18 @@ describe('getUserInfo', () => {
     res.name.should.equal('_')
   })
 })
+
+describe('passThreadControl', () => {
+  it('should call Facebook handoff API with correct parameters', async () => {
+    nock(BASE_URL)
+      .post(`/${V}/me/pass_thread_control`, {
+        recipient: { id: 'user123' },
+        target_app_id: '987654321',
+        metadata: '{"survey_id":"test","question_ref":"handoff1"}'
+      })
+      .reply(200, { success: true })
+
+    const res = await m.passThreadControl('user123', '987654321', { survey_id: 'test', question_ref: 'handoff1' }, 'test_token')
+    res.should.deep.equal({ success: true })
+  })
+})
