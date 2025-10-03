@@ -1,8 +1,11 @@
 import r2 from 'r2';
 import util from 'util';
+import { should } from 'chai';
 import { makeEcho, Field } from '@vlab-research/mox';
 import sendMessage from './sender';
 import { snooze } from './utils';
+
+should();
 
 const facebot = 'http://gbv-facebot';
 
@@ -59,7 +62,7 @@ export async function flowMaster(userId: string, testFlow: TestFlow): Promise<vo
     const msg = data.message;
 
     try {
-      (msg as any).should.eql(get);
+      msg.should.eql(get);
       await send(token, res);
     }
     catch (e) {
