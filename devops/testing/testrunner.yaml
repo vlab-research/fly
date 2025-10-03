@@ -14,7 +14,7 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: testrunner
-        image: vlabresearch/testrunner:v0.0.6
+        image: vlabresearch/testrunner:v0.0.7
         imagePullPolicy: Always
         resources:
           requests:

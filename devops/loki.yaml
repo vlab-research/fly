@@ -4,7 +4,7 @@ loki:
     enabled: true
     accessModes:
       - ReadWriteOnce
-    size: 50Gi
+    size: 100Gi
 
 
 promtail:

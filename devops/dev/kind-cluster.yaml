@@ -1,6 +1,10 @@
 ---
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+# Use a stable Kubernetes version instead of experimental v1.34.0
+# Available images: https://github.com/kubernetes-sigs/kind/releases
+# kindest/node:v1.29.2 is a stable release
+name: kind
 containerdConfigPatches:
 # required for the local registry
 - |-
@@ -8,13 +12,6 @@ containerdConfigPatches:
     endpoint = ["http://kind-registry:5000"]
 nodes:
 - role: control-plane
-  kubeadmConfigPatches:
-  - |
-    # Configiuration for ingress controller
-    kind: InitConfiguration
-    nodeRegistration:
-      kubeletExtraArgs:
-        node-labels: "ingress-ready=true"
   extraPortMappings:
   # Exposes ingress controller on 0.0.0.0:80
   - containerPort: 80
@@ -32,7 +29,5 @@ nodes:
   - containerPort: 32432
     hostPort: 32432
     protocol: TCP
-- role: worker
-- role: worker
 - role: worker
 - role: worker

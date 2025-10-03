@@ -10,7 +10,11 @@ MINIO_HOST=minio.fly.local
 HOST_FILE=/etc/hosts
 DEV_USER=nandanmarkrao@gmail.com
 
-dev: create-kind-cluster certs certs-secret setup-dev-secret setup-kind-registry setup-ingress-controller bootstrap-fly
+dev: create-kind-cluster parallel-setup certs-secret bootstrap-fly
+
+# Run these tasks in parallel after cluster creation
+parallel-setup:
+	$(MAKE) -j4 certs setup-dev-secret setup-kind-registry setup-ingress-controller
 
 clean: delete-kind-cluster
 
@@ -57,6 +61,7 @@ swap-test-user:
 	@bash ./scripts/swap-test-user.sh $(DEV_USER)
 
 setup-ingress-controller:
+	@echo "Setting up ingress-nginx without admission webhooks..."
 	@kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 	@kubectl wait --namespace ingress-nginx \
 	--for=condition=ready pod \

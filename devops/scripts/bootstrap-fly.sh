@@ -8,13 +8,36 @@ helm repo add cockroachdb https://charts.cockroachdb.com/
 helm repo update
 
 ######################
-# install db
+# install infrastructure in parallel
 ######################
+echo "Installing infrastructure components in parallel..."
+
+# Start all installations in parallel (without --wait)
 helm upgrade --install db cockroachdb/cockroachdb \
   --values values/integrations/cdb.yaml \
-  --timeout 10m \
-  --wait
+  --timeout 10m &
+DB_PID=$!
 
+helm upgrade --install kafka bitnami/kafka \
+  --values values/integrations/kafka.yaml \
+  --version 22.1.6 \
+  --timeout 10m0s &
+KAFKA_PID=$!
+
+helm upgrade --install minio oci://registry-1.docker.io/bitnamicharts/minio \
+  --values values/integrations/minio.yaml \
+  --timeout 10m0s &
+MINIO_PID=$!
+
+# Wait for all to complete
+echo "Waiting for database installation..."
+wait $DB_PID
+echo "Waiting for kafka installation..."
+wait $KAFKA_PID
+echo "Waiting for minio installation..."
+wait $MINIO_PID
+
+# Apply the cockroachdb hack after DB is ready
 kubectl apply -f dev/cockroachdb.hack.yaml
 
 ######################
@@ -23,28 +46,9 @@ kubectl apply -f dev/cockroachdb.hack.yaml
 # Migrations should be idempotent
 cat migrations/* | kubectl run -i \
   --rm cockroach-client \
-  --image=cockroachdb/cockroach:v21.1.9 \
+  --image=cockroachdb/cockroach:v21.2.17 \
   --restart=Never \
   --command -- ./cockroach sql --insecure --host db-cockroachdb-public
-
-
-######################
-# install kafka
-######################
-helm upgrade --install kafka bitnami/kafka \
-  --values values/integrations/kafka.yaml \
-  --version 22.1.6 \
-  --timeout 10m0s \
-  --wait
-
-
-######################
-# install minio
-######################
-helm upgrade --install minio oci://registry-1.docker.io/bitnamicharts/minio \
-  --values values/integrations/minio.yaml \
-  --timeout 10m0s \
-  --wait
 
 ######################
 # install fly

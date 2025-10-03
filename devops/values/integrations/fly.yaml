@@ -1,6 +1,7 @@
 tags:
   kafka: true
   cockroach: true
+  redis: true
   payments: true
   backup: false
   naughtybot: false
@@ -21,14 +22,15 @@ botEnvs: &botenvs bot-envs
 chatbaseHost: &host db-cockroachdb-public
 exporterTopic: &exportertopic "vlab-exports"
 
-versionDashboard: &vdashboard v0.0.33
-versionBotserver: &vbotserver v0.0.10
-versionReplybot: &vreplybot v0.0.146
+versionDashboard: &vdashboard v0.0.37
+versionBotserver: &vbotserver v0.0.11
+versionReplybot: &vreplybot v0.0.168
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.28
-versionScribble: &vscribble v0.0.25
-versionDinersclub: &vdinersclub v0.0.28
-versionFormcentral: &vformcentral v0.0.10
+versionDean: &vdean v0.0.37
+versionScribble: &vscribble v0.0.27
+versionDinersclub: &vdinersclub v0.0.38
+versionFormcentral: &vformcentral v0.0.12
+versionExporter: &vexporter v0.3.6
 
 linksniffer:
   replicaCount: 1
@@ -217,6 +219,8 @@ replybot:
     value: "305"
   - name: REPLYBOT_EVENT_TOPIC
     value: *topic
+  - name: REPLYBOT_RESET_SHORTCODE
+    value: "reset"
   - name: FACEBOOK_GRAPH_URL
     value: "http://gbv-facebot"
   - name: BOTSPINE_KAFKA_BROKERS
@@ -235,6 +239,15 @@ replybot:
     value: "http://fly-botserver"
   - name: FORMCENTRAL_URL
     value: "http://fly-formcentral"
+  - name: NUM_SPINES
+    value: "6"
+  - name: REDIS_HOST
+    value: "fly-redis-master"
+  - name: REDIS_PORT
+    value: "6379"
+  - name: REDIS_DB
+    value: "0"
+
 
 botserver:
   replicaCount: 1
@@ -278,30 +291,33 @@ dean:
     value: "26257"
   - name: BOTSERVER_URL
     value: "http://fly-botserver/synthetic"
-  - name: DEAN_FB_CODES
-    value: "2022,-1"
   - name: DEAN_ERROR_TAGS
-    value: "NETWORK,INTERNAL"
-  - name: DEAN_TIMEOUT_BLACKLIST
-    value: ""
+    value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
-    value: "24 hours"
+    value: "48 hours"
+  - name: DEAN_FB_CODES
+    value: "2022,613,-1,190,80006,551"
   - name: DEAN_BLOCKED_INTERVAL
-    value: "24 hours"
+    value: "48 hours"
   - name: DEAN_RESPONDING_INTERVAL
-    value: "23 hours"
+    value: "48 hours"
   - name: DEAN_RESPONDING_GRACE
-    value: "1 hour"
+    value: "20 minutes" 
+  - name: DEAN_RETRY_MAX_ATTEMPTS
+    value: "30"
   - name: DEAN_PAYMENT_GRACE
-    value: "2 minutes"
+    value: "2 hours"
   - name: DEAN_PAYMENT_INTERVAL
-    value: "24 hours"
+    value: "14 days"
   - name: DEAN_SEND_DELAY
     value: "1ms"
   - name: DEAN_FOLLOWUP_MIN
     value: "1 minute"
   - name: DEAN_FOLLOWUP_MAX
     value: "1 hour"
+  - name: DEAN_TIMEOUT_BLACKLIST
+    value: ""
+
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"
@@ -312,6 +328,13 @@ dean:
           memory: 10Mi
     - name: timeouts
       queries: "timeouts,followups"
+      schedule: "*/1 * * * *"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 10Mi
+    - name: spammers
+      queries: "spammers"
       schedule: "*/1 * * * *"
       resources:
         requests:
@@ -398,3 +421,39 @@ cockroachdb:
 kafka:
   # disable kafka as we run it as a service
   enabled: false
+
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "6379"
+  metrics:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+  networkPolicy:
+    enabled: false
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    runAsUser: 1001
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: true

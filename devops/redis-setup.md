@@ -39,8 +39,8 @@ Redis has been added to the VLAB deployment as a caching layer. The setup uses B
 ## Connection Details
 
 ### Service Names
-- **Production/Staging**: `vlab-redis-master` (master), `vlab-redis-replicas` (replicas)
-- **Test/Online-Test**: `vlab-redis-master`
+- **Production/Staging**: `gbv-redis-master` (master), `gbv-redis-replicas` (replicas)
+- **Test/Online-Test**: `gbv-redis-master`
 
 ### Ports
 - **Redis**: 6379
@@ -55,23 +55,23 @@ Redis has been added to the VLAB deployment as a caching layer. The setup uses B
 ### Connecting from Applications
 ```bash
 # Production/Staging (with auth)
-redis-cli -h vlab-redis-master -p 6379 -a $REDIS_PASSWORD
+redis-cli -h gbv-redis-master -p 6379 -a $REDIS_PASSWORD
 
 # Test/Online-Test (no auth)
-redis-cli -h vlab-redis-master -p 6379
+redis-cli -h gbv-redis-master -p 6379
 ```
 
 ### Environment Variables for Applications
 ```yaml
 env:
   - name: REDIS_HOST
-    value: "vlab-redis-master"
+    value: "gbv-redis-master"
   - name: REDIS_PORT
     value: "6379"
   - name: REDIS_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: vlab-redis
+        name: gbv-redis
         key: redis-password
 ```
 

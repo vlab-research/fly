@@ -303,6 +303,17 @@ replybot:
     value: "https://graph.facebook.com/v8.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
+  - name: REDIS_HOST
+    value: "gbv-redis-master"
+  - name: REDIS_PORT
+    value: "6379"
+  - name: REDIS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: gbv-redis
+        key: redis-password
+  - name: REDIS_DB
+    value: "0"
 
 formcentral:
   replicaCount: 1

@@ -65,6 +65,12 @@ replybot:
     value: "http://gbv-botserver"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
+  - name: REDIS_HOST
+    value: "gbv-redis-master"
+  - name: REDIS_PORT
+    value: "6379"
+  - name: REDIS_DB
+    value: "0"
 
 naughtybot:
   image:

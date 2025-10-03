@@ -19,12 +19,12 @@ chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 
 versionDashboard: &vdashboard v0.0.37
-versionBotserver: &vbotserver v0.0.10
-versionReplybot: &vreplybot v0.0.164
+versionBotserver: &vbotserver v0.0.11
+versionReplybot: &vreplybot v0.0.168
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.37
 versionScribble: &vscribble v0.0.27
-versionDinersclub: &vdinersclub v0.0.36
+versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.3.6
 
@@ -451,7 +451,7 @@ dashboard:
 
 
 replybot:
-  replicaCount: 12
+  replicaCount: 8
   image:
     repository: vlabresearch/replybot
     tag: *vreplybot
@@ -504,7 +504,18 @@ replybot:
   - name: STATE_STORE_LIMIT
     value: "30000"
   - name: NUM_SPINES
-    value: "4"
+    value: "6"
+  - name: REDIS_HOST
+    value: "gbv-redis-master"
+  - name: REDIS_PORT
+    value: "6379"
+  - name: REDIS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: gbv-redis
+        key: redis-password
+  - name: REDIS_DB
+    value: "0"
 
 botserver:
   replicaCount: 3
