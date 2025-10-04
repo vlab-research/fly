@@ -22,7 +22,7 @@ botEnvs: &botenvs bot-envs
 chatbaseHost: &host db-cockroachdb-public
 exporterTopic: &exportertopic "vlab-exports"
 
-versionDashboard: &vdashboard v0.0.37
+versionDashboard: &vdashboard v0.0.38
 versionBotserver: &vbotserver v0.0.11
 versionReplybot: &vreplybot v0.0.168
 versionLinksniffer: &vlinksniffer v0.0.4
