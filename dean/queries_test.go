@@ -321,7 +321,7 @@ func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
                       "md": { "startTime": %v },
                       "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
 
-	cfg := &Config{TimeoutBlacklist: []string{"short3"}, TimeoutMaxPast: "48 hours"}
+	cfg := &Config{TimeoutBlacklist: []string{"short3", "shortnone"}, TimeoutMaxPast: "48 hours"}
 	ch := Timeouts(cfg, pool)
 	events := getEvents(ch)
 

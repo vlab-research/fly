@@ -198,7 +198,7 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	d := time.Now().UTC()
 
 	if len(cfg.TimeoutBlacklist) > 0 {
-		query += ` AND current_form != ANY($3)`
+		query += ` AND NOT (current_form = ANY($3))`
 		return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast, cfg.TimeoutBlacklist)
 	}
 
