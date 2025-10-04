@@ -270,7 +270,7 @@ func TestGetTimeoutsGetsOnlyExpiredTimeouts(t *testing.T) {
                       "md": { "startTime": %v },
                       "wait": { "type": "timeout", "value": "40 minutes"}}`, ms, ms))
 
-	cfg := &Config{}
+	cfg := &Config{TimeoutMaxPast: "48 hours"}
 	ch := Timeouts(cfg, pool)
 	events := getEvents(ch)
 
@@ -321,7 +321,7 @@ func TestGetTimeoutsIgnoresBlacklistShortcodes(t *testing.T) {
                       "md": { "startTime": %v },
                       "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
 
-	cfg := &Config{TimeoutBlacklist: []string{"short3"}}
+	cfg := &Config{TimeoutBlacklist: []string{"short3"}, TimeoutMaxPast: "48 hours"}
 	ch := Timeouts(cfg, pool)
 	events := getEvents(ch)
 
@@ -375,7 +375,7 @@ func TestGetTimeouts_WithRelativeVariableTimeout(t *testing.T) {
 	mustExec(t, pool, settingsInsertSql, "short2", surveyTime,
 		`[{"name": "foo_var", "type": "relative", "value": "20 minutes"}, {"name": "bar_var", "type": "relative", "value": "40 minutes"}]`, ts)
 
-	cfg := &Config{}
+	cfg := &Config{TimeoutMaxPast: "48 hours"}
 	ch := Timeouts(cfg, pool)
 	events := getEvents(ch)
 
@@ -432,7 +432,7 @@ func TestGetTimeouts_WithAbsoluteVariableTimeout(t *testing.T) {
 			now.Add(1*time.Minute).Format(time.RFC3339)),
 		ts)
 
-	cfg := &Config{}
+	cfg := &Config{TimeoutMaxPast: "48 hours"}
 	ch := Timeouts(cfg, pool)
 	events := getEvents(ch)
 
@@ -492,7 +492,7 @@ func TestGetTimeouts_OnlyWorksForCorrectSurveyVersion(t *testing.T) {
                       "md": { "startTime": %v },
                       "wait": { "type": "timeout", "value": { "type": "relative", "variable": "foo_var"}}}`, ms, startTime2))
 
-	cfg := &Config{}
+	cfg := &Config{TimeoutMaxPast: "48 hours"}
 	ch := Timeouts(cfg, pool)
 	events := getEvents(ch)
 
@@ -502,6 +502,109 @@ func TestGetTimeouts_OnlyWorksForCorrectSurveyVersion(t *testing.T) {
 
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), fmt.Sprintf(`{"type":"timeout","value":%v}`, ms))
+}
+
+func TestGetTimeouts_IgnoresTimeoutsTooFarInThePast(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	now := time.Now().UTC()
+	// Create two timeouts: one that's 10 hours old (within window) and one that's 50 hours old (outside window)
+	ts1 := now.Add(-10 * time.Hour)
+	ts2 := now.Add(-50 * time.Hour)
+	ms1 := ts1.Unix() * 1000
+	ms2 := ts2.Unix() * 1000
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	mustExec(t, pool, surveyInsertSql, "short1", now.Add(-60*time.Hour), "{}")
+
+	// User with timeout 10 hours ago - SHOULD be included (within 48 hour window)
+	mustExec(t, pool, insertQuery,
+		"recent_timeout",
+		"bar",
+		ts1,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": "5 hours"}}`, ms1, ms1))
+
+	// User with timeout 50 hours ago - should NOT be included (outside 48 hour window)
+	mustExec(t, pool, insertQuery,
+		"old_timeout",
+		"bar",
+		ts2,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": "5 hours"}}`, ms2, ms2))
+
+	cfg := &Config{TimeoutMaxPast: "48 hours"}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "recent_timeout", events[0].User)
+	assert.Equal(t, "timeout", events[0].Event.Type)
+}
+
+func TestGetTimeouts_MaxPastWorksWithVariableTimeouts(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	now := time.Now().UTC()
+	// Create timeouts using variable settings
+	ts1 := now.Add(-10 * time.Hour)
+	ts2 := now.Add(-50 * time.Hour)
+	ms1 := ts1.Unix() * 1000
+	ms2 := ts2.Unix() * 1000
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	surveyTime := now.Add(-60 * time.Hour)
+	mustExec(t, pool, surveyInsertSql, "short1", surveyTime, "{}")
+	mustExec(t, pool, settingsInsertSql, "short1", surveyTime,
+		`[{"name": "timeout_var", "type": "relative", "value": "5 hours"}]`, now)
+
+	// Recent timeout with variable - SHOULD be included
+	mustExec(t, pool, insertQuery,
+		"recent_var_timeout",
+		"bar",
+		ts1,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "timeout_var"}}}`, ms1, ms1))
+
+	// Old timeout with variable - should NOT be included
+	mustExec(t, pool, insertQuery,
+		"old_var_timeout",
+		"bar",
+		ts2,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": { "type": "relative", "variable": "timeout_var"}}}`, ms2, ms2))
+
+	cfg := &Config{TimeoutMaxPast: "48 hours"}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "recent_var_timeout", events[0].User)
+	assert.Equal(t, "timeout", events[0].Event.Type)
 }
 
 func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *testing.T) {
@@ -672,7 +775,7 @@ func TestGetSpammersGetsTheSpammer(t *testing.T) {
 		fmt.Sprintf(`{"state": "QOUT", "qa": %s,
                       "forms": ["closed", "open"]}`, qaString))
 
-	cfg := &Config{}
+	cfg := &Config{TimeoutMaxPast: "48 hours"}
 	ch := Spammers(cfg, pool)
 	events := getEvents(ch)
 

@@ -317,6 +317,8 @@ dean:
     value: "1 hour"
   - name: DEAN_TIMEOUT_BLACKLIST
     value: ""
+  - name: DEAN_TIMEOUT_MAX_PAST
+    value: "72 hours"
 
   queries:
     - name: respondings

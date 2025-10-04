@@ -20,7 +20,7 @@ exporterTopic: &exportertopic "vlab-exports"
 
 versionDashboard: &vdashboard v0.0.37
 versionBotserver: &vbotserver v0.0.11
-versionReplybot: &vreplybot v0.0.168
+versionReplybot: &vreplybot v0.0.169
 versionLinksniffer: &vlinksniffer v0.0.4
 versionDean: &vdean v0.0.37
 versionScribble: &vscribble v0.0.27
@@ -180,7 +180,9 @@ dean:
   - name: DEAN_FOLLOWUP_MAX
     value: "24 hours"
   - name: DEAN_TIMEOUT_BLACKLIST
-    value: "bebborsbaseserb,bebbobg2basebul"
+    value: "bebborsbaseserb,bebbobg2basebul,nciaim2followup2pay,nciaim2followup1pay,nciaim2baselinepay"
+  - name: DEAN_TIMEOUT_MAX_PAST
+    value: "72 hours"
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"

@@ -165,34 +165,46 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                   json_array_elements(timeouts)->>'type' AS type,
                   json_array_elements(timeouts)->>'value' AS value
                 FROM survey_settings
+                WHERE timeouts IS NOT NULL
+                  AND json_typeof(timeouts) = 'array'
+              ),
+              timeout_dates as (
+                SELECT
+                  s.userid,
+                  s.pageid,
+                  s.current_form,
+                  (state_json->>'waitStart')::int as waitStart,
+                  CASE
+                    WHEN s.timeout_date IS NOT NULL THEN s.timeout_date
+                    WHEN settings.type = 'relative' THEN timezone('UTC', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + (settings.value)::INTERVAL))
+                    WHEN settings.type = 'absolute' THEN timezone('UTC',parse_timestamp(settings.value))
+                  END as calculated_timeout_date
+                FROM states s
+                LEFT JOIN surveys surv
+                  ON surv.shortcode = s.current_form
+                LEFT JOIN unrolled_settings settings
+                  ON settings.surveyid = surv.id
+                  AND settings.name = s.state_json->'wait'->'value'->>'variable'
+                WHERE
+                  surv.created <= s.form_start_time AND
+                  current_state = 'WAIT_EXTERNAL_EVENT'
               )
-              SELECT (state_json->>'waitStart')::int, s.userid, s.pageid
-              FROM states s
-              LEFT JOIN surveys surv 
-                ON surv.shortcode = s.current_form
-              LEFT JOIN unrolled_settings settings
-                ON settings.surveyid = surv.id
-                AND settings.name = s.state_json->'wait'->'value'->>'variable'
+              SELECT waitStart, userid, pageid
+              FROM timeout_dates
               WHERE
-                surv.created <= s.form_start_time AND
-                current_state = 'WAIT_EXTERNAL_EVENT' AND
-                (s.timeout_date < $1
-                 OR
-                   (settings.type = 'relative' AND (timezone('UTC', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + (settings.value)::INTERVAL)) < $1 ))
-                 OR
-                   (settings.type = 'absolute' AND (timezone('UTC',parse_timestamp(settings.value))) < $1)
-                 )
+                calculated_timeout_date < $1 AND
+                calculated_timeout_date > $1 - ($2)::INTERVAL
         `
 	d := time.Now().UTC()
 
 	if len(cfg.TimeoutBlacklist) > 0 {
-		query += `AND s.current_form != ANY($2)`
-		return get(conn, getTimeout, query, d, cfg.TimeoutBlacklist)
+		query += ` AND current_form != ANY($3)`
+		return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast, cfg.TimeoutBlacklist)
 	}
 
-	query += `ORDER BY surv.created DESC LIMIT 1`
+	query += ` ORDER BY calculated_timeout_date DESC LIMIT 1`
 
-	return get(conn, getTimeout, query, d)
+	return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast)
 }
 
 // TODO: test cockroach perf and index
