@@ -985,7 +985,7 @@ describe('Machine', () => {
     actions.messages[0].message.attachment.payload.buttons[0].url.should.equal('https://foo.com/?q=hello')
   })
 
-/* 
+/*
   it.only('Parses a webview url properly with funkyness from typeform', () => {
     const form = {
       logic: [],
@@ -1928,16 +1928,16 @@ describe('Machine', () => {
       logic: [],
       fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }],
       offTime: now - 1000 * 60,
-    }    
+    }
 
     const log = [{...referral, timestamp: now}]
 
     const actions = getMessage(log, form, user, { id: 'bar' })
 
-    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")      
+    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")
     JSON.parse(actions.messages[0].message.metadata).ref.should.equal('bar')
     const state = getState(log)
-    state.state.should.equal('RESPONDING')    
+    state.state.should.equal('RESPONDING')
   });
 
   it('sends multiple off messages if a person keeps writing', () => {
@@ -1946,15 +1946,15 @@ describe('Machine', () => {
       logic: [],
       fields: [{ type: 'short_text', title: 'bar', ref: 'bar' }],
       offTime: now - 1000 * 60,
-    }    
+    }
 
     const log = [{...referral, timestamp: now}, _echo('bar'), { ...text, timestamp: now }]
 
     const actions = getMessage(log, form, user, { id: 'bar' })
     actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")
-    
+
     const state = getState(log)
-    state.state.should.equal('RESPONDING')    
+    state.state.should.equal('RESPONDING')
   });
 
   it('allows off users to start a new survey', () => {
@@ -1983,12 +1983,12 @@ describe('Machine', () => {
     const form = {
       logic: [],
       fields: [
-        { 
-          type: 'statement', 
-          title: 'We are generating your gift card now. Please wait, this should take several minutes but could take up to 48 hours if your account is flagged as potentially fraudulent (outside of the US, etc.)', 
-          ref: 'generating_gift_card', 
-          properties: { 
-            description: JSON.stringify({ 
+        {
+          type: 'statement',
+          title: 'We are generating your gift card now. Please wait, this should take several minutes but could take up to 48 hours if your account is flagged as potentially fraudulent (outside of the US, etc.)',
+          ref: 'generating_gift_card',
+          properties: {
+            description: JSON.stringify({
               type: 'wait',
               responseMessage: 'Sorry, please wait a bit longer, we\'re working on it.',
               wait: {
@@ -2032,8 +2032,8 @@ describe('Machine', () => {
                 }
               },
               ref: 'generating_gift_card'
-            }) 
-          } 
+            })
+          }
         }
       ]
     }
@@ -2083,18 +2083,18 @@ describe('Handoff functionality', () => {
       logic: [],
       fields: [
         { type: 'short_text', title: 'bar', ref: 'bar' },
-        { 
-          type: 'statement', 
-          title: 'foo', 
-          ref: 'foo', 
-          properties: { 
-            description: JSON.stringify({ 
-              handoff: { 
-                target_app_id: '123456789', 
-                metadata: { reason: 'customer_support' } 
-              } 
-            }) 
-          } 
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({
+              handoff: {
+                target_app_id: '123456789',
+                metadata: { reason: 'customer_support' }
+              }
+            })
+          }
         }
       ]
     }
@@ -2119,17 +2119,17 @@ describe('Handoff functionality', () => {
     const form = {
       logic: [],
       fields: [
-        { 
-          type: 'statement', 
-          title: 'foo', 
-          ref: 'foo', 
-          properties: { 
-            description: JSON.stringify({ 
-              handoff: { 
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({
+              handoff: {
                 target_app_id: '987654321'
-              } 
-            }) 
-          } 
+              }
+            })
+          }
         }
       ]
     }
@@ -2161,29 +2161,24 @@ describe('Handoff functionality', () => {
 
 describe('Thread passback functionality', () => {
   let user = { id: '1989430067808669' }
-  
+
   before(() => {
     process.env.FACEBOOK_APP_ID = '123456789'
   })
 
   it('should handle handover event and fulfill wait condition', () => {
-    const wait = { 
-      op: 'or',
-      vars: [
-        { type: 'handover', value: { target_app_id: '123456789' } },
-        { type: 'timeout', value: '60m' }
-      ]
-    }
+    const wait = { type: 'handover', value: { target_app_id: '123456789' } }
+
     const form = {
       logic: [],
       fields: [
-        { 
-          type: 'statement', 
-          title: 'foo', 
-          ref: 'foo', 
-          properties: { 
-            description: JSON.stringify({ wait }) 
-          } 
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({ wait })
+          }
         },
         { type: 'short_text', title: 'bar', ref: 'bar' }
       ]
@@ -2210,7 +2205,7 @@ describe('Thread passback functionality', () => {
   })
 
   it('should handle handover event with metadata', () => {
-    const wait = { 
+    const wait = {
       op: 'or',
       vars: [
         { type: 'handover', value: { target_app_id: '123456789' } },
@@ -2219,14 +2214,14 @@ describe('Thread passback functionality', () => {
     }
     const form = {
       logic: [],
-      fields: [ 
-        { 
-          type: 'statement', 
-          title: 'foo', 
-          ref: 'foo', 
-          properties: { 
-            description: JSON.stringify({ wait }) 
-          } 
+      fields: [
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({ wait })
+          }
         },
         { type: 'short_text', title: 'bar', ref: 'bar' }
       ]
@@ -2245,12 +2240,12 @@ describe('Thread passback functionality', () => {
       }
     }
 
-    const waitCondition = { 
-      op: 'or', 
+    const waitCondition = {
+      op: 'or',
       vars: [
-        { type: 'handover', value: { target_app_id: '123456789' } }, 
+        { type: 'handover', value: { target_app_id: '123456789' } },
         { type: 'timeout', value: '60m' }
-      ] 
+      ]
     }
     const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: waitCondition }), handoverEvent]
     const actions = getMessage(log, form, user)
@@ -2260,7 +2255,7 @@ describe('Thread passback functionality', () => {
   })
 
   it('should not fulfill wait condition for wrong app ID', () => {
-    const wait = { 
+    const wait = {
       op: 'or',
       vars: [
         { type: 'handover', value: { target_app_id: '123456789' } },
@@ -2270,13 +2265,13 @@ describe('Thread passback functionality', () => {
     const form = {
       logic: [],
       fields: [
-        { 
-          type: 'statement', 
-          title: 'foo', 
-          ref: 'foo', 
-          properties: { 
-            description: JSON.stringify({ wait }) 
-          } 
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({ wait })
+          }
         },
         { type: 'short_text', title: 'bar', ref: 'bar' }
       ]
@@ -2295,12 +2290,12 @@ describe('Thread passback functionality', () => {
       }
     }
 
-    const waitCondition = { 
-      op: 'or', 
+    const waitCondition = {
+      op: 'or',
       vars: [
-        { type: 'handover', value: { target_app_id: '123456789' } }, 
+        { type: 'handover', value: { target_app_id: '123456789' } },
         { type: 'timeout', value: '60m' }
-      ] 
+      ]
     }
     const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: waitCondition }), handoverEvent]
     const actions = getMessage(log, form, user)
