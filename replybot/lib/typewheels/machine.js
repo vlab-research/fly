@@ -17,6 +17,20 @@ function _eventMetadata(prefix, value) {
 }
 
 function makeEventMetadata(event) {
+  // Handle handover events directly
+  if (event.pass_thread_control) {
+    const { previous_owner_app_id, metadata } = event.pass_thread_control
+    const parsed = metadata ? JSON.parse(metadata) : {}
+    const prefix = 'e_handover'
+
+    return _eventMetadata(prefix, {
+      target_app_id: previous_owner_app_id,
+      ...parsed
+    })
+  }
+
+  // Handle synthetic external events
+  if (!event.event) return
   const { type, value } = event.event
 
   // We don't want to make metadata with
@@ -334,7 +348,7 @@ function exec(state, nxt) {
         return _noop()
       }
 
-      return _handleExternalEvent(state, nxt, false)
+      return _handleExternalEvent(state, nxt, true)
     }
 
     case 'EXTERNAL_EVENT': {

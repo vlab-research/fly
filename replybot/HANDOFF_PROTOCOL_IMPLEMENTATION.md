@@ -383,7 +383,7 @@ External apps can include metadata when returning thread control, which will be 
 
 ### Metadata Flattening Process
 
-The existing `makeEventMetadata` function automatically flattens nested metadata objects using the `_eventMetadata` helper. For handoff events, metadata is flattened with the prefix `e_handoff_return_`.
+The existing `makeEventMetadata` function automatically flattens nested metadata objects using the `_eventMetadata` helper. For handoff events, metadata is flattened with the prefix `e_handover_`.
 
 **Example External App Metadata:**
 ```json
@@ -404,13 +404,13 @@ The existing `makeEventMetadata` function automatically flattens nested metadata
 **Flattened Metadata Added to State:**
 ```javascript
 {
-  e_handoff_return_completion_status: "success",
-  e_handoff_return_assessment_results_reading_level: 8,
-  e_handoff_return_assessment_results_comprehension_score: 75,
-  e_handoff_return_recommendations_0: "literacy_support",
-  e_handoff_return_recommendations_1: "advanced_content",
-  e_handoff_return_participant_needs_language_preference: "spanish",
-  e_handoff_return_participant_needs_requires_assistance: true
+  e_handover_completion_status: "success",
+  e_handover_assessment_results_reading_level: 8,
+  e_handover_assessment_results_comprehension_score: 75,
+  e_handover_recommendations_0: "literacy_support",
+  e_handover_recommendations_1: "advanced_content",
+  e_handover_participant_needs_language_preference: "spanish",
+  e_handover_participant_needs_requires_assistance: true
 }
 ```
 
@@ -420,14 +420,14 @@ The flattened metadata becomes available as hidden fields in survey logic and qu
 
 ```javascript
 // In survey logic conditions
-{{hidden:e_handoff_return_completion_status}} // "success"
-{{hidden:e_handoff_return_assessment_results_reading_level}} // 8
+{{hidden:e_handover_completion_status}} // "success"
+{{hidden:e_handover_assessment_results_reading_level}} // 8
 
 // In question text
-"Based on your reading level assessment of grade {{hidden:e_handoff_return_assessment_results_reading_level}}, we have prepared appropriate materials..."
+"Based on your reading level assessment of grade {{hidden:e_handover_assessment_results_reading_level}}, we have prepared appropriate materials..."
 
 // In survey branching logic
-if ({{hidden:e_handoff_return_participant_needs_requires_assistance}} == true) {
+if ({{hidden:e_handover_participant_needs_requires_assistance}} == true) {
   // Show questions with additional support options
 }
 ```
@@ -439,7 +439,7 @@ The metadata processing happens automatically through the existing event metadat
 1. External app calls `pass_thread_control` with metadata
 2. Handover event converted to synthetic external event (includes all metadata)
 3. `makeEventMetadata` function processes the external event
-4. Metadata flattened with `e_handoff_return_` prefix
+4. Metadata flattened with `e_handover_` prefix
 5. Flattened metadata merged into user state via existing `md` update process
 
 **No additional code required** - the existing metadata flattening infrastructure handles handoff metadata automatically.
@@ -576,22 +576,22 @@ const handoffQuestion = {
    }
    ```
 5. Handover event processed and `makeEventMetadata` called
-6. Metadata flattened with `e_handoff_return_` prefix
+6. Metadata flattened with `e_handover_` prefix
 7. State updated with flattened metadata:
    ```javascript
    {
-     e_handoff_return_completion_status: "success",
-     e_handoff_return_assessment_results_reading_level: 6,
-     e_handoff_return_assessment_results_comprehension_score: 82,
-     e_handoff_return_assessment_results_completed_modules: 3,
-     e_handoff_return_recommendations_0: "literacy_support",
-     e_handoff_return_recommendations_1: "visual_aids",
-     e_handoff_return_participant_profile_preferred_language: "portuguese",
-     e_handoff_return_participant_profile_needs_audio_support: true
+     e_handover_completion_status: "success",
+     e_handover_assessment_results_reading_level: 6,
+     e_handover_assessment_results_comprehension_score: 82,
+     e_handover_assessment_results_completed_modules: 3,
+     e_handover_recommendations_0: "literacy_support",
+     e_handover_recommendations_1: "visual_aids",
+     e_handover_participant_profile_preferred_language: "portuguese",
+     e_handover_participant_profile_needs_audio_support: true
    }
    ```
 8. Survey resumes with metadata available as hidden fields
-9. Next questions can use metadata for logic: `{{hidden:e_handoff_return_assessment_results_reading_level}}`
+9. Next questions can use metadata for logic: `{{hidden:e_handover_assessment_results_reading_level}}`
 
 **Verification Points:**
 - Nested objects flattened correctly with underscore separation
@@ -934,11 +934,11 @@ describe('makeEventMetadata', () => {
 
     const metadata = makeEventMetadata(event)
     expect(metadata).to.deep.equal({
-      e_handoff_return_target_app_id: '123456',
-      e_handoff_return_assessment_results_reading_level: 7,
-      e_handoff_return_assessment_results_comprehension_score: 88,
-      e_handoff_return_recommendations_0: 'literacy_support',
-      e_handoff_return_recommendations_1: 'advanced_materials'
+      e_handover_target_app_id: '123456',
+      e_handover_assessment_results_reading_level: 7,
+      e_handover_assessment_results_comprehension_score: 88,
+      e_handover_recommendations_0: 'literacy_support',
+      e_handover_recommendations_1: 'advanced_materials'
     })
   })
 
@@ -954,7 +954,7 @@ describe('makeEventMetadata', () => {
     }
 
     const metadata = makeEventMetadata(event)
-    expect(metadata.e_handoff_return_target_app_id).to.equal('123456')
+    expect(metadata.e_handover_target_app_id).to.equal('123456')
   })
 })
 ```
