@@ -986,7 +986,7 @@ describe('Machine', () => {
   })
 
 /*
-  it.only('Parses a webview url properly with funkyness from typeform', () => {
+  it('Parses a webview url properly with funkyness from typeform', () => {
     const form = {
       logic: [],
       fields: [{ type: 'statement', title: 'bar', ref: 'bar', properties: { description: '{\n \"type\": \"webview\",\n \"url\": {\n \"base\": \"[columbiangwu.co1.qualtrics.com/jfe/form/SV\\_8k7acmuWQAZjERE](https://columbiangwu.co1.qualtrics.com/jfe/form/SV_8k7acmuWQAZjERE)\",\n \"params\": {\n \"vlab\\_id\": \"{{hidden:id}}\"\n }\n },\n \"buttonText\": \"Start\",\n \"extensions\": false\n}' } }]
@@ -2302,5 +2302,77 @@ describe('Thread passback functionality', () => {
 
     // Should not proceed - still waiting
     should.not.exist(actions.messages[0])
+  })
+})
+
+describe('Statement with wait should not gather next responses', () => {
+  let user = { id: '1989430067808669' }
+
+  it('should NOT gather next question when statement has wait condition', () => {
+    const wait = { type: 'handover', value: { target_app_id: '123456789' } }
+
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'First question', ref: 'first' },
+        {
+          type: 'statement',
+          title: 'Please wait, passing control...',
+          ref: 'wait_statement',
+          properties: {
+            description: JSON.stringify({ wait })
+          }
+        },
+        { type: 'short_text', title: 'This should not be sent yet', ref: 'next_question' }
+      ]
+    }
+
+    const log = [referral, _echo('first'), text]
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    // Should only send ONE message (the statement), not the next question
+    actions.messages.length.should.equal(1)
+    const md = JSON.parse(actions.messages[0].message.metadata)
+    md.ref.should.equal('wait_statement')
+    md.type.should.equal('statement')
+    md.wait.should.deep.equal(wait)
+  })
+
+  it('should NOT gather next question when statement has both handoff AND wait', () => {
+    const wait = { type: 'handover', value: { target_app_id: '123456789' } }
+    const handoff = {
+      target_app_id: '123456789',
+      metadata: { reason: 'customer_support' }
+    }
+
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'First question', ref: 'first' },
+        {
+          type: 'statement',
+          title: 'Passing you to support...',
+          ref: 'handoff_wait_statement',
+          properties: {
+            description: JSON.stringify({ handoff, wait })
+          }
+        },
+        { type: 'short_text', title: 'Welcome back!', ref: 'after_handoff' }
+      ]
+    }
+
+    const log = [referral, _echo('first'), text]
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    // Should only send ONE message (the statement with handoff), not the next question
+    actions.messages.length.should.equal(1)
+    const md = JSON.parse(actions.messages[0].message.metadata)
+    md.ref.should.equal('handoff_wait_statement')
+    md.handoff.should.deep.equal(handoff)
+    md.wait.should.deep.equal(wait)
+
+    // Handoff action should be created
+    actions.handoff.should.exist
+    actions.handoff.target_app_id.should.equal('123456789')
   })
 })

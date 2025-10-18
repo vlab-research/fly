@@ -726,9 +726,10 @@ function _gatherResponses(ctx, qa, q, previous = []) {
     return [q, repeat]
   }
 
-  if (md.type === 'statement' || md.keepMoving) {
+  if ((md.type === 'statement' || md.keepMoving) && !md.wait) {
     // if question is statement, recursively
     // get the next question and send it too!
+    // BUT: if there's a wait condition, stop here and don't gather more responses
     const nq = nextQuestion(ctx, qa, md.ref)
     if (nq) return _gatherResponses(ctx, qa, nq, [...previous, q])
   }
