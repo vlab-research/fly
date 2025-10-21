@@ -139,7 +139,9 @@ function convertHandoverToExternal(handoverEvent, userId) {
   if (!pass_thread_control) return null
 
   // Only process if control passed back to our app
-  if (pass_thread_control.new_owner_app_id !== process.env.FACEBOOK_APP_ID) {
+  // Note: new_owner_app_id may be missing in some Messenger API webhook payloads
+  if (pass_thread_control.new_owner_app_id &&
+      pass_thread_control.new_owner_app_id !== process.env.FACEBOOK_APP_ID) {
     return null
   }
 
@@ -528,6 +530,30 @@ const handoffQuestion = {
     }]
   }]
 }
+```
+
+**Note:** The `new_owner_app_id` field may be missing in some Messenger API webhook payloads. When this field is absent, replybot will accept the handover event (assuming control is being passed back to our app). To handle cases where `new_owner_app_id` might be missing, use a wait condition without a `value` field (or with an empty value):
+
+```yaml
+wait:
+  op: or
+  vars:
+    - type: handover        # Accept any handover event (value is optional)
+    - type: timeout
+      value: 60m
+```
+
+This will match any handover event regardless of the `target_app_id`. If you want to match only handovers from a specific app, include the `value` field:
+
+```yaml
+wait:
+  op: or
+  vars:
+    - type: handover
+      value:
+        target_app_id: '123456789'  # Only accept handovers from this specific app
+    - type: timeout
+      value: 60m
 ```
 
 ### Test Case 3: Metadata Processing

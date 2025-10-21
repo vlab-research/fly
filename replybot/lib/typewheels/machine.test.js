@@ -2303,6 +2303,56 @@ describe('Thread passback functionality', () => {
     // Should not proceed - still waiting
     should.not.exist(actions.messages[0])
   })
+
+  it('should fulfill wait condition when new_owner_app_id is missing', () => {
+    const wait = {
+      op: 'or',
+      vars: [
+        { type: 'handover' },  // Accept any handover (value is optional)
+        { type: 'timeout', value: '60m' }
+      ]
+    }
+    const form = {
+      logic: [],
+      fields: [
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({ wait })
+          }
+        },
+        { type: 'short_text', title: 'bar', ref: 'bar' }
+      ]
+    }
+
+    // Create a handover event without new_owner_app_id (Messenger API sometimes omits this)
+    const handoverEvent = {
+      source: 'messenger',
+      timestamp: Date.now(),
+      recipient: { id: '1855355231229529' },
+      sender: { id: '1989430067808669' },
+      pass_thread_control: {
+        // new_owner_app_id is missing
+        previous_owner_app_id: '987654321',
+        metadata: '{"reason":"customer_support"}'
+      }
+    }
+
+    const waitCondition = {
+      op: 'or',
+      vars: [
+        { type: 'handover' },
+        { type: 'timeout', value: '60m' }
+      ]
+    }
+    const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: waitCondition }), handoverEvent]
+    const actions = getMessage(log, form, user)
+
+    // Should proceed to next question when new_owner_app_id is missing (accept handover)
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+  })
 })
 
 describe('Statement with wait should not gather next responses', () => {

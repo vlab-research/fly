@@ -21,6 +21,10 @@ function _waitFulfilled(value, events, waitStart) {
 const _contains = (a, b) => _.keys(b).every(k => a[k] === b[k])
 
 function _matches(v1, v2) {
+  // If v2 (wait condition value) is undefined or empty object, match any event of that type
+  if (!v2 || (typeof v2 === 'object' && Object.keys(v2).length === 0)) {
+    return !!v1
+  }
   return v1 && v2 && (_.isEqual(v1, v2) || _contains(v1, v2))
 }
 
@@ -35,15 +39,20 @@ function _normalizeEvent(event) {
     // Synthetic events (timeout, external)
     return event.event
   } else if (event.pass_thread_control) {
-    // Raw handover events 
-    
+    // Raw handover events
+    const value = {
+      timestamp: event.timestamp,
+      ...(event.pass_thread_control.metadata ? JSON.parse(event.pass_thread_control.metadata) : {})
+    }
+
+    // Only include target_app_id if new_owner_app_id is present
+    if (event.pass_thread_control.new_owner_app_id) {
+      value.target_app_id = event.pass_thread_control.new_owner_app_id
+    }
+
     return {
       type: 'handover',
-      value: {
-        target_app_id: event.pass_thread_control.new_owner_app_id,
-        timestamp: event.timestamp,
-        ...(event.pass_thread_control.metadata ? JSON.parse(event.pass_thread_control.metadata) : {})
-      }
+      value
     }
   }
   return null
