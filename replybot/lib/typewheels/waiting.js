@@ -41,8 +41,18 @@ function _normalizeEvent(event) {
   } else if (event.pass_thread_control) {
     // Raw handover events
     const value = {
-      timestamp: event.timestamp,
-      ...(event.pass_thread_control.metadata ? JSON.parse(event.pass_thread_control.metadata) : {})
+      timestamp: event.timestamp
+    }
+
+    // Parse metadata if present - handle both JSON and plain strings
+    if (event.pass_thread_control.metadata) {
+      try {
+        const parsed = JSON.parse(event.pass_thread_control.metadata)
+        Object.assign(value, parsed)
+      } catch (e) {
+        // Metadata is a plain string, not JSON - store it as-is
+        value.metadata = event.pass_thread_control.metadata
+      }
     }
 
     // Only include target_app_id if new_owner_app_id is present

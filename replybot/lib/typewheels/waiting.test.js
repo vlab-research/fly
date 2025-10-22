@@ -395,10 +395,39 @@ describe('waitConditionFulfilled', () => {
         }
       }
 
-      // This should throw an error due to invalid JSON
-      should.throw(() => {
-        w._normalizeEvent(handoverEvent)
-      }, 'Unexpected token j in JSON at position 12')
+      // Should handle invalid JSON gracefully and store as plain string
+      const result = w._normalizeEvent(handoverEvent)
+
+      result.should.deep.equal({
+        type: 'handover',
+        value: {
+          target_app_id: '123456789',
+          timestamp: 1640995200000,
+          metadata: '{"invalid": json}'  // Stored as plain string
+        }
+      })
+    })
+
+    it('should handle plain string metadata (non-JSON)', () => {
+      const handoverEvent = {
+        source: 'messenger',
+        sender: { id: '24311852335166032' },
+        recipient: { id: '101435865704727' },
+        timestamp: 1761146257000,
+        pass_thread_control: {
+          metadata: 'End of AI chatbot session – handing back to Virtual Lab'
+        }
+      }
+
+      const result = w._normalizeEvent(handoverEvent)
+
+      result.should.deep.equal({
+        type: 'handover',
+        value: {
+          timestamp: 1761146257000,
+          metadata: 'End of AI chatbot session – handing back to Virtual Lab'
+        }
+      })
     })
 
     it('should return null for unrecognized event types', () => {
@@ -408,7 +437,7 @@ describe('waitConditionFulfilled', () => {
       }
 
       const result = w._normalizeEvent(unknownEvent)
-      
+
       should.not.exist(result)
     })
 
