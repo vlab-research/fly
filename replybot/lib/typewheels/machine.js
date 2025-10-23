@@ -20,7 +20,18 @@ function makeEventMetadata(event) {
   // Handle handover events directly
   if (event.pass_thread_control) {
     const { previous_owner_app_id, metadata } = event.pass_thread_control
-    const parsed = metadata ? JSON.parse(metadata) : {}
+    let parsed = {}
+
+    // Parse metadata if present - handle both JSON and plain strings
+    if (metadata) {
+      try {
+        parsed = JSON.parse(metadata)
+      } catch (e) {
+        // Metadata is a plain string, not JSON - store it as-is
+        parsed = { metadata }
+      }
+    }
+
     const prefix = 'e_handover'
 
     return _eventMetadata(prefix, {
