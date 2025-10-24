@@ -15,7 +15,7 @@ const KVLinkModal = ({ items, title, description, successText, handleCreate, loa
   const success = async () => {
     const vals = items.reduce((a, i) => ({ ...a, [i.name]: form.getFieldValue(i.name) }), {});
     await handleCreate(vals);
-    back();
+    localBack();
   }
 
   const content = <>

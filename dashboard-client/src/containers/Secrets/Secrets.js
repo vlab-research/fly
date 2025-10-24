@@ -65,7 +65,7 @@ const Secrets = () => {
       description={description}
       successText={ !key ? "Create" : "Update" }
       handleCreate={ handleCreate }
-      loading={ items === [] }
+      loading={ items.length === 0 }
     />
   );
 };

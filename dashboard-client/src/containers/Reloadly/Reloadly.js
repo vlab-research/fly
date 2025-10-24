@@ -59,7 +59,7 @@ const Reloadly = () => {
       description={description}
       successText={!cred ? "Create" : "Update"}
       handleCreate={handleCreate}
-      loading={items === []}
+      loading={items.length === 0}
     />
   );
 };
