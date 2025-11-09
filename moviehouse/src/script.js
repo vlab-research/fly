@@ -3,11 +3,12 @@
 
 const SERVER_URL = '{{{SERVER_URL}}}';
 
-// make params dissapear after getting them 
+// make params dissapear after getting them
 const params = getQueryParams()
 const videoId = params['id'];
 const pageId = params['pageId'];
 const userId = params['userId'];
+const useExtensions = params['useExtensions'] === 'true';
 
 Sentry.init({ dsn: 'https://17c9ad73343d4a15b8e155a722224374@sentry.io/2581797' });
 
@@ -113,10 +114,29 @@ function initMessenger() {
   );
 };
 
+function validateRequiredParams() {
+  const missing = [];
+  if (!videoId) missing.push('id');
+  if (!pageId) missing.push('pageId');
+  if (!userId) missing.push('userId');
+
+  if (missing.length > 0) {
+    const title = '❌ Missing Parameters';
+    const message = `Required parameters are missing: ${missing.join(', ')}. Please make sure you opened this link correctly.`;
+    handleError(new Error('Missing parameters'), title, message);
+    return false;
+  }
+  return true;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  if (userId) {
-    setPlayer(userId)
+  if (useExtensions) {
+    // Use Messenger Extensions to get user context
+    window.extAsyncInit = initMessenger;
   } else {
-    window.extAsyncInit = initMessenger
+    // Direct mode: validate required parameters and load player
+    if (validateRequiredParams()) {
+      setPlayer(userId);
+    }
   }
 });
