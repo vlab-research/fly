@@ -1,0 +1,60 @@
+# Default values for exodus
+image:
+  repository: vlabresearch/exodus
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+
+# Environment variables for both executor and API
+env:
+  - name: CHATBASE_DATABASE
+    value: chatroach
+  - name: CHATBASE_HOST
+    value: cockroachdb-public
+  - name: CHATBASE_PORT
+    value: "26257"
+  - name: CHATBASE_USER
+    value: root
+  - name: BOTSERVER_URL
+    value: http://botserver/synthetic
+  - name: DRY_RUN
+    value: "false"
+  - name: EXODUS_RATE_LIMIT
+    value: "1s"
+  - name: EXODUS_MAX_BAIL_USERS
+    value: "100000"
+
+# Executor (CronJob) settings
+executor:
+  enabled: true
+  schedule: "* * * * *"  # Every minute
+  concurrencyPolicy: Forbid
+  activeDeadlineSeconds: 3600  # 1 hour max
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# API (Deployment) settings
+api:
+  enabled: false  # Enable when UI is ready
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

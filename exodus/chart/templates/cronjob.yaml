@@ -1,0 +1,47 @@
+{{- if .Values.executor.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "exodus.fullname" . }}-executor
+  labels:
+    {{- include "exodus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: executor
+spec:
+  schedule: "{{ .Values.executor.schedule }}"
+  concurrencyPolicy: {{ .Values.executor.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.executor.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "exodus.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: executor
+        spec:
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          restartPolicy: OnFailure
+          containers:
+            - name: {{ .Chart.Name }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["--mode=executor"]
+              env:
+                {{- toYaml .Values.env | nindent 16 }}
+              resources:
+                {{- toYaml .Values.executor.resources | nindent 16 }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

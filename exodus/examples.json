@@ -1,0 +1,137 @@
+{
+  "simple_bail_example": {
+    "name": "Timeout Bail",
+    "description": "Bail users who have been in WAITING state",
+    "survey_id": "123e4567-e89b-12d3-a456-426614174000",
+    "enabled": true,
+    "destination_form": "exit-survey",
+    "definition": {
+      "conditions": {
+        "type": "state",
+        "value": "WAITING"
+      },
+      "execution": {
+        "timing": "immediate"
+      },
+      "action": {
+        "destination_form": "exit-survey",
+        "metadata": {
+          "reason": "timeout",
+          "auto_bailed": true
+        }
+      }
+    }
+  },
+  "complex_bail_with_and": {
+    "name": "Form and State Bail",
+    "description": "Bail users in specific form and state combination",
+    "survey_id": "123e4567-e89b-12d3-a456-426614174000",
+    "enabled": true,
+    "destination_form": "feedback-survey",
+    "definition": {
+      "conditions": {
+        "op": "and",
+        "vars": [
+          {
+            "type": "form",
+            "value": "onboarding-survey"
+          },
+          {
+            "type": "state",
+            "value": "ERROR"
+          }
+        ]
+      },
+      "execution": {
+        "timing": "scheduled",
+        "time_of_day": "09:00",
+        "timezone": "Africa/Lagos"
+      },
+      "action": {
+        "destination_form": "feedback-survey",
+        "metadata": {
+          "reason": "form_error",
+          "original_form": "onboarding-survey"
+        }
+      }
+    }
+  },
+  "complex_bail_with_nested_logic": {
+    "name": "Multi-Condition Bail",
+    "description": "Bail users meeting complex criteria",
+    "survey_id": "123e4567-e89b-12d3-a456-426614174000",
+    "enabled": true,
+    "destination_form": "completion-survey",
+    "definition": {
+      "conditions": {
+        "op": "or",
+        "vars": [
+          {
+            "op": "and",
+            "vars": [
+              {
+                "type": "form",
+                "value": "main-survey"
+              },
+              {
+                "type": "state",
+                "value": "WAITING"
+              }
+            ]
+          },
+          {
+            "type": "error_code",
+            "value": "TIMEOUT"
+          },
+          {
+            "type": "current_question",
+            "value": "consent"
+          }
+        ]
+      },
+      "execution": {
+        "timing": "absolute",
+        "datetime": "2025-12-15T10:00:00Z"
+      },
+      "action": {
+        "destination_form": "completion-survey",
+        "metadata": {
+          "campaign": "december-2025",
+          "auto_bail": true
+        }
+      }
+    }
+  },
+  "elapsed_time_bail": {
+    "name": "Time-Based Bail",
+    "description": "Bail users after elapsed time from response",
+    "survey_id": "123e4567-e89b-12d3-a456-426614174000",
+    "enabled": true,
+    "destination_form": "followup-survey",
+    "definition": {
+      "conditions": {
+        "type": "elapsed_time",
+        "since": {
+          "event": "response",
+          "details": {
+            "question_ref": "initial_consent",
+            "form": "consent-form"
+          }
+        },
+        "duration": "7 days"
+      },
+      "execution": {
+        "timing": "scheduled",
+        "time_of_day": "15:30",
+        "timezone": "UTC"
+      },
+      "action": {
+        "destination_form": "followup-survey",
+        "metadata": {
+          "trigger": "elapsed_time",
+          "days_elapsed": 7
+        }
+      }
+    }
+  }
+}

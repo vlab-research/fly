@@ -1,0 +1,6 @@
+apiVersion: v2
+name: exodus
+description: Database-driven bail management service for moving users between forms
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
