@@ -1,7 +1,9 @@
 [context.production.environment]
 APP_ID="699455733740842"
 SERVER_URL="https://fly-botserver.vlab.digital/synthetic"
+HEARTBEAT_INTERVAL_MS="30000"
 
 [context.staging.environment]
 APP_ID="790352681363186"
 SERVER_URL="https://gbvbot-staging.nandan.cloud/synthetic"
+HEARTBEAT_INTERVAL_MS="30000"

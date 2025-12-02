@@ -2,6 +2,7 @@
 /* global Sentry, MessengerExtensions, Vimeo */
 
 const SERVER_URL = '{{{SERVER_URL}}}';
+const HEARTBEAT_INTERVAL_MS = parseInt('{{{HEARTBEAT_INTERVAL_MS}}}', 10) || 30000;
 
 // make params dissapear after getting them
 const params = getQueryParams()
@@ -9,6 +10,11 @@ const videoId = params['id'];
 const pageId = params['pageId'];
 const userId = params['userId'];
 const useExtensions = params['useExtensions'] === 'true';
+
+// Heartbeat state
+let heartbeatInterval = null;
+let currentPlayer = null;
+let currentPsid = null;
 
 Sentry.init({ dsn: 'https://17c9ad73343d4a15b8e155a722224374@sentry.io/2581797' });
 
@@ -44,6 +50,42 @@ function handleError(err, title, message) {
   throw err;
 }
 
+async function sendHeartbeat() {
+  if (!currentPlayer || !currentPsid) return;
+
+  try {
+    const currentTime = await currentPlayer.getCurrentTime();
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', SERVER_URL);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify({
+      user: currentPsid,
+      page: pageId,
+      data: { currentTime: currentTime },
+      event: {
+        type: 'external',
+        value: { type: 'moviehouse:heartbeat', id: videoId }
+      }
+    }));
+  } catch (err) {
+    console.error('Heartbeat error:', err);
+  }
+}
+
+function startHeartbeat() {
+  if (!heartbeatInterval) {
+    sendHeartbeat();
+    heartbeatInterval = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+  }
+}
+
+function stopHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}
+
 function setPlayer(psid) {
   const options = {
     id: videoId,
@@ -51,15 +93,26 @@ function setPlayer(psid) {
   };
 
   const player = new Vimeo.Player('vimeoVideo', options);
+  currentPlayer = player;
+  currentPsid = psid;
 
   player.ready().then(() => {
-    player.on('ended', handleEvent(psid, 'ended'));
+    player.on('ended', (data) => {
+      handleEvent(psid, 'ended')(data);
+      stopHeartbeat();
+    });
 
     player.on('error', handleEvent(psid, 'error'));
 
-    player.on('pause', handleEvent(psid, 'pause'));
+    player.on('pause', (data) => {
+      handleEvent(psid, 'pause')(data);
+      stopHeartbeat();
+    });
 
-    player.on('play', handleEvent(psid, 'play'));
+    player.on('play', (data) => {
+      handleEvent(psid, 'play')(data);
+      startHeartbeat();
+    });
 
     player.on('playbackratechange', handleEvent(psid, 'playbackratechange'));
 
