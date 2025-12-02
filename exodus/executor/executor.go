@@ -127,18 +127,8 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 		return err
 	}
 
-	// Convert to timing-compatible bail structure
-	timingBail := &Bail{
-		Execution: Execution{
-			Timing:    bailDef.Execution.Timing,
-			TimeOfDay: bailDef.Execution.TimeOfDay,
-			Timezone:  bailDef.Execution.Timezone,
-			Datetime:  bailDef.Execution.Datetime,
-		},
-	}
-
 	// Check if should execute based on timing
-	if !shouldExecute(timingBail, now, lastExecution) {
+	if !shouldExecute(&bailDef.Execution, now, lastExecution) {
 		log.Printf("Bail %s not ready to execute (timing conditions not met)", dbBail.Name)
 		return nil
 	}

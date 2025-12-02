@@ -5,21 +5,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vlab-research/exodus/types"
 )
-
-// Bail represents the minimal bail structure needed for timing logic
-// This avoids circular dependencies with the main package
-type Bail struct {
-	Execution Execution
-}
-
-// Execution represents the timing configuration for a bail
-type Execution struct {
-	Timing    string
-	TimeOfDay *string
-	Timezone  *string
-	Datetime  *string
-}
 
 // shouldExecute determines if a bail should execute based on its timing configuration
 // and the current time. It returns true if execution should proceed.
@@ -29,16 +17,16 @@ type Execution struct {
 // - scheduled: Returns true if current time matches time_of_day in the specified timezone,
 //   and no execution has occurred in the last 24 hours
 // - absolute: Returns true if current time >= datetime and no prior execution has occurred
-func shouldExecute(bail *Bail, now time.Time, lastExecution *time.Time) bool {
-	switch bail.Execution.Timing {
+func shouldExecute(execution *types.Execution, now time.Time, lastExecution *time.Time) bool {
+	switch execution.Timing {
 	case "immediate":
 		return true
 
 	case "scheduled":
-		return shouldExecuteScheduled(bail.Execution, now, lastExecution)
+		return shouldExecuteScheduled(execution, now, lastExecution)
 
 	case "absolute":
-		return shouldExecuteAbsolute(bail.Execution, now, lastExecution)
+		return shouldExecuteAbsolute(execution, now, lastExecution)
 
 	default:
 		// This should never happen if validation is correct, but fail fast if it does
@@ -47,7 +35,7 @@ func shouldExecute(bail *Bail, now time.Time, lastExecution *time.Time) bool {
 }
 
 // shouldExecuteScheduled checks if a scheduled bail should execute now
-func shouldExecuteScheduled(exec Execution, now time.Time, lastExecution *time.Time) bool {
+func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution *time.Time) bool {
 	// Parse required fields (validation should have caught missing fields)
 	if exec.TimeOfDay == nil || exec.Timezone == nil {
 		return false
@@ -86,7 +74,7 @@ func shouldExecuteScheduled(exec Execution, now time.Time, lastExecution *time.T
 }
 
 // shouldExecuteAbsolute checks if an absolute-timed bail should execute now
-func shouldExecuteAbsolute(exec Execution, now time.Time, lastExecution *time.Time) bool {
+func shouldExecuteAbsolute(exec *types.Execution, now time.Time, lastExecution *time.Time) bool {
 	// Parse required field (validation should have caught missing field)
 	if exec.Datetime == nil {
 		return false

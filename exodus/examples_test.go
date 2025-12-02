@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/vlab-research/exodus/types"
 )
 
 func TestExamplesJSONParsing(t *testing.T) {
@@ -36,12 +38,12 @@ func TestExamplesJSONParsing(t *testing.T) {
 
 			// Parse the definition field
 			var exampleStruct struct {
-				Name            string         `json:"name"`
-				Description     string         `json:"description"`
-				SurveyID        string         `json:"survey_id"`
-				Enabled         bool           `json:"enabled"`
-				DestinationForm string         `json:"destination_form"`
-				Definition      BailDefinition `json:"definition"`
+				Name            string               `json:"name"`
+				Description     string               `json:"description"`
+				SurveyID        string               `json:"survey_id"`
+				Enabled         bool                 `json:"enabled"`
+				DestinationForm string               `json:"destination_form"`
+				Definition      types.BailDefinition `json:"definition"`
 			}
 
 			err := json.Unmarshal(exampleData, &exampleStruct)
@@ -73,7 +75,7 @@ func TestExamplesJSONParsing(t *testing.T) {
 
 			t.Logf("Marshaled definition: %s", string(defData))
 
-			var def2 BailDefinition
+			var def2 types.BailDefinition
 			err = json.Unmarshal(defData, &def2)
 			if err != nil {
 				t.Errorf("Failed to unmarshal round-trip: %v", err)

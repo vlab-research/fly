@@ -3,6 +3,8 @@ package executor
 import (
 	"testing"
 	"time"
+
+	"github.com/vlab-research/exodus/types"
 )
 
 func TestShouldExecute_Immediate(t *testing.T) {
@@ -35,13 +37,11 @@ func TestShouldExecute_Immediate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bail := &Bail{
-				Execution: Execution{
-					Timing: "immediate",
-				},
+			execution := &types.Execution{
+				Timing: "immediate",
 			}
 
-			got := shouldExecute(bail, time.Now(), tt.lastExecution)
+			got := shouldExecute(execution, time.Now(), tt.lastExecution)
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}
@@ -152,27 +152,25 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			want:      false,
 		},
 		{
-			name:      "missing time_of_day",
-			timezone:  "UTC",
-			now:       testNow,
-			want:      false,
+			name:     "missing time_of_day",
+			timezone: "UTC",
+			now:      testNow,
+			want:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bail := &Bail{
-				Execution: Execution{
-					Timing:   "scheduled",
-					Timezone: &tt.timezone,
-				},
+			execution := &types.Execution{
+				Timing:   "scheduled",
+				Timezone: &tt.timezone,
 			}
 
 			if tt.timeOfDay != "" {
-				bail.Execution.TimeOfDay = &tt.timeOfDay
+				execution.TimeOfDay = &tt.timeOfDay
 			}
 
-			got := shouldExecute(bail, tt.now, tt.lastExecution)
+			got := shouldExecute(execution, tt.now, tt.lastExecution)
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}
@@ -253,14 +251,12 @@ func TestShouldExecute_Absolute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bail := &Bail{
-				Execution: Execution{
-					Timing:   "absolute",
-					Datetime: &tt.datetime,
-				},
+			execution := &types.Execution{
+				Timing:   "absolute",
+				Datetime: &tt.datetime,
 			}
 
-			got := shouldExecute(bail, tt.now, tt.lastExecution)
+			got := shouldExecute(execution, tt.now, tt.lastExecution)
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}
@@ -532,15 +528,13 @@ func TestScheduled_DSTTransition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bail := &Bail{
-				Execution: Execution{
-					Timing:    "scheduled",
-					TimeOfDay: &tt.timeOfDay,
-					Timezone:  &tt.timezone,
-				},
+			execution := &types.Execution{
+				Timing:    "scheduled",
+				TimeOfDay: &tt.timeOfDay,
+				Timezone:  &tt.timezone,
 			}
 
-			got := shouldExecute(bail, tt.now, tt.lastExecution)
+			got := shouldExecute(execution, tt.now, tt.lastExecution)
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}
