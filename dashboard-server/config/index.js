@@ -24,6 +24,7 @@ const envVarsSchema = joi
     FACEBOOK_GRAPH_URL: joi.string(),
     KAFKA_BROKERS: joi.string(),
     KAFKA_EXPORTS_TOPIC: joi.string(),
+    EXODUS_API_URL: joi.string().optional().empty(''),
   })
   .unknown()
   .required();
@@ -80,7 +81,10 @@ const config = {
   KAFKA: {
     BROKERS: isTest() ? "" : envVars.KAFKA_BROKERS.split(","),
     EXPORTS_TOPIC: envVars.KAFKA_EXPORTS_TOPIC || 'vlabs-exports'
-  }
+  },
+  EXODUS: {
+    url: envVars.EXODUS_API_URL || 'http://exodus-api:8080',
+  },
 };
 
 module.exports = config;

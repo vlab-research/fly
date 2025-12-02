@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const bailsController = require('./bails/bails.controller');
 
 router
   .use('/responses', require('./responses'))
@@ -8,6 +9,8 @@ router
   .use('/typeform', require('./typeform'))
   .use('/credentials', require('./credentials'))
   .use('/facebook', require('./facebook'))
-  .use('/auth', require('./auth/auth.routes'));
+  .use('/auth', require('./auth/auth.routes'))
+  .use('/surveys/:surveyId/bails', require('./bails'))
+  .get('/surveys/:surveyId/bail-events', bailsController.validateSurveyAccess, bailsController.getSurveyEvents);
 
 module.exports = router;
