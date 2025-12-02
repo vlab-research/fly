@@ -1,0 +1,14 @@
+.bail-systems-container {
+  padding: 30px;
+}
+
+.bail-systems-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.bail-systems-header h2 {
+  margin: 0;
+}
