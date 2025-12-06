@@ -613,6 +613,29 @@ describe('getCondition', () => {
 
     f.getCondition({ form }, qa, '', cond).should.be.false
   })
+
+  // Unicode numeral tests (integration tests - parseNumber handles the details)
+  it('works with unicode numerals in comparison', () => {
+    const cond = {
+      op: 'greater_than',
+      vars: [{ type: 'field', value: 'age' },
+      { type: 'constant', value: 17 }]
+    }
+
+    const qa = [['age', '٢٣']] // Arabic-Indic 23
+    f.getCondition({ form }, qa, '', cond).should.be.true
+  })
+
+  it('works with decimal unicode numerals', () => {
+    const cond = {
+      op: 'greater_than',
+      vars: [{ type: 'field', value: 'price' },
+      { type: 'constant', value: 3.5 }]
+    }
+
+    const qa = [['price', '७.८']] // Devanagari 7.8
+    f.getCondition({ form }, qa, '', cond).should.be.true
+  })
 })
 
 
