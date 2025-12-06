@@ -24,7 +24,8 @@ const payloadReferral = {
 }
 
 
-// multiple choice response
+// Legacy postback response (old format for yes_no/legal with boolean values)
+// Keep this for backward compatibility testing - replaying old user logs
 const multipleChoice = {
   recipient: { id: PAGE_ID },
   timestamp: 1542116257642,
@@ -33,6 +34,18 @@ const multipleChoice = {
   {
     payload: { value: true, ref: "foo" },
     title: 'I Accept'
+  }
+}
+
+// New quick reply response format for yes_no/legal (uses string labels)
+const legalQuickReply = {
+  recipient: { id: PAGE_ID },
+  timestamp: 1542116257642,
+  sender: { id: USER_ID },
+  message: {
+    quick_reply: {
+      payload: { value: 'I Accept', ref: "foo" }
+    }
   }
 }
 
@@ -229,4 +242,4 @@ const reaction = {
 
 
 
-module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, reaction, USER_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic }
+module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic }
