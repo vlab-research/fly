@@ -2,11 +2,24 @@ const mustache = require('mustache')
 const util = require('util')
 const _ = require('lodash')
 const { hash } = require('./utils')
-const { translator, addCustomType: baseAddCustomType } = require('@vlab-research/translate-typeform')
+const { translator, addCustomType: baseAddCustomType, normalizeUnicodeNumerals, parseNumber } = require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
 class FieldError extends Error { }
 
+// Wrapper for type-casting values in comparisons.
+// Uses parseNumber for proper handling of unicode numerals and decimals.
+// Falls back to yaml.safeLoad for non-numeric values (booleans, strings).
+function safeLoadWithNormalization(value) {
+  // Try parseNumber first - handles unicode digits and preserves decimals
+  const num = parseNumber(value)
+  if (num !== null) {
+    return num
+  }
+  // Fall back to yaml.safeLoad for booleans, strings, etc.
+  const normalized = normalizeUnicodeNumerals(value)
+  return yaml.safeLoad(normalized)
+}
 
 function getSeed(md, key) {
   // format: seed_12 or seed_12_1 or seed_12_2
@@ -224,10 +237,11 @@ function getCondition(ctx, qa, ref, { op, vars }) {
     throw new TypeError(`Cannot find operation: ${op}\nquestion: ${ref}`)
   }
 
-  // wrap in yaml safe-load to perform type-casting
-  // from form data (strings) to js native types
-  // i.e. boolean, null, etc.
-  const fn = (a, b) => f(yaml.safeLoad(a), yaml.safeLoad(b))
+  // wrap in safeLoadWithNormalization to perform type-casting
+  // from form data (strings) to js native types while normalizing
+  // unicode numerals. This enables correct numeric comparisons for
+  // users entering numbers in any script (Arabic, Devanagari, etc.)
+  const fn = (a, b) => f(safeLoadWithNormalization(a), safeLoadWithNormalization(b))
 
   // getChoiceValue needs to ref from the "field" type,
   // which it is always paired with....
