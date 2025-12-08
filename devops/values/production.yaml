@@ -20,9 +20,9 @@ exporterTopic: &exportertopic "vlab-exports"
 
 versionDashboard: &vdashboard v0.0.37
 versionBotserver: &vbotserver v0.0.11
-versionReplybot: &vreplybot v0.0.169
+versionReplybot: &vreplybot v0.0.176
 versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.37
+versionDean: &vdean v0.0.38
 versionScribble: &vscribble v0.0.27
 versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
@@ -608,6 +608,10 @@ cockroachdb:
 
 redis:
   enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 8.2.1-debian-12-r0
   architecture: replication
   auth:
     enabled: true
@@ -645,6 +649,10 @@ redis:
       prometheus.io/port: "6379"
   metrics:
     enabled: true
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/redis-exporter
+      tag: 1.76.0-debian-12-r0
     serviceMonitor:
       enabled: true
       interval: 30s
