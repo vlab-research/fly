@@ -110,3 +110,4 @@ describe('hash', () => {
     frac.should.equal(11)
   })
 })
+

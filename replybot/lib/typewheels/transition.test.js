@@ -114,7 +114,7 @@ describe('Machine integrated', () => {
     should.not.exist(report.error)
     report.timestamp.should.equal(referral.timestamp)
     report.actions[0].should.eql({
-      message: { 'metadata': '{"ref":"foo"}', text: 'foo' },
+      message: { 'metadata': '{"ref":"foo","type":"short_text"}', text: 'foo' },
       recipient: { id: 'bar' }
     })
     report.publish.should.be.true

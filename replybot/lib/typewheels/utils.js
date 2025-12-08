@@ -71,8 +71,6 @@ function getForm(event) {
   return form
 }
 
-
-
 module.exports = {
   recursiveJSONParser,
   parseLogJSON,

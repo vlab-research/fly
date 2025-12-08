@@ -777,7 +777,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, multipleChoice]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
 
   it('Invalidates answers to legal when not in set', () => {
@@ -898,7 +898,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
 
   it('Responds to opening text without referral', () => {
@@ -1107,7 +1107,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz","type":"number"}' })
   })
 
   it('it follows logic jumps from postbacks', () => {
@@ -1139,7 +1139,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, multipleChoice]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz","type":"number"}' })
   })
 
 
@@ -1174,7 +1174,7 @@ describe('Machine', () => {
     const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: { type: 'external', value: { type: 'payment:reloadly' } } }), event]
 
     const actions = getMessage(log, form, user)
-    actions.messages[1].message.should.deep.equal({ text: 'qux', metadata: '{"ref":"qux"}' })
+    actions.messages[1].message.should.deep.equal({ text: 'qux', metadata: '{"ref":"qux","type":"number"}' })
   })
 
   it('repeats when it misses validation', () => {
@@ -1193,7 +1193,7 @@ describe('Machine', () => {
     actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
     actions.messages[0].message.text.should.contain('Sorry')
 
-    actions.messages[1].message.metadata.should.equal('{"isRepeat":true,"ref":"foo"}')
+    actions.messages[1].message.metadata.should.equal('{"isRepeat":true,"ref":"foo","type":"multiple_choice"}')
   })
 
 
@@ -1395,7 +1395,7 @@ describe('Machine', () => {
     const log = [referral, echo, delivery, text]
 
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
 
 
@@ -2201,7 +2201,7 @@ describe('Thread passback functionality', () => {
     const actions = getMessage(log, form, user)
 
     // Should proceed to next question after handover
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
 
   it('should handle handover event with metadata', () => {
@@ -2251,7 +2251,7 @@ describe('Thread passback functionality', () => {
     const actions = getMessage(log, form, user)
 
     // Should proceed to next question after handover
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
 
   it('should not fulfill wait condition for wrong app ID', () => {
@@ -2351,7 +2351,7 @@ describe('Thread passback functionality', () => {
     const actions = getMessage(log, form, user)
 
     // Should proceed to next question when new_owner_app_id is missing (accept handover)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar"}' })
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
 })
 
