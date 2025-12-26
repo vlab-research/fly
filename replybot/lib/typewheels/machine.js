@@ -259,6 +259,9 @@ function exec(state, nxt) {
         return { action: "RESET", stateUpdate: { pointer: nxt.timestamp } }
       }
 
+      // Blocked users cannot start new forms
+      if (state.state === 'USER_BLOCKED') return _noop()
+
       // if current form in entire history of forms, repeat previous question
       if (_hasForm(state, form)) {
         if (state.state === 'QOUT') return _repeat(state)
@@ -458,7 +461,7 @@ function exec(state, nxt) {
     }
 
     case 'POSTBACK': {
-      if (state.state === 'RESPONDING') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
       return {
         action: 'RESPOND',
         response: nxt.postback.payload,
@@ -468,7 +471,7 @@ function exec(state, nxt) {
     }
 
     case 'QUICK_REPLY': {
-      if (state.state === 'RESPONDING') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
 
       const qrResponse = nxt.message.quick_reply.payload.value === undefined ?
         nxt.message.quick_reply.payload :

@@ -208,6 +208,56 @@ describe('getCurrentForm', () => {
     state1.pointer.should.equal(20)
   })
 
+  it('Ignores POSTBACK events after block_user', () => {
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+
+    const state = getState(log)
+    state.state.should.equal('USER_BLOCKED')
+
+    // A postback (button click) after being blocked should be ignored
+    const postbackAfterBlock = {
+      ...multipleChoice,
+      timestamp: 30
+    }
+    const state1 = getState([...log, postbackAfterBlock])
+    state1.state.should.equal('USER_BLOCKED')
+    state1.qa.should.eql([]) // qa should remain empty, not record the postback
+  })
+
+  it('Ignores QUICK_REPLY events after block_user', () => {
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+
+    const state = getState(log)
+    state.state.should.equal('USER_BLOCKED')
+
+    // A quick reply after being blocked should be ignored
+    const qrAfterBlock = {
+      ...qr,
+      timestamp: 30
+    }
+    const state1 = getState([...log, qrAfterBlock])
+    state1.state.should.equal('USER_BLOCKED')
+    state1.qa.should.eql([]) // qa should remain empty
+  })
+
+  it('Ignores REFERRAL for new form after block_user', () => {
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+
+    const state = getState(log)
+    state.state.should.equal('USER_BLOCKED')
+    state.forms.should.eql(['FOO'])
+
+    // A referral for a NEW form (BAR) after being blocked should be ignored
+    const newFormReferral = {
+      ...referral,
+      referral: { ...referral.referral, ref: 'form.BAR' },
+      timestamp: 30
+    }
+    const state1 = getState([...log, newFormReferral])
+    state1.state.should.equal('USER_BLOCKED')
+    state1.forms.should.eql(['FOO']) // Should NOT add BAR to forms
+  })
+
   it('Changes form with new referral', () => {
     const ref2 = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
 
