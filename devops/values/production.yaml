@@ -603,7 +603,7 @@ cockroachdb:
     enabled: no
   storage:
     persistentVolume:
-      size: 140Gi
+      size: 240Gi
       storageClass: "pd-ssd"
 
 redis:
