@@ -1,7 +1,7 @@
 'use strict';
 
 const { BailsUtil } = require('../../utils');
-const { Survey } = require('../../queries');
+const { User } = require('../../queries');
 
 function handle(err, res) {
   console.error('Bails API Error:', err);
@@ -9,36 +9,34 @@ function handle(err, res) {
   res.status(status).json({ error: { message: err.message } });
 }
 
-// Middleware to validate survey ownership
-async function validateSurveyAccess(req, res, next) {
+// Middleware to validate that the authenticated user matches the userId param
+async function validateUserAccess(req, res, next) {
   try {
     const { email } = req.user;
-    const { surveyId } = req.params;
+    const { userId } = req.params;
 
     if (!email) {
       return res.status(401).json({ error: { message: 'Authentication required' } });
     }
 
-    // Verify user owns this survey (surveyId is the shortcode)
-    const surveys = await Survey.retrieve({ email });
-    const survey = surveys.find(s => s.shortcode === surveyId || s.id === surveyId);
+    const user = await User.user({ email });
 
-    if (!survey) {
-      return res.status(403).json({ error: { message: 'Access denied to this survey' } });
+    if (!user || user.id !== userId) {
+      return res.status(403).json({ error: { message: 'Access denied' } });
     }
 
-    req.survey = survey;
+    req.vlabUser = user;
     next();
   } catch (err) {
     handle(err, res);
   }
 }
 
-// List all bails for a survey
+// List all bails for a user
 exports.listBails = async (req, res) => {
   try {
-    const { surveyId } = req.params;
-    const result = await BailsUtil.listBails(surveyId);
+    const { userId } = req.params;
+    const result = await BailsUtil.listBails(userId);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);
@@ -48,8 +46,8 @@ exports.listBails = async (req, res) => {
 // Get a single bail
 exports.getBail = async (req, res) => {
   try {
-    const { surveyId, bailId } = req.params;
-    const result = await BailsUtil.getBail(surveyId, bailId);
+    const { userId, bailId } = req.params;
+    const result = await BailsUtil.getBail(userId, bailId);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);
@@ -59,14 +57,19 @@ exports.getBail = async (req, res) => {
 // Create a new bail
 exports.createBail = async (req, res) => {
   try {
-    const { surveyId } = req.params;
-    const { name, description, definition } = req.body;
+    const { userId } = req.params;
+    const { name, description, definition, destination_form } = req.body;
 
     if (!name || !definition) {
       return res.status(400).json({ error: { message: 'name and definition are required' } });
     }
 
-    const result = await BailsUtil.createBail(surveyId, { name, description, definition });
+    const result = await BailsUtil.createBail(userId, {
+      name,
+      description,
+      definition,
+      destination_form,
+    });
     res.status(201).json(result);
   } catch (err) {
     handle(err, res);
@@ -76,14 +79,15 @@ exports.createBail = async (req, res) => {
 // Update an existing bail
 exports.updateBail = async (req, res) => {
   try {
-    const { surveyId, bailId } = req.params;
-    const { name, description, definition, enabled } = req.body;
+    const { userId, bailId } = req.params;
+    const { name, description, definition, enabled, destination_form } = req.body;
 
-    const result = await BailsUtil.updateBail(surveyId, bailId, {
+    const result = await BailsUtil.updateBail(userId, bailId, {
       name,
       description,
       definition,
       enabled,
+      destination_form,
     });
     res.status(200).json(result);
   } catch (err) {
@@ -94,8 +98,8 @@ exports.updateBail = async (req, res) => {
 // Delete a bail
 exports.deleteBail = async (req, res) => {
   try {
-    const { surveyId, bailId } = req.params;
-    await BailsUtil.deleteBail(surveyId, bailId);
+    const { userId, bailId } = req.params;
+    await BailsUtil.deleteBail(userId, bailId);
     res.status(204).send();
   } catch (err) {
     handle(err, res);
@@ -105,14 +109,14 @@ exports.deleteBail = async (req, res) => {
 // Preview bail (dry-run query)
 exports.previewBail = async (req, res) => {
   try {
-    const { surveyId } = req.params;
+    const { userId } = req.params;
     const { definition } = req.body;
 
     if (!definition) {
       return res.status(400).json({ error: { message: 'definition is required' } });
     }
 
-    const result = await BailsUtil.previewBail(surveyId, definition);
+    const result = await BailsUtil.previewBail(userId, definition);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);
@@ -122,24 +126,24 @@ exports.previewBail = async (req, res) => {
 // Get events for a specific bail
 exports.getBailEvents = async (req, res) => {
   try {
-    const { surveyId, bailId } = req.params;
-    const result = await BailsUtil.getBailEvents(surveyId, bailId);
+    const { userId, bailId } = req.params;
+    const result = await BailsUtil.getBailEvents(userId, bailId);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);
   }
 };
 
-// Get all bail events for a survey
-exports.getSurveyEvents = async (req, res) => {
+// Get all bail events for a user
+exports.getUserEvents = async (req, res) => {
   try {
-    const { surveyId } = req.params;
+    const { userId } = req.params;
     const { limit } = req.query;
-    const result = await BailsUtil.getSurveyEvents(surveyId, limit ? parseInt(limit) : 100);
+    const result = await BailsUtil.getUserEvents(userId, limit ? parseInt(limit) : 100);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);
   }
 };
 
-exports.validateSurveyAccess = validateSurveyAccess;
+exports.validateUserAccess = validateUserAccess;

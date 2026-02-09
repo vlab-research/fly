@@ -264,7 +264,7 @@ func TestExecutionValidation(t *testing.T) {
 }
 
 func TestBailValidation(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 
 	tests := []struct {
 		name    string
@@ -274,7 +274,7 @@ func TestBailValidation(t *testing.T) {
 		{
 			name: "valid bail",
 			bail: Bail{
-				SurveyID:        surveyID,
+				UserID:          userID,
 				Name:            "timeout-bail",
 				DestinationForm: "exit-survey",
 				Definition: BailDefinition{
@@ -295,7 +295,7 @@ func TestBailValidation(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing survey_id",
+			name: "missing user_id",
 			bail: Bail{
 				Name:            "timeout-bail",
 				DestinationForm: "exit-survey",
@@ -319,7 +319,7 @@ func TestBailValidation(t *testing.T) {
 		{
 			name: "destination_form mismatch",
 			bail: Bail{
-				SurveyID:        surveyID,
+				UserID:          userID,
 				Name:            "timeout-bail",
 				DestinationForm: "exit-survey",
 				Definition: BailDefinition{
@@ -352,7 +352,7 @@ func TestBailValidation(t *testing.T) {
 }
 
 func TestBailEventValidation(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 	bailID := uuid.New()
 
 	tests := []struct {
@@ -364,7 +364,7 @@ func TestBailEventValidation(t *testing.T) {
 			name: "valid execution event",
 			event: BailEvent{
 				BailID:       &bailID,
-				SurveyID:     surveyID,
+				UserID:     userID,
 				BailName:     "timeout-bail",
 				EventType:    "execution",
 				Timestamp:    time.Now(),
@@ -391,7 +391,7 @@ func TestBailEventValidation(t *testing.T) {
 			name: "invalid event type",
 			event: BailEvent{
 				BailID:       &bailID,
-				SurveyID:     surveyID,
+				UserID:     userID,
 				BailName:     "timeout-bail",
 				EventType:    "invalid",
 				Timestamp:    time.Now(),
@@ -418,7 +418,7 @@ func TestBailEventValidation(t *testing.T) {
 			name: "users_bailed exceeds users_matched",
 			event: BailEvent{
 				BailID:       &bailID,
-				SurveyID:     surveyID,
+				UserID:     userID,
 				BailName:     "timeout-bail",
 				EventType:    "execution",
 				Timestamp:    time.Now(),

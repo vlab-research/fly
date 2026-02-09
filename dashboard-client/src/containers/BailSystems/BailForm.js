@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { useParams, useHistory } from 'react-router-dom';
 import {
   Form, Input, Select, Button, Switch, Card, Space,
@@ -14,27 +13,43 @@ import { Loading } from '../../components/UI';
 const { Option } = Select;
 const { TextArea } = Input;
 
-const BailForm = ({ surveyId, backPath }) => {
+const BailForm = () => {
   const { bailId } = useParams();
   const history = useHistory();
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(!!bailId);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [previewResult, setPreviewResult] = useState(null);
   const [timing, setTiming] = useState('immediate');
+  const [userId, setUserId] = useState(null);
 
   const isEdit = !!bailId;
 
   useEffect(() => {
-    if (isEdit) {
-      loadBail();
-    }
-  }, [surveyId, bailId]);
+    loadUser();
+  }, []);
 
-  const loadBail = async () => {
+  const loadUser = async () => {
     try {
-      const res = await api.fetcher({ path: `/surveys/${surveyId}/bails/${bailId}` });
+      const res = await api.fetcher({ path: '/users', method: 'POST', body: {} });
+      const user = await res.json();
+      setUserId(user.id);
+      if (isEdit) {
+        await loadBail(user.id);
+      } else {
+        setLoading(false);
+      }
+    } catch (err) {
+      message.error('Failed to load user');
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const loadBail = async (uid) => {
+    try {
+      const res = await api.fetcher({ path: `/users/${uid}/bails/${bailId}` });
       const data = await res.json();
       const bail = data.bail;
       const def = bail.definition;
@@ -113,20 +128,20 @@ const BailForm = ({ surveyId, backPath }) => {
 
       if (isEdit) {
         await api.fetcher({
-          path: `/surveys/${surveyId}/bails/${bailId}`,
+          path: `/users/${userId}/bails/${bailId}`,
           method: 'PUT',
           body,
         });
         message.success('Bail updated successfully');
       } else {
         await api.fetcher({
-          path: `/surveys/${surveyId}/bails`,
+          path: `/users/${userId}/bails`,
           method: 'POST',
           body,
         });
         message.success('Bail created successfully');
       }
-      history.push(backPath);
+      history.push('/bails');
     } catch (err) {
       message.error(`Failed to ${isEdit ? 'update' : 'create'} bail: ${err.message}`);
     } finally {
@@ -142,7 +157,7 @@ const BailForm = ({ surveyId, backPath }) => {
       const definition = buildDefinition(values);
 
       const res = await api.fetcher({
-        path: `/surveys/${surveyId}/bails/preview`,
+        path: `/users/${userId}/bails/preview`,
         method: 'POST',
         body: { definition },
       });
@@ -161,7 +176,7 @@ const BailForm = ({ surveyId, backPath }) => {
     <div style={{ padding: '30px', maxWidth: 900 }}>
       <Button
         icon={<ArrowLeftOutlined />}
-        onClick={() => history.push(backPath)}
+        onClick={() => history.push('/bails')}
         style={{ marginBottom: 16 }}
       >
         Back to Bail Systems
@@ -338,7 +353,7 @@ const BailForm = ({ surveyId, backPath }) => {
             >
               {isEdit ? 'Update' : 'Create'} Bail System
             </Button>
-            <Button onClick={() => history.push(backPath)}>
+            <Button onClick={() => history.push('/bails')}>
               Cancel
             </Button>
           </Space>
@@ -346,11 +361,6 @@ const BailForm = ({ surveyId, backPath }) => {
       </Spin>
     </div>
   );
-};
-
-BailForm.propTypes = {
-  surveyId: PropTypes.string.isRequired,
-  backPath: PropTypes.string.isRequired,
 };
 
 export default BailForm;

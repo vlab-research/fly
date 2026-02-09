@@ -1,10 +1,10 @@
 const router = require('express').Router({ mergeParams: true });
 const controller = require('./bails.controller');
 
-// All routes are prefixed with /surveys/:surveyId/bails
-// Survey access is validated by middleware
+// All routes are prefixed with /users/:userId/bails
+// User access is validated by middleware on all routes
 
-router.use(controller.validateSurveyAccess);
+router.use(controller.validateUserAccess);
 
 router
   .get('/', controller.listBails)

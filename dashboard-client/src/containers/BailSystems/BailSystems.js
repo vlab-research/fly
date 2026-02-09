@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { Link, useHistory } from 'react-router-dom';
 import { Table, Layout, Switch, Tag, Space, Button, Popconfirm, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
@@ -9,18 +8,32 @@ import './BailSystems.css';
 
 const { Content } = Layout;
 
-const BailSystems = ({ surveyId }) => {
+const BailSystems = () => {
   const history = useHistory();
   const [bails, setBails] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState(null);
 
   useEffect(() => {
-    loadBails();
-  }, [surveyId]);
+    loadUser();
+  }, []);
 
-  const loadBails = async () => {
+  const loadUser = async () => {
     try {
-      const res = await api.fetcher({ path: `/surveys/${surveyId}/bails` });
+      const res = await api.fetcher({ path: '/users', method: 'POST', body: {} });
+      const user = await res.json();
+      setUserId(user.id);
+      await loadBails(user.id);
+    } catch (err) {
+      message.error('Failed to load user');
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const loadBails = async (uid) => {
+    try {
+      const res = await api.fetcher({ path: `/users/${uid}/bails` });
       const data = await res.json();
       setBails(data.bails || []);
     } catch (err) {
@@ -34,7 +47,7 @@ const BailSystems = ({ surveyId }) => {
   const handleToggleEnabled = async (bail, enabled) => {
     try {
       await api.fetcher({
-        path: `/surveys/${surveyId}/bails/${bail.bail.id}`,
+        path: `/users/${userId}/bails/${bail.bail.id}`,
         method: 'PUT',
         body: { enabled },
       });
@@ -52,7 +65,7 @@ const BailSystems = ({ surveyId }) => {
   const handleDelete = async (bailId) => {
     try {
       await api.fetcher({
-        path: `/surveys/${surveyId}/bails/${bailId}`,
+        path: `/users/${userId}/bails/${bailId}`,
         method: 'DELETE',
         raw: true,
       });
@@ -69,7 +82,7 @@ const BailSystems = ({ surveyId }) => {
       dataIndex: ['bail', 'name'],
       key: 'name',
       render: (text, record) => (
-        <Link to={`bails/${record.bail.id}/edit`}>
+        <Link to={`/bails/${record.bail.id}/edit`}>
           {text}
         </Link>
       ),
@@ -132,12 +145,12 @@ const BailSystems = ({ surveyId }) => {
           <Button
             icon={<EditOutlined />}
             size="small"
-            onClick={() => history.push(`bails/${record.bail.id}/edit`)}
+            onClick={() => history.push(`/bails/${record.bail.id}/edit`)}
           />
           <Button
             icon={<HistoryOutlined />}
             size="small"
-            onClick={() => history.push(`bails/${record.bail.id}/events`)}
+            onClick={() => history.push(`/bails/${record.bail.id}/events`)}
           />
           <Popconfirm
             title="Delete this bail system?"
@@ -159,7 +172,7 @@ const BailSystems = ({ surveyId }) => {
       <Content style={{ padding: '30px' }}>
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
           <h2>Bail Systems</h2>
-          <CreateBtn to="bails/create">
+          <CreateBtn to="/bails/create">
             <PlusOutlined /> New Bail System
           </CreateBtn>
         </div>
@@ -172,10 +185,6 @@ const BailSystems = ({ surveyId }) => {
       </Content>
     </Layout>
   );
-};
-
-BailSystems.propTypes = {
-  surveyId: PropTypes.string.isRequired,
 };
 
 export default BailSystems;

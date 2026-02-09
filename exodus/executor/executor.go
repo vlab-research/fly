@@ -224,7 +224,7 @@ func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *
 
 	event := &db.BailEvent{
 		BailID:             &dbBail.ID,
-		SurveyID:           dbBail.SurveyID,
+		UserID:             dbBail.UserID,
 		BailName:           dbBail.Name,
 		EventType:          "execution",
 		UsersMatched:       usersMatched,
@@ -250,7 +250,7 @@ func (e *Executor) recordError(ctx context.Context, dbBail *db.Bail, execErr err
 
 	event := &db.BailEvent{
 		BailID:             &dbBail.ID,
-		SurveyID:           dbBail.SurveyID,
+		UserID:             dbBail.UserID,
 		BailName:           dbBail.Name,
 		EventType:          "error",
 		UsersMatched:       0,

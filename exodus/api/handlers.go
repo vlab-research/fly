@@ -21,26 +21,23 @@ func (s *Server) Health(c echo.Context) error {
 	})
 }
 
-// ListBails retrieves all bails for a survey with their most recent events
-// GET /surveys/:surveyId/bails
+// ListBails retrieves all bails for a user with their most recent events
+// GET /users/:userId/bails
 func (s *Server) ListBails(c echo.Context) error {
-	// Parse survey ID from path
-	surveyIDStr := c.Param("surveyId")
-	surveyID, err := uuid.Parse(surveyIDStr)
+	userIDStr := c.Param("userId")
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Get bails from database
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
-	dbBails, err := s.db.GetBailsBySurvey(ctx, surveyID)
+	dbBails, err := s.db.GetBailsByUser(ctx, userID)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Convert db.Bail to types.Bail and fetch last events
 	bailResponses := make([]*BailResponse, len(dbBails))
 	for i, dbBail := range dbBails {
 		typeBail, err := dbBailToTypesBail(dbBail)
@@ -48,7 +45,6 @@ func (s *Server) ListBails(c echo.Context) error {
 			return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert bail: %v", err))
 		}
 
-		// Get most recent event for this bail
 		events, err := s.db.GetEventsByBailID(ctx, dbBail.ID)
 		if err != nil {
 			return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -72,23 +68,20 @@ func (s *Server) ListBails(c echo.Context) error {
 }
 
 // GetBail retrieves a single bail by ID
-// GET /surveys/:surveyId/bails/:id
+// GET /users/:userId/bails/:id
 func (s *Server) GetBail(c echo.Context) error {
-	// Parse survey ID
-	surveyIDStr := c.Param("surveyId")
-	surveyID, err := uuid.Parse(surveyIDStr)
+	userIDStr := c.Param("userId")
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Parse bail ID
 	bailIDStr := c.Param("id")
 	bailID, err := uuid.Parse(bailIDStr)
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_bail_id", "Bail ID must be a valid UUID")
 	}
 
-	// Get bail from database
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
@@ -100,18 +93,16 @@ func (s *Server) GetBail(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Verify bail belongs to the survey
-	if dbBail.SurveyID != surveyID {
-		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found in this survey")
+	// Verify bail belongs to the user
+	if dbBail.UserID != userID {
+		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found for this user")
 	}
 
-	// Convert to types.Bail
 	typeBail, err := dbBailToTypesBail(dbBail)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert bail: %v", err))
 	}
 
-	// Get most recent event
 	events, err := s.db.GetEventsByBailID(ctx, bailID)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -131,49 +122,42 @@ func (s *Server) GetBail(c echo.Context) error {
 	})
 }
 
-// CreateBail creates a new bail for a survey
-// POST /surveys/:surveyId/bails
+// CreateBail creates a new bail for a user
+// POST /users/:userId/bails
 func (s *Server) CreateBail(c echo.Context) error {
-	// Parse survey ID
-	surveyIDStr := c.Param("surveyId")
-	surveyID, err := uuid.Parse(surveyIDStr)
+	userIDStr := c.Param("userId")
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Parse request body
 	var req CreateBailRequest
 	if err := c.Bind(&req); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_request", "Failed to parse request body")
 	}
 
-	// Validate required fields
 	if req.Name == "" {
 		return respondError(c, http.StatusBadRequest, "missing_field", "Name is required")
 	}
 
-	// Validate bail definition
 	if err := req.Definition.Validate(); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
 	}
 
-	// Marshal definition to JSON
 	definitionJSON, err := json.Marshal(req.Definition)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "marshal_error", "Failed to marshal definition")
 	}
 
-	// Create db.Bail
 	dbBail := &db.Bail{
-		SurveyID:        surveyID,
+		UserID:          userID,
 		Name:            req.Name,
 		Description:     req.Description,
-		Enabled:         true, // Default to enabled
+		Enabled:         true,
 		Definition:      definitionJSON,
 		DestinationForm: req.Definition.Action.DestinationForm,
 	}
 
-	// Insert into database
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
@@ -181,7 +165,6 @@ func (s *Server) CreateBail(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Convert to types.Bail for response
 	typeBail, err := dbBailToTypesBail(dbBail)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert bail: %v", err))
@@ -194,29 +177,25 @@ func (s *Server) CreateBail(c echo.Context) error {
 }
 
 // UpdateBail updates an existing bail
-// PUT /surveys/:surveyId/bails/:id
+// PUT /users/:userId/bails/:id
 func (s *Server) UpdateBail(c echo.Context) error {
-	// Parse survey ID
-	surveyIDStr := c.Param("surveyId")
-	surveyID, err := uuid.Parse(surveyIDStr)
+	userIDStr := c.Param("userId")
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Parse bail ID
 	bailIDStr := c.Param("id")
 	bailID, err := uuid.Parse(bailIDStr)
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_bail_id", "Bail ID must be a valid UUID")
 	}
 
-	// Parse request body
 	var req UpdateBailRequest
 	if err := c.Bind(&req); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_request", "Failed to parse request body")
 	}
 
-	// Get existing bail
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
@@ -228,9 +207,9 @@ func (s *Server) UpdateBail(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Verify bail belongs to the survey
-	if dbBail.SurveyID != surveyID {
-		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found in this survey")
+	// Verify bail belongs to the user
+	if dbBail.UserID != userID {
+		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found for this user")
 	}
 
 	// Apply updates
@@ -244,12 +223,10 @@ func (s *Server) UpdateBail(c echo.Context) error {
 		dbBail.Enabled = *req.Enabled
 	}
 	if req.Definition != nil {
-		// Validate new definition
 		if err := req.Definition.Validate(); err != nil {
 			return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
 		}
 
-		// Marshal new definition
 		definitionJSON, err := json.Marshal(req.Definition)
 		if err != nil {
 			return respondError(c, http.StatusInternalServerError, "marshal_error", "Failed to marshal definition")
@@ -259,18 +236,15 @@ func (s *Server) UpdateBail(c echo.Context) error {
 		dbBail.DestinationForm = req.Definition.Action.DestinationForm
 	}
 
-	// Update in database
 	if err := s.db.UpdateBail(ctx, dbBail); err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Convert to types.Bail for response
 	typeBail, err := dbBailToTypesBail(dbBail)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert bail: %v", err))
 	}
 
-	// Get most recent event
 	events, err := s.db.GetEventsByBailID(ctx, bailID)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -291,23 +265,20 @@ func (s *Server) UpdateBail(c echo.Context) error {
 }
 
 // DeleteBail removes a bail from the database
-// DELETE /surveys/:surveyId/bails/:id
+// DELETE /users/:userId/bails/:id
 func (s *Server) DeleteBail(c echo.Context) error {
-	// Parse survey ID
-	surveyIDStr := c.Param("surveyId")
-	surveyID, err := uuid.Parse(surveyIDStr)
+	userIDStr := c.Param("userId")
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Parse bail ID
 	bailIDStr := c.Param("id")
 	bailID, err := uuid.Parse(bailIDStr)
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_bail_id", "Bail ID must be a valid UUID")
 	}
 
-	// Get bail to verify it belongs to survey
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
@@ -319,12 +290,11 @@ func (s *Server) DeleteBail(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Verify bail belongs to the survey
-	if dbBail.SurveyID != surveyID {
-		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found in this survey")
+	// Verify bail belongs to the user
+	if dbBail.UserID != userID {
+		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found for this user")
 	}
 
-	// Delete from database
 	if err := s.db.DeleteBail(ctx, bailID); err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
@@ -333,23 +303,20 @@ func (s *Server) DeleteBail(c echo.Context) error {
 }
 
 // GetBailEvents retrieves event history for a specific bail
-// GET /surveys/:surveyId/bails/:id/events
+// GET /users/:userId/bails/:id/events
 func (s *Server) GetBailEvents(c echo.Context) error {
-	// Parse survey ID
-	surveyIDStr := c.Param("surveyId")
-	surveyID, err := uuid.Parse(surveyIDStr)
+	userIDStr := c.Param("userId")
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Parse bail ID
 	bailIDStr := c.Param("id")
 	bailID, err := uuid.Parse(bailIDStr)
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_bail_id", "Bail ID must be a valid UUID")
 	}
 
-	// Get bail to verify it exists and belongs to survey
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
@@ -361,18 +328,16 @@ func (s *Server) GetBailEvents(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Verify bail belongs to the survey
-	if dbBail.SurveyID != surveyID {
-		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found in this survey")
+	// Verify bail belongs to the user
+	if dbBail.UserID != userID {
+		return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found for this user")
 	}
 
-	// Get events
 	dbEvents, err := s.db.GetEventsByBailID(ctx, bailID)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Convert to types.BailEvent
 	events := make([]*types.BailEvent, len(dbEvents))
 	for i, dbEvent := range dbEvents {
 		typeEvent, err := dbEventToTypesEvent(dbEvent)
@@ -385,17 +350,15 @@ func (s *Server) GetBailEvents(c echo.Context) error {
 	return c.JSON(http.StatusOK, EventsListResponse{Events: events})
 }
 
-// GetSurveyEvents retrieves recent event history for a survey
-// GET /surveys/:surveyId/bail-events
-func (s *Server) GetSurveyEvents(c echo.Context) error {
-	// Parse survey ID
-	surveyIDStr := c.Param("surveyId")
-	surveyID, err := uuid.Parse(surveyIDStr)
+// GetUserEvents retrieves recent event history for a user
+// GET /users/:userId/bail-events
+func (s *Server) GetUserEvents(c echo.Context) error {
+	userIDStr := c.Param("userId")
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Get limit from query parameter (default 100)
 	limit := 100
 	if limitStr := c.QueryParam("limit"); limitStr != "" {
 		if _, err := fmt.Sscanf(limitStr, "%d", &limit); err != nil {
@@ -406,16 +369,14 @@ func (s *Server) GetSurveyEvents(c echo.Context) error {
 		}
 	}
 
-	// Get events from database
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
-	dbEvents, err := s.db.GetEventsBySurvey(ctx, surveyID, limit)
+	dbEvents, err := s.db.GetEventsByUser(ctx, userID, limit)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	// Convert to types.BailEvent
 	events := make([]*types.BailEvent, len(dbEvents))
 	for i, dbEvent := range dbEvents {
 		typeEvent, err := dbEventToTypesEvent(dbEvent)
@@ -429,33 +390,28 @@ func (s *Server) GetSurveyEvents(c echo.Context) error {
 }
 
 // PreviewBail performs a dry run of a bail definition without saving
-// POST /surveys/:surveyId/bails/preview
+// POST /users/:userId/bails/preview
 func (s *Server) PreviewBail(c echo.Context) error {
-	// Parse survey ID (for context, though not strictly needed for preview)
-	surveyIDStr := c.Param("surveyId")
-	_, err := uuid.Parse(surveyIDStr)
+	userIDStr := c.Param("userId")
+	_, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, "invalid_survey_id", "Survey ID must be a valid UUID")
+		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
 
-	// Parse request body
 	var req PreviewRequest
 	if err := c.Bind(&req); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_request", "Failed to parse request body")
 	}
 
-	// Validate definition
 	if err := req.Definition.Validate(); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
 	}
 
-	// Build query from definition
 	sqlQuery, params, err := query.BuildQuery(&req.Definition)
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "query_build_error", err.Error())
 	}
 
-	// Execute query to get matching users (limited to 100)
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
@@ -464,7 +420,6 @@ func (s *Server) PreviewBail(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "query_error", err.Error())
 	}
 
-	// Convert results to UserPreview
 	users := make([]UserPreview, len(results))
 	for i, row := range results {
 		userID, ok := row["userid"].(string)
@@ -496,7 +451,7 @@ func dbBailToTypesBail(dbBail *db.Bail) (*types.Bail, error) {
 
 	return &types.Bail{
 		ID:              dbBail.ID,
-		SurveyID:        dbBail.SurveyID,
+		UserID:          dbBail.UserID,
 		Name:            dbBail.Name,
 		Description:     dbBail.Description,
 		Enabled:         dbBail.Enabled,
@@ -517,7 +472,7 @@ func dbEventToTypesEvent(dbEvent *db.BailEvent) (*types.BailEvent, error) {
 	return &types.BailEvent{
 		ID:                 dbEvent.ID,
 		BailID:             dbEvent.BailID,
-		SurveyID:           dbEvent.SurveyID,
+		UserID:             dbEvent.UserID,
 		BailName:           dbEvent.BailName,
 		EventType:          dbEvent.EventType,
 		Timestamp:          dbEvent.Timestamp,

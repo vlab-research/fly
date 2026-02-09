@@ -12,13 +12,13 @@ import (
 
 // DBInterface defines the database operations needed by the API
 type DBInterface interface {
-	GetBailsBySurvey(ctx context.Context, surveyID uuid.UUID) ([]*db.Bail, error)
+	GetBailsByUser(ctx context.Context, userID uuid.UUID) ([]*db.Bail, error)
 	GetBailByID(ctx context.Context, id uuid.UUID) (*db.Bail, error)
 	CreateBail(ctx context.Context, bail *db.Bail) error
 	UpdateBail(ctx context.Context, bail *db.Bail) error
 	DeleteBail(ctx context.Context, id uuid.UUID) error
 	GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*db.BailEvent, error)
-	GetEventsBySurvey(ctx context.Context, surveyID uuid.UUID, limit int) ([]*db.BailEvent, error)
+	GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*db.BailEvent, error)
 	Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
 	Close()
 }
@@ -57,16 +57,16 @@ func (s *Server) registerRoutes() {
 	// Health check
 	s.echo.GET("/health", s.Health)
 
-	// Survey-scoped bail endpoints
-	surveyGroup := s.echo.Group("/surveys/:surveyId")
-	surveyGroup.GET("/bails", s.ListBails)
-	surveyGroup.POST("/bails", s.CreateBail)
-	surveyGroup.POST("/bails/preview", s.PreviewBail)
-	surveyGroup.GET("/bails/:id", s.GetBail)
-	surveyGroup.PUT("/bails/:id", s.UpdateBail)
-	surveyGroup.DELETE("/bails/:id", s.DeleteBail)
-	surveyGroup.GET("/bails/:id/events", s.GetBailEvents)
-	surveyGroup.GET("/bail-events", s.GetSurveyEvents)
+	// User-scoped bail endpoints
+	userGroup := s.echo.Group("/users/:userId")
+	userGroup.GET("/bails", s.ListBails)
+	userGroup.POST("/bails", s.CreateBail)
+	userGroup.POST("/bails/preview", s.PreviewBail)
+	userGroup.GET("/bails/:id", s.GetBail)
+	userGroup.PUT("/bails/:id", s.UpdateBail)
+	userGroup.DELETE("/bails/:id", s.DeleteBail)
+	userGroup.GET("/bails/:id/events", s.GetBailEvents)
+	userGroup.GET("/bail-events", s.GetUserEvents)
 }
 
 // Run starts the HTTP server on the specified address (blocking)

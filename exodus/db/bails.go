@@ -12,25 +12,25 @@ import (
 
 // Bail represents a bail configuration stored in the database
 type Bail struct {
-	ID              uuid.UUID      `json:"id"`
-	SurveyID        uuid.UUID      `json:"survey_id"`
-	Name            string         `json:"name"`
-	Description     string         `json:"description"`
-	Enabled         bool           `json:"enabled"`
-	Definition      json.RawMessage `json:"definition"`
-	DestinationForm string         `json:"destination_form"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID               uuid.UUID       `json:"id"`
+	UserID           uuid.UUID       `json:"user_id"`
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	Enabled          bool            `json:"enabled"`
+	Definition       json.RawMessage `json:"definition"`
+	DestinationForm  string          `json:"destination_form"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 // GetEnabledBails retrieves all enabled bails from the database
 func (d *DB) GetEnabledBails(ctx context.Context) ([]*Bail, error) {
 	query := `
-		SELECT id, survey_id, name, description, enabled, definition,
+		SELECT id, user_id, name, description, enabled, definition,
 		       destination_form, created_at, updated_at
 		FROM chatroach.bails
 		WHERE enabled = true
-		ORDER BY survey_id, name
+		ORDER BY user_id, name
 	`
 
 	rows, err := d.pool.Query(ctx, query)
@@ -45,7 +45,7 @@ func (d *DB) GetEnabledBails(ctx context.Context) ([]*Bail, error) {
 // GetBailByID retrieves a specific bail by its ID
 func (d *DB) GetBailByID(ctx context.Context, id uuid.UUID) (*Bail, error) {
 	query := `
-		SELECT id, survey_id, name, description, enabled, definition,
+		SELECT id, user_id, name, description, enabled, definition,
 		       destination_form, created_at, updated_at
 		FROM chatroach.bails
 		WHERE id = $1
@@ -64,19 +64,19 @@ func (d *DB) GetBailByID(ctx context.Context, id uuid.UUID) (*Bail, error) {
 	return bail, nil
 }
 
-// GetBailsBySurvey retrieves all bails for a specific survey
-func (d *DB) GetBailsBySurvey(ctx context.Context, surveyID uuid.UUID) ([]*Bail, error) {
+// GetBailsByUser retrieves all bails for a specific user
+func (d *DB) GetBailsByUser(ctx context.Context, userID uuid.UUID) ([]*Bail, error) {
 	query := `
-		SELECT id, survey_id, name, description, enabled, definition,
+		SELECT id, user_id, name, description, enabled, definition,
 		       destination_form, created_at, updated_at
 		FROM chatroach.bails
-		WHERE survey_id = $1
+		WHERE user_id = $1
 		ORDER BY name
 	`
 
-	rows, err := d.pool.Query(ctx, query, surveyID)
+	rows, err := d.pool.Query(ctx, query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query bails for survey: %w", err)
+		return nil, fmt.Errorf("failed to query bails for user: %w", err)
 	}
 	defer rows.Close()
 
@@ -88,7 +88,7 @@ func (d *DB) GetBailsBySurvey(ctx context.Context, surveyID uuid.UUID) ([]*Bail,
 func (d *DB) CreateBail(ctx context.Context, bail *Bail) error {
 	query := `
 		INSERT INTO chatroach.bails
-		  (survey_id, name, description, enabled, definition, destination_form)
+		  (user_id, name, description, enabled, definition, destination_form)
 		VALUES
 		  ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at, updated_at
@@ -97,7 +97,7 @@ func (d *DB) CreateBail(ctx context.Context, bail *Bail) error {
 	err := d.pool.QueryRow(
 		ctx,
 		query,
-		bail.SurveyID,
+		bail.UserID,
 		bail.Name,
 		bail.Description,
 		bail.Enabled,
@@ -170,7 +170,7 @@ func scanBail(row pgx.Row) (*Bail, error) {
 	bail := &Bail{}
 	err := row.Scan(
 		&bail.ID,
-		&bail.SurveyID,
+		&bail.UserID,
 		&bail.Name,
 		&bail.Description,
 		&bail.Enabled,
@@ -193,7 +193,7 @@ func scanBails(rows pgx.Rows) ([]*Bail, error) {
 		bail := &Bail{}
 		err := rows.Scan(
 			&bail.ID,
-			&bail.SurveyID,
+			&bail.UserID,
 			&bail.Name,
 			&bail.Description,
 			&bail.Enabled,
@@ -214,3 +214,4 @@ func scanBails(rows pgx.Rows) ([]*Bail, error) {
 
 	return bails, nil
 }
+
