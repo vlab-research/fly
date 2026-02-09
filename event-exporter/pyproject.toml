@@ -1,0 +1,11 @@
+[project]
+name = "event-exporter"
+version = "0.1.0"
+description = "Export synthetic events from CockroachDB"
+requires-python = ">=3.10"
+dependencies = [
+    "psycopg2-binary>=2.9.0",
+]
+
+[project.scripts]
+export-events = "export_synthetic_events:main"
