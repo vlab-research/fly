@@ -92,3 +92,31 @@ func TestGetEvent_errorsOnLackingID(t *testing.T) {
 	err := s.forward(c)
 	assert.Equal(t, 400, err.(*echo.HTTPError).Code)
 }
+
+func TestGetEvent_forwardTel(t *testing.T) {
+	e := echo.New()
+
+	expectedEvent := `{"user":"123","page":"789","event":{"type":"external","value":{"type":"linksniffer:click","url":"tel:9999999999"}}}`
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := ioutil.ReadAll(r.Body)
+		assert.Nil(t, err)
+		assert.Equal(t, expectedEvent, string(data))
+	}))
+
+	q := make(url.Values)
+	q.Set("url", "9999999999")
+	q.Set("id", "123")
+	q.Set("p", "tel")
+	q.Set("pageid", "789")
+	req := httptest.NewRequest(http.MethodGet, "/?"+q.Encode(), nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	client := &http.Client{}
+	s := &Server{&Eventer{client, ts.URL}}
+
+	s.forward(c)
+	assert.Equal(t, http.StatusFound, rec.Code)
+	assert.Equal(t, "tel:9999999999", rec.HeaderMap["Location"][0])
+}

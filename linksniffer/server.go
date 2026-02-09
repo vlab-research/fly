@@ -46,7 +46,12 @@ func (s *Server) forward(c echo.Context) error {
 		p = "https"
 	}
 
-	u = p + "://" + u
+	// Only http/https use ://, everything else uses single colon
+	if p == "http" || p == "https" {
+		u = p + "://" + u
+	} else {
+		u = p + ":" + u
+	}
 
 	u, err := url.PathUnescape(u)
 	if err != nil {
