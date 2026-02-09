@@ -4,7 +4,6 @@ import { useHistory } from 'react-router-dom';
 import { Card, Table, Tag, Input, Select, Button, Row, Col, message } from 'antd';
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../../services/api';
-import { Loading } from '../../components/UI';
 
 const { Option } = Select;
 
@@ -107,7 +106,8 @@ const StatesList = ({ surveyName }) => {
       key: 'userid',
       width: 200,
       render: (userid) => (
-        <a onClick={(e) => e.stopPropagation()}>
+        // eslint-disable-next-line jsx-a11y/anchor-is-valid
+        <a href="#" onClick={(e) => e.stopPropagation()}>
           {userid}
         </a>
       ),
