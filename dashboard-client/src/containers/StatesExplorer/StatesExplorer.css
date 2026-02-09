@@ -1,0 +1,8 @@
+/* StatesExplorer styles */
+.states-explorer {
+  padding: 24px;
+}
+
+.states-explorer .ant-card {
+  margin-bottom: 16px;
+}
