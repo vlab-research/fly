@@ -68,3 +68,25 @@ Which you can then run:
 alias kubelog=kube-logs.sh
 kubelog gbv-replybot 1
 ```
+
+## Chat Log Publisher
+
+The `lib/chat-log/publisher.js` module publishes chat log entries to a Kafka topic for every visible message in a conversation (both bot echoes and user messages). This feeds the `chat_log` database table via a downstream scribble sink.
+
+### Architecture
+
+The module follows a functional core / imperative shell pattern:
+
+- **`extractChatLogEntry(event, state)`** -- Pure function. Given a parsed Facebook webhook event and the current state machine state, returns a chat log entry object or `null`. Uses `categorizeEvent()` from `machine.js` to classify the event. Only ECHO, TEXT, QUICK_REPLY, and POSTBACK events produce entries; all other event types (synthetic events, watermarks, referrals, reactions, etc.) return `null`.
+
+- **`publishChatLog(produce, topic, rawEvent, state)`** -- Thin IO wrapper. Parses the raw event, calls `extractChatLogEntry`, and if the result is non-null, publishes to Kafka using the same `produce()` helper used for state/response/payment topics.
+
+### Integration
+
+The publisher is called in the `processor()` function in `lib/index.js`, after `machine.run()` completes and all other publish operations (state, responses, payment) have run. It only activates when the `VLAB_CHAT_LOG_TOPIC` environment variable is set -- if not configured, the publisher is silently skipped (graceful degradation).
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `VLAB_CHAT_LOG_TOPIC` | Kafka topic for chat log entries (e.g., `vlab-prod-chat-log`). If not set, chat logging is disabled. |

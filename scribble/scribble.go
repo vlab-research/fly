@@ -65,6 +65,7 @@ func getMarshaller(cfg *Config, pool *pgxpool.Pool) Scribbler {
 		"states":    NewStateScribbler,
 		"responses": NewResponseScribbler,
 		"messages":  NewMessageScribbler,
+		"chat_log":  NewChatLogScribbler,
 	}
 
 	fn, ok := marshallers[name]

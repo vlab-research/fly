@@ -17,6 +17,7 @@ paymentTopic: &paymenttopic "vlab-prod-payment"
 botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
+chatLogTopic: &chatlogtopic "vlab-prod-chat-log"
 
 versionDashboard: &vdashboard v0.0.42
 versionBotserver: &vbotserver v0.0.11
@@ -52,6 +53,10 @@ laggingAlerts:
     alertname: LaggingConsumerScribbleMessages
     window: "5m"
     limit: "200"
+  - consumergroup: scribble-chat-log
+    alertname: LaggingConsumerScribbleChatLog
+    window: "5m"
+    limit: "200"
   - consumergroup: dinersclub
     alertname: LaggingConsumerDinersclub
     window: "5m"
@@ -81,6 +86,11 @@ kafkaTopics:
   - name: *exportertopic
     partitions: 2
     replicationFactor: 2
+    config:
+      "retention.ms": "2678400000" # 31 days
+  - name: *chatlogtopic
+    partitions: 12
+    replicationFactor: 3
     config:
       "retention.ms": "2678400000" # 31 days
 
@@ -288,6 +298,19 @@ scribble:
         value: "128"
       - name: SCRIBBLE_STRICT_MODE
         value: "true"
+    - destination: "chat_log"
+      replicaCount: 1
+      env:
+      - name: KAFKA_TOPIC
+        value: *chatlogtopic
+      - name: KAFKA_GROUP
+        value: "scribble-chat-log"
+      - name: SCRIBBLE_CHUNK_SIZE
+        value: "32"
+      - name: SCRIBBLE_BATCH_SIZE
+        value: "128"
+      - name: SCRIBBLE_STRICT_MODE
+        value: "false"
 
 dumper:
   image:
@@ -521,6 +544,8 @@ replybot:
         key: redis-password
   - name: REDIS_DB
     value: "0"
+  - name: VLAB_CHAT_LOG_TOPIC
+    value: *chatlogtopic
 
 botserver:
   replicaCount: 3

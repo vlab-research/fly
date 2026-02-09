@@ -842,6 +842,7 @@ function getMessage(log, form, user, page) {
 }
 
 module.exports = {
+  categorizeEvent,
   makeEventMetadata,
   getWatermark,
   getState,
