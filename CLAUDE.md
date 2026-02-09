@@ -51,13 +51,13 @@ When using subagents, pick the right type:
 
 | Task | Agent Type |
 |------|-----------|
-| Read/search code | `Explore` |
+| Read/search/document code | `explore` (lowercase — has Write/Edit) |
 | Write/edit code | `fullstack-engineer` |
-| Plan architecture | `Plan` |
 | Run commands | `Bash` |
 | Test code | `qa-testing-engineer` |
 | Deploy/infra | `devops-deployment-optimizer` |
 
+- **Do NOT use `Explore` (capital E) or `Plan`** — these agents cannot write files
 - **NEVER use `subagent_type=general-purpose`** — too vague, use a specific type
 - **NEVER use `EnterPlanMode`** — use `/three-phase` for structured planning instead
 
