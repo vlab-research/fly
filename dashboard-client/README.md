@@ -87,3 +87,98 @@ Three styling approaches coexist:
 2. **Ant Design** — dominant UI framework, used in 25+ files
 3. **styled-components** — used in 3 files (`UI/index.js`, `ConditionBuilder.js`, `LinkModal/style.js`), uses `styled-components/macro` for build-time optimization
 4. **Inline styles** — occasional use
+
+## Architecture Overview
+
+Dashboard Client is a **React single-page application** deployed on **Netlify**. It provides a web interface for researchers to manage surveys, view response data, and monitor survey health.
+
+### Project Structure
+
+```
+src/
+  components/       # Reusable UI components (buttons, tables, layout, etc.)
+  containers/       # Feature-level components (pages/screens with business logic)
+  services/
+    api/            # API client — standard fetcher with Auth0 Bearer token
+    auth/           # Auth0 integration and session management
+    cube/           # Cube.js client for analytics queries
+```
+
+**Container pattern**: Feature components live in `src/containers/` and compose reusable pieces from `src/components/`. Containers typically handle data fetching, state management, and business logic, while components handle presentation.
+
+### Key Containers
+
+- **Data** — main data exploration view
+- **SurveyScreen** — individual survey management (includes routing to form details and states explorer)
+- **AnswersReport** — response/answer analytics
+- **TopQuestionsReport** — question-level analytics
+- **DurationReport** — survey duration/timing analytics
+- **BailSystems** — bail-out monitoring (participants who abandon surveys)
+- **StatesExplorer** — participant state debugging (where participants are in survey flow, error tracking)
+  - **StatesSummary** — aggregated state counts per form and state
+  - **StatesList** — filterable list of all participants with their current states
+  - **StateDetail** — detailed view of a single participant's state including QA transcript and error details
+
+### API Client
+
+The API client in `src/services/api/` handles all communication with the dashboard-server backend:
+
+- Automatically attaches the **Auth0 Bearer token** to every request
+- Targets `REACT_APP_SERVER_URL/api/v1/{path}` (environment-configured base URL)
+- All requests are scoped to the authenticated user on the server side
+- **URL encoding**: When survey names are used in URL paths, they must be encoded with `encodeURIComponent()` to handle special characters
+
+### Component Patterns
+
+#### Container Data Fetching Pattern
+
+Containers follow a consistent pattern for fetching data from the backend:
+
+```javascript
+const [data, setData] = useState(null);
+const [loading, setLoading] = useState(true);
+
+useEffect(() => {
+  loadData();
+}, [dependency]);
+
+const loadData = async () => {
+  try {
+    const res = await api.fetcher({ path: `/endpoint` });
+    const data = await res.json();
+    setData(data.field);
+  } catch (err) {
+    message.error('Failed to load data');
+    console.error(err);
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+#### Ant Design Component Usage
+
+Common patterns for Ant Design components:
+
+- **Card** — wrapper for distinct UI sections with optional title
+- **Table** — data tables with built-in sorting, filtering, and pagination
+- **Tag** — color-coded labels for categorical data (states, statuses, etc.)
+- **Statistic** — large numerical displays for key metrics
+- **message** — toast notifications for user feedback
+- **Descriptions** — key-value display with labels (use `bordered` and `column` props)
+- **Collapse/Panel** — expandable sections for optional/verbose content
+- **Alert** — warnings and error messages with icons
+
+**State color mapping convention** for state machine values:
+```javascript
+const stateColors = {
+  START: 'blue',
+  RESPONDING: 'green',
+  QOUT: 'cyan',
+  END: 'default',
+  BLOCKED: 'red',
+  ERROR: 'red',
+  WAIT_EXTERNAL_EVENT: 'orange',
+  USER_BLOCKED: 'volcano',
+};
+```

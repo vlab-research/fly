@@ -5,7 +5,7 @@ import {
 } from 'react-router-dom';
 import { Table, Spin } from 'antd';
 import './SurveyScreen.css';
-import { FormScreen } from '..';
+import { FormScreen, StatesSummary, StatesList, StateDetail } from '..';
 import { groupBy } from '../../helpers';
 import { CreateBtn } from '../../components/UI';
 
@@ -87,6 +87,7 @@ const Survey = ({ forms, selected }) => {
           <CreateBtn to={`/surveys/create?survey_name=${encodeURIComponent(selected)}`}> NEW FORM </CreateBtn>
           <span className="download-buttons">
             <CreateBtn to={`/exports/create?survey_name=${encodeURIComponent(selected)}`}> EXPORT </CreateBtn>
+            <CreateBtn to={`${match.url}/states`}> STATES </CreateBtn>
           </span>
         </div>
         <Table
@@ -111,8 +112,17 @@ const SurveyScreen = ({ forms, selected }) => {
         <Route exact path={match.path}>
           <Survey forms={forms} selected={selected} />
         </Route>
-        <Route exact path={`${match.path}/form/:surveyid`}> 
+        <Route exact path={`${match.path}/form/:surveyid`}>
           <FormScreen forms={forms} />
+        </Route>
+        <Route exact path={`${match.path}/states`}>
+          <StatesSummary surveyName={selected} />
+        </Route>
+        <Route exact path={`${match.path}/states/list`}>
+          <StatesList surveyName={selected} />
+        </Route>
+        <Route exact path={`${match.path}/states/:userid`}>
+          <StateDetail surveyName={selected} backPath={`${match.url}/states/list`} />
         </Route>
       </Switch>
     </div>
