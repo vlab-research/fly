@@ -40,7 +40,9 @@ const BailForm = ({ surveyId, backPath }) => {
       const def = bail.definition;
 
       // Set timing state for conditional field rendering
-      setTiming(def.execution?.timing || 'immediate');
+      var execution = def.execution || {};
+      var action = def.action || {};
+      setTiming(execution.timing || 'immediate');
 
       // Populate form
       form.setFieldsValue({
@@ -48,12 +50,12 @@ const BailForm = ({ surveyId, backPath }) => {
         description: bail.description,
         enabled: bail.enabled,
         conditions: def.conditions,
-        timing: def.execution?.timing || 'immediate',
-        time_of_day: def.execution?.time_of_day ? moment(def.execution.time_of_day, 'HH:mm') : null,
-        timezone: def.execution?.timezone || 'UTC',
-        datetime: def.execution?.datetime ? moment(def.execution.datetime) : null,
-        destination_form: def.action?.destination_form,
-        metadata: def.action?.metadata ? JSON.stringify(def.action.metadata, null, 2) : '',
+        timing: execution.timing || 'immediate',
+        time_of_day: execution.time_of_day ? moment(execution.time_of_day, 'HH:mm') : null,
+        timezone: execution.timezone || 'UTC',
+        datetime: execution.datetime ? moment(execution.datetime) : null,
+        destination_form: action.destination_form,
+        metadata: action.metadata ? JSON.stringify(action.metadata, null, 2) : '',
       });
     } catch (err) {
       message.error('Failed to load bail');
@@ -106,7 +108,7 @@ const BailForm = ({ surveyId, backPath }) => {
         name: values.name,
         description: values.description,
         definition,
-        enabled: values.enabled ?? false,
+        enabled: values.enabled !== undefined && values.enabled !== null ? values.enabled : false,
       };
 
       if (isEdit) {

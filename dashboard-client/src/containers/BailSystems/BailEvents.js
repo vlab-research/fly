@@ -91,7 +91,7 @@ const BailEvents = ({ surveyId, backPath }) => {
           Back to Bail Systems
         </Button>
 
-        <Card title={`Event History: ${bail?.name || 'Bail'}`}>
+        <Card title={`Event History: ${(bail && bail.name) || 'Bail'}`}>
           <Table
             columns={columns}
             dataSource={events}
