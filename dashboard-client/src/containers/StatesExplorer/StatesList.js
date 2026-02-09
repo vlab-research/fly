@@ -85,7 +85,7 @@ const StatesList = ({ surveyName }) => {
   };
 
   const handleRowClick = (record) => {
-    history.push(`/surveys/${encodeURIComponent(surveyName)}/states/${encodeURIComponent(record.userid)}`);
+    history.push(`/surveys/${encodeURIComponent(surveyName)}/monitor/${encodeURIComponent(record.userid)}`);
   };
 
   // State color mapping
