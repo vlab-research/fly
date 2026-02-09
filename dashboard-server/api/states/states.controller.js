@@ -1,7 +1,6 @@
 'use strict';
 
-const { Survey } = require('../../queries');
-const statesQueries = require('../../queries/states');
+const { Survey, States: statesQueries } = require('../../queries');
 
 function handle(err, res) {
   console.error('States API Error:', err);
