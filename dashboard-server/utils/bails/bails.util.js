@@ -33,44 +33,44 @@ async function exodusRequest(method, path, body = null) {
   return res.json();
 }
 
-// List all bails for a survey
-async function listBails(surveyId) {
-  return exodusRequest('GET', `/surveys/${surveyId}/bails`);
+// List all bails for a user
+async function listBails(userId) {
+  return exodusRequest('GET', `/users/${userId}/bails`);
 }
 
 // Get a single bail
-async function getBail(surveyId, bailId) {
-  return exodusRequest('GET', `/surveys/${surveyId}/bails/${bailId}`);
+async function getBail(userId, bailId) {
+  return exodusRequest('GET', `/users/${userId}/bails/${bailId}`);
 }
 
 // Create a new bail
-async function createBail(surveyId, bail) {
-  return exodusRequest('POST', `/surveys/${surveyId}/bails`, bail);
+async function createBail(userId, bail) {
+  return exodusRequest('POST', `/users/${userId}/bails`, bail);
 }
 
 // Update an existing bail
-async function updateBail(surveyId, bailId, bail) {
-  return exodusRequest('PUT', `/surveys/${surveyId}/bails/${bailId}`, bail);
+async function updateBail(userId, bailId, bail) {
+  return exodusRequest('PUT', `/users/${userId}/bails/${bailId}`, bail);
 }
 
 // Delete a bail
-async function deleteBail(surveyId, bailId) {
-  return exodusRequest('DELETE', `/surveys/${surveyId}/bails/${bailId}`);
+async function deleteBail(userId, bailId) {
+  return exodusRequest('DELETE', `/users/${userId}/bails/${bailId}`);
 }
 
 // Preview bail (dry-run query)
-async function previewBail(surveyId, definition) {
-  return exodusRequest('POST', `/surveys/${surveyId}/bails/preview`, { definition });
+async function previewBail(userId, definition) {
+  return exodusRequest('POST', `/users/${userId}/bails/preview`, { definition });
 }
 
 // Get events for a specific bail
-async function getBailEvents(surveyId, bailId) {
-  return exodusRequest('GET', `/surveys/${surveyId}/bails/${bailId}/events`);
+async function getBailEvents(userId, bailId) {
+  return exodusRequest('GET', `/users/${userId}/bails/${bailId}/events`);
 }
 
-// Get all bail events for a survey
-async function getSurveyEvents(surveyId, limit = 100) {
-  return exodusRequest('GET', `/surveys/${surveyId}/bail-events?limit=${limit}`);
+// Get all bail events for a user
+async function getUserEvents(userId, limit = 100) {
+  return exodusRequest('GET', `/users/${userId}/bail-events?limit=${limit}`);
 }
 
 module.exports = {
@@ -81,5 +81,5 @@ module.exports = {
   deleteBail,
   previewBail,
   getBailEvents,
-  getSurveyEvents,
+  getUserEvents,
 };

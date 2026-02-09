@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { useParams, useHistory } from 'react-router-dom';
 import { Table, Layout, Tag, Button, Card, message } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -8,7 +7,7 @@ import { Loading } from '../../components/UI';
 
 const { Content } = Layout;
 
-const BailEvents = ({ surveyId, backPath }) => {
+const BailEvents = () => {
   const { bailId } = useParams();
   const history = useHistory();
   const [events, setEvents] = useState(null);
@@ -16,14 +15,26 @@ const BailEvents = ({ surveyId, backPath }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadData();
-  }, [surveyId, bailId]);
+    loadUser();
+  }, []);
 
-  const loadData = async () => {
+  const loadUser = async () => {
+    try {
+      const res = await api.fetcher({ path: '/users', method: 'POST', body: {} });
+      const user = await res.json();
+      await loadData(user.id);
+    } catch (err) {
+      message.error('Failed to load user');
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const loadData = async (userId) => {
     try {
       const [eventsRes, bailRes] = await Promise.all([
-        api.fetcher({ path: `/surveys/${surveyId}/bails/${bailId}/events` }),
-        api.fetcher({ path: `/surveys/${surveyId}/bails/${bailId}` }),
+        api.fetcher({ path: `/users/${userId}/bails/${bailId}/events` }),
+        api.fetcher({ path: `/users/${userId}/bails/${bailId}` }),
       ]);
 
       const eventsData = await eventsRes.json();
@@ -85,7 +96,7 @@ const BailEvents = ({ surveyId, backPath }) => {
       <Content style={{ padding: '30px' }}>
         <Button
           icon={<ArrowLeftOutlined />}
-          onClick={() => history.push(backPath)}
+          onClick={() => history.push('/bails')}
           style={{ marginBottom: 16 }}
         >
           Back to Bail Systems
@@ -102,11 +113,6 @@ const BailEvents = ({ surveyId, backPath }) => {
       </Content>
     </Layout>
   );
-};
-
-BailEvents.propTypes = {
-  surveyId: PropTypes.string.isRequired,
-  backPath: PropTypes.string.isRequired,
 };
 
 export default BailEvents;

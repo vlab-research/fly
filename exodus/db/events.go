@@ -14,7 +14,7 @@ import (
 type BailEvent struct {
 	ID                 uuid.UUID        `json:"id"`
 	BailID             *uuid.UUID       `json:"bail_id,omitempty"`
-	SurveyID           uuid.UUID        `json:"survey_id"`
+	UserID             uuid.UUID        `json:"user_id"`
 	BailName           string           `json:"bail_name"`
 	EventType          string           `json:"event_type"` // "execution" or "error"
 	Timestamp          time.Time        `json:"timestamp"`
@@ -29,7 +29,7 @@ type BailEvent struct {
 func (d *DB) RecordEvent(ctx context.Context, event *BailEvent) error {
 	query := `
 		INSERT INTO chatroach.bail_events
-		  (bail_id, survey_id, bail_name, event_type, users_matched, users_bailed,
+		  (bail_id, user_id, bail_name, event_type, users_matched, users_bailed,
 		   definition_snapshot, error)
 		VALUES
 		  ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -40,7 +40,7 @@ func (d *DB) RecordEvent(ctx context.Context, event *BailEvent) error {
 		ctx,
 		query,
 		event.BailID,
-		event.SurveyID,
+		event.UserID,
 		event.BailName,
 		event.EventType,
 		event.UsersMatched,
@@ -59,7 +59,7 @@ func (d *DB) RecordEvent(ctx context.Context, event *BailEvent) error {
 // GetEventsByBailID retrieves all events for a specific bail, ordered by timestamp descending
 func (d *DB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*BailEvent, error) {
 	query := `
-		SELECT id, bail_id, survey_id, bail_name, event_type, timestamp,
+		SELECT id, bail_id, user_id, bail_name, event_type, timestamp,
 		       users_matched, users_bailed, definition_snapshot, error
 		FROM chatroach.bail_events
 		WHERE bail_id = $1
@@ -75,21 +75,21 @@ func (d *DB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*BailEv
 	return scanEvents(rows)
 }
 
-// GetEventsBySurvey retrieves recent events for a specific survey with an optional limit
+// GetEventsByUser retrieves recent events for a specific user with an optional limit
 // Events are ordered by timestamp descending (most recent first)
-func (d *DB) GetEventsBySurvey(ctx context.Context, surveyID uuid.UUID, limit int) ([]*BailEvent, error) {
+func (d *DB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*BailEvent, error) {
 	query := `
-		SELECT id, bail_id, survey_id, bail_name, event_type, timestamp,
+		SELECT id, bail_id, user_id, bail_name, event_type, timestamp,
 		       users_matched, users_bailed, definition_snapshot, error
 		FROM chatroach.bail_events
-		WHERE survey_id = $1
+		WHERE user_id = $1
 		ORDER BY timestamp DESC
 		LIMIT $2
 	`
 
-	rows, err := d.pool.Query(ctx, query, surveyID, limit)
+	rows, err := d.pool.Query(ctx, query, userID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query events for survey: %w", err)
+		return nil, fmt.Errorf("failed to query events for user: %w", err)
 	}
 	defer rows.Close()
 
@@ -126,7 +126,7 @@ func scanEvent(row pgx.Row) (*BailEvent, error) {
 	err := row.Scan(
 		&event.ID,
 		&event.BailID,
-		&event.SurveyID,
+		&event.UserID,
 		&event.BailName,
 		&event.EventType,
 		&event.Timestamp,
@@ -150,7 +150,7 @@ func scanEvents(rows pgx.Rows) ([]*BailEvent, error) {
 		err := rows.Scan(
 			&event.ID,
 			&event.BailID,
-			&event.SurveyID,
+			&event.UserID,
 			&event.BailName,
 			&event.EventType,
 			&event.Timestamp,

@@ -26,10 +26,10 @@ type mockDB struct {
 	deleteFunc func(ctx context.Context, id uuid.UUID) error
 }
 
-func (m *mockDB) GetBailsBySurvey(ctx context.Context, surveyID uuid.UUID) ([]*db.Bail, error) {
+func (m *mockDB) GetBailsByUser(ctx context.Context, userID uuid.UUID) ([]*db.Bail, error) {
 	var result []*db.Bail
 	for _, bail := range m.bails {
-		if bail.SurveyID == surveyID {
+		if bail.UserID == userID {
 			result = append(result, bail)
 		}
 	}
@@ -93,11 +93,11 @@ func (m *mockDB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*db
 	return result, nil
 }
 
-func (m *mockDB) GetEventsBySurvey(ctx context.Context, surveyID uuid.UUID, limit int) ([]*db.BailEvent, error) {
+func (m *mockDB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*db.BailEvent, error) {
 	var result []*db.BailEvent
 	count := 0
 	for _, event := range m.events {
-		if event.SurveyID == surveyID {
+		if event.UserID == userID {
 			result = append(result, event)
 			count++
 			if count >= limit {
@@ -141,7 +141,6 @@ func simpleFormCondition(formName string) types.Condition {
 }
 
 func TestHealth(t *testing.T) {
-	// Setup
 	mock := &mockDB{}
 	server := New(mock)
 
@@ -149,12 +148,10 @@ func TestHealth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
 
-	// Test
 	if err := server.Health(c); err != nil {
 		t.Fatalf("Health check failed: %v", err)
 	}
 
-	// Verify
 	if rec.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
@@ -170,7 +167,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestListBails(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 	bailID := uuid.New()
 
 	def := testBailDefinition()
@@ -180,22 +177,22 @@ func TestListBails(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:              bailID,
-				SurveyID:        surveyID,
-				Name:            "Test Bail",
-				Description:     "Test description",
-				Enabled:         true,
-				Definition:      defJSON,
-				DestinationForm: "exit-form",
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
+				ID:               bailID,
+				UserID:           userID,
+				Name:             "Test Bail",
+				Description:      "Test description",
+				Enabled:          true,
+				Definition:       defJSON,
+				DestinationForm:  "exit-form",
+				CreatedAt:        time.Now(),
+				UpdatedAt:        time.Now(),
 			},
 		},
 		events: []*db.BailEvent{
 			{
 				ID:                 uuid.New(),
 				BailID:             &bailID,
-				SurveyID:           surveyID,
+				UserID:             userID,
 				BailName:           "Test Bail",
 				EventType:          "execution",
 				Timestamp:          time.Now(),
@@ -208,19 +205,17 @@ func TestListBails(t *testing.T) {
 
 	server := New(mock)
 
-	req := httptest.NewRequest(http.MethodGet, "/surveys/"+surveyID.String()+"/bails", nil)
+	req := httptest.NewRequest(http.MethodGet, "/users/"+userID.String()+"/bails", nil)
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
-	c.SetPath("/surveys/:surveyId/bails")
-	c.SetParamNames("surveyId")
-	c.SetParamValues(surveyID.String())
+	c.SetPath("/users/:userId/bails")
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
 
-	// Test
 	if err := server.ListBails(c); err != nil {
 		t.Fatalf("ListBails failed: %v", err)
 	}
 
-	// Verify
 	if rec.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
@@ -244,7 +239,7 @@ func TestListBails(t *testing.T) {
 }
 
 func TestCreateBail_Success(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 	mock := &mockDB{
 		bails: []*db.Bail{},
 	}
@@ -261,20 +256,18 @@ func TestCreateBail_Success(t *testing.T) {
 	}
 	reqJSON, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest(http.MethodPost, "/surveys/"+surveyID.String()+"/bails", strings.NewReader(string(reqJSON)))
+	req := httptest.NewRequest(http.MethodPost, "/users/"+userID.String()+"/bails", strings.NewReader(string(reqJSON)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
-	c.SetPath("/surveys/:surveyId/bails")
-	c.SetParamNames("surveyId")
-	c.SetParamValues(surveyID.String())
+	c.SetPath("/users/:userId/bails")
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
 
-	// Test
 	if err := server.CreateBail(c); err != nil {
 		t.Fatalf("CreateBail failed: %v", err)
 	}
 
-	// Verify
 	if rec.Code != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d", rec.Code)
 	}
@@ -288,32 +281,30 @@ func TestCreateBail_Success(t *testing.T) {
 		t.Errorf("Expected bail name 'New Bail', got '%s'", response.Bail.Name)
 	}
 
-	if response.Bail.SurveyID != surveyID {
-		t.Errorf("Expected survey ID %s, got %s", surveyID, response.Bail.SurveyID)
+	if response.Bail.UserID != userID {
+		t.Errorf("Expected user ID %s, got %s", userID, response.Bail.UserID)
 	}
 
-	// Verify bail was added to mock
 	if len(mock.bails) != 1 {
 		t.Errorf("Expected 1 bail in mock, got %d", len(mock.bails))
 	}
 }
 
 func TestCreateBail_InvalidDefinition(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 	mock := &mockDB{
 		bails: []*db.Bail{},
 	}
 
 	server := New(mock)
 
-	// Create invalid definition (missing destination_form)
 	def := types.BailDefinition{
 		Conditions: simpleFormCondition("test-form"),
 		Execution: types.Execution{
 			Timing: "immediate",
 		},
 		Action: types.Action{
-			DestinationForm: "", // Invalid: empty
+			DestinationForm: "",
 		},
 	}
 
@@ -323,20 +314,18 @@ func TestCreateBail_InvalidDefinition(t *testing.T) {
 	}
 	reqJSON, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest(http.MethodPost, "/surveys/"+surveyID.String()+"/bails", strings.NewReader(string(reqJSON)))
+	req := httptest.NewRequest(http.MethodPost, "/users/"+userID.String()+"/bails", strings.NewReader(string(reqJSON)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
-	c.SetPath("/surveys/:surveyId/bails")
-	c.SetParamNames("surveyId")
-	c.SetParamValues(surveyID.String())
+	c.SetPath("/users/:userId/bails")
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
 
-	// Test
 	if err := server.CreateBail(c); err != nil {
 		t.Fatalf("CreateBail failed: %v", err)
 	}
 
-	// Verify error response
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", rec.Code)
 	}
@@ -350,14 +339,13 @@ func TestCreateBail_InvalidDefinition(t *testing.T) {
 		t.Errorf("Expected error 'invalid_definition', got '%s'", response.Error)
 	}
 
-	// Verify bail was NOT added to mock
 	if len(mock.bails) != 0 {
 		t.Errorf("Expected 0 bails in mock, got %d", len(mock.bails))
 	}
 }
 
 func TestUpdateBail(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 	bailID := uuid.New()
 
 	def := testBailDefinition()
@@ -367,15 +355,15 @@ func TestUpdateBail(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:              bailID,
-				SurveyID:        surveyID,
-				Name:            "Original Name",
-				Description:     "Original description",
-				Enabled:         true,
-				Definition:      defJSON,
-				DestinationForm: "exit-form",
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
+				ID:               bailID,
+				UserID:           userID,
+				Name:             "Original Name",
+				Description:      "Original description",
+				Enabled:          true,
+				Definition:       defJSON,
+				DestinationForm:  "exit-form",
+				CreatedAt:        time.Now(),
+				UpdatedAt:        time.Now(),
 			},
 		},
 	}
@@ -390,20 +378,18 @@ func TestUpdateBail(t *testing.T) {
 	}
 	reqJSON, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest(http.MethodPut, "/surveys/"+surveyID.String()+"/bails/"+bailID.String(), strings.NewReader(string(reqJSON)))
+	req := httptest.NewRequest(http.MethodPut, "/users/"+userID.String()+"/bails/"+bailID.String(), strings.NewReader(string(reqJSON)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
-	c.SetPath("/surveys/:surveyId/bails/:id")
-	c.SetParamNames("surveyId", "id")
-	c.SetParamValues(surveyID.String(), bailID.String())
+	c.SetPath("/users/:userId/bails/:id")
+	c.SetParamNames("userId", "id")
+	c.SetParamValues(userID.String(), bailID.String())
 
-	// Test
 	if err := server.UpdateBail(c); err != nil {
 		t.Fatalf("UpdateBail failed: %v", err)
 	}
 
-	// Verify
 	if rec.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
@@ -421,14 +407,13 @@ func TestUpdateBail(t *testing.T) {
 		t.Error("Expected bail to be disabled")
 	}
 
-	// Verify bail was updated in mock
 	if mock.bails[0].Name != "Updated Name" {
 		t.Errorf("Expected bail name in mock to be 'Updated Name', got '%s'", mock.bails[0].Name)
 	}
 }
 
 func TestDeleteBail(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 	bailID := uuid.New()
 
 	def := testBailDefinition()
@@ -438,46 +423,43 @@ func TestDeleteBail(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:              bailID,
-				SurveyID:        surveyID,
-				Name:            "Test Bail",
-				Description:     "Test description",
-				Enabled:         true,
-				Definition:      defJSON,
-				DestinationForm: "exit-form",
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
+				ID:               bailID,
+				UserID:           userID,
+				Name:             "Test Bail",
+				Description:      "Test description",
+				Enabled:          true,
+				Definition:       defJSON,
+				DestinationForm:  "exit-form",
+				CreatedAt:        time.Now(),
+				UpdatedAt:        time.Now(),
 			},
 		},
 	}
 
 	server := New(mock)
 
-	req := httptest.NewRequest(http.MethodDelete, "/surveys/"+surveyID.String()+"/bails/"+bailID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/users/"+userID.String()+"/bails/"+bailID.String(), nil)
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
-	c.SetPath("/surveys/:surveyId/bails/:id")
-	c.SetParamNames("surveyId", "id")
-	c.SetParamValues(surveyID.String(), bailID.String())
+	c.SetPath("/users/:userId/bails/:id")
+	c.SetParamNames("userId", "id")
+	c.SetParamValues(userID.String(), bailID.String())
 
-	// Test
 	if err := server.DeleteBail(c); err != nil {
 		t.Fatalf("DeleteBail failed: %v", err)
 	}
 
-	// Verify
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("Expected status 204, got %d", rec.Code)
 	}
 
-	// Verify bail was removed from mock
 	if len(mock.bails) != 0 {
 		t.Errorf("Expected 0 bails in mock after delete, got %d", len(mock.bails))
 	}
 }
 
 func TestGetBailEvents(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 	bailID := uuid.New()
 
 	def := testBailDefinition()
@@ -487,22 +469,22 @@ func TestGetBailEvents(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:              bailID,
-				SurveyID:        surveyID,
-				Name:            "Test Bail",
-				Description:     "Test description",
-				Enabled:         true,
-				Definition:      defJSON,
-				DestinationForm: "exit-form",
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
+				ID:               bailID,
+				UserID:           userID,
+				Name:             "Test Bail",
+				Description:      "Test description",
+				Enabled:          true,
+				Definition:       defJSON,
+				DestinationForm:  "exit-form",
+				CreatedAt:        time.Now(),
+				UpdatedAt:        time.Now(),
 			},
 		},
 		events: []*db.BailEvent{
 			{
 				ID:                 uuid.New(),
 				BailID:             &bailID,
-				SurveyID:           surveyID,
+				UserID:             userID,
 				BailName:           "Test Bail",
 				EventType:          "execution",
 				Timestamp:          time.Now(),
@@ -513,7 +495,7 @@ func TestGetBailEvents(t *testing.T) {
 			{
 				ID:                 uuid.New(),
 				BailID:             &bailID,
-				SurveyID:           surveyID,
+				UserID:             userID,
 				BailName:           "Test Bail",
 				EventType:          "execution",
 				Timestamp:          time.Now().Add(-1 * time.Hour),
@@ -526,19 +508,17 @@ func TestGetBailEvents(t *testing.T) {
 
 	server := New(mock)
 
-	req := httptest.NewRequest(http.MethodGet, "/surveys/"+surveyID.String()+"/bails/"+bailID.String()+"/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/users/"+userID.String()+"/bails/"+bailID.String()+"/events", nil)
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
-	c.SetPath("/surveys/:surveyId/bails/:id/events")
-	c.SetParamNames("surveyId", "id")
-	c.SetParamValues(surveyID.String(), bailID.String())
+	c.SetPath("/users/:userId/bails/:id/events")
+	c.SetParamNames("userId", "id")
+	c.SetParamValues(userID.String(), bailID.String())
 
-	// Test
 	if err := server.GetBailEvents(c); err != nil {
 		t.Fatalf("GetBailEvents failed: %v", err)
 	}
 
-	// Verify
 	if rec.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
@@ -558,11 +538,10 @@ func TestGetBailEvents(t *testing.T) {
 }
 
 func TestPreviewBail(t *testing.T) {
-	surveyID := uuid.New()
+	userID := uuid.New()
 
 	mock := &mockDB{
 		queryFunc: func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
-			// Return mock results
 			return []map[string]interface{}{
 				{"userid": "user1", "pageid": "page1"},
 				{"userid": "user2", "pageid": "page2"},
@@ -581,20 +560,18 @@ func TestPreviewBail(t *testing.T) {
 	}
 	reqJSON, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest(http.MethodPost, "/surveys/"+surveyID.String()+"/bails/preview", strings.NewReader(string(reqJSON)))
+	req := httptest.NewRequest(http.MethodPost, "/users/"+userID.String()+"/bails/preview", strings.NewReader(string(reqJSON)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := server.echo.NewContext(req, rec)
-	c.SetPath("/surveys/:surveyId/bails/preview")
-	c.SetParamNames("surveyId")
-	c.SetParamValues(surveyID.String())
+	c.SetPath("/users/:userId/bails/preview")
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
 
-	// Test
 	if err := server.PreviewBail(c); err != nil {
 		t.Fatalf("PreviewBail failed: %v", err)
 	}
 
-	// Verify
 	if rec.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}

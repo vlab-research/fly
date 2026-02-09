@@ -34,10 +34,10 @@ const Root = () => (
       <PrivateRoute exact path="/connect/secrets" component={Secrets} auth={Auth} />
       <PrivateRoute exact path="/connect/api-keys" component={ApiKeys} auth={Auth} />
       <PrivateRoute path="/surveys/:survey?" component={Surveys} auth={Auth} />
-      <PrivateRoute exact path="/surveys/:survey/bails/:bailId/events" component={BailEvents} auth={Auth} />
-      <PrivateRoute exact path="/surveys/:survey/bails/:bailId/edit" component={BailForm} auth={Auth} />
-      <PrivateRoute exact path="/surveys/:survey/bails/create" component={BailForm} auth={Auth} />
-      <PrivateRoute exact path="/surveys/:survey/bails" component={BailSystems} auth={Auth} />
+      <PrivateRoute exact path="/bails/:bailId/events" component={BailEvents} auth={Auth} />
+      <PrivateRoute exact path="/bails/:bailId/edit" component={BailForm} auth={Auth} />
+      <PrivateRoute exact path="/bails/create" component={BailForm} auth={Auth} />
+      <PrivateRoute exact path="/bails" component={BailSystems} auth={Auth} />
       <PrivateRoute exact path="/exports/create" component={CreateExport} auth={Auth} />
       <PrivateRoute exact path="/exports" component={Exports} auth={Auth} />
       <Route exact path="/login" render={props => <LoginScreen {...props} auth={Auth} />} />

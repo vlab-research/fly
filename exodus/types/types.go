@@ -257,21 +257,21 @@ func (c *Condition) GetOperator() *LogicalOperator {
 
 // Bail represents a bail configuration stored in the database
 type Bail struct {
-	ID              uuid.UUID      `json:"id"`
-	SurveyID        uuid.UUID      `json:"survey_id"`
-	Name            string         `json:"name"`
-	Description     string         `json:"description"`
-	Enabled         bool           `json:"enabled"`
-	Definition      BailDefinition `json:"definition"`
-	DestinationForm string         `json:"destination_form"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID               uuid.UUID      `json:"id"`
+	UserID           uuid.UUID      `json:"user_id"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description"`
+	Enabled          bool           `json:"enabled"`
+	Definition       BailDefinition `json:"definition"`
+	DestinationForm  string         `json:"destination_form"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 // Validate checks if the Bail is valid
 func (b *Bail) Validate() error {
-	if b.SurveyID == uuid.Nil {
-		return fmt.Errorf("survey_id is required")
+	if b.UserID == uuid.Nil {
+		return fmt.Errorf("user_id is required")
 	}
 	if b.Name == "" {
 		return fmt.Errorf("name is required")
@@ -293,7 +293,7 @@ func (b *Bail) Validate() error {
 type BailEvent struct {
 	ID                 uuid.UUID        `json:"id"`
 	BailID             *uuid.UUID       `json:"bail_id,omitempty"`
-	SurveyID           uuid.UUID        `json:"survey_id"`
+	UserID             uuid.UUID        `json:"user_id"`
 	BailName           string           `json:"bail_name"`
 	EventType          string           `json:"event_type"` // "execution" or "error"
 	Timestamp          time.Time        `json:"timestamp"`
@@ -305,8 +305,8 @@ type BailEvent struct {
 
 // Validate checks if the BailEvent is valid
 func (be *BailEvent) Validate() error {
-	if be.SurveyID == uuid.Nil {
-		return fmt.Errorf("survey_id is required")
+	if be.UserID == uuid.Nil {
+		return fmt.Errorf("user_id is required")
 	}
 	if be.BailName == "" {
 		return fmt.Errorf("bail_name is required")

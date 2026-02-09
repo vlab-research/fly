@@ -61,17 +61,26 @@ func Before(pool *pgxpool.Pool) {
 	}
 }
 
+// SetupTestUser creates a minimal test user and returns its ID
+// This provides a valid user_id for testing bails
+func SetupTestUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+	userID := uuid.New()
+	MustExec(t, pool, `
+		INSERT INTO chatroach.users (id, email)
+		VALUES ($1, $2)
+	`, userID, "test-"+userID.String()+"@example.com")
+	return userID
+}
+
 // SetupTestSurvey creates a minimal test survey and returns its ID
-// This provides a valid survey_id for testing bails
+// Also creates a user. Kept for backward compatibility with other tests.
 func SetupTestSurvey(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
-	// First create a test user
 	userID := uuid.New()
 	MustExec(t, pool, `
 		INSERT INTO chatroach.users (id, email)
 		VALUES ($1, $2)
 	`, userID, "test-"+userID.String()+"@example.com")
 
-	// Create a test survey with all required fields
 	surveyID := uuid.New()
 	MustExec(t, pool, `
 		INSERT INTO chatroach.surveys (id, userid, created, formid, form, shortcode, title)

@@ -75,7 +75,7 @@ func (m *mockBailSender) SendBailouts(ctx context.Context, users []sender.UserTa
 // Helper functions
 
 func createTestBail(id uuid.UUID, name string, timing string, timeOfDay, timezone, datetime *string) *db.Bail {
-	surveyID := uuid.New()
+	userID := uuid.New()
 
 	def := map[string]interface{}{
 		"conditions": map[string]interface{}{
@@ -103,15 +103,15 @@ func createTestBail(id uuid.UUID, name string, timing string, timeOfDay, timezon
 	defJSON, _ := json.Marshal(def)
 
 	return &db.Bail{
-		ID:              id,
-		SurveyID:        surveyID,
-		Name:            name,
-		Description:     "Test bail",
-		Enabled:         true,
-		Definition:      defJSON,
-		DestinationForm: "bailout_form",
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		ID:               id,
+		UserID:           userID,
+		Name:             name,
+		Description:      "Test bail",
+		Enabled:          true,
+		Definition:       defJSON,
+		DestinationForm:  "bailout_form",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 }
 
@@ -230,15 +230,15 @@ func TestExecutor_Run_ContinuesOnBailError(t *testing.T) {
 	// First bail will fail (invalid definition)
 	badDef := []byte(`{"invalid": "json"}`)
 	badBail := &db.Bail{
-		ID:              bailID1,
-		SurveyID:        uuid.New(),
-		Name:            "bad_bail",
-		Description:     "This will fail",
-		Enabled:         true,
-		Definition:      badDef,
-		DestinationForm: "bailout_form",
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		ID:               bailID1,
+		UserID:           uuid.New(),
+		Name:             "bad_bail",
+		Description:      "This will fail",
+		Enabled:          true,
+		Definition:       badDef,
+		DestinationForm:  "bailout_form",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 
 	// Second bail is good
