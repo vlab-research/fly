@@ -11,6 +11,7 @@ router
   .use('/facebook', require('./facebook'))
   .use('/auth', require('./auth/auth.routes'))
   .use('/surveys/:surveyId/bails', require('./bails'))
+  .use('/surveys/:surveyName/states', require('./states'))
   .get('/surveys/:surveyId/bail-events', bailsController.validateSurveyAccess, bailsController.getSurveyEvents);
 
 module.exports = router;

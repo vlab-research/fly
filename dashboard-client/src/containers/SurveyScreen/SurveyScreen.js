@@ -1,13 +1,15 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import {
-  Switch, Route, useRouteMatch, Link
+  Switch, Route, useRouteMatch, useLocation, useHistory, Link, Redirect
 } from 'react-router-dom';
-import { Table, Spin } from 'antd';
+import { Table, Spin, Tabs } from 'antd';
 import './SurveyScreen.css';
-import { FormScreen } from '..';
+import { FormScreen, StatesSummary, StatesList, StateDetail } from '..';
 import { groupBy } from '../../helpers';
 import { CreateBtn } from '../../components/UI';
+
+const { TabPane } = Tabs;
 
 const Survey = ({ forms, selected }) => {
   const nameLookup = Object.fromEntries(forms.map(f => [f.id, f.prettyName]));
@@ -53,7 +55,7 @@ const Survey = ({ forms, selected }) => {
     render: text => (`${text.toLocaleDateString()} - ${text.toLocaleTimeString()}`),
   };
 
-  const ActionLink = (text, record) => (<Link to={`create?from=${record.id}`}> new version </Link>);
+  const ActionLink = (text, record) => (<Link to={`/surveys/create?from=${record.id}`}> new version </Link>);
 
   columns = [...columns,
   { title: 'translation', dataIndex: 'translation_conf', render: (text, record) => getTranslationInfo(record) },
@@ -85,9 +87,6 @@ const Survey = ({ forms, selected }) => {
       <div className="survey-table">
         <div className="buttons">
           <CreateBtn to={`/surveys/create?survey_name=${encodeURIComponent(selected)}`}> NEW FORM </CreateBtn>
-          <span className="download-buttons">
-            <CreateBtn to={`/exports/create?survey_name=${encodeURIComponent(selected)}`}> EXPORT </CreateBtn>
-          </span>
         </div>
         <Table
           columns={columns}
@@ -100,19 +99,58 @@ const Survey = ({ forms, selected }) => {
   );
 };
 
-
+const ExportPanel = ({ selected }) => (
+  <div style={{ padding: '24px 0' }}>
+    <CreateBtn to={`/exports/create?survey_name=${encodeURIComponent(selected)}`}> EXPORT </CreateBtn>
+  </div>
+);
 
 const SurveyScreen = ({ forms, selected }) => {
   const match = useRouteMatch();
+  const location = useLocation();
+  const history = useHistory();
+
+  const getActiveTab = () => {
+    const path = location.pathname.slice(match.url.length);
+    if (path.startsWith('/monitor')) return 'monitor';
+    if (path.startsWith('/export')) return 'export';
+    return 'edit';
+  };
+
+  const handleTabChange = (key) => {
+    history.push(`${match.url}/${key}`);
+  };
 
   return (
     <div>
+      <Tabs activeKey={getActiveTab()} onChange={handleTabChange}>
+        <TabPane tab="Edit" key="edit" />
+        <TabPane tab="Monitor" key="monitor" />
+        <TabPane tab="Export" key="export" />
+      </Tabs>
+
       <Switch>
-        <Route exact path={match.path}>
+        <Redirect exact from={match.path} to={`${match.url}/edit`} />
+
+        <Route exact path={`${match.path}/edit`}>
           <Survey forms={forms} selected={selected} />
         </Route>
-        <Route exact path={`${match.path}/form/:surveyid`}> 
+        <Route exact path={`${match.path}/edit/form/:surveyid`}>
           <FormScreen forms={forms} />
+        </Route>
+
+        <Route exact path={`${match.path}/monitor`}>
+          <StatesSummary surveyName={selected} />
+        </Route>
+        <Route exact path={`${match.path}/monitor/list`}>
+          <StatesList surveyName={selected} />
+        </Route>
+        <Route exact path={`${match.path}/monitor/:userid`}>
+          <StateDetail surveyName={selected} backPath={`${match.url}/monitor/list`} />
+        </Route>
+
+        <Route exact path={`${match.path}/export`}>
+          <ExportPanel selected={selected} />
         </Route>
       </Switch>
     </div>
@@ -124,6 +162,9 @@ Survey.propTypes = {
   selected: PropTypes.string.isRequired,
 };
 
+ExportPanel.propTypes = {
+  selected: PropTypes.string.isRequired,
+};
 
 SurveyScreen.propTypes = {
   forms: PropTypes.arrayOf(PropTypes.object).isRequired,
