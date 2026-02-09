@@ -6,3 +6,7 @@ cockroachdb:
 
 kakfka:
   enabled: true
+
+exodus:
+  api:
+    enabled: true

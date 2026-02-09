@@ -15,6 +15,9 @@ const Navbar = ({ auth }) => {
         <Link to="/surveys">Surveys</Link>
       </Menu.Item>
       <Menu.Item>
+        <Link to="/bails">Bails</Link>
+      </Menu.Item>
+      <Menu.Item>
         <Link to="/exports">Exports</Link>
       </Menu.Item>
       <Menu.Item style={{ float: 'right' }}>

@@ -3,8 +3,9 @@ import React from 'react';
 import { Router, Route } from 'react-router-dom';
 import { Layout } from 'antd';
 import {
-  App, LoginScreen, Surveys, ApiKeys, Exports, CreateExport
+  App, LoginScreen, Surveys, ApiKeys, Exports, CreateExport,
 } from './containers';
+import { BailSystems, BailForm, BailEvents } from './containers/BailSystems';
 import { PrivateRoute, Spinner } from './components';
 import { TypeformCreateAuth } from './components/TypeformCreate/TypeformCreate';
 import { Auth, History } from './services';
@@ -33,6 +34,10 @@ const Root = () => (
       <PrivateRoute exact path="/connect/secrets" component={Secrets} auth={Auth} />
       <PrivateRoute exact path="/connect/api-keys" component={ApiKeys} auth={Auth} />
       <PrivateRoute path="/surveys/:survey?" component={Surveys} auth={Auth} />
+      <PrivateRoute exact path="/surveys/:survey/bails/:bailId/events" component={BailEvents} auth={Auth} />
+      <PrivateRoute exact path="/surveys/:survey/bails/:bailId/edit" component={BailForm} auth={Auth} />
+      <PrivateRoute exact path="/surveys/:survey/bails/create" component={BailForm} auth={Auth} />
+      <PrivateRoute exact path="/surveys/:survey/bails" component={BailSystems} auth={Auth} />
       <PrivateRoute exact path="/exports/create" component={CreateExport} auth={Auth} />
       <PrivateRoute exact path="/exports" component={Exports} auth={Auth} />
       <Route exact path="/login" render={props => <LoginScreen {...props} auth={Auth} />} />

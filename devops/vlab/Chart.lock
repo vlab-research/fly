@@ -29,6 +29,9 @@ dependencies:
 - name: exporter
   repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.1.0
+- name: exodus
+  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+  version: 0.1.0
 - name: naughtybot
   repository: https://vlab-research.github.io/fly
   version: 0.0.1
@@ -47,5 +50,5 @@ dependencies:
 - name: redis
   repository: https://charts.bitnami.com/bitnami
   version: 18.0.0
-digest: sha256:318f05692f021fdf84774dcac3bea5419c6e82bd01a51981f816aa19e84a1ae0
-generated: "2025-07-23T01:04:08.930371286-04:00"
+digest: sha256:7f67d6b31e7de5157a7d885502c745dfdc3b202b12249be18c41c1b1d82749bc
+generated: "2026-02-08T23:51:04.562943332-05:00"
