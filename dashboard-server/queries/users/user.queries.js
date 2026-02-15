@@ -3,7 +3,7 @@
 async function create({ email }) {
   const CREATE_ONE = `INSERT INTO users(email)
        values($1)
-       ON CONFLICT(email) DO NOTHING
+       ON CONFLICT(email) DO UPDATE SET email=EXCLUDED.email
        RETURNING *`;
   const values = [email];
   const { rows } = await this.query(CREATE_ONE, values);
