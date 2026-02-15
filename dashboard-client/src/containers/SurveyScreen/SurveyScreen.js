@@ -209,6 +209,11 @@ ExportPanel.propTypes = {
   selected: PropTypes.string.isRequired,
 };
 
+MonitorSection.propTypes = {
+  surveyName: PropTypes.string.isRequired,
+  match: PropTypes.object.isRequired,
+};
+
 SurveyScreen.propTypes = {
   forms: PropTypes.arrayOf(PropTypes.object).isRequired,
   selected: PropTypes.string.isRequired,
