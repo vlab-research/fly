@@ -30,7 +30,7 @@ async function summary(shortcodes) {
   `;
 
   const { rows } = await this.query(query, [shortcodes]);
-  return rows;
+  return { summary: rows };
 }
 
 /**
