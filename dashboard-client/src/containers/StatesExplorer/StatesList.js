@@ -1,24 +1,36 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { useHistory } from 'react-router-dom';
+import { useHistory, useLocation } from 'react-router-dom';
 import { Card, Table, Tag, Input, Select, Button, Row, Col, message } from 'antd';
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 
 const { Option } = Select;
 
+const VALID_STATES = new Set([
+  'START', 'RESPONDING', 'QOUT', 'END',
+  'BLOCKED', 'ERROR', 'WAIT_EXTERNAL_EVENT', 'USER_BLOCKED',
+]);
+
 const StatesList = ({ surveyName }) => {
   const history = useHistory();
+  const location = useLocation();
   const [states, setStates] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Filter state
-  const [filters, setFilters] = useState({
-    state: null,
-    error_tag: '',
-    search: '',
-  });
+  // Read initial filters from URL query params (for drill-down from Summary)
+  const getInitialFilters = () => {
+    const params = new URLSearchParams(location.search);
+    const stateParam = params.get('state');
+    return {
+      state: (stateParam && VALID_STATES.has(stateParam)) ? stateParam : null,
+      error_tag: params.get('error_tag') || '',
+      search: params.get('search') || '',
+    };
+  };
+
+  const [filters, setFilters] = useState(getInitialFilters);
 
   // Pagination state
   const [pagination, setPagination] = useState({
@@ -81,6 +93,8 @@ const StatesList = ({ surveyName }) => {
       current: 1,
       pageSize: 50,
     });
+    // Clear URL query params so they don't persist after reset
+    history.replace(location.pathname);
   };
 
   const handleRowClick = (record) => {

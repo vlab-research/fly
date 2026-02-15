@@ -1,10 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { Link, useRouteMatch } from 'react-router-dom';
 import { Card, Table, Tag, Statistic, Row, Col, message } from 'antd';
 import api from '../../services/api';
 import { Loading } from '../../components/UI';
 
+const linkStyle = {
+  display: 'block',
+  textDecoration: 'none',
+  color: 'inherit',
+  cursor: 'pointer',
+  borderRadius: 4,
+  padding: 4,
+  margin: -4,
+  transition: 'background-color 0.2s',
+};
+
 const StatesSummary = ({ surveyName }) => {
+  const match = useRouteMatch();
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -71,7 +84,14 @@ const StatesSummary = ({ surveyName }) => {
       dataIndex: 'count',
       key: 'count',
       align: 'right',
-      render: (count) => parseInt(count, 10).toLocaleString(),
+      render: (count, record) => (
+        <Link
+          to={`${match.url}/list?state=${encodeURIComponent(record.current_state)}`}
+          style={{ color: '#1890ff' }}
+        >
+          {parseInt(count, 10).toLocaleString()}
+        </Link>
+      ),
       sorter: (a, b) => parseInt(a.count, 10) - parseInt(b.count, 10),
       defaultSortOrder: 'descend',
     },
@@ -82,21 +102,25 @@ const StatesSummary = ({ surveyName }) => {
       <Card style={{ marginBottom: 24 }}>
         <Row gutter={16}>
           <Col span={6}>
-            <Statistic
-              title="Total Participants"
-              value={totalParticipants}
-            />
+            <Link to={`${match.url}/list`} style={linkStyle}>
+              <Statistic
+                title="Total Participants"
+                value={totalParticipants}
+              />
+            </Link>
           </Col>
           {Object.entries(stateCounts).map(([state, count]) => (
             <Col span={6} key={state}>
-              <Statistic
-                title={
-                  <span>
-                    {state} <Tag color={stateColors[state] || 'default'} />
-                  </span>
-                }
-                value={count}
-              />
+              <Link to={`${match.url}/list?state=${encodeURIComponent(state)}`} style={linkStyle}>
+                <Statistic
+                  title={
+                    <span>
+                      {state} <Tag color={stateColors[state] || 'default'} />
+                    </span>
+                  }
+                  value={count}
+                />
+              </Link>
             </Col>
           ))}
         </Row>

@@ -105,6 +105,55 @@ const ExportPanel = ({ selected }) => (
   </div>
 );
 
+const MonitorSection = ({ surveyName, match }) => {
+  const location = useLocation();
+  const history = useHistory();
+
+  const getActiveSubTab = () => {
+    const path = location.pathname;
+    if (path.endsWith('/list') || path.includes('/list?')) return 'list';
+    // Detail pages (monitor/:userid) should highlight the "list" tab
+    const monitorBase = `${match.url}/monitor`;
+    const remainder = path.slice(monitorBase.length);
+    if (remainder && remainder !== '/' && !remainder.startsWith('/list')) return 'list';
+    return 'summary';
+  };
+
+  const handleSubTabChange = (key) => {
+    if (key === 'summary') {
+      history.push(`${match.url}/monitor`);
+    } else {
+      history.push(`${match.url}/monitor/list`);
+    }
+  };
+
+  return (
+    <div>
+      <Tabs
+        activeKey={getActiveSubTab()}
+        onChange={handleSubTabChange}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <TabPane tab="Summary" key="summary" />
+        <TabPane tab="Respondents" key="list" />
+      </Tabs>
+
+      <Switch>
+        <Route exact path={`${match.path}/monitor`}>
+          <StatesSummary surveyName={surveyName} />
+        </Route>
+        <Route exact path={`${match.path}/monitor/list`}>
+          <StatesList surveyName={surveyName} />
+        </Route>
+        <Route exact path={`${match.path}/monitor/:userid`}>
+          <StateDetail surveyName={surveyName} backPath={`${match.url}/monitor/list`} />
+        </Route>
+      </Switch>
+    </div>
+  );
+};
+
 const SurveyScreen = ({ forms, selected }) => {
   const match = useRouteMatch();
   const location = useLocation();
@@ -139,14 +188,8 @@ const SurveyScreen = ({ forms, selected }) => {
           <FormScreen forms={forms} />
         </Route>
 
-        <Route exact path={`${match.path}/monitor`}>
-          <StatesSummary surveyName={selected} />
-        </Route>
-        <Route exact path={`${match.path}/monitor/list`}>
-          <StatesList surveyName={selected} />
-        </Route>
-        <Route exact path={`${match.path}/monitor/:userid`}>
-          <StateDetail surveyName={selected} backPath={`${match.url}/monitor/list`} />
+        <Route path={`${match.path}/monitor`}>
+          <MonitorSection surveyName={selected} match={match} />
         </Route>
 
         <Route exact path={`${match.path}/export`}>
