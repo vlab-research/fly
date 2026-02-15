@@ -30,7 +30,12 @@ async function summary(shortcodes) {
   `;
 
   const { rows } = await this.query(query, [shortcodes]);
-  return { summary: rows };
+  // Ensure count is a number (pg driver may return it as string)
+  const summary = rows.map(row => ({
+    ...row,
+    count: parseInt(row.count, 10),
+  }));
+  return { summary };
 }
 
 /**

@@ -30,10 +30,10 @@ const StatesSummary = ({ surveyName }) => {
   if (loading) return <Loading>Loading states summary...</Loading>;
 
   // Compute aggregate stats
-  const totalParticipants = summary.reduce((sum, row) => sum + row.count, 0);
+  const totalParticipants = summary.reduce((sum, row) => sum + parseInt(row.count, 10), 0);
 
   const stateCounts = summary.reduce((acc, row) => {
-    acc[row.current_state] = (acc[row.current_state] || 0) + row.count;
+    acc[row.current_state] = (acc[row.current_state] || 0) + parseInt(row.count, 10);
     return acc;
   }, {});
 
@@ -71,7 +71,8 @@ const StatesSummary = ({ surveyName }) => {
       dataIndex: 'count',
       key: 'count',
       align: 'right',
-      sorter: (a, b) => a.count - b.count,
+      render: (count) => parseInt(count, 10).toLocaleString(),
+      sorter: (a, b) => parseInt(a.count, 10) - parseInt(b.count, 10),
       defaultSortOrder: 'descend',
     },
   ];
