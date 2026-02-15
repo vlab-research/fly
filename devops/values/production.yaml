@@ -18,7 +18,7 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 
-versionDashboard: &vdashboard v0.0.37
+versionDashboard: &vdashboard v0.0.42
 versionBotserver: &vbotserver v0.0.11
 versionReplybot: &vreplybot v0.0.178
 versionLinksniffer: &vlinksniffer v0.0.6
@@ -27,6 +27,7 @@ versionScribble: &vscribble v0.0.27
 versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.3.6
+versionExodus: &vexodus v0.1.0
 
 processingAlerts:
   - consumergroup: replybot
@@ -425,6 +426,8 @@ dashboard:
       value: *kb
     - name: KAFKA_EXPORTS_TOPIC
       value: *exportertopic
+    - name: EXODUS_API_URL
+      value: "http://gbv-exodus"
 
   resources:
     requests:
@@ -583,6 +586,44 @@ exporter:
       value: "3600000"
   envSecrets:
     - exporter
+
+exodus:
+  image:
+    repository: vlabresearch/exodus
+    tag: *vexodus
+    pullPolicy: IfNotPresent
+  env:
+  - name: CHATBASE_DATABASE
+    value: "chatroach"
+  - name: CHATBASE_USER
+    value: "chatroach"
+  - name: CHATBASE_PASSWORD
+    value: ""
+  - name: CHATBASE_HOST
+    value: *host
+  - name: CHATBASE_PORT
+    value: "26257"
+  - name: BOTSERVER_URL
+    value: "http://gbv-botserver/synthetic"
+  - name: DRY_RUN
+    value: "false"
+  - name: EXODUS_RATE_LIMIT
+    value: "1s"
+  - name: EXODUS_MAX_BAIL_USERS
+    value: "100000"
+  executor:
+    enabled: true
+    schedule: "* * * * *"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+  api:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
 
 cockroachdb:
   image:
