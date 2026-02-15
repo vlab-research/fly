@@ -23,9 +23,9 @@ const NestedContainer = styled.div`
 const CONDITION_TYPES = {
   form: { label: 'Form' },
   state: { label: 'State' },
+  error_code: { label: 'Error Code' },
+  current_question: { label: 'Current Question' },
   elapsed_time: { label: 'Elapsed Time' },
-  timeout: { label: 'Timeout' },
-  metadata: { label: 'Metadata' },
 };
 
 const STATE_OPTIONS = [
@@ -44,17 +44,17 @@ const SimpleCondition = ({ condition, onChange, onDelete }) => {
   const handleTypeChange = (newType) => {
     // Reset to default values for new type
     const newCondition = { type: newType };
-    if (newType === 'form' || newType === 'state') {
+    if (newType === 'form' || newType === 'state' || newType === 'error_code' || newType === 'current_question') {
       newCondition.value = '';
     } else if (newType === 'elapsed_time') {
-      newCondition.form = '';
-      newCondition.question_ref = '';
+      newCondition.since = {
+        event: 'response',
+        details: {
+          form: '',
+          question_ref: '',
+        },
+      };
       newCondition.duration = '1 week';
-    } else if (newType === 'timeout') {
-      newCondition.duration = '4 weeks';
-    } else if (newType === 'metadata') {
-      newCondition.key = '';
-      newCondition.value = '';
     }
     onChange(newCondition);
   };
@@ -107,18 +107,52 @@ const SimpleCondition = ({ condition, onChange, onDelete }) => {
           </Select>
         )}
 
+        {(type === 'error_code') && (
+          <Input
+            placeholder="Error code (e.g., TIMEOUT, NETWORK_ERROR)"
+            value={condition.value || ''}
+            onChange={(e) => handleFieldChange('value', e.target.value)}
+          />
+        )}
+
+        {(type === 'current_question') && (
+          <Input
+            placeholder="Question reference (e.g., consent, demographics)"
+            value={condition.value || ''}
+            onChange={(e) => handleFieldChange('value', e.target.value)}
+          />
+        )}
+
         {(type === 'elapsed_time') && (
           <>
             <Input
               placeholder="Form shortcode"
-              value={condition.form || ''}
-              onChange={(e) => handleFieldChange('form', e.target.value)}
+              value={(condition.since && condition.since.details && condition.since.details.form) || ''}
+              onChange={(e) => {
+                const newSince = {
+                  event: 'response',
+                  details: {
+                    ...(condition.since && condition.since.details),
+                    form: e.target.value,
+                  },
+                };
+                onChange({ ...condition, since: newSince });
+              }}
               addonBefore="Form"
             />
             <Input
               placeholder="Question reference"
-              value={condition.question_ref || ''}
-              onChange={(e) => handleFieldChange('question_ref', e.target.value)}
+              value={(condition.since && condition.since.details && condition.since.details.question_ref) || ''}
+              onChange={(e) => {
+                const newSince = {
+                  event: 'response',
+                  details: {
+                    ...(condition.since && condition.since.details),
+                    question_ref: e.target.value,
+                  },
+                };
+                onChange({ ...condition, since: newSince });
+              }}
               addonBefore="Question"
             />
             <Input
@@ -126,32 +160,6 @@ const SimpleCondition = ({ condition, onChange, onDelete }) => {
               value={condition.duration || ''}
               onChange={(e) => handleFieldChange('duration', e.target.value)}
               addonBefore="Duration"
-            />
-          </>
-        )}
-
-        {(type === 'timeout') && (
-          <Input
-            placeholder="e.g., 4 weeks, 30 days"
-            value={condition.duration || ''}
-            onChange={(e) => handleFieldChange('duration', e.target.value)}
-            addonBefore="Since last response"
-          />
-        )}
-
-        {(type === 'metadata') && (
-          <>
-            <Input
-              placeholder="Metadata key"
-              value={condition.key || ''}
-              onChange={(e) => handleFieldChange('key', e.target.value)}
-              addonBefore="Key"
-            />
-            <Input
-              placeholder="Expected value"
-              value={condition.value || ''}
-              onChange={(e) => handleFieldChange('value', e.target.value)}
-              addonBefore="Value"
             />
           </>
         )}
@@ -171,11 +179,11 @@ let ConditionNode;
 
 // Compound condition editor (AND/OR)
 const CompoundCondition = ({ condition, onChange, onDelete, depth = 0 }) => {
-  const operator = condition.operator || 'and';
+  const operator = condition.op || 'and';
   const children = condition.vars || [];
 
   const handleOperatorChange = (newOp) => {
-    onChange({ ...condition, operator: newOp });
+    onChange({ ...condition, op: newOp });
   };
 
   const handleChildChange = (index, newChild) => {
@@ -196,7 +204,7 @@ const CompoundCondition = ({ condition, onChange, onDelete, depth = 0 }) => {
 
   const handleAddCondition = (isCompound) => {
     const newChild = isCompound
-      ? { operator: 'and', vars: [{ type: 'form', value: '' }] }
+      ? { op: 'and', vars: [{ type: 'form', value: '' }] }
       : { type: 'form', value: '' };
     onChange({ ...condition, vars: [...children, newChild] });
   };
@@ -272,8 +280,8 @@ CompoundCondition.propTypes = {
 
 // Dispatcher that renders the right component based on condition type
 ConditionNode = ({ condition, onChange, onDelete, depth = 0 }) => {
-  // Check if it's a compound condition (has operator)
-  if (condition.operator) {
+  // Check if it's a compound condition (has op field)
+  if (condition.op) {
     return (
       <CompoundCondition
         condition={condition}
@@ -315,7 +323,7 @@ const ConditionBuilder = ({ value, onChange }) => {
     // Wrap current condition in AND
     if (onChange) {
       onChange({
-        operator: 'and',
+        op: 'and',
         vars: [condition],
       });
     }
@@ -329,7 +337,7 @@ const ConditionBuilder = ({ value, onChange }) => {
         onDelete={() => handleChange({ type: 'form', value: '' })}
       />
 
-      {!condition.operator && (
+      {!condition.op && (
         <Button
           type="dashed"
           onClick={handleConvertToCompound}
