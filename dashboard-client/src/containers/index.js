@@ -1,5 +1,4 @@
 import App from './App';
-import Exports from './Exports';
 import LoginScreen from './LoginScreen';
 import SurveyScreen from './SurveyScreen';
 import FormScreen from './FormScreen';
@@ -21,7 +20,6 @@ import { StatesSummary, StatesList, StateDetail } from './StatesExplorer';
 
 export {
   App,
-  Exports,
   LoginScreen,
   Surveys,
   SurveyScreen,

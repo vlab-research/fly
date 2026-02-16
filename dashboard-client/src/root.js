@@ -3,7 +3,7 @@ import React from 'react';
 import { Router, Route } from 'react-router-dom';
 import { Layout } from 'antd';
 import {
-  App, LoginScreen, Surveys, ApiKeys, Exports, CreateExport, CreateChatLogExport, CreateFullMessagesExport,
+  App, LoginScreen, Surveys, ApiKeys, CreateExport, CreateChatLogExport, CreateFullMessagesExport,
 } from './containers';
 import { BailSystems, BailForm, BailEvents } from './containers/BailSystems';
 import { PrivateRoute, Spinner } from './components';
@@ -41,7 +41,6 @@ const Root = () => (
       <PrivateRoute exact path="/exports/create-full-messages" component={CreateFullMessagesExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create-chat-log" component={CreateChatLogExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create" component={CreateExport} auth={Auth} />
-      <PrivateRoute exact path="/exports" component={Exports} auth={Auth} />
       <Route exact path="/login" render={props => <LoginScreen {...props} auth={Auth} />} />
       <Route
         path="/auth"
