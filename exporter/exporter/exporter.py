@@ -60,9 +60,9 @@ def format_data(
     )
 
 
-def export_data(cnf, user, survey, options: ExportOptions):
+def export_data(cnf, export_id, user, survey, options: ExportOptions):
     log.info(f"starting csv export for survey: {survey}")
-    set_export_status(cnf, user, survey, status="Started")
+    set_export_status(cnf, export_id, status="Started")
     storage_backend = storage.get_storage_backend(file_path=f"exports/{survey}.csv")
 
     try:
@@ -76,21 +76,24 @@ def export_data(cnf, user, survey, options: ExportOptions):
         # store as csv on configured backend
         storage_backend.save_to_csv(dd)
         url = storage_backend.generate_link()
-        set_export_status(cnf, user, survey, url, status="Finished")
+        set_export_status(cnf, export_id, url, status="Finished")
         log.info(f"finished csv export for survey: {survey}")
     except Exception as e:
-        set_export_status(cnf, user, survey, status="Failed")
+        set_export_status(cnf, export_id, status="Failed")
         raise e
 
 
-def set_export_status(cnf, user, survey, url="Not Found", status="Failed"):
-    q = f"""
-        INSERT INTO export_status (survey_id, user_id, status, export_link)
-		VALUES (%s, %s, %s, %s)
-        ON CONFLICT (user_id, survey_id)
-        DO UPDATE SET (status, export_link) = (excluded.status, excluded.export_link)
+def set_export_status(cnf, export_id, url="Not Found", status="Failed"):
     """
-    execute(cnf, q, vals=(survey, user, status, url))
+    Update the export_status row identified by export_id.
+    The row was already INSERTed by the dashboard-server with status='Started'.
+    """
+    q = """
+        UPDATE export_status
+        SET status = %s, export_link = %s
+        WHERE id = %s
+    """
+    execute(cnf, q, vals=(status, url, export_id))
 
 
 def get_responses(cnf, user, survey):
@@ -142,6 +145,63 @@ def get_form_data(cnf, user, survey):
                metadata::string
         FROM t
         ORDER BY shortcode, created
+    """
+    dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
+    return pd.DataFrame(dat)
+
+
+def export_chat_log(cnf, export_id, user, survey, chat_log_options):
+    """
+    Export raw chat log data as CSV for a survey.
+    No preprocessing -- just a direct dump of the chat_log table.
+    Optional columns (raw_payload, metadata) are controlled by chat_log_options.
+    """
+    log.info(f"starting chat log export for survey: {survey}")
+    set_export_status(cnf, export_id, status="Started")
+    storage_backend = storage.get_storage_backend(
+        file_path=f"exports/{survey}_chat_log.csv"
+    )
+
+    try:
+        chat_data = get_chat_log(cnf, user, survey, chat_log_options)
+
+        if chat_data.empty:
+            log.warning(f"no chat log data found for survey: {survey}")
+
+        storage_backend.save_to_csv(chat_data)
+        url = storage_backend.generate_link()
+        set_export_status(cnf, export_id, url, status="Finished")
+        log.info(f"finished chat log export for survey: {survey}")
+    except Exception as e:
+        set_export_status(cnf, export_id, status="Failed")
+        raise e
+
+
+def get_chat_log(cnf, user, survey, chat_log_options):
+    """
+    Returns chat log data for a survey as a dataframe.
+    Base columns are always included. metadata and raw_payload
+    are conditionally appended based on chat_log_options.
+    """
+    base_columns = (
+        "cl.userid, cl.pageid, cl.timestamp::string, cl.direction, "
+        "cl.content, cl.question_ref, cl.shortcode, cl.surveyid::string, "
+        "cl.message_type"
+    )
+
+    optional_columns = ""
+    if chat_log_options.include_metadata:
+        optional_columns += ", cl.metadata::string"
+    if chat_log_options.include_raw_payload:
+        optional_columns += ", cl.raw_payload::string"
+
+    q = f"""
+        SELECT {base_columns}{optional_columns}
+        FROM chat_log cl
+        INNER JOIN surveys s ON cl.shortcode = s.shortcode
+        INNER JOIN users u ON s.userid = u.id
+        WHERE u.email = %s AND s.survey_name = %s
+        ORDER BY (cl.userid, cl.timestamp)
     """
     dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
     return pd.DataFrame(dat)

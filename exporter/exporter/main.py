@@ -5,7 +5,7 @@ from confluent_kafka import Consumer
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from .exporter import ExportOptions, export_data
+from .exporter import ExportOptions, export_data, export_chat_log
 from .log import log
 
 # load the env file into the environment
@@ -19,11 +19,19 @@ KAFKA_MAX_POLL_INTERVAL = os.getenv("KAFKA_MAX_POLL_INTERVAL", "1200000")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+class ChatLogExportOptions(BaseModel):
+    include_raw_payload: bool = False
+    include_metadata: bool = False
+
+
 class KafkaMessage(BaseModel):
     event: str
     survey: str
     user: str
-    options: ExportOptions
+    export_id: str
+    source: str = "responses"
+    options: ExportOptions = ExportOptions()
+    chat_log_options: ChatLogExportOptions = ChatLogExportOptions()
 
 
 def app():
@@ -69,8 +77,11 @@ def process(cnf, data: KafkaMessage):
     """
     The main message processor
     """
-    log.info(f"processing export for study {data.survey}")
-    export_data(cnf, data.user, data.survey, data.options)
+    log.info(f"processing {data.source} export for study {data.survey} (id={data.export_id})")
+    if data.source == "chat_log":
+        export_chat_log(cnf, data.export_id, data.user, data.survey, data.chat_log_options)
+    else:
+        export_data(cnf, data.export_id, data.user, data.survey, data.options)
 
 
 def setup_kafka_consumer():

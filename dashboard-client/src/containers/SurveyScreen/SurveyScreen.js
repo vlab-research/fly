@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import {
   Switch, Route, useRouteMatch, useLocation, useHistory, Link, Redirect
@@ -8,6 +8,7 @@ import './SurveyScreen.css';
 import { FormScreen, StatesSummary, StatesList, StateDetail } from '..';
 import { groupBy } from '../../helpers';
 import { CreateBtn } from '../../components/UI';
+import fetchExportsBySurvey from '../../services/api/fetchExportsBySurvey';
 
 const { TabPane } = Tabs;
 
@@ -99,10 +100,10 @@ const Survey = ({ forms, selected }) => {
   );
 };
 
-const ExportPanel = ({ selected }) => (
-  <div style={{ padding: '24px 0' }}>
-    <CreateBtn to={`/exports/create?survey_name=${encodeURIComponent(selected)}`}> EXPORT </CreateBtn>
-  </div>
+const DownloadLink = (text) => (
+  text && text !== 'Not Found'
+    ? <a href={text} target="_blank" rel="noopener noreferrer">DOWNLOAD</a>
+    : null
 );
 
 const MonitorSection = ({ surveyName, match }) => {
@@ -150,6 +151,47 @@ const MonitorSection = ({ surveyName, match }) => {
           <StateDetail surveyName={surveyName} backPath={`${match.url}/monitor/list`} />
         </Route>
       </Switch>
+    </div>
+  );
+};
+
+const exportColumns = [
+  { title: 'Source', dataIndex: 'source', render: (text) => text === 'chat_log' ? 'Chat Log' : 'Responses' },
+  { title: 'Status', dataIndex: 'status' },
+  { title: 'Time', dataIndex: 'updated' },
+  { title: 'Download', dataIndex: 'export_link', render: DownloadLink },
+];
+
+const ExportPanel = ({ selected }) => {
+  const [exports, setExports] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchExportsBySurvey(selected)
+      .then(data => setExports(data || []))
+      .catch(err => console.error(err))
+      .finally(() => setLoading(false));
+  }, [selected]);
+
+  return (
+    <div style={{ padding: '24px 0' }}>
+      <div style={{ marginBottom: 24 }}>
+        <CreateBtn to={`/exports/create?survey_name=${encodeURIComponent(selected)}`}>
+          EXPORT RESPONSES
+        </CreateBtn>
+        <CreateBtn to={`/exports/create-chat-log?survey_name=${encodeURIComponent(selected)}`} style={{ marginLeft: 16 }}>
+          EXPORT CHAT LOG
+        </CreateBtn>
+      </div>
+
+      <Spin spinning={loading}>
+        <Table
+          columns={exportColumns}
+          dataSource={exports}
+          rowKey="id"
+          pagination={{ pageSize: 10 }}
+        />
+      </Spin>
     </div>
   );
 };

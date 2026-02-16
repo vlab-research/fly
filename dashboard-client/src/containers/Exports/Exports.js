@@ -11,8 +11,10 @@ export const Export = React.createContext(null);
 const Exports = () => {
 
   const DownloadLink = (text, record) => (<Link to={{pathname: text }} target="_blank"> DOWNLOAD </Link>);
+  // Note: data comes back newest-first from the server (ORDER BY updated DESC)
   let columns = [
     { title: 'Survey', dataIndex: 'survey_id' },
+    { title: 'Source', dataIndex: 'source', render: (text) => text === 'chat_log' ? 'Chat Log' : 'Responses' },
     { title: 'User', dataIndex: 'user_id' },
     { title: 'Time Exported', dataIndex: 'updated' },
     { title: 'Status', dataIndex: 'status' },
@@ -23,12 +25,12 @@ const Exports = () => {
   if (exports === null) {
     return <Loading> (loading exports) </Loading>;
   }
-    console.log(exports)
   return (
     <Layout style={{ height: '100%' }}>
       <Export.Provider value={{ setExports }}>
         <Content style={{ padding: '30px' }}>
         <Table
+          rowKey="id"
           columns={columns}
           dataSource={exports}
           pagination={{ pageSize: 20 }}

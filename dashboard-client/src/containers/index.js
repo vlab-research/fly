@@ -6,6 +6,7 @@ import FormScreen from './FormScreen';
 import FormConfig from './FormConfig';
 import CreateForm from './CreateForm';
 import CreateExport from './CreateExport';
+import CreateChatLogExport from './CreateChatLogExport';
 import Surveys from './Surveys';
 import DataScreen from './Data';
 import StartTimeReport from './StartTimeReport';
@@ -27,6 +28,7 @@ export {
   FormConfig,
   CreateForm,
   CreateExport,
+  CreateChatLogExport,
   DataScreen,
   StartTimeReport,
   DurationReport,
