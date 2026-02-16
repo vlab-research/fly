@@ -221,26 +221,29 @@ const StateDetail = ({ surveyName, backPath }) => {
             headStyle={{ backgroundColor: '#fffbe6' }}
           >
             <Descriptions bordered column={1}>
-              {stateJson.wait.event && (
-                <Descriptions.Item label="Expected Event">
-                  {stateJson.wait.event}
+              {stateJson.wait.type && (
+                <Descriptions.Item label="Wait Type">
+                  <Tag color="orange">{stateJson.wait.type}</Tag>
                 </Descriptions.Item>
               )}
-              {stateJson.wait.timeout && (
-                <Descriptions.Item label="Timeout">
-                  {new Date(stateJson.wait.timeout).toLocaleString()}
+              {stateJson.wait.value && (
+                <Descriptions.Item label="Value">
+                  {typeof stateJson.wait.value === 'object' ? (
+                    <Descriptions bordered column={1} size="small">
+                      {Object.entries(stateJson.wait.value).map(([key, val]) => (
+                        <Descriptions.Item label={key} key={key}>
+                          {String(val)}
+                        </Descriptions.Item>
+                      ))}
+                    </Descriptions>
+                  ) : (
+                    String(stateJson.wait.value)
+                  )}
                 </Descriptions.Item>
               )}
-              {stateJson.wait.reason && (
-                <Descriptions.Item label="Reason">
-                  {stateJson.wait.reason}
-                </Descriptions.Item>
-              )}
-              {stateJson.wait.metadata && (
-                <Descriptions.Item label="Metadata">
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-                    {JSON.stringify(stateJson.wait.metadata, null, 2)}
-                  </pre>
+              {stateJson.waitStart && (
+                <Descriptions.Item label="Wait Started">
+                  {new Date(stateJson.waitStart).toLocaleString()}
                 </Descriptions.Item>
               )}
             </Descriptions>
