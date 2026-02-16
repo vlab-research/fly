@@ -38,6 +38,9 @@ class BaseStorageBackend(BaseSettings):
         log.info("BaseStorage only prints:")
         log.info(df)
 
+    def save_file(self, path: str):
+        log.info(f"BaseStorage save_file: {path}")
+
     def generate_link(self):
         return "Base backend fake link"
 
@@ -56,6 +59,11 @@ class GoogleStorageBackend(BaseStorageBackend):
             df.to_csv(index=False), "text/csv"
         )
 
+    def save_file(self, path: str):
+        client = storage.Client()
+        bucket = client.get_bucket(self.bucket_name)
+        bucket.blob(self.file_path).upload_from_filename(path, content_type="text/csv")
+
 
 class S3StorageBackend(BaseStorageBackend):
     bucket_name: str = Field(..., env="S3_BUCKET_NAME")
@@ -72,7 +80,7 @@ class S3StorageBackend(BaseStorageBackend):
             secure=self.ssl_enabled,
         )
 
-    def save_to_csv(self, df: pd.DataFrame):
+    def _ensure_client(self):
         if str(self.ssl_enabled).upper() == "FALSE":
             self.ssl_enabled = False
         else:
@@ -80,18 +88,31 @@ class S3StorageBackend(BaseStorageBackend):
 
         client = self.get_client()
 
-        # Check if bucket exists
         found = client.bucket_exists(self.bucket_name)
         if not found:
             client.make_bucket(self.bucket_name)
 
+        return client
+
+    def save_to_csv(self, df: pd.DataFrame):
+        client = self._ensure_client()
+
         csv = df.to_csv(index=False).encode("utf-8")
-        # Put the object into bucket
-        res = client.put_object(
+        client.put_object(
             bucket_name=self.bucket_name,
             object_name=self.file_path,
             length=len(csv),
             data=BytesIO(csv),
+            content_type="text/csv",
+        )
+
+    def save_file(self, path: str):
+        client = self._ensure_client()
+
+        client.fput_object(
+            bucket_name=self.bucket_name,
+            object_name=self.file_path,
+            file_path=path,
             content_type="text/csv",
         )
 

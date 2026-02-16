@@ -1,3 +1,8 @@
+import csv
+import json
+import os
+import tempfile
+
 import pandas as pd
 from pydantic import BaseModel
 from toolz import pipe
@@ -6,6 +11,147 @@ from vlab_prepro import Preprocessor
 from . import storage
 from .db import query, execute
 from .log import log
+
+
+# --- Full Messages Export: event classification and streaming ---
+
+EVENT_GROUPS = {
+    "conversation": ["echo", "text", "quick_reply", "postback"],
+    "referrals": ["referral", "optin"],
+    "bails": ["bailout"],
+    "payments": ["payment", "repeat_payment"],
+    "external_tracking": ["moviehouse", "linksniffer", "external_other"],
+    "retries": ["redo", "follow_up"],
+    "system": ["machine_report", "platform_response", "block_user", "unblock"],
+    "other": ["watermark", "reaction", "media", "handover", "timeout"],
+}
+
+
+def expand_groups(groups):
+    types = set()
+    for g in groups:
+        types.update(EVENT_GROUPS.get(g, []))
+    return types
+
+
+def classify_event(msg):
+    source = msg.get("source")
+    if source == "messenger":
+        m = msg.get("message", {})
+        if m.get("is_echo"):
+            return "echo"
+        if m.get("quick_reply"):
+            return "quick_reply"
+        if "text" in m:
+            return "text"
+        if m.get("attachments"):
+            return "media"
+        if msg.get("postback"):
+            return "postback"
+        if msg.get("referral"):
+            return "referral"
+        if msg.get("read") or msg.get("delivery"):
+            return "watermark"
+        if msg.get("reaction"):
+            return "reaction"
+        if msg.get("optin"):
+            return "optin"
+        if msg.get("pass_thread_control"):
+            return "handover"
+        return "unknown_messenger"
+    elif source == "synthetic":
+        etype = msg.get("event", {}).get("type", "")
+        if etype == "external":
+            subtype = msg.get("event", {}).get("value", {}).get("type", "")
+            if subtype.startswith("moviehouse:"):
+                return "moviehouse"
+            if subtype.startswith("linksniffer:"):
+                return "linksniffer"
+            if subtype.startswith("payment:"):
+                return "payment"
+            return "external_other"
+        if etype in (
+            "bailout", "redo", "follow_up", "repeat_payment", "block_user",
+            "unblock", "platform_response", "machine_report", "timeout",
+        ):
+            return etype
+        return "unknown_synthetic"
+    return "unknown"
+
+
+def get_direction(event_type):
+    if event_type == "echo":
+        return "bot"
+    if event_type in ("text", "quick_reply", "postback", "referral", "optin", "media"):
+        return "user"
+    return "system"
+
+
+def extract_content(msg, event_type):
+    if event_type == "echo":
+        return msg.get("message", {}).get("text", "")
+    if event_type in ("text", "quick_reply"):
+        return msg.get("message", {}).get("text", "")
+    if event_type == "postback":
+        return msg.get("postback", {}).get("title", "")
+    if event_type == "referral":
+        return msg.get("referral", {}).get("ref", "")
+    if event_type == "media":
+        attachments = msg.get("message", {}).get("attachments", [])
+        if attachments:
+            return attachments[0].get("type", "attachment")
+        return "attachment"
+    if event_type in ("bailout", "redo", "follow_up", "repeat_payment",
+                      "block_user", "unblock", "timeout"):
+        return msg.get("event", {}).get("type", "")
+    if event_type == "machine_report":
+        return msg.get("event", {}).get("value", "")
+    if event_type == "platform_response":
+        value = msg.get("event", {}).get("value", {})
+        if isinstance(value, dict):
+            return value.get("error", value.get("message_id", ""))
+        return str(value)
+    return ""
+
+
+def extract_event_detail(msg, event_type):
+    if event_type in ("moviehouse", "linksniffer", "payment", "external_other"):
+        return msg.get("event", {}).get("value", {}).get("type", "")
+    return ""
+
+
+FULL_MESSAGES_COLUMNS = [
+    "userid", "timestamp", "source", "event_type",
+    "direction", "content", "event_detail",
+]
+
+FULL_MESSAGES_COLUMNS_WITH_RAW = FULL_MESSAGES_COLUMNS + ["raw_json"]
+
+
+def _iter_messages(raw_rows, allowed_types, include_raw_json):
+    for row in raw_rows:
+        raw = row["content"]
+        try:
+            msg = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        event_type = classify_event(msg)
+        if event_type not in allowed_types:
+            continue
+
+        out = {
+            "userid": row["userid"],
+            "timestamp": row["timestamp"],
+            "source": msg.get("source", "unknown"),
+            "event_type": event_type,
+            "direction": get_direction(event_type),
+            "content": extract_content(msg, event_type),
+            "event_detail": extract_event_detail(msg, event_type),
+        }
+        if include_raw_json:
+            out["raw_json"] = raw
+        yield out
 
 
 class ExportOptions(BaseModel):
@@ -148,6 +294,63 @@ def get_form_data(cnf, user, survey):
     """
     dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
     return pd.DataFrame(dat)
+
+
+def export_full_messages(cnf, export_id, user, survey, full_messages_options):
+    """
+    Export full message history for a survey as CSV.
+    Streams rows through a generator — never loads all messages into memory.
+    Event type filtering happens in the generator before rows hit disk.
+    """
+    log.info(f"starting full messages export for survey: {survey}")
+    set_export_status(cnf, export_id, status="Started")
+    storage_backend = storage.get_storage_backend(
+        file_path=f"exports/{survey}_full_messages.csv"
+    )
+
+    try:
+        allowed_types = expand_groups(full_messages_options.event_groups)
+        include_raw = full_messages_options.include_raw_json
+        columns = FULL_MESSAGES_COLUMNS_WITH_RAW if include_raw else FULL_MESSAGES_COLUMNS
+
+        q = """
+            SELECT m.userid, m.timestamp::string AS timestamp, m.content
+            FROM messages m
+            INNER JOIN (
+                SELECT DISTINCT userid
+                FROM responses
+                WHERE shortcode IN (
+                    SELECT shortcode FROM surveys
+                    WHERE survey_name = %s
+                    AND userid = (SELECT id FROM users WHERE email = %s)
+                )
+            ) r ON m.userid = r.userid
+            ORDER BY m.userid, m.timestamp ASC
+        """
+
+        raw_rows = query(cnf, q, vals=(survey, user), as_dict=True)
+        rows = _iter_messages(raw_rows, allowed_types, include_raw)
+
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, newline=""
+        )
+        try:
+            writer = csv.DictWriter(tmp, fieldnames=columns)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+            tmp.close()
+
+            storage_backend.save_file(tmp.name)
+        finally:
+            os.unlink(tmp.name)
+
+        url = storage_backend.generate_link()
+        set_export_status(cnf, export_id, url, status="Finished")
+        log.info(f"finished full messages export for survey: {survey}")
+    except Exception as e:
+        set_export_status(cnf, export_id, status="Failed")
+        raise e
 
 
 def export_chat_log(cnf, export_id, user, survey, chat_log_options):

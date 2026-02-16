@@ -55,7 +55,8 @@ exports.generateExport = async (req, res) => {
   const { export_type, ...options } = req.body;
 
   const { email } = req.user;
-  const source = export_type === 'chat_log' ? 'chat_log' : 'responses';
+  const SOURCE_MAP = { chat_log: 'chat_log', full_messages: 'full_messages' };
+  const source = SOURCE_MAP[export_type] || 'responses';
   const exportId = crypto.randomUUID();
 
   try {
@@ -75,6 +76,8 @@ exports.generateExport = async (req, res) => {
       source: source,
       ...(source === 'chat_log'
         ? { chat_log_options: options }
+        : source === 'full_messages'
+        ? { full_messages_options: options }
         : { options: options })
     };
 

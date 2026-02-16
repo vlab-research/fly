@@ -5,6 +5,7 @@ import pytest
 
 from exporter.main import (
     ChatLogExportOptions,
+    FullMessagesExportOptions,
     KafkaMessage,
     parse_message,
     process,
@@ -22,6 +23,22 @@ class TestChatLogExportOptions:
         opts = ChatLogExportOptions(include_raw_payload=True, include_metadata=True)
         assert opts.include_raw_payload is True
         assert opts.include_metadata is True
+
+
+class TestFullMessagesExportOptions:
+    def test_defaults(self):
+        opts = FullMessagesExportOptions()
+        assert len(opts.event_groups) == 8
+        assert "conversation" in opts.event_groups
+        assert opts.include_raw_json is False
+
+    def test_custom_values(self):
+        opts = FullMessagesExportOptions(
+            event_groups=["conversation", "bails"],
+            include_raw_json=True,
+        )
+        assert opts.event_groups == ["conversation", "bails"]
+        assert opts.include_raw_json is True
 
 
 class TestKafkaMessage:
@@ -76,6 +93,23 @@ class TestKafkaMessage:
         )
         assert msg.options == ExportOptions()
         assert msg.chat_log_options == ChatLogExportOptions()
+        assert msg.full_messages_options == FullMessagesExportOptions()
+
+    def test_parses_full_messages_export(self):
+        msg = KafkaMessage(
+            event="data-export",
+            survey="my-survey",
+            user="user@example.com",
+            export_id="ghi-789",
+            source="full_messages",
+            full_messages_options={
+                "event_groups": ["conversation", "bails"],
+                "include_raw_json": True,
+            },
+        )
+        assert msg.source == "full_messages"
+        assert msg.full_messages_options.event_groups == ["conversation", "bails"]
+        assert msg.full_messages_options.include_raw_json is True
 
 
 class TestParseMessage:
@@ -132,4 +166,21 @@ class TestProcess:
 
         mock_export_chat_log.assert_called_once_with(
             "db-url", "id-2", "user@example.com", "my-survey", data.chat_log_options
+        )
+
+    @patch("exporter.main.export_full_messages")
+    def test_routes_full_messages_to_export_full_messages(self, mock_export_full_messages):
+        data = KafkaMessage(
+            event="data-export",
+            survey="my-survey",
+            user="user@example.com",
+            export_id="id-3",
+            source="full_messages",
+            full_messages_options={"event_groups": ["conversation"], "include_raw_json": True},
+        )
+
+        process("db-url", data)
+
+        mock_export_full_messages.assert_called_once_with(
+            "db-url", "id-3", "user@example.com", "my-survey", data.full_messages_options
         )

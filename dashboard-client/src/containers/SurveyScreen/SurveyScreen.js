@@ -156,7 +156,7 @@ const MonitorSection = ({ surveyName, match }) => {
 };
 
 const exportColumns = [
-  { title: 'Source', dataIndex: 'source', render: (text) => text === 'chat_log' ? 'Chat Log' : 'Responses' },
+  { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
   { title: 'Status', dataIndex: 'status' },
   { title: 'Time', dataIndex: 'updated' },
   { title: 'Download', dataIndex: 'export_link', render: DownloadLink },
@@ -181,6 +181,9 @@ const ExportPanel = ({ selected }) => {
         </CreateBtn>
         <CreateBtn to={`/exports/create-chat-log?survey_name=${encodeURIComponent(selected)}`} style={{ marginLeft: 16 }}>
           EXPORT CHAT LOG
+        </CreateBtn>
+        <CreateBtn to={`/exports/create-full-messages?survey_name=${encodeURIComponent(selected)}`} style={{ marginLeft: 16 }}>
+          EXPORT FULL MESSAGES
         </CreateBtn>
       </div>
 

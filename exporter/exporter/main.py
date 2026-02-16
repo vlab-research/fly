@@ -5,7 +5,7 @@ from confluent_kafka import Consumer
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from .exporter import ExportOptions, export_data, export_chat_log
+from .exporter import ExportOptions, export_data, export_chat_log, export_full_messages
 from .log import log
 
 # load the env file into the environment
@@ -24,6 +24,14 @@ class ChatLogExportOptions(BaseModel):
     include_metadata: bool = False
 
 
+class FullMessagesExportOptions(BaseModel):
+    event_groups: list[str] = [
+        "conversation", "referrals", "bails", "payments",
+        "external_tracking", "retries", "system", "other",
+    ]
+    include_raw_json: bool = False
+
+
 class KafkaMessage(BaseModel):
     event: str
     survey: str
@@ -32,6 +40,7 @@ class KafkaMessage(BaseModel):
     source: str = "responses"
     options: ExportOptions = ExportOptions()
     chat_log_options: ChatLogExportOptions = ChatLogExportOptions()
+    full_messages_options: FullMessagesExportOptions = FullMessagesExportOptions()
 
 
 def app():
@@ -80,6 +89,8 @@ def process(cnf, data: KafkaMessage):
     log.info(f"processing {data.source} export for study {data.survey} (id={data.export_id})")
     if data.source == "chat_log":
         export_chat_log(cnf, data.export_id, data.user, data.survey, data.chat_log_options)
+    elif data.source == "full_messages":
+        export_full_messages(cnf, data.export_id, data.user, data.survey, data.full_messages_options)
     else:
         export_data(cnf, data.export_id, data.user, data.survey, data.options)
 

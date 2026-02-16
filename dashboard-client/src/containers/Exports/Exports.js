@@ -14,7 +14,7 @@ const Exports = () => {
   // Note: data comes back newest-first from the server (ORDER BY updated DESC)
   let columns = [
     { title: 'Survey', dataIndex: 'survey_id' },
-    { title: 'Source', dataIndex: 'source', render: (text) => text === 'chat_log' ? 'Chat Log' : 'Responses' },
+    { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
     { title: 'User', dataIndex: 'user_id' },
     { title: 'Time Exported', dataIndex: 'updated' },
     { title: 'Status', dataIndex: 'status' },
