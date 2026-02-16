@@ -22,7 +22,7 @@ function extractChatLogEntry(event, state) {
     return {
       userid: event.recipient.id,
       pageid: event.sender.id,
-      timestamp: new Date(event.timestamp),
+      timestamp: event.timestamp,
       direction: 'bot',
       content: event.message.text || '',
       question_ref: md.ref || null,
@@ -40,7 +40,7 @@ function extractChatLogEntry(event, state) {
     return {
       userid: event.sender.id,
       pageid: (state.md && state.md.pageid) || null,
-      timestamp: new Date(event.timestamp),
+      timestamp: event.timestamp,
       direction: 'user',
       content: (event.message && event.message.text)
         || (event.postback && event.postback.title)

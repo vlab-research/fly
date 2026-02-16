@@ -256,10 +256,9 @@ describe('extractChatLogEntry', () => {
       entry.pageid.should.equal(echoEvent.sender.id)
     })
 
-    it('should convert timestamp to a Date object', () => {
+    it('should pass through the numeric timestamp', () => {
       const entry = extractChatLogEntry(echoEvent, fullState)
-      entry.timestamp.should.be.an.instanceOf(Date)
-      entry.timestamp.getTime().should.equal(1700000000000)
+      entry.timestamp.should.equal(1700000000000)
     })
 
     it('should use the last form in state.forms as shortcode', () => {
@@ -303,10 +302,9 @@ describe('extractChatLogEntry', () => {
       entry.question_ref.should.equal(fullState.question)
     })
 
-    it('should convert timestamp to a Date object', () => {
+    it('should pass through the numeric timestamp', () => {
       const entry = extractChatLogEntry(textEvent, fullState)
-      entry.timestamp.should.be.an.instanceOf(Date)
-      entry.timestamp.getTime().should.equal(1700000010000)
+      entry.timestamp.should.equal(1700000010000)
     })
   })
 
