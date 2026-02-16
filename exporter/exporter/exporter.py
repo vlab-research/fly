@@ -87,6 +87,14 @@ def get_direction(event_type):
     return "system"
 
 
+def _to_str(val):
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    if val is None:
+        return ""
+    return str(val)
+
+
 def extract_content(msg, event_type):
     if event_type == "echo":
         return msg.get("message", {}).get("text", "")
@@ -146,7 +154,7 @@ def _iter_messages(raw_rows, allowed_types, include_raw_json):
             "source": msg.get("source", "unknown"),
             "event_type": event_type,
             "direction": get_direction(event_type),
-            "content": extract_content(msg, event_type),
+            "content": _to_str(extract_content(msg, event_type)),
             "event_detail": extract_event_detail(msg, event_type),
         }
         if include_raw_json:
