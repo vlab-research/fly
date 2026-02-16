@@ -184,16 +184,16 @@ def get_chat_log(cnf, user, survey, chat_log_options):
     are conditionally appended based on chat_log_options.
     """
     base_columns = (
-        "cl.userid, cl.pageid, cl.timestamp::string, cl.direction, "
-        "cl.content, cl.question_ref, cl.shortcode, cl.surveyid::string, "
+        "cl.userid, cl.pageid, cl.timestamp::string AS timestamp, cl.direction, "
+        "cl.content, cl.question_ref, cl.shortcode, cl.surveyid::string AS surveyid, "
         "cl.message_type"
     )
 
     optional_columns = ""
     if chat_log_options.include_metadata:
-        optional_columns += ", cl.metadata::string"
+        optional_columns += ", cl.metadata::string AS metadata"
     if chat_log_options.include_raw_payload:
-        optional_columns += ", cl.raw_payload::string"
+        optional_columns += ", cl.raw_payload::string AS raw_payload"
 
     q = f"""
         SELECT DISTINCT {base_columns}{optional_columns}
@@ -201,7 +201,7 @@ def get_chat_log(cnf, user, survey, chat_log_options):
         INNER JOIN surveys s ON cl.shortcode = s.shortcode
         INNER JOIN users u ON s.userid = u.id
         WHERE u.email = %s AND s.survey_name = %s
-        ORDER BY cl.userid, cl.timestamp
+        ORDER BY cl.userid, timestamp
     """
     dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
     return pd.DataFrame(dat)
