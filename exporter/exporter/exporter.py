@@ -201,7 +201,7 @@ def get_chat_log(cnf, user, survey, chat_log_options):
         INNER JOIN surveys s ON cl.shortcode = s.shortcode
         INNER JOIN users u ON s.userid = u.id
         WHERE u.email = %s AND s.survey_name = %s
-        ORDER BY (cl.userid, cl.timestamp)
+        ORDER BY cl.userid, cl.timestamp
     """
     dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
     return pd.DataFrame(dat)
