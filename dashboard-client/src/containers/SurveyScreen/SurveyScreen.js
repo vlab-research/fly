@@ -157,7 +157,11 @@ const MonitorSection = ({ surveyName, match }) => {
 
 const exportColumns = [
   { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
-  { title: 'Status', dataIndex: 'status' },
+  { title: 'Status', dataIndex: 'status', render: (status) => (
+    status === 'Started'
+      ? <span><Spin size="small" /> Exporting...</span>
+      : status
+  )},
   { title: 'Time', dataIndex: 'updated' },
   { title: 'Download', dataIndex: 'export_link', render: DownloadLink },
 ];
@@ -167,10 +171,22 @@ const ExportPanel = ({ selected }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchExportsBySurvey(selected)
-      .then(data => setExports(data || []))
-      .catch(err => console.error(err))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    const fetchExports = () => {
+      fetchExportsBySurvey(selected)
+        .then(data => { if (!cancelled) setExports(data || []); })
+        .catch(err => console.error(err))
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
+
+    fetchExports();
+    const intervalId = setInterval(fetchExports, 4000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
   }, [selected]);
 
   return (
