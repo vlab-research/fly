@@ -23,10 +23,9 @@ ALTER TABLE chatroach.export_status
     ADD COLUMN IF NOT EXISTS source VARCHAR NOT NULL DEFAULT 'responses';
 
 -- Drop the unique constraint so multiple exports can exist per user per survey.
--- Handle both possible constraint names: the original from 02-export-status.sql
--- and the one from 09-export-type.sql if it was applied.
-ALTER TABLE chatroach.export_status
-    DROP CONSTRAINT IF EXISTS unique_status;
+-- CockroachDB v21.2 requires DROP INDEX CASCADE instead of ALTER TABLE DROP CONSTRAINT
+-- for unique constraints (see https://go.crdb.dev/issue-v/42840/v21.2).
+DROP INDEX IF EXISTS chatroach.export_status@unique_status CASCADE;
 
 -- Add primary key on id (only if no PK exists yet -- the original table had no PK)
 -- CockroachDB requires a primary key; if one does not exist, it uses rowid implicitly.

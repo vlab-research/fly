@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS chatroach.chat_log (
     raw_payload   JSONB,
     metadata      JSONB,
     PRIMARY KEY (userid, timestamp, direction),
-    INDEX (userid, timestamp ASC) STORING (content, direction, question_ref),
+    INDEX (userid, timestamp ASC) STORING (content, question_ref),
     INDEX (shortcode, userid, timestamp ASC),
     INVERTED INDEX (metadata)
 );
