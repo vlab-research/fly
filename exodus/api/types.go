@@ -9,6 +9,7 @@ type CreateBailRequest struct {
 	Name        string               `json:"name"`
 	Description string               `json:"description,omitempty"`
 	Definition  types.BailDefinition `json:"definition"`
+	Enabled     bool                 `json:"enabled"`
 }
 
 // UpdateBailRequest represents the payload for updating an existing bail

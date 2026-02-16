@@ -153,7 +153,7 @@ func (s *Server) CreateBail(c echo.Context) error {
 		UserID:          userID,
 		Name:            req.Name,
 		Description:     req.Description,
-		Enabled:         true,
+		Enabled:         req.Enabled,
 		Definition:      definitionJSON,
 		DestinationForm: req.Definition.Action.DestinationForm,
 	}
