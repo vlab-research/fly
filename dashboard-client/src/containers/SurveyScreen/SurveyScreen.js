@@ -157,13 +157,13 @@ const MonitorSection = ({ surveyName, match }) => {
 
 const exportColumns = [
   { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
-  { title: 'Status', dataIndex: 'status', render: (status) => (
-    status === 'Started'
-      ? <span><Spin size="small" /> Exporting...</span>
-      : status
-  )},
+  { title: 'Status', dataIndex: 'status' },
   { title: 'Time', dataIndex: 'updated' },
-  { title: 'Download', dataIndex: 'export_link', render: DownloadLink },
+  { title: 'Download', dataIndex: 'export_link', render: (text, record) => (
+    record.status === 'Started'
+      ? <Spin size="small" />
+      : DownloadLink(text)
+  )},
 ];
 
 const ExportPanel = ({ selected }) => {
