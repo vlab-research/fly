@@ -198,7 +198,7 @@ def get_chat_log(cnf, user, survey, chat_log_options):
     q = f"""
         SELECT {base_columns}{optional_columns}
         FROM chat_log cl
-        INNER JOIN surveys s ON cl.shortcode = s.shortcode
+        INNER JOIN surveys s ON cl.surveyid = s.id
         INNER JOIN users u ON s.userid = u.id
         WHERE u.email = %s AND s.survey_name = %s
         ORDER BY (cl.userid, cl.timestamp)
