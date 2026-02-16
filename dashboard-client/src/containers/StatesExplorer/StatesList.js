@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { useHistory, useLocation } from 'react-router-dom';
+import { useHistory, useLocation, Link } from 'react-router-dom';
 import { Card, Table, Tag, Input, Select, Button, Row, Col, message } from 'antd';
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../../services/api';
@@ -120,10 +120,12 @@ const StatesList = ({ surveyName }) => {
       key: 'userid',
       width: 200,
       render: (userid) => (
-        // eslint-disable-next-line jsx-a11y/anchor-is-valid
-        <a href="#" onClick={(e) => e.stopPropagation()}>
+        <Link
+          to={`/surveys/${encodeURIComponent(surveyName)}/monitor/${encodeURIComponent(userid)}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {userid}
-        </a>
+        </Link>
       ),
     },
     {

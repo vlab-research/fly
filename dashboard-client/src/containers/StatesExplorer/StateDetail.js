@@ -79,7 +79,7 @@ const StateDetail = ({ surveyName, backPath }) => {
     USER_BLOCKED: 'volcano',
   };
 
-  // QA transcript columns
+  // QA transcript columns — each qa entry is a tuple: [questionRef, responseValue]
   const qaColumns = [
     {
       title: '#',
@@ -89,36 +89,16 @@ const StateDetail = ({ surveyName, backPath }) => {
     },
     {
       title: 'Question',
-      dataIndex: 'question',
       key: 'question',
-      render: (question) => {
-        if (!question) return '-';
-        return (
-          <div>
-            <div><strong>{question.ref || 'N/A'}</strong></div>
-            <div style={{ fontSize: '0.9em', color: '#666' }}>
-              {question.text || 'N/A'}
-            </div>
-          </div>
-        );
-      },
+      render: (_, record) => record[0] || '-',
     },
     {
-      title: 'Answer',
-      dataIndex: 'response',
+      title: 'Response',
       key: 'response',
-      render: (response) => {
-        if (!response) return '-';
-        return (
-          <div>
-            <div>{response.text || 'N/A'}</div>
-            {response.value !== undefined && (
-              <div style={{ fontSize: '0.9em', color: '#666' }}>
-                Value: {JSON.stringify(response.value)}
-              </div>
-            )}
-          </div>
-        );
+      render: (_, record) => {
+        const value = record[1];
+        if (value === undefined || value === null) return '-';
+        return String(value);
       },
     },
   ];
@@ -184,6 +164,15 @@ const StateDetail = ({ surveyName, backPath }) => {
             )}
           </Descriptions>
         </Card>
+
+        {/* Forms progression */}
+        {stateJson.forms && stateJson.forms.length > 0 && (
+          <Card title="Forms" style={{ marginBottom: 16 }}>
+            {stateJson.forms.map((form, idx) => (
+              <Tag key={idx} style={{ marginBottom: 4 }}>{form}</Tag>
+            ))}
+          </Card>
+        )}
 
         {/* Error Details Card - shown if in ERROR state */}
         {isError && stateJson.error && (
