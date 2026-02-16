@@ -136,18 +136,24 @@ FULL_MESSAGES_COLUMNS = [
 FULL_MESSAGES_COLUMNS_WITH_RAW = FULL_MESSAGES_COLUMNS + ["raw_json"]
 
 
-def _iter_messages(raw_rows, allowed_types, include_raw_json):
+def _iter_messages(raw_rows, allowed_types, include_raw_json, stats=None):
+    if stats is None:
+        stats = {"total": 0, "json_errors": 0, "filtered": 0, "yielded": 0}
     for row in raw_rows:
+        stats["total"] += 1
         raw = row["content"]
         try:
             msg = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
+            stats["json_errors"] += 1
             continue
 
         event_type = classify_event(msg)
         if event_type not in allowed_types:
+            stats["filtered"] += 1
             continue
 
+        stats["yielded"] += 1
         out = {
             "userid": row["userid"],
             "timestamp": row["timestamp"],
@@ -321,6 +327,16 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         include_raw = full_messages_options.include_raw_json
         columns = FULL_MESSAGES_COLUMNS_WITH_RAW if include_raw else FULL_MESSAGES_COLUMNS
 
+        log.info(
+            f"full messages export {export_id}: "
+            f"groups={full_messages_options.event_groups}, "
+            f"allowed_types={sorted(allowed_types)}, "
+            f"include_raw_json={include_raw}"
+        )
+
+        if not allowed_types:
+            log.warning(f"full messages export {export_id}: allowed_types is empty, no rows will match")
+
         q = """
             SELECT m.userid, m.timestamp::string AS timestamp, m.content
             FROM messages m
@@ -337,7 +353,8 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         """
 
         raw_rows = query(cnf, q, vals=(survey, user), as_dict=True)
-        rows = _iter_messages(raw_rows, allowed_types, include_raw)
+        stats = {"total": 0, "json_errors": 0, "filtered": 0, "yielded": 0}
+        rows = _iter_messages(raw_rows, allowed_types, include_raw, stats)
 
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".csv", delete=False, newline=""
@@ -352,6 +369,18 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
             storage_backend.save_file(tmp.name)
         finally:
             os.unlink(tmp.name)
+
+        log.info(
+            f"full messages export {export_id} stats: "
+            f"total_rows={stats['total']}, json_errors={stats['json_errors']}, "
+            f"filtered_out={stats['filtered']}, written={stats['yielded']}"
+        )
+
+        if stats["total"] == 0:
+            log.warning(
+                f"full messages export {export_id}: query returned 0 rows for "
+                f"survey={survey}, user={user}"
+            )
 
         url = storage_backend.generate_link()
         set_export_status(cnf, export_id, url, status="Finished")
