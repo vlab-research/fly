@@ -63,7 +63,7 @@ const Media = () => {
       let errorMsg = 'Unknown error';
       try {
         const parsed = JSON.parse(err.message);
-        errorMsg = parsed.error?.message || parsed.error || err.message;
+        errorMsg = (parsed.error && parsed.error.message) || parsed.error || err.message;
       } catch (_) {
         errorMsg = err.message || errorMsg;
       }
