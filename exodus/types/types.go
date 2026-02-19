@@ -93,9 +93,9 @@ type SimpleCondition struct {
 	CurrentState *string        `json:"current_state,omitempty"`
 }
 
-// LogicalOperator represents and/or operations on conditions
+// LogicalOperator represents and/or/not operations on conditions
 type LogicalOperator struct {
-	Op   string      `json:"op"`   // "and" or "or"
+	Op   string      `json:"op"`   // "and", "or", or "not"
 	Vars []Condition `json:"vars"` // Array of conditions
 }
 
@@ -133,7 +133,7 @@ func (c *Condition) UnmarshalJSON(data []byte) error {
 
 	// Check if this is a logical operator (has "op" and "vars" fields)
 	if op, hasOp := raw["op"]; hasOp {
-		if opStr, ok := op.(string); ok && (opStr == "and" || opStr == "or") {
+		if opStr, ok := op.(string); ok && (opStr == "and" || opStr == "or" || opStr == "not") {
 			var logOp LogicalOperator
 			if err := json.Unmarshal(data, &logOp); err != nil {
 				return err
@@ -200,18 +200,45 @@ func (sc *SimpleCondition) Validate() error {
 
 // Validate checks if a LogicalOperator is valid
 func (lo *LogicalOperator) Validate() error {
-	if lo.Op != "and" && lo.Op != "or" {
-		return fmt.Errorf("invalid operator: %s (must be and or or)", lo.Op)
-	}
-	if len(lo.Vars) == 0 {
-		return fmt.Errorf("logical operator must have at least one condition")
+	switch lo.Op {
+	case "and", "or":
+		if len(lo.Vars) == 0 {
+			return fmt.Errorf("logical operator must have at least one condition")
+		}
+	case "not":
+		if len(lo.Vars) != 1 {
+			return fmt.Errorf("not operator must have exactly one condition, got %d", len(lo.Vars))
+		}
+	default:
+		return fmt.Errorf("invalid operator: %s (must be and, or, or not)", lo.Op)
 	}
 	for i, cond := range lo.Vars {
 		if err := cond.Validate(); err != nil {
 			return fmt.Errorf("invalid condition at index %d: %w", i, err)
 		}
 	}
+	// Reject NOT wrapping elapsed_time (directly or transitively)
+	if lo.Op == "not" {
+		if containsElapsedTime(&lo.Vars[0]) {
+			return fmt.Errorf("not operator cannot negate elapsed_time conditions (not yet supported)")
+		}
+	}
 	return nil
+}
+
+// containsElapsedTime recursively checks if a condition tree contains an elapsed_time condition
+func containsElapsedTime(c *Condition) bool {
+	if c.IsSimple() {
+		return c.GetSimple().Type == "elapsed_time"
+	}
+	if c.IsOperator() {
+		for i := range c.GetOperator().Vars {
+			if containsElapsedTime(&c.GetOperator().Vars[i]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Validate checks if a TimeReference is valid

@@ -1,5 +1,23 @@
 # Bail Systems
 
+## Table of Contents
+
+1. [Overview](#overview)
+2. [User-Facing Behavior](#user-facing-behavior)
+3. [Bail Types](#bail-types)
+4. [Data Flow](#data-flow)
+5. [Bail Definition Model](#bail-definition-model)
+6. [Source Shortcodes](#source-shortcodes)
+7. [Access Control](#access-control)
+8. [Component Responsibilities](#component-responsibilities)
+9. [Execution Model](#execution-model)
+10. [Event Audit Trail](#event-audit-trail)
+11. [API Endpoints Reference](#api-endpoints-reference)
+12. [Data Transformation](#data-transformation)
+13. [Frontend-Backend Mapping](#frontend-backend-mapping)
+
+---
+
 ## Overview
 
 Bail systems are automated rules that redirect survey respondents from one form to another based on configurable conditions. They replace the previous approach of hand-written Kubernetes CronJob manifests (`bailer-job/kube/`) with a database-driven, UI-manageable system.
@@ -31,7 +49,7 @@ The dashboard shows a table of all bail systems for the authenticated user at `/
 The create form (`/bails/create`) has four sections:
 
 1. **Basic Information** -- name, description, enabled toggle
-2. **Conditions** -- a visual condition builder supporting AND/OR logic trees with condition types: form, state, error_code, current_question, elapsed_time
+2. **Conditions** -- a visual condition builder supporting AND/OR/NOT logic trees with condition types: form, state, error_code, current_question, elapsed_time
 3. **Execution Timing** -- choose immediate, scheduled (daily at a time + timezone), or absolute (one-time at a datetime)
 4. **Action** -- destination form shortcode and optional JSON metadata
 
@@ -86,7 +104,7 @@ A bail definition is a JSON object with three sections:
 
 ### Conditions
 
-Conditions define **who** gets bailed. They form a recursive tree supporting AND/OR logic.
+Conditions define **who** gets bailed. They form a recursive tree supporting AND/OR/NOT logic.
 
 **Simple condition types:**
 
@@ -115,6 +133,10 @@ Duration uses PostgreSQL interval syntax: `"4 weeks"`, `"2 days"`, `"1 hour"`, `
 
 **Logical operators** combine conditions:
 
+- **`and`** -- all child conditions must match. Takes 1 or more children.
+- **`or`** -- any child condition must match. Takes 1 or more children.
+- **`not`** -- negates a single child condition. Takes exactly 1 child.
+
 ```json
 {
   "op": "and",
@@ -131,6 +153,52 @@ Duration uses PostgreSQL interval syntax: `"4 weeks"`, `"2 days"`, `"1 hour"`, `
   ]
 }
 ```
+
+**NOT operator examples:**
+
+Negate a single condition (match users whose state is NOT "END"):
+
+```json
+{"op": "not", "vars": [{"type": "state", "value": "END"}]}
+```
+
+Negate a compound group (match users who are NOT on form X AND in state Y):
+
+```json
+{
+  "op": "not",
+  "vars": [{
+    "op": "and",
+    "vars": [
+      {"type": "form", "value": "survey_v1"},
+      {"type": "state", "value": "END"}
+    ]
+  }]
+}
+```
+
+NOT inside an AND group (match users on a form whose state is NOT "END"):
+
+```json
+{
+  "op": "and",
+  "vars": [
+    {"type": "form", "value": "myform"},
+    {"op": "not", "vars": [{"type": "state", "value": "END"}]}
+  ]
+}
+```
+
+**NOT operator constraints:**
+- Must have exactly 1 child (validation rejects 0 or 2+ children).
+- Cannot negate `elapsed_time` conditions, directly or transitively. Negating elapsed_time would require LEFT JOIN + IS NULL semantics to correctly include users who never responded, which is not yet supported.
+
+**SQL generation for NOT:**
+
+| Condition | Generated SQL |
+|-----------|--------------|
+| `{"op": "not", "vars": [{"type": "state", "value": "END"}]}` | `NOT (s.current_state = $1)` |
+| `{"op": "not", "vars": [{"op": "and", "vars": [...]}]}` | `NOT ((child1 AND child2))` |
 
 ### Execution Timing
 
@@ -278,3 +346,376 @@ Every bail execution (successful or failed) is recorded in the `bail_events` tab
 The `definition_snapshot` is critical: it captures exactly what definition was active when the bail ran, providing a full audit trail even if the bail is later edited or deleted.
 
 Events are immutable -- they are only ever inserted, never updated or deleted.
+
+---
+
+## API Endpoints Reference
+
+All bail endpoints are scoped under `/api/v1/users/:userId/bails`. Authentication is via Bearer token in the Authorization header. The dashboard-server proxies these to exodus.
+
+### Endpoints Summary
+
+| Operation | Method | Path | Frontend | Backend Handler |
+|-----------|--------|------|----------|-----------------|
+| List | GET | `/users/:userId/bails` | BailSystems.js | handlers.go:26 |
+| Get | GET | `/users/:userId/bails/:id` | BailForm.js | handlers.go:72 |
+| Create | POST | `/users/:userId/bails` | BailForm.js | handlers.go:127 |
+| Update | PUT | `/users/:userId/bails/:id` | BailForm.js | handlers.go:181 |
+| Delete | DELETE | `/users/:userId/bails/:id` | BailSystems.js | handlers.go:269 |
+| Preview | POST | `/users/:userId/bails/preview` | BailForm.js | handlers.go |
+
+### List Bails
+
+```
+GET /api/v1/users/:userId/bails
+Authorization: Bearer {token}
+```
+
+**Response** (200 OK):
+```json
+{
+  "bails": [
+    {
+      "bail": {
+        "id": "uuid",
+        "user_id": "uuid",
+        "name": "string",
+        "description": "string",
+        "enabled": true,
+        "definition": { "conditions": {}, "execution": {}, "action": {} },
+        "destination_form": "string",
+        "created_at": "ISO-8601",
+        "updated_at": "ISO-8601"
+      },
+      "last_event": {
+        "id": "uuid",
+        "bail_id": "uuid",
+        "user_id": "uuid",
+        "bail_name": "string",
+        "event_type": "execution|error",
+        "timestamp": "ISO-8601",
+        "users_matched": 0,
+        "users_bailed": 0,
+        "definition_snapshot": {},
+        "error": null
+      }
+    }
+  ]
+}
+```
+
+### Get Single Bail
+
+```
+GET /api/v1/users/:userId/bails/:id
+Authorization: Bearer {token}
+```
+
+**Response** (200 OK):
+```json
+{
+  "bail": { "..." },
+  "last_event": { "..." }
+}
+```
+
+**Errors**: 400 (invalid UUID), 404 (not found), 500 (database error)
+
+### Create Bail
+
+```
+POST /api/v1/users/:userId/bails
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "name": "string (required)",
+  "description": "string (optional)",
+  "definition": {
+    "conditions": {},
+    "execution": { "timing": "immediate|scheduled|absolute", "..." },
+    "action": { "destination_form": "string", "..." }
+  }
+}
+```
+
+**Response** (201 Created):
+```json
+{
+  "bail": { "..." },
+  "last_event": null
+}
+```
+
+Note: The `enabled` field is always set to `true` by the backend on creation, regardless of the frontend value.
+
+### Update Bail
+
+```
+PUT /api/v1/users/:userId/bails/:id
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "name": "string (optional)",
+  "description": "string (optional)",
+  "definition": { "..." },
+  "enabled": true
+}
+```
+
+Partial update -- only provided fields are changed.
+
+**Response** (200 OK): Updated bail object with last_event.
+
+### Delete Bail
+
+```
+DELETE /api/v1/users/:userId/bails/:id
+Authorization: Bearer {token}
+```
+
+**Response** (204 No Content): Empty body.
+
+### Preview Bail (Dry Run)
+
+```
+POST /api/v1/users/:userId/bails/preview
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "definition": {
+    "conditions": {},
+    "execution": { "timing": "immediate" },
+    "action": { "destination_form": "string" }
+  }
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "count": 127,
+  "users": [
+    { "userid": "user1", "pageid": "page1" }
+  ]
+}
+```
+
+Shows which users match the conditions without creating or executing the bail.
+
+### Data Structures
+
+**Condition** -- Union type discriminated by presence of `op` field:
+
+- If `op` is present: compound condition (`LogicalOperator`)
+- If `op` is absent: simple condition (`SimpleCondition`)
+
+Simple conditions:
+
+```json
+{ "type": "form", "value": "string" }
+{ "type": "state", "value": "START|RESPONDING|WAIT_EXTERNAL_EVENT|END|BLOCKED|ERROR" }
+{ "type": "error_code", "value": "string" }
+{ "type": "current_question", "value": "string" }
+{
+  "type": "elapsed_time",
+  "since": { "event": "response", "details": { "form": "string", "question_ref": "string" } },
+  "duration": "string (PostgreSQL interval)"
+}
+```
+
+Compound conditions:
+
+```json
+{ "op": "and|or", "vars": [ /* 1+ Condition objects */ ] }
+{ "op": "not", "vars": [ /* exactly 1 Condition object */ ] }
+```
+
+**Execution**:
+
+```json
+{
+  "timing": "immediate|scheduled|absolute",
+  "time_of_day": "HH:mm (required if scheduled)",
+  "timezone": "IANA timezone (required if scheduled)",
+  "datetime": "ISO-8601 (required if absolute)"
+}
+```
+
+**Action**:
+
+```json
+{
+  "destination_form": "string (required)",
+  "metadata": { "optional": "JSON object" }
+}
+```
+
+### Error Handling
+
+Error response format:
+
+```json
+{
+  "error": "error_code",
+  "message": "human readable message"
+}
+```
+
+Common errors:
+
+| Status | Error Code | Scenario |
+|--------|-----------|----------|
+| 400 | `invalid_user_id` | User ID is not a valid UUID |
+| 400 | `invalid_bail_id` | Bail ID is not a valid UUID |
+| 400 | `invalid_request` | Request body is not valid JSON |
+| 400 | `missing_field` | Required field is missing (e.g., name) |
+| 400 | `invalid_definition` | Definition fails validation (with details) |
+| 404 | `bail_not_found` | Bail does not exist or does not belong to user |
+| 500 | `database_error` | Database operation failed |
+
+### Example: Create a Scheduled Bail
+
+**Request**:
+```json
+POST /api/v1/users/550e8400-e29b-41d4-a716-446655440001/bails
+
+{
+  "name": "4-Week Dropout Recovery",
+  "description": "Recover users who haven't responded in 4 weeks",
+  "definition": {
+    "conditions": {
+      "op": "and",
+      "vars": [
+        {
+          "type": "elapsed_time",
+          "since": {
+            "event": "response",
+            "details": { "form": "intake_survey", "question_ref": "age_q" }
+          },
+          "duration": "4 weeks"
+        },
+        { "type": "state", "value": "RESPONDING" }
+      ]
+    },
+    "execution": {
+      "timing": "scheduled",
+      "time_of_day": "09:00",
+      "timezone": "America/New_York"
+    },
+    "action": {
+      "destination_form": "recovery_survey",
+      "metadata": { "reason": "dropout_recovery" }
+    }
+  }
+}
+```
+
+**Response** (201):
+```json
+{
+  "bail": {
+    "id": "550e8400-e29b-41d4-a716-446655440002",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "4-Week Dropout Recovery",
+    "enabled": true,
+    "definition": { "..." },
+    "destination_form": "recovery_survey",
+    "created_at": "2024-02-15T18:48:00Z",
+    "updated_at": "2024-02-15T18:48:00Z"
+  },
+  "last_event": null
+}
+```
+
+---
+
+## Data Transformation
+
+### Key Transformation Points
+
+Data flows through several layers, with transformations at each boundary:
+
+| Field | Frontend Type | Transformation | Backend Type | Storage |
+|-------|---|---|---|---|
+| `name` | string | unchanged | string | TEXT |
+| `conditions` | JS object | JSON serialization | Condition (union) | JSONB |
+| `timing` | string | unchanged | string | JSONB |
+| `time_of_day` | moment object | `format('HH:mm')` | *string | JSONB |
+| `datetime` | moment object | `toISOString()` | *string | JSONB |
+| `timezone` | string | unchanged | *string | JSONB |
+| `destination_form` | string | unchanged | string | TEXT |
+| `metadata` | JSON string (textarea) | `JSON.parse()` | map[string]interface{} | JSONB |
+| `enabled` | boolean | unchanged | boolean | BOOLEAN |
+
+### Validation Flow
+
+All comprehensive validation happens on the backend in `types.go`:
+
+```
+BailDefinition.Validate()
++-- Conditions.Validate()
+|   +-- (if operator) LogicalOperator.Validate()
+|   |   +-- Check op is "and", "or", or "not"
+|   |   +-- "not" must have exactly 1 child
+|   |   +-- "not" cannot contain elapsed_time (directly or transitively)
+|   |   +-- Validate each child condition recursively
+|   +-- (if simple) SimpleCondition.Validate()
+|       +-- Check type is valid (form, state, error_code, current_question, elapsed_time)
+|       +-- Check required fields for each type
+|       +-- If elapsed_time: validate TimeReference structure
+|
++-- Execution.Validate()
+|   +-- Check timing is valid (immediate, scheduled, absolute)
+|   +-- If scheduled: require time_of_day and timezone
+|   +-- If absolute: require datetime
+|
++-- Action.Validate()
+    +-- Check destination_form is non-empty
+```
+
+Frontend validation is minimal (required field checks via AntD Form rules). The backend is the source of truth for all validation.
+
+### Common Issues
+
+**Time format mismatches**: `time_of_day` must be "HH:mm" format (not "HH:mm:ss"). `datetime` must be ISO 8601 (not JS Date toString()).
+
+**Metadata validation**: The frontend silently falls back to an empty object on invalid JSON input. Users receive no feedback that their JSON was malformed.
+
+**Missing timing fields**: The frontend does not strictly enforce conditional required fields (e.g., `time_of_day` when timing is "scheduled"). The backend will reject with a clear error message.
+
+**Condition type errors**: Using an unsupported condition type name will be rejected by the backend with: `invalid condition type: <type> (must be form, state, error_code, current_question, or elapsed_time)`.
+
+---
+
+## Frontend-Backend Mapping
+
+### Condition Union Pattern
+
+Frontend and backend represent the same condition tree using different patterns:
+
+- **Frontend**: Plain JavaScript objects. Presence of `op` field distinguishes compound from simple conditions.
+- **Backend**: Go discriminated union (`Condition` struct) with custom JSON marshal/unmarshal. Presence of `op` triggers `LogicalOperator` path; absence triggers `SimpleCondition` path.
+
+Both patterns produce identical JSON over the wire.
+
+### Key Compatibility Notes
+
+| Aspect | Frontend | Backend | Notes |
+|--------|----------|---------|-------|
+| Condition union | Plain JS object with `op` or `type` | Custom unmarshal, discriminated union struct | Identical JSON wire format |
+| Time fields | moment.js objects in form state | ISO 8601 or HH:mm strings in JSON | Transformation in `buildDefinition()` |
+| Metadata | JSON string in textarea | `map[string]interface{}` | Frontend parses on send, stringifies on load |
+| Enabled on create | Part of form values | Ignored; always set to `true` | No `enabled` field in `CreateBailRequest` |
+| Validation depth | Minimal (required fields) | Comprehensive (type enums, format, structure) | Backend is source of truth |
+| Partial update | Full form always submitted | `UpdateBailRequest` supports optional fields | Only provided fields updated on PUT |
+
+### Special Behaviors
+
+**Create vs. Update for `enabled`**: The `CreateBailRequest` has no `enabled` field -- new bails are always created as enabled. `UpdateBailRequest` accepts an optional `enabled` field for toggling.
+
+**`destination_form` duplication**: The `Bail` object has `destination_form` both at the top level and inside `definition.action.destination_form`. The backend populates the top-level field from the definition on create/update. This duplication exists for easier database queries.
+
+**Metadata round-trip**: On load, metadata object is stringified to JSON for display in a textarea. On save, the textarea string is parsed back to an object. Invalid JSON silently becomes `{}`.

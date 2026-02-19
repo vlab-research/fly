@@ -177,13 +177,22 @@ SimpleCondition.propTypes = {
 // Forward declaration for recursive rendering
 let ConditionNode;
 
-// Compound condition editor (AND/OR)
+// Compound condition editor (AND/OR/NOT)
 const CompoundCondition = ({ condition, onChange, onDelete, depth = 0 }) => {
   const operator = condition.op || 'and';
   const children = condition.vars || [];
 
   const handleOperatorChange = (newOp) => {
-    onChange({ ...condition, op: newOp });
+    if (newOp === 'not') {
+      // NOT takes exactly 1 child -- keep only the first
+      const firstChild = children[0] || { type: 'form', value: '' };
+      onChange({ op: 'not', vars: [firstChild] });
+    } else if (condition.op === 'not' && newOp !== 'not') {
+      // Switching away from NOT -- keep the single child, allow adding more
+      onChange({ op: newOp, vars: [...children] });
+    } else {
+      onChange({ ...condition, op: newOp });
+    }
   };
 
   const handleChildChange = (index, newChild) => {
@@ -194,8 +203,11 @@ const CompoundCondition = ({ condition, onChange, onDelete, depth = 0 }) => {
 
   const handleChildDelete = (index) => {
     const newVars = children.filter((_, i) => i !== index);
-    // If only one child left, replace compound with that child
-    if (newVars.length === 1) {
+    if (operator === 'not') {
+      // NOT must always have exactly 1 child; replace with default
+      onChange({ op: 'not', vars: [{ type: 'form', value: '' }] });
+    } else if (newVars.length === 1) {
+      // If only one child left, replace compound with that child
       onChange(newVars[0]);
     } else {
       onChange({ ...condition, vars: newVars });
@@ -209,7 +221,11 @@ const CompoundCondition = ({ condition, onChange, onDelete, depth = 0 }) => {
     onChange({ ...condition, vars: [...children, newChild] });
   };
 
-  const operatorText = operator === 'and' ? 'all conditions must match' : 'any condition must match';
+  const operatorText = operator === 'not'
+    ? 'negate this condition'
+    : operator === 'and'
+      ? 'all conditions must match'
+      : 'any condition must match';
 
   return (
     <Card
@@ -224,6 +240,7 @@ const CompoundCondition = ({ condition, onChange, onDelete, depth = 0 }) => {
           >
             <Radio.Button value="and">AND</Radio.Button>
             <Radio.Button value="or">OR</Radio.Button>
+            <Radio.Button value="not">NOT</Radio.Button>
           </Radio.Group>
           <span style={{ color: '#666', fontSize: 12 }}>
             ({operatorText})
@@ -250,22 +267,24 @@ const CompoundCondition = ({ condition, onChange, onDelete, depth = 0 }) => {
             depth={depth + 1}
           />
         ))}
-        <Space style={{ marginTop: 8 }}>
-          <Button
-            icon={<PlusOutlined />}
-            onClick={() => handleAddCondition(false)}
-            size="small"
-          >
-            Add Condition
-          </Button>
-          <Button
-            icon={<PlusOutlined />}
-            onClick={() => handleAddCondition(true)}
-            size="small"
-          >
-            Add Group
-          </Button>
-        </Space>
+        {operator !== 'not' && (
+          <Space style={{ marginTop: 8 }}>
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => handleAddCondition(false)}
+              size="small"
+            >
+              Add Condition
+            </Button>
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => handleAddCondition(true)}
+              size="small"
+            >
+              Add Group
+            </Button>
+          </Space>
+        )}
       </NestedContainer>
     </Card>
   );

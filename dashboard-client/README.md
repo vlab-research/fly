@@ -169,6 +169,19 @@ Common patterns for Ant Design components:
 - **Collapse/Panel** — expandable sections for optional/verbose content
 - **Alert** — warnings and error messages with icons
 
+### ConditionBuilder (Bail Conditions UI)
+
+The `ConditionBuilder` component (`src/components/ConditionBuilder/ConditionBuilder.js`) provides a recursive tree editor for bail conditions. It supports three logical operators: **AND**, **OR**, and **NOT**.
+
+**NOT operator behavior**:
+- NOT takes exactly **one** child condition (simple or compound group).
+- When switching from AND/OR to NOT, only the first child is kept; extra children are discarded.
+- When switching from NOT to AND/OR, the single child is preserved and the user can add more.
+- The "Add Condition" and "Add Group" buttons are hidden when NOT is selected, enforcing the single-child constraint.
+- Deleting the only child of a NOT group resets it to a default empty form condition (`{type: 'form', value: ''}`) rather than collapsing the NOT wrapper.
+- The JSON structure produced is `{op: "not", vars: [child]}`.
+- The backend rejects NOT conditions that wrap `elapsed_time` (directly or transitively). The frontend does not currently block this selection -- the backend validation error is surfaced to the user.
+
 **State color mapping convention** for state machine values:
 ```javascript
 const stateColors = {

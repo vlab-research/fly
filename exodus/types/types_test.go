@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -456,4 +457,67 @@ func TestBailEventValidation(t *testing.T) {
 // Helper function to create string pointers
 func strPtr(s string) *string {
 	return &s
+}
+
+func TestNotOperatorValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		jsonStr string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid not with simple condition",
+			jsonStr: `{"op": "not", "vars": [{"type": "form", "value": "myform"}]}`,
+			wantErr: false,
+		},
+		{
+			name:    "valid not with and group",
+			jsonStr: `{"op": "not", "vars": [{"op": "and", "vars": [{"type": "form", "value": "f"}, {"type": "state", "value": "END"}]}]}`,
+			wantErr: false,
+		},
+		{
+			name:    "invalid not with zero children",
+			jsonStr: `{"op": "not", "vars": []}`,
+			wantErr: true,
+			errMsg:  "not operator must have exactly one condition",
+		},
+		{
+			name:    "invalid not with two children",
+			jsonStr: `{"op": "not", "vars": [{"type": "form", "value": "f1"}, {"type": "form", "value": "f2"}]}`,
+			wantErr: true,
+			errMsg:  "not operator must have exactly one condition",
+		},
+		{
+			name:    "invalid not with elapsed_time",
+			jsonStr: `{"op": "not", "vars": [{"type": "elapsed_time", "since": {"event": "response", "details": {"question_ref": "q1", "form": "f1"}}, "duration": "4 weeks"}]}`,
+			wantErr: true,
+			errMsg:  "not operator cannot negate elapsed_time",
+		},
+		{
+			name:    "invalid not with nested elapsed_time",
+			jsonStr: `{"op": "not", "vars": [{"op": "and", "vars": [{"type": "form", "value": "f"}, {"type": "elapsed_time", "since": {"event": "response", "details": {"question_ref": "q1", "form": "f1"}}, "duration": "1 week"}]}]}`,
+			wantErr: true,
+			errMsg:  "not operator cannot negate elapsed_time",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cond Condition
+			err := json.Unmarshal([]byte(tt.jsonStr), &cond)
+			if err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			err = cond.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+			}
+		})
+	}
 }

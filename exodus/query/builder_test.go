@@ -546,3 +546,84 @@ func TestSQLInjectionPrevention(t *testing.T) {
 		t.Error("SQL should use parameterized query")
 	}
 }
+
+func TestBuildQuery_NotSimpleCondition(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"op": "not", "vars": [{"type": "state", "value": "END"}]}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	if !strings.Contains(sql, "NOT (s.current_state = $1)") {
+		t.Errorf("SQL missing NOT wrapper, got: %s", sql)
+	}
+	if len(params) != 1 || params[0] != "END" {
+		t.Errorf("Incorrect parameters: %v", params)
+	}
+}
+
+func TestBuildQuery_NotWrappingAndGroup(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"op": "not",
+			"vars": [{
+				"op": "and",
+				"vars": [
+					{"type": "form", "value": "survey_v1"},
+					{"type": "state", "value": "END"}
+				]
+			}]
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	if !strings.Contains(sql, "NOT (") {
+		t.Errorf("SQL missing NOT wrapper, got: %s", sql)
+	}
+	if !strings.Contains(sql, "AND") {
+		t.Errorf("SQL missing AND inside NOT, got: %s", sql)
+	}
+	if len(params) != 2 {
+		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	}
+}
+
+func TestBuildQuery_NotInsideAnd(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"op": "and",
+			"vars": [
+				{"type": "form", "value": "myform"},
+				{"op": "not", "vars": [{"type": "state", "value": "END"}]}
+			]
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	if !strings.Contains(sql, "s.current_form = $1") {
+		t.Errorf("SQL missing form condition, got: %s", sql)
+	}
+	if !strings.Contains(sql, "NOT (s.current_state = $2)") {
+		t.Errorf("SQL missing NOT(state) condition, got: %s", sql)
+	}
+	if len(params) != 2 {
+		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	}
+}

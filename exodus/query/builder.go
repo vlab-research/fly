@@ -195,8 +195,19 @@ func (qb *QueryBuilder) buildElapsedTimeCondition(cond *types.SimpleCondition) (
 		qb.cteIndex-1, durationParam), nil
 }
 
-// buildLogicalOperator handles AND/OR operations recursively
+// buildLogicalOperator handles AND/OR/NOT operations recursively
 func (qb *QueryBuilder) buildLogicalOperator(op *types.LogicalOperator) (string, error) {
+	if op.Op == "not" {
+		if len(op.Vars) != 1 {
+			return "", fmt.Errorf("not operator must have exactly one condition")
+		}
+		child, err := qb.buildCondition(&op.Vars[0])
+		if err != nil {
+			return "", fmt.Errorf("failed to build not condition: %w", err)
+		}
+		return "NOT (" + child + ")", nil
+	}
+
 	if len(op.Vars) == 0 {
 		return "", fmt.Errorf("logical operator must have at least one condition")
 	}
