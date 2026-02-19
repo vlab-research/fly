@@ -19,16 +19,16 @@ chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 chatLogTopic: &chatlogtopic "vlab-prod-chat-log"
 
-versionDashboard: &vdashboard v0.0.42
+versionDashboard: &vdashboard v0.0.45
 versionBotserver: &vbotserver v0.0.11
-versionReplybot: &vreplybot v0.0.178
+versionReplybot: &vreplybot v0.0.180
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.38
-versionScribble: &vscribble v0.0.27
+versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
-versionExporter: &vexporter v0.3.6
-versionExodus: &vexodus v0.1.0
+versionExporter: &vexporter v0.5.2
+versionExodus: &vexodus v0.1.1
 
 processingAlerts:
   - consumergroup: replybot
@@ -298,7 +298,7 @@ scribble:
         value: "128"
       - name: SCRIBBLE_STRICT_MODE
         value: "true"
-    - destination: "chat_log"
+    - destination: "chat-log"
       replicaCount: 1
       env:
       - name: KAFKA_TOPIC
@@ -450,7 +450,7 @@ dashboard:
     - name: KAFKA_EXPORTS_TOPIC
       value: *exportertopic
     - name: EXODUS_API_URL
-      value: "http://gbv-exodus"
+      value: "http://gbv-exodus-api"
 
   resources:
     requests:
@@ -462,6 +462,7 @@ dashboard:
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
       kubernetes.io/ingress.class: nginx
+      nginx.ingress.kubernetes.io/proxy-body-size: "200m"
     hosts:
       - host: fly-dashboard-api.vlab.digital
         paths:

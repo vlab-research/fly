@@ -1,7 +1,7 @@
 'use strict';
 
 const VALID_MEDIA_TYPES = ['image', 'video'];
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB (Facebook's limit)
+const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
 
 /**
  * Validates that all required upload inputs are present and valid.

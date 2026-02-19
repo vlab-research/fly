@@ -13,7 +13,7 @@ const {
 // multer middleware: memory storage, single file field named 'file'
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 200 * 1024 * 1024 },
 }).single('file');
 
 /**
