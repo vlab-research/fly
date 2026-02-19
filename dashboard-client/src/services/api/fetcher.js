@@ -21,8 +21,15 @@ export default async function fetcher({
   const TOKEN = auth.getIdToken();
 
   const opts = { method, headers, body };
-  if (method === 'POST' || method === 'PUT') opts.headers['Content-Type'] = 'application/json';
-  if (body) opts.body = JSON.stringify(body);
+  if (method === 'POST' || method === 'PUT') {
+    if (body instanceof FormData) {
+      // Let the browser set Content-Type with multipart boundary automatically
+      opts.body = body;
+    } else {
+      opts.headers['Content-Type'] = 'application/json';
+      if (body) opts.body = JSON.stringify(body);
+    }
+  }
 
   opts.headers.Authorization = `Bearer ${TOKEN}`;
 

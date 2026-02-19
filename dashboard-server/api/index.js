@@ -9,6 +9,7 @@ router
   .use('/typeform', require('./typeform'))
   .use('/credentials', require('./credentials'))
   .use('/facebook', require('./facebook'))
+  .use('/media', require('./media'))
   .use('/auth', require('./auth/auth.routes'))
   .use('/users/:userId/bails', require('./bails'))
   .use('/surveys/:surveyName/states', require('./states'))

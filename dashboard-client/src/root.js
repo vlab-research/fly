@@ -12,6 +12,7 @@ import { Auth, History } from './services';
 import FacebookPages from './containers/FacebookPages';
 import Reloadly from './containers/Reloadly';
 import Secrets from './containers/Secrets';
+import Media from './containers/Media';
 
 const handleAuthentication = ({ location }) => {
   if (/access_token|id_token|error/.test(location.hash)) {
@@ -38,6 +39,7 @@ const Root = () => (
       <PrivateRoute exact path="/bails/:bailId/edit" component={BailForm} auth={Auth} />
       <PrivateRoute exact path="/bails/create" component={BailForm} auth={Auth} />
       <PrivateRoute exact path="/bails" component={BailSystems} auth={Auth} />
+      <PrivateRoute exact path="/media" component={Media} auth={Auth} />
       <PrivateRoute exact path="/exports/create-full-messages" component={CreateFullMessagesExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create-chat-log" component={CreateChatLogExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create" component={CreateExport} auth={Auth} />
