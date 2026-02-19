@@ -21,7 +21,13 @@ async function facebookUploadAttachment(pageToken, payload) {
   });
 
   const url = `${fb.url}/me/message_attachments?access_token=${pageToken}`;
-  return r2.post(url, { body: form, headers: form.getHeaders() }).json;
+  try {
+    return await r2.post(url, { body: form, headers: form.getHeaders() }).json;
+  } catch (err) {
+    // Sanitize: never leak the access token in error messages
+    const safeMsg = (err.message || '').replace(/access_token=[^&\s]+/g, 'access_token=REDACTED');
+    throw new Error(safeMsg);
+  }
 }
 
 module.exports = { facebookUploadAttachment };
