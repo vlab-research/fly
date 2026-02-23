@@ -26,6 +26,7 @@ const CONDITION_TYPES = {
   error_code: { label: 'Error Code' },
   current_question: { label: 'Current Question' },
   elapsed_time: { label: 'Elapsed Time' },
+  question_response: { label: 'Question Response' },
 };
 
 const STATE_OPTIONS = [
@@ -55,6 +56,10 @@ const SimpleCondition = ({ condition, onChange, onDelete }) => {
         },
       };
       newCondition.duration = '1 week';
+    } else if (newType === 'question_response') {
+      newCondition.form = '';
+      newCondition.question_ref = '';
+      // response intentionally not set — absence means "is answered" mode
     }
     onChange(newCondition);
   };
@@ -161,6 +166,46 @@ const SimpleCondition = ({ condition, onChange, onDelete }) => {
               onChange={(e) => handleFieldChange('duration', e.target.value)}
               addonBefore="Duration"
             />
+          </>
+        )}
+
+        {(type === 'question_response') && (
+          <>
+            <Input
+              placeholder="Form shortcode (e.g., onboarding_v1)"
+              value={condition.form || ''}
+              onChange={(e) => handleFieldChange('form', e.target.value)}
+              addonBefore="Form"
+            />
+            <Input
+              placeholder="Question reference (e.g., consent)"
+              value={condition.question_ref || ''}
+              onChange={(e) => handleFieldChange('question_ref', e.target.value)}
+              addonBefore="Question Ref"
+            />
+            <Select
+              value={condition.response !== undefined ? 'equals' : 'answered'}
+              onChange={(mode) => {
+                if (mode === 'answered') {
+                  const { response, ...rest } = condition;
+                  onChange(rest);
+                } else {
+                  onChange({ ...condition, response: '' });
+                }
+              }}
+              style={{ width: '100%' }}
+            >
+              <Option value="answered">Is answered (any response)</Option>
+              <Option value="equals">Equals specific response</Option>
+            </Select>
+            {condition.response !== undefined && (
+              <Input
+                placeholder="Expected response value"
+                value={condition.response}
+                onChange={(e) => handleFieldChange('response', e.target.value)}
+                addonBefore="Response"
+              />
+            )}
           </>
         )}
       </Space>

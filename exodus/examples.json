@@ -133,5 +133,46 @@
         }
       }
     }
+  },
+  "question_response_with_value": {
+    "name": "Question Response With Value Bail",
+    "description": "Bail users who answered a specific question with a specific value",
+    "survey_id": "123e4567-e89b-12d3-a456-426614174000",
+    "enabled": true,
+    "destination_form": "exit_survey",
+    "definition": {
+      "conditions": {
+        "type": "question_response",
+        "form": "myform",
+        "question_ref": "q1",
+        "response": "yes"
+      },
+      "execution": {
+        "timing": "immediate"
+      },
+      "action": {
+        "destination_form": "exit_survey"
+      }
+    }
+  },
+  "question_response_answered": {
+    "name": "Question Response Answered Bail",
+    "description": "Bail users who answered a specific question in any way",
+    "survey_id": "123e4567-e89b-12d3-a456-426614174000",
+    "enabled": true,
+    "destination_form": "exit_survey",
+    "definition": {
+      "conditions": {
+        "type": "question_response",
+        "form": "myform",
+        "question_ref": "q1"
+      },
+      "execution": {
+        "timing": "immediate"
+      },
+      "action": {
+        "destination_form": "exit_survey"
+      }
+    }
   }
 }

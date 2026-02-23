@@ -91,6 +91,8 @@ type SimpleCondition struct {
 	ErrorCode    *string        `json:"error_code,omitempty"`
 	QuestionRef  *string        `json:"question_ref,omitempty"`
 	CurrentState *string        `json:"current_state,omitempty"`
+	Form         *string        `json:"form,omitempty"`
+	Response     *string        `json:"response,omitempty"`
 }
 
 // LogicalOperator represents and/or/not operations on conditions
@@ -192,8 +194,16 @@ func (sc *SimpleCondition) Validate() error {
 		if err := sc.Since.Validate(); err != nil {
 			return fmt.Errorf("invalid since reference: %w", err)
 		}
+	case "question_response":
+		if sc.Form == nil || *sc.Form == "" {
+			return fmt.Errorf("question_response condition requires 'form' field")
+		}
+		if sc.QuestionRef == nil || *sc.QuestionRef == "" {
+			return fmt.Errorf("question_response condition requires 'question_ref' field")
+		}
+		// response is optional — no check needed
 	default:
-		return fmt.Errorf("invalid condition type: %s", sc.Type)
+		return fmt.Errorf("invalid condition type: %s (must be form, state, error_code, current_question, elapsed_time, or question_response)", sc.Type)
 	}
 	return nil
 }
@@ -217,23 +227,25 @@ func (lo *LogicalOperator) Validate() error {
 			return fmt.Errorf("invalid condition at index %d: %w", i, err)
 		}
 	}
-	// Reject NOT wrapping elapsed_time (directly or transitively)
+	// Reject NOT wrapping elapsed_time or question_response (directly or transitively)
 	if lo.Op == "not" {
-		if containsElapsedTime(&lo.Vars[0]) {
-			return fmt.Errorf("not operator cannot negate elapsed_time conditions (not yet supported)")
+		if containsCTECondition(&lo.Vars[0]) {
+			return fmt.Errorf("not operator cannot negate elapsed_time or question_response conditions (not yet supported)")
 		}
 	}
 	return nil
 }
 
-// containsElapsedTime recursively checks if a condition tree contains an elapsed_time condition
-func containsElapsedTime(c *Condition) bool {
+// containsCTECondition recursively checks if a condition tree contains an elapsed_time
+// or question_response condition (both require CTE-based query generation)
+func containsCTECondition(c *Condition) bool {
 	if c.IsSimple() {
-		return c.GetSimple().Type == "elapsed_time"
+		t := c.GetSimple().Type
+		return t == "elapsed_time" || t == "question_response"
 	}
 	if c.IsOperator() {
 		for i := range c.GetOperator().Vars {
-			if containsElapsedTime(&c.GetOperator().Vars[i]) {
+			if containsCTECondition(&c.GetOperator().Vars[i]) {
 				return true
 			}
 		}

@@ -627,3 +627,88 @@ func TestBuildQuery_NotInsideAnd(t *testing.T) {
 		t.Fatalf("Expected 2 parameters, got %d", len(params))
 	}
 }
+
+func TestBuildQuery_QuestionResponseWithResponse(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "question_response", "form": "myform", "question_ref": "q1", "response": "yes"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	// CTE should exist
+	if !strings.Contains(sql, "question_responses_0") {
+		t.Errorf("SQL missing CTE name 'question_responses_0', got: %s", sql)
+	}
+	// CTE WHERE clause must filter by shortcode, question_ref, and response
+	if !strings.Contains(sql, "WHERE shortcode = $1 AND question_ref = $2 AND response = $3") {
+		t.Errorf("CTE missing expected WHERE clause, got: %s", sql)
+	}
+	// Main WHERE references the CTE alias
+	if !strings.Contains(sql, "qr0.userid IS NOT NULL") {
+		t.Errorf("SQL missing 'qr0.userid IS NOT NULL', got: %s", sql)
+	}
+	// JOIN must link CTE to states table
+	if !strings.Contains(sql, "JOIN question_responses_0 qr0 ON s.userid = qr0.userid") {
+		t.Errorf("SQL missing JOIN clause, got: %s", sql)
+	}
+
+	// params: $1=myform, $2=q1, $3=yes
+	if len(params) != 3 {
+		t.Fatalf("Expected 3 parameters, got %d", len(params))
+	}
+	if params[0] != "myform" {
+		t.Errorf("Expected params[0]='myform', got %v", params[0])
+	}
+	if params[1] != "q1" {
+		t.Errorf("Expected params[1]='q1', got %v", params[1])
+	}
+	if params[2] != "yes" {
+		t.Errorf("Expected params[2]='yes', got %v", params[2])
+	}
+}
+
+func TestBuildQuery_QuestionResponseWithoutResponse(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "question_response", "form": "myform", "question_ref": "q1"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	// CTE should exist
+	if !strings.Contains(sql, "question_responses_0") {
+		t.Errorf("SQL missing CTE name 'question_responses_0', got: %s", sql)
+	}
+	// CTE WHERE clause must filter by shortcode and question_ref only (no response)
+	if !strings.Contains(sql, "WHERE shortcode = $1 AND question_ref = $2") {
+		t.Errorf("CTE missing expected WHERE clause, got: %s", sql)
+	}
+	// Must NOT contain a response parameter filter in the CTE
+	if strings.Contains(sql, "AND response = ") {
+		t.Errorf("SQL should not contain 'AND response =' when response is absent, got: %s", sql)
+	}
+	// Main WHERE references the CTE alias
+	if !strings.Contains(sql, "qr0.userid IS NOT NULL") {
+		t.Errorf("SQL missing 'qr0.userid IS NOT NULL', got: %s", sql)
+	}
+
+	// params: $1=myform, $2=q1
+	if len(params) != 2 {
+		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	}
+	if params[0] != "myform" {
+		t.Errorf("Expected params[0]='myform', got %v", params[0])
+	}
+	if params[1] != "q1" {
+		t.Errorf("Expected params[1]='q1', got %v", params[1])
+	}
+}

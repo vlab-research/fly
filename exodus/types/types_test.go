@@ -459,6 +459,57 @@ func strPtr(s string) *string {
 	return &s
 }
 
+func TestSimpleConditionValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		jsonStr string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid question_response with all three fields",
+			jsonStr: `{"type": "question_response", "form": "myform", "question_ref": "q1", "response": "yes"}`,
+			wantErr: false,
+		},
+		{
+			name:    "valid question_response with only form and question_ref",
+			jsonStr: `{"type": "question_response", "form": "myform", "question_ref": "q1"}`,
+			wantErr: false,
+		},
+		{
+			name:    "invalid question_response missing form",
+			jsonStr: `{"type": "question_response", "question_ref": "q1", "response": "yes"}`,
+			wantErr: true,
+			errMsg:  "question_response condition requires 'form' field",
+		},
+		{
+			name:    "invalid question_response missing question_ref",
+			jsonStr: `{"type": "question_response", "form": "myform", "response": "yes"}`,
+			wantErr: true,
+			errMsg:  "question_response condition requires 'question_ref' field",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cond Condition
+			err := json.Unmarshal([]byte(tt.jsonStr), &cond)
+			if err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			err = cond.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+			}
+		})
+	}
+}
+
 func TestNotOperatorValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -499,6 +550,12 @@ func TestNotOperatorValidation(t *testing.T) {
 			jsonStr: `{"op": "not", "vars": [{"op": "and", "vars": [{"type": "form", "value": "f"}, {"type": "elapsed_time", "since": {"event": "response", "details": {"question_ref": "q1", "form": "f1"}}, "duration": "1 week"}]}]}`,
 			wantErr: true,
 			errMsg:  "not operator cannot negate elapsed_time",
+		},
+		{
+			name:    "invalid not with question_response",
+			jsonStr: `{"op": "not", "vars": [{"type": "question_response", "form": "myform", "question_ref": "q1"}]}`,
+			wantErr: true,
+			errMsg:  "not operator cannot negate",
 		},
 	}
 

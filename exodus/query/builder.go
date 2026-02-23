@@ -98,6 +98,8 @@ func (qb *QueryBuilder) buildSimpleCondition(cond *types.SimpleCondition) (strin
 		return qb.buildCurrentQuestionCondition(cond)
 	case "elapsed_time":
 		return qb.buildElapsedTimeCondition(cond)
+	case "question_response":
+		return qb.buildQuestionResponseCondition(cond)
 	default:
 		return "", fmt.Errorf("unsupported condition type: %s", cond.Type)
 	}
@@ -193,6 +195,48 @@ func (qb *QueryBuilder) buildElapsedTimeCondition(cond *types.SimpleCondition) (
 	// Return the WHERE condition using this CTE
 	return fmt.Sprintf("rt%d.response_time + $%d::INTERVAL < NOW()",
 		qb.cteIndex-1, durationParam), nil
+}
+
+// buildQuestionResponseCondition creates SQL for question response conditions with CTEs.
+// It matches users who answered a specific question in a specific form.
+// If Form or QuestionRef is nil, an error is returned.
+// When Response is non-nil, the CTE also filters by the specific response value.
+// When Response is nil, any answer to the question qualifies (existence check only).
+func (qb *QueryBuilder) buildQuestionResponseCondition(cond *types.SimpleCondition) (string, error) {
+	if cond.Form == nil {
+		return "", fmt.Errorf("form (shortcode) is required for question_response condition")
+	}
+	if cond.QuestionRef == nil {
+		return "", fmt.Errorf("question_ref is required for question_response condition")
+	}
+
+	cteName := fmt.Sprintf("question_responses_%d", qb.cteIndex)
+	alias := fmt.Sprintf("qr%d", qb.cteIndex)
+	qb.cteIndex++
+
+	formParam := qb.addParam(*cond.Form)
+	questionParam := qb.addParam(*cond.QuestionRef)
+
+	var cte string
+	if cond.Response != nil {
+		responseParam := qb.addParam(*cond.Response)
+		cte = fmt.Sprintf(`%s AS (
+    SELECT DISTINCT userid
+    FROM responses
+    WHERE shortcode = $%d AND question_ref = $%d AND response = $%d
+)`, cteName, formParam, questionParam, responseParam)
+	} else {
+		cte = fmt.Sprintf(`%s AS (
+    SELECT DISTINCT userid
+    FROM responses
+    WHERE shortcode = $%d AND question_ref = $%d
+)`, cteName, formParam, questionParam)
+	}
+
+	qb.ctes = append(qb.ctes, cte)
+	qb.cteJoins = append(qb.cteJoins, fmt.Sprintf("JOIN %s %s ON s.userid = %s.userid", cteName, alias, alias))
+
+	return fmt.Sprintf("%s.userid IS NOT NULL", alias), nil
 }
 
 // buildLogicalOperator handles AND/OR/NOT operations recursively

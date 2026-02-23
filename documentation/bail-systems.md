@@ -49,7 +49,7 @@ The dashboard shows a table of all bail systems for the authenticated user at `/
 The create form (`/bails/create`) has four sections:
 
 1. **Basic Information** -- name, description, enabled toggle
-2. **Conditions** -- a visual condition builder supporting AND/OR/NOT logic trees with condition types: form, state, error_code, current_question, elapsed_time
+2. **Conditions** -- a visual condition builder supporting AND/OR/NOT logic trees with condition types: form, state, error_code, current_question, elapsed_time, question_response (with a mode toggle for "is answered" vs "equals specific response")
 3. **Execution Timing** -- choose immediate, scheduled (daily at a time + timezone), or absolute (one-time at a datetime)
 4. **Action** -- destination form shortcode and optional JSON metadata
 
@@ -115,6 +115,7 @@ Conditions define **who** gets bailed. They form a recursive tree supporting AND
 | `error_code` | `states.state_json.error.code` | `{"type": "error_code", "value": "10"}` |
 | `current_question` | `states.state_json.question` | `{"type": "current_question", "value": "hello_again"}` |
 | `elapsed_time` | Time since a response event | See below |
+| `question_response` | `responses` table (form + question_ref + optional response) | See below |
 
 **Elapsed time** is the most complex condition. It references a specific response event and checks if enough time has passed:
 
@@ -130,6 +131,69 @@ Conditions define **who** gets bailed. They form a recursive tree supporting AND
 ```
 
 Duration uses PostgreSQL interval syntax: `"4 weeks"`, `"2 days"`, `"1 hour"`, `"30 minutes"`.
+
+**Question response** conditions select users based on their survey answers. `form` and `question_ref` are required; `response` is optional.
+
+Mode 1 — Equals specific response (user answered question X with exactly response Y):
+
+```json
+{
+  "type": "question_response",
+  "form": "intake-survey",
+  "question_ref": "consent_question",
+  "response": "Yes"
+}
+```
+
+Mode 2 — Is answered (user answered question X at all, any response):
+
+```json
+{
+  "type": "question_response",
+  "form": "intake-survey",
+  "question_ref": "consent_question"
+}
+```
+
+If `response` is provided, only users who answered that question with exactly that value are matched. If `response` is omitted (not just empty string — the key must be absent), all users who answered the question with any value are matched.
+
+Implementation uses a CTE with an INNER JOIN against the `responses` table, similar to `elapsed_time`. Wrapping `question_response` inside a NOT operator is not supported for the same reason as `elapsed_time`: the INNER JOIN cannot express "users who did NOT answer this question".
+
+**SQL generation for question_response:**
+
+When `response` is specified (exact match):
+
+```sql
+WITH question_responses_0 AS (
+    SELECT DISTINCT userid
+    FROM responses
+    WHERE shortcode = $1 AND question_ref = $2 AND response = $3
+)
+SELECT DISTINCT s.userid, s.pageid
+FROM states s
+JOIN question_responses_0 qr0 ON s.userid = qr0.userid
+WHERE qr0.userid IS NOT NULL
+LIMIT 100000
+```
+
+Parameters: `[$form, $question_ref, $response]`
+
+When `response` is absent (any answer):
+
+```sql
+WITH question_responses_0 AS (
+    SELECT DISTINCT userid
+    FROM responses
+    WHERE shortcode = $1 AND question_ref = $2
+)
+SELECT DISTINCT s.userid, s.pageid
+FROM states s
+JOIN question_responses_0 qr0 ON s.userid = qr0.userid
+WHERE qr0.userid IS NOT NULL
+LIMIT 100000
+```
+
+Parameters: `[$form, $question_ref]`
 
 **Logical operators** combine conditions:
 
@@ -191,7 +255,7 @@ NOT inside an AND group (match users on a form whose state is NOT "END"):
 
 **NOT operator constraints:**
 - Must have exactly 1 child (validation rejects 0 or 2+ children).
-- Cannot negate `elapsed_time` conditions, directly or transitively. Negating elapsed_time would require LEFT JOIN + IS NULL semantics to correctly include users who never responded, which is not yet supported.
+- Cannot negate `elapsed_time` or `question_response` conditions, directly or transitively. Both conditions use INNER JOIN CTEs against the responses table; negating them would require LEFT JOIN + IS NULL semantics to correctly include users who never responded, which is not yet supported.
 
 **SQL generation for NOT:**
 
@@ -255,7 +319,7 @@ The core service, deployed in two modes from the same binary:
 
 Key packages:
 - `types/` -- Bail, BailEvent, BailDefinition, Condition types with validation and custom JSON marshaling
-- `query/` -- Translates condition trees into parameterized SQL with CTEs for elapsed_time conditions
+- `query/` -- Translates condition trees into parameterized SQL with CTEs for elapsed_time and question_response conditions
 - `executor/` -- Execution loop with timing logic, error isolation per bail, panic recovery
 - `sender/` -- HTTP POST to botserver's `/synthetic` endpoint with rate limiting
 - `api/` -- REST handlers, request/response types, db-to-types conversion
@@ -524,6 +588,12 @@ Simple conditions:
   "since": { "event": "response", "details": { "form": "string", "question_ref": "string" } },
   "duration": "string (PostgreSQL interval)"
 }
+{
+  "type": "question_response",
+  "form": "string (required, form shortcode)",
+  "question_ref": "string (required)",
+  "response": "string (optional, exact match against responses.response column)"
+}
 ```
 
 Compound conditions:
@@ -660,12 +730,13 @@ BailDefinition.Validate()
 |   +-- (if operator) LogicalOperator.Validate()
 |   |   +-- Check op is "and", "or", or "not"
 |   |   +-- "not" must have exactly 1 child
-|   |   +-- "not" cannot contain elapsed_time (directly or transitively)
+|   |   +-- "not" cannot contain elapsed_time or question_response (directly or transitively)
 |   |   +-- Validate each child condition recursively
 |   +-- (if simple) SimpleCondition.Validate()
-|       +-- Check type is valid (form, state, error_code, current_question, elapsed_time)
+|       +-- Check type is valid (form, state, error_code, current_question, elapsed_time, question_response)
 |       +-- Check required fields for each type
 |       +-- If elapsed_time: validate TimeReference structure
+|       +-- If question_response: require form and question_ref (response is optional)
 |
 +-- Execution.Validate()
 |   +-- Check timing is valid (immediate, scheduled, absolute)
@@ -686,7 +757,7 @@ Frontend validation is minimal (required field checks via AntD Form rules). The 
 
 **Missing timing fields**: The frontend does not strictly enforce conditional required fields (e.g., `time_of_day` when timing is "scheduled"). The backend will reject with a clear error message.
 
-**Condition type errors**: Using an unsupported condition type name will be rejected by the backend with: `invalid condition type: <type> (must be form, state, error_code, current_question, or elapsed_time)`.
+**Condition type errors**: Using an unsupported condition type name will be rejected by the backend with: `invalid condition type: <type>`. Valid types are: `form`, `state`, `error_code`, `current_question`, `elapsed_time`, `question_response`.
 
 ---
 

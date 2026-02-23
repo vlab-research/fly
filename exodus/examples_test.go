@@ -27,6 +27,8 @@ func TestExamplesJSONParsing(t *testing.T) {
 		"complex_bail_with_and",
 		"complex_bail_with_nested_logic",
 		"elapsed_time_bail",
+		"question_response_with_value",
+		"question_response_answered",
 	}
 
 	for _, name := range testCases {
