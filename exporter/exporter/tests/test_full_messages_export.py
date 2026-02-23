@@ -232,6 +232,16 @@ class TestIterMessages:
 # --- export_full_messages ---
 
 
+def _mock_query_two_step(userids, message_rows):
+    """Helper: mock query() for the two-step batched approach.
+
+    First call returns userids (as tuples), subsequent calls return message rows.
+    """
+    userid_results = [(uid,) for uid in userids]
+    calls = [iter(userid_results)] + [iter(rows) for rows in message_rows]
+    return calls
+
+
 class TestExportFullMessages:
     @patch("exporter.exporter.query")
     @patch("exporter.exporter.storage.get_storage_backend")
@@ -242,9 +252,10 @@ class TestExportFullMessages:
         mock_backend_factory.return_value = mock_backend
 
         msg = {"source": "messenger", "message": {"text": "hello"}}
-        mock_query.return_value = iter([
+        message_rows = [
             {"userid": "u1", "timestamp": "2025-01-01", "content": json.dumps(msg)},
-        ])
+        ]
+        mock_query.side_effect = _mock_query_two_step(["u1"], [message_rows])
 
         opts = FullMessagesExportOptions()
         export_full_messages("db-url", "uuid-1", "user@test.com", "survey1", opts)
@@ -278,7 +289,7 @@ class TestExportFullMessages:
         mock_backend = MagicMock()
         mock_backend.generate_link.return_value = "http://link"
         mock_backend_factory.return_value = mock_backend
-        mock_query.return_value = iter([])
+        mock_query.side_effect = _mock_query_two_step([], [])
 
         opts = FullMessagesExportOptions()
         export_full_messages("db-url", "uuid-3", "user@test.com", "survey1", opts)
@@ -293,7 +304,7 @@ class TestExportFullMessages:
         mock_backend = MagicMock()
         mock_backend.generate_link.return_value = "http://link"
         mock_backend_factory.return_value = mock_backend
-        mock_query.return_value = iter([])
+        mock_query.side_effect = _mock_query_two_step([], [])
 
         opts = FullMessagesExportOptions()
         export_full_messages("db-url", "uuid-4", "user@test.com", "survey1", opts)
@@ -312,36 +323,58 @@ class TestExportFullMessages:
 
         text_msg = {"source": "messenger", "message": {"text": "hello"}}
         report_msg = {"source": "synthetic", "event": {"type": "machine_report"}}
-        mock_query.return_value = iter([
+        message_rows = [
             {"userid": "u1", "timestamp": "t1", "content": json.dumps(text_msg)},
             {"userid": "u1", "timestamp": "t2", "content": json.dumps(report_msg)},
-        ])
+        ]
+        mock_query.side_effect = _mock_query_two_step(["u1"], [message_rows])
 
         # Only request "conversation" group — should exclude machine_report
         opts = FullMessagesExportOptions(event_groups=["conversation"])
         export_full_messages("db-url", "uuid-5", "user@test.com", "survey1", opts)
 
-        # Read back the CSV that was written to the temp file
-        path = mock_backend.save_file.call_args[0][0]
-        # File is already deleted, but we verified the filtering works via _iter_messages tests
         mock_backend.save_file.assert_called_once()
 
     @patch("exporter.exporter.query")
     @patch("exporter.exporter.storage.get_storage_backend")
     @patch("exporter.exporter.set_export_status")
-    def test_sql_joins_through_responses(self, mock_status, mock_backend_factory, mock_query):
+    def test_two_step_query_structure(self, mock_status, mock_backend_factory, mock_query):
+        """Verify the batched two-step approach: first userids, then messages per batch."""
         mock_backend = MagicMock()
         mock_backend.generate_link.return_value = "http://link"
         mock_backend_factory.return_value = mock_backend
-        mock_query.return_value = iter([])
+        mock_query.side_effect = _mock_query_two_step(["u1", "u2"], [[]])
 
         opts = FullMessagesExportOptions()
         export_full_messages("db-url", "uuid-6", "user@test.com", "survey1", opts)
 
-        sql = mock_query.call_args[0][1]
-        assert "FROM messages m" in sql
-        assert "INNER JOIN" in sql
-        assert "SELECT DISTINCT userid" in sql
-        assert "FROM responses" in sql
-        assert "survey_name = %s" in sql
-        assert "email = %s" in sql
+        # First call: userid query
+        first_sql = mock_query.call_args_list[0][0][1]
+        assert "SELECT DISTINCT userid" in first_sql
+        assert "FROM responses" in first_sql
+        assert "survey_name = %s" in first_sql
+        assert "email = %s" in first_sql
+
+        # Second call: messages query with IN clause
+        second_sql = mock_query.call_args_list[1][0][1]
+        assert "FROM messages m" in second_sql
+        assert "WHERE m.userid IN" in second_sql
+
+    @patch("exporter.exporter.query")
+    @patch("exporter.exporter.storage.get_storage_backend")
+    @patch("exporter.exporter.set_export_status")
+    def test_batches_large_user_sets(self, mock_status, mock_backend_factory, mock_query):
+        """Verify that >500 users are split into multiple batches."""
+        mock_backend = MagicMock()
+        mock_backend.generate_link.return_value = "http://link"
+        mock_backend_factory.return_value = mock_backend
+
+        userids = [f"u{i}" for i in range(750)]
+        # First call returns userids, next two calls return empty message batches
+        mock_query.side_effect = _mock_query_two_step(userids, [[], []])
+
+        opts = FullMessagesExportOptions()
+        export_full_messages("db-url", "uuid-7", "user@test.com", "survey1", opts)
+
+        # Should be 3 calls: 1 userid query + 2 message batches (500 + 250)
+        assert mock_query.call_count == 3

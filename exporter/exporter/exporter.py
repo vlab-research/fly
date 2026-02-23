@@ -337,24 +337,39 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         if not allowed_types:
             log.warning(f"full messages export {export_id}: allowed_types is empty, no rows will match")
 
-        q = """
-            SELECT m.userid, m.timestamp::string AS timestamp, m.content
-            FROM messages m
-            INNER JOIN (
-                SELECT DISTINCT userid
-                FROM responses
-                WHERE shortcode IN (
-                    SELECT shortcode FROM surveys
-                    WHERE survey_name = %s
-                    AND userid = (SELECT id FROM users WHERE email = %s)
-                )
-            ) r ON m.userid = r.userid
-            ORDER BY m.userid, m.timestamp ASC
+        # Step 1: collect distinct userids for this survey (small result set)
+        userid_q = """
+            SELECT DISTINCT userid
+            FROM responses
+            WHERE shortcode IN (
+                SELECT shortcode FROM surveys
+                WHERE survey_name = %s
+                AND userid = (SELECT id FROM users WHERE email = %s)
+            )
         """
+        userids = [row[0] for row in query(cnf, userid_q, vals=(survey, user))]
+        log.info(
+            f"full messages export {export_id}: found {len(userids)} users"
+        )
 
-        raw_rows = query(cnf, q, vals=(survey, user), as_dict=True)
         stats = {"total": 0, "json_errors": 0, "filtered": 0, "yielded": 0}
-        rows = _iter_messages(raw_rows, allowed_types, include_raw, stats)
+
+        # Step 2: query messages in batches of userids to force index usage
+        # and avoid full table scan on the 101M-row messages table
+        def _batched_message_rows():
+            batch_size = 500
+            for i in range(0, len(userids), batch_size):
+                batch = userids[i : i + batch_size]
+                placeholders = ",".join(["%s"] * len(batch))
+                q = f"""
+                    SELECT m.userid, m.timestamp::string AS timestamp, m.content
+                    FROM messages m
+                    WHERE m.userid IN ({placeholders})
+                    ORDER BY m.userid, m.timestamp ASC
+                """
+                yield from query(cnf, q, vals=tuple(batch), as_dict=True)
+
+        rows = _iter_messages(_batched_message_rows(), allowed_types, include_raw, stats)
 
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".csv", delete=False, newline=""
