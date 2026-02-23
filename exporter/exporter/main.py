@@ -1,7 +1,7 @@
 import json
 import os
 
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, KafkaError
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
@@ -62,7 +62,11 @@ def app():
                 continue
 
             if msg.error():
-                log.error("Consumer error: {}".format(msg.error()))
+                err = msg.error()
+                if err.fatal() or err.code() == KafkaError._MAX_POLL_EXCEEDED:
+                    log.error("Fatal consumer error, exiting to restart: {}".format(err))
+                    raise SystemExit(1)
+                log.error("Consumer error: {}".format(err))
                 continue
 
             try:
