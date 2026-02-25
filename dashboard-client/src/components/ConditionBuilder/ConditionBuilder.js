@@ -27,6 +27,7 @@ const CONDITION_TYPES = {
   current_question: { label: 'Current Question' },
   elapsed_time: { label: 'Elapsed Time' },
   question_response: { label: 'Question Response' },
+  surveyid: { label: 'Survey ID' },
 };
 
 const STATE_OPTIONS = [
@@ -60,6 +61,8 @@ const SimpleCondition = ({ condition, onChange, onDelete }) => {
       newCondition.form = '';
       newCondition.question_ref = '';
       // response intentionally not set — absence means "is answered" mode
+    } else if (newType === 'surveyid') {
+      newCondition.value = '';
     }
     onChange(newCondition);
   };
@@ -207,6 +210,15 @@ const SimpleCondition = ({ condition, onChange, onDelete }) => {
               />
             )}
           </>
+        )}
+
+        {(type === 'surveyid') && (
+          <Input
+            placeholder="Enter survey UUID"
+            value={condition.value || ''}
+            onChange={(e) => handleFieldChange('value', e.target.value)}
+            addonBefore="Survey ID"
+          />
         )}
       </Space>
     </ConditionCard>

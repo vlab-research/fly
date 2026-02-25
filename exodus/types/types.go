@@ -202,8 +202,12 @@ func (sc *SimpleCondition) Validate() error {
 			return fmt.Errorf("question_response condition requires 'question_ref' field")
 		}
 		// response is optional — no check needed
+	case "surveyid":
+		if sc.Value == nil || *sc.Value == "" {
+			return fmt.Errorf("value is required for surveyid condition")
+		}
 	default:
-		return fmt.Errorf("invalid condition type: %s (must be form, state, error_code, current_question, elapsed_time, or question_response)", sc.Type)
+		return fmt.Errorf("invalid condition type: %s (must be form, state, error_code, current_question, elapsed_time, question_response, or surveyid)", sc.Type)
 	}
 	return nil
 }
