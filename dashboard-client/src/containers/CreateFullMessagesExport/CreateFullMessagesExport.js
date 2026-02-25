@@ -31,8 +31,6 @@ const CreateFullMessagesExport = () => {
     setLoading(true);
     await startExport(survey, body, 'full_messages');
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
     setLoading(false);
     history.goBack();
   };

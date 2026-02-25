@@ -18,10 +18,6 @@ const CreateChatLogExport = () => {
     setLoading(true);
     await startExport(survey, body, 'chat_log');
 
-    // Short wait -- the "Started" row is already inserted by the server,
-    // but give a moment before navigating back.
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
     setLoading(false);
     history.goBack();
   };

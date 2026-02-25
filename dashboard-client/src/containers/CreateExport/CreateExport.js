@@ -27,11 +27,8 @@ const CreateExport = () => {
 
     await startExport(survey, body)
 
-    // artificial wait, hoping for exporter to catch up
-    await new Promise(resolve => setTimeout(resolve, 4000));
-
     setLoading(false)
-    history.push('/exports')
+    history.goBack()
   };
 
   const [form] = Form.useForm();
