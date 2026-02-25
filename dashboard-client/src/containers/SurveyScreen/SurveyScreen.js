@@ -155,12 +155,23 @@ const MonitorSection = ({ surveyName, match }) => {
   );
 };
 
+const STALE_MS = 30 * 60 * 1000; // 30 minutes
+
+const isStale = (updated) => Date.now() - new Date(updated).getTime() > STALE_MS;
+
 const exportColumns = [
   { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
-  { title: 'Status', dataIndex: 'status' },
+  { title: 'Status', dataIndex: 'status', render: (status, record) => {
+    if (status === 'Started') {
+      return isStale(record.updated)
+        ? <span style={{ color: '#faad14' }}>Stale</span>
+        : status;
+    }
+    return status;
+  }},
   { title: 'Time', dataIndex: 'updated' },
   { title: 'Download', dataIndex: 'export_link', render: (text, record) => (
-    record.status === 'Started'
+    record.status === 'Started' && !isStale(record.updated)
       ? <Spin size="small" />
       : DownloadLink(text)
   )},
@@ -172,16 +183,27 @@ const ExportPanel = ({ selected }) => {
 
   useEffect(() => {
     let cancelled = false;
+    let intervalId = null;
 
     const fetchExports = () => {
       fetchExportsBySurvey(selected)
-        .then(data => { if (!cancelled) setExports(data || []); })
+        .then(data => {
+          if (!cancelled) {
+            const rows = data || [];
+            setExports(rows);
+            // Stop polling once no active (non-stale) exports remain
+            if (intervalId && !rows.some(r => r.status === 'Started' && !isStale(r.updated))) {
+              clearInterval(intervalId);
+              intervalId = null;
+            }
+          }
+        })
         .catch(err => console.error(err))
         .finally(() => { if (!cancelled) setLoading(false); });
     };
 
     fetchExports();
-    const intervalId = setInterval(fetchExports, 4000);
+    intervalId = setInterval(fetchExports, 4000);
 
     return () => {
       cancelled = true;
