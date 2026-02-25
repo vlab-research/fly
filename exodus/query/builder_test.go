@@ -712,3 +712,99 @@ func TestBuildQuery_QuestionResponseWithoutResponse(t *testing.T) {
 		t.Errorf("Expected params[1]='q1', got %v", params[1])
 	}
 }
+
+func TestBuildQuery_SurveyIDCondition(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "surveyid", "value": "550e8400-e29b-41d4-a716-446655440000"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	// Verify the subquery pattern
+	if !strings.Contains(sql, "s.current_form IN (SELECT shortcode FROM surveys WHERE id = $1)") {
+		t.Errorf("SQL missing surveyid subquery condition, got: %s", sql)
+	}
+
+	// Should be a plain SELECT with no CTEs
+	if strings.Contains(sql, "WITH ") {
+		t.Errorf("surveyid condition should not generate any CTEs, got: %s", sql)
+	}
+
+	// Verify parameters: $1=survey UUID
+	if len(params) != 1 {
+		t.Fatalf("Expected 1 parameter, got %d", len(params))
+	}
+	if params[0] != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Errorf("Expected params[0]='550e8400-e29b-41d4-a716-446655440000', got %v", params[0])
+	}
+}
+
+func TestBuildQuery_NotSurveyIDCondition(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"op": "not", "vars": [{"type": "surveyid", "value": "550e8400-e29b-41d4-a716-446655440000"}]}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	// Verify NOT wraps the subquery
+	if !strings.Contains(sql, "NOT (s.current_form IN (SELECT shortcode FROM surveys WHERE id = $1))") {
+		t.Errorf("SQL missing NOT wrapper around surveyid subquery, got: %s", sql)
+	}
+
+	if len(params) != 1 {
+		t.Fatalf("Expected 1 parameter, got %d", len(params))
+	}
+	if params[0] != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Errorf("Expected params[0]='550e8400-e29b-41d4-a716-446655440000', got %v", params[0])
+	}
+}
+
+func TestBuildQuery_SurveyIDInsideAnd(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"op": "and",
+			"vars": [
+				{"type": "state", "value": "WAIT_EXTERNAL_EVENT"},
+				{"type": "surveyid", "value": "550e8400-e29b-41d4-a716-446655440000"}
+			]
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	// $1=state value, $2=survey UUID — parameter numbering must be correct
+	if !strings.Contains(sql, "s.current_state = $1") {
+		t.Errorf("SQL missing state condition at $1, got: %s", sql)
+	}
+	if !strings.Contains(sql, "s.current_form IN (SELECT shortcode FROM surveys WHERE id = $2)") {
+		t.Errorf("SQL missing surveyid subquery at $2, got: %s", sql)
+	}
+	if !strings.Contains(sql, "AND") {
+		t.Error("SQL missing AND operator")
+	}
+
+	if len(params) != 2 {
+		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	}
+	if params[0] != "WAIT_EXTERNAL_EVENT" {
+		t.Errorf("Expected params[0]='WAIT_EXTERNAL_EVENT', got %v", params[0])
+	}
+	if params[1] != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Errorf("Expected params[1]='550e8400-e29b-41d4-a716-446655440000', got %v", params[1])
+	}
+}

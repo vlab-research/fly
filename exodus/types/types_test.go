@@ -510,6 +510,62 @@ func TestSimpleConditionValidation(t *testing.T) {
 	}
 }
 
+func TestSurveyIDConditionValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		jsonStr string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid surveyid with non-empty value",
+			jsonStr: `{"type": "surveyid", "value": "550e8400-e29b-41d4-a716-446655440000"}`,
+			wantErr: false,
+		},
+		{
+			name:    "invalid surveyid with empty value",
+			jsonStr: `{"type": "surveyid", "value": ""}`,
+			wantErr: true,
+			errMsg:  "value is required for surveyid condition",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cond Condition
+			err := json.Unmarshal([]byte(tt.jsonStr), &cond)
+			if err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			err = cond.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestSurveyIDConditionMissingValue(t *testing.T) {
+	// A surveyid condition with no value field at all (nil pointer) must fail validation.
+	var cond Condition
+	err := json.Unmarshal([]byte(`{"type": "surveyid"}`), &cond)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	err = cond.Validate()
+	if err == nil {
+		t.Error("Expected validation error for surveyid with nil value, got nil")
+	}
+	if !strings.Contains(err.Error(), "value is required for surveyid condition") {
+		t.Errorf("Unexpected error message: %q", err.Error())
+	}
+}
+
 func TestNotOperatorValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -525,6 +581,11 @@ func TestNotOperatorValidation(t *testing.T) {
 		{
 			name:    "valid not with and group",
 			jsonStr: `{"op": "not", "vars": [{"op": "and", "vars": [{"type": "form", "value": "f"}, {"type": "state", "value": "END"}]}]}`,
+			wantErr: false,
+		},
+		{
+			name:    "valid not with surveyid",
+			jsonStr: `{"op": "not", "vars": [{"type": "surveyid", "value": "550e8400-e29b-41d4-a716-446655440000"}]}`,
 			wantErr: false,
 		},
 		{

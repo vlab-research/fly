@@ -100,6 +100,8 @@ func (qb *QueryBuilder) buildSimpleCondition(cond *types.SimpleCondition) (strin
 		return qb.buildElapsedTimeCondition(cond)
 	case "question_response":
 		return qb.buildQuestionResponseCondition(cond)
+	case "surveyid":
+		return qb.buildSurveyIDCondition(cond)
 	default:
 		return "", fmt.Errorf("unsupported condition type: %s", cond.Type)
 	}
@@ -237,6 +239,19 @@ func (qb *QueryBuilder) buildQuestionResponseCondition(cond *types.SimpleConditi
 	qb.cteJoins = append(qb.cteJoins, fmt.Sprintf("JOIN %s %s ON s.userid = %s.userid", cteName, alias, alias))
 
 	return fmt.Sprintf("%s.userid IS NOT NULL", alias), nil
+}
+
+// buildSurveyIDCondition matches users whose current form belongs to a specific survey UUID.
+// It uses a subquery against the surveys table to map the survey UUID to one or more shortcodes,
+// then checks whether states.current_form is one of those shortcodes.
+// A survey UUID can map to multiple shortcodes (one per published version), so IN is correct.
+func (qb *QueryBuilder) buildSurveyIDCondition(cond *types.SimpleCondition) (string, error) {
+	if cond.Value == nil || *cond.Value == "" {
+		return "", fmt.Errorf("value is required for surveyid condition")
+	}
+
+	paramNum := qb.addParam(*cond.Value)
+	return fmt.Sprintf("s.current_form IN (SELECT shortcode FROM surveys WHERE id = $%d)", paramNum), nil
 }
 
 // buildLogicalOperator handles AND/OR/NOT operations recursively
