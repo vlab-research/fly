@@ -44,8 +44,10 @@ type PreviewRequest struct {
 
 // PreviewResponse contains the results of a bail preview
 type PreviewResponse struct {
-	Users []UserPreview `json:"users"`
-	Count int           `json:"count"`
+	Users  []UserPreview `json:"users"`
+	Count  int           `json:"count"`
+	SQL    string        `json:"sql"`
+	Params []interface{} `json:"params"`
 }
 
 // UserPreview represents a user that matches bail conditions

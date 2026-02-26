@@ -21,6 +21,7 @@ const BailForm = () => {
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [previewResult, setPreviewResult] = useState(null);
+  const [showSql, setShowSql] = useState(false);
   const [timing, setTiming] = useState('immediate');
   const [userId, setUserId] = useState(null);
 
@@ -321,24 +322,72 @@ const BailForm = () => {
             </Button>
 
             {previewResult && (
-              <Alert
-                style={{ marginTop: 16 }}
-                type={previewResult.count > 0 ? 'info' : 'warning'}
-                message={`${previewResult.count} users would be bailed`}
-                description={
-                  previewResult.count > 0 ? (
-                    <div>
-                      <p>Sample users:</p>
-                      <ul>
-                        {previewResult.users.slice(0, 5).map((u, i) => (
-                          <li key={i}>{u.userid} (page: {u.pageid})</li>
-                        ))}
-                        {previewResult.count > 5 && <li>... and {previewResult.count - 5} more</li>}
-                      </ul>
-                    </div>
-                  ) : 'No users match the current conditions.'
-                }
-              />
+              <>
+                <Alert
+                  style={{ marginTop: 16 }}
+                  type={previewResult.count > 0 ? 'info' : 'warning'}
+                  message={`${previewResult.count} users would be bailed`}
+                  description={
+                    previewResult.count > 0 ? (
+                      <div>
+                        <p>Sample users:</p>
+                        <ul>
+                          {previewResult.users.slice(0, 5).map((u, i) => (
+                            <li key={i}>{u.userid} (page: {u.pageid})</li>
+                          ))}
+                          {previewResult.count > 5 && <li>... and {previewResult.count - 5} more</li>}
+                        </ul>
+                      </div>
+                    ) : 'No users match the current conditions.'
+                  }
+                />
+                {previewResult.sql && (
+                  <div style={{ marginTop: 12 }}>
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingLeft: 0 }}
+                      onClick={() => setShowSql(s => !s)}
+                    >
+                      {showSql ? 'Hide SQL' : 'Show SQL'}
+                    </Button>
+                    {showSql && (
+                      <div style={{ marginTop: 4 }}>
+                        <pre style={{
+                          background: '#f5f5f5',
+                          border: '1px solid #d9d9d9',
+                          borderRadius: 4,
+                          padding: '10px 12px',
+                          fontSize: 12,
+                          lineHeight: 1.5,
+                          overflowX: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                          margin: 0,
+                        }}>
+                          {previewResult.sql}
+                        </pre>
+                        {previewResult.params && previewResult.params.length > 0 && (
+                          <div style={{ marginTop: 8, fontSize: 12, color: '#595959' }}>
+                            <strong>Parameters: </strong>
+                            {previewResult.params.map((p, i) => (
+                              <span key={i} style={{ marginRight: 12 }}>
+                                <code style={{ background: '#f0f0f0', padding: '1px 4px', borderRadius: 2 }}>
+                                  {'$'}{i + 1}
+                                </code>
+                                {' = '}
+                                <code style={{ background: '#f0f0f0', padding: '1px 4px', borderRadius: 2 }}>
+                                  {JSON.stringify(p)}
+                                </code>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </Card>
 

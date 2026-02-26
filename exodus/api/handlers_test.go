@@ -592,4 +592,12 @@ func TestPreviewBail(t *testing.T) {
 	if response.Users[0].UserID != "user1" {
 		t.Errorf("Expected first user to be 'user1', got '%s'", response.Users[0].UserID)
 	}
+
+	if response.SQL == "" {
+		t.Errorf("Expected non-empty SQL in preview response")
+	}
+
+	if response.Params == nil {
+		t.Errorf("Expected non-nil Params slice in preview response")
+	}
 }

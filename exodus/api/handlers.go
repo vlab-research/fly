@@ -437,8 +437,10 @@ func (s *Server) PreviewBail(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, PreviewResponse{
-		Users: users,
-		Count: len(users),
+		Users:  users,
+		Count:  len(users),
+		SQL:    sqlQuery,
+		Params: params,
 	})
 }
 
