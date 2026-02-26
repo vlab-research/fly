@@ -155,7 +155,7 @@ const MonitorSection = ({ surveyName, match }) => {
   );
 };
 
-const STALE_MS = 30 * 60 * 1000; // 30 minutes
+const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 const isStale = (updated) => Date.now() - new Date(updated).getTime() > STALE_MS;
 
