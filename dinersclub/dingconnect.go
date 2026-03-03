@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 // DingConnectProvider implements the Provider interface for DingConnect API integration.
 type DingConnectProvider struct {
-	apiKey string
+	apiKey string           // Set during Auth() call
 	client *http.Client
 	pool   *pgxpool.Pool
 }
@@ -74,14 +74,9 @@ type DingConnectResponse struct {
 }
 
 // NewDingConnectProvider creates a new DingConnect provider instance.
-// It loads the API key from the DINGCONNECT_API_KEY environment variable.
+// The API key is loaded from the database during Auth() based on user and key.
 func NewDingConnectProvider(pool *pgxpool.Pool) (Provider, error) {
-	apiKey := os.Getenv("DINGCONNECT_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("DINGCONNECT_API_KEY environment variable not set")
-	}
 	return &DingConnectProvider{
-		apiKey: apiKey,
 		client: http.DefaultClient,
 		pool:   pool,
 	}, nil
@@ -92,10 +87,47 @@ func (p *DingConnectProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*Use
 	return GenericGetUser(p.pool, event)
 }
 
-// Auth validates authentication for DingConnect (stateless no-op since API key is global).
-// The API key is loaded at provider creation time and validated by actual API calls.
+// Auth validates authentication for DingConnect by fetching credentials from the database.
+// It queries the credentials table for the user's dingconnect API key and stores it in the provider.
 func (p *DingConnectProvider) Auth(user *User, key string) error {
+	if key == "" {
+		return fmt.Errorf(`No key provided for DingConnect provider. A key is required for DingConnect Payment Events!`)
+	}
+
+	crds, err := p.getCredentials(user.Id, key)
+	if err != nil {
+		return err
+	}
+	if crds == nil {
+		return fmt.Errorf(`No dingconnect credentials were found for user: %s`, user.Id)
+	}
+
+	auth := struct {
+		ApiKey string `json:"api_key"`
+	}{}
+	err = json.Unmarshal(*crds.Details, &auth)
+	if err != nil {
+		return err
+	}
+
+	// Store the API key in the provider instance for use in Payout()
+	p.apiKey = auth.ApiKey
 	return nil
+}
+
+// getCredentials queries the database for DingConnect credentials for a given user and key.
+// Returns nil if no credentials are found (not an error).
+func (p *DingConnectProvider) getCredentials(userid string, key string) (*Credentials, error) {
+	query := `SELECT details FROM credentials WHERE entity='dingconnect' AND userid=$1 AND key=$2 LIMIT 1`
+	row := p.pool.QueryRow(context.Background(), query, userid, key)
+	var c Credentials
+	err := row.Scan(&c.Details)
+
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+
+	return &c, err
 }
 
 // Payout executes a DingConnect SendTransfer request and returns the result.

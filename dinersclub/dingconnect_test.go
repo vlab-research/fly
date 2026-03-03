@@ -12,72 +12,143 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestNewDingConnectProvider_MissingApiKey verifies that constructor returns error when DINGCONNECT_API_KEY is not set.
-func TestNewDingConnectProvider_MissingApiKey(t *testing.T) {
-	// Save original API key
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	// Unset the API key
-	os.Unsetenv("DINGCONNECT_API_KEY")
-
-	// Constructor should return error
-	provider, err := NewDingConnectProvider(nil)
-
-	assert.Nil(t, provider)
-	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "DINGCONNECT_API_KEY environment variable not set")
+func init() {
+	// Set required environment variables for tests that use getConfig()
+	os.Setenv("CACHE_TTL", "1h")
+	os.Setenv("CACHE_NUM_COUNTERS", "10000")
+	os.Setenv("CACHE_MAX_COST", "10000")
+	os.Setenv("CACHE_BUFFER_ITEMS", "64")
+	os.Setenv("CHATBASE_DATABASE", "chatroach")
+	os.Setenv("CHATBASE_HOST", "localhost")
+	os.Setenv("CHATBASE_PORT", "26257")
+	os.Setenv("CHATBASE_USER", "root")
+	os.Setenv("CHATBASE_MAX_CONNECTIONS", "10")
+	os.Setenv("KAFKA_BROKERS", "localhost:9092")
+	os.Setenv("KAFKA_TOPIC", "vlab-payment")
+	os.Setenv("KAFKA_GROUP", "dinersclub")
+	os.Setenv("KAFKA_POLL_TIMEOUT", "1s")
+	os.Setenv("DINERSCLUB_BATCH_SIZE", "100")
+	os.Setenv("DINERSCLUB_PROVIDERS", "fake,reloadly,giftcard,http,dingconnect")
+	os.Setenv("DINERSCLUB_POOL_SIZE", "10")
+	os.Setenv("DINERSCLUB_RETRY_PROVIDER", "2m")
+	os.Setenv("DINERSCLUB_RETRY_BOTSERVER", "2m")
+	os.Setenv("RELOADLY_SANDBOX", "true")
+	os.Setenv("BOTSERVER_URL", "http://localhost:8080/synthetic")
 }
 
-// TestDingConnectProviderAuth_IsNoOp verifies that Auth is a stateless no-op.
-func TestDingConnectProviderAuth_IsNoOp(t *testing.T) {
-	// Set up API key
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
+// TestDingConnectAuth_FetchesFromDatabase verifies that Auth() fetches credentials from the database.
+func TestDingConnectAuth_FetchesFromDatabase(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
 
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
+	before(t, pool)
 
-	provider, err := NewDingConnectProvider(nil)
+	// Insert test user
+	insertUserSql := `
+		INSERT INTO users(id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+	`
+	mustExec(t, pool, insertUserSql)
+
+	// Insert DingConnect credentials
+	insertDingConnectSql := `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'dingconnect', 'test-key', '{"api_key": "test_api_key_12345"}');
+	`
+	mustExec(t, pool, insertDingConnectSql)
+
+	provider, err := NewDingConnectProvider(pool)
 	assert.Nil(t, err)
 	assert.NotNil(t, provider)
 
-	// Auth should return nil for any user/key combination
-	err = provider.Auth(&User{Id: "user123"}, "any_key")
+	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
+	err = provider.Auth(user, "test-key")
 	assert.Nil(t, err)
 
-	err = provider.Auth(&User{Id: "user456"}, "")
+	// Verify the API key was set
+	p := provider.(*DingConnectProvider)
+	assert.Equal(t, "test_api_key_12345", p.apiKey)
+}
+
+// TestDingConnectAuth_MissingCredentials verifies error when credentials not found.
+func TestDingConnectAuth_MissingCredentials(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+
+	// Insert test user but no credentials
+	insertUserSql := `
+		INSERT INTO users(id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+	`
+	mustExec(t, pool, insertUserSql)
+
+	provider, err := NewDingConnectProvider(pool)
 	assert.Nil(t, err)
 
-	err = provider.Auth(nil, "some_key")
+	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
+	err = provider.Auth(user, "test-key")
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "No dingconnect credentials were found for user")
+}
+
+// TestDingConnectAuth_EmptyKey verifies error when key parameter is empty.
+func TestDingConnectAuth_EmptyKey(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+
+	provider, err := NewDingConnectProvider(pool)
 	assert.Nil(t, err)
+
+	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
+	err = provider.Auth(user, "")
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "No key provided for DingConnect provider")
+}
+
+// TestDingConnectAuth_InvalidJSON verifies error when credentials JSON is malformed.
+func TestDingConnectAuth_InvalidJSON(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+
+	// Insert test user
+	insertUserSql := `
+		INSERT INTO users(id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+	`
+	mustExec(t, pool, insertUserSql)
+
+	// Insert DingConnect credentials with malformed JSON
+	insertDingConnectSql := `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'dingconnect', 'test-key', '{invalid json}');
+	`
+	mustExec(t, pool, insertDingConnectSql)
+
+	provider, err := NewDingConnectProvider(pool)
+	assert.Nil(t, err)
+
+	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
+	err = provider.Auth(user, "test-key")
+	assert.NotNil(t, err)
 }
 
 // TestDingConnectPayout_InvalidJsonDetails verifies malformed JSON in details is handled gracefully.
 func TestDingConnectPayout_InvalidJsonDetails(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
-	provider, _ := NewDingConnectProvider(nil)
+	provider := &DingConnectProvider{
+		apiKey: "test_api_key",
+		client: nil,
+		pool:   nil,
+	}
 
 	// Malformed JSON
 	details := json.RawMessage(`{"invalid json}`)
@@ -95,18 +166,11 @@ func TestDingConnectPayout_InvalidJsonDetails(t *testing.T) {
 
 // TestDingConnectPayout_MissingSkuCode verifies missing sku_code returns INVALID_PAYMENT_DETAILS error.
 func TestDingConnectPayout_MissingSkuCode(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
-	provider, _ := NewDingConnectProvider(nil)
+	provider := &DingConnectProvider{
+		apiKey: "test_api_key",
+		client: nil,
+		pool:   nil,
+	}
 
 	// Missing sku_code
 	details := json.RawMessage([]byte(`{
@@ -127,18 +191,11 @@ func TestDingConnectPayout_MissingSkuCode(t *testing.T) {
 
 // TestDingConnectPayout_MissingAccountNumber verifies missing account_number returns INVALID_PAYMENT_DETAILS error.
 func TestDingConnectPayout_MissingAccountNumber(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
-	provider, _ := NewDingConnectProvider(nil)
+	provider := &DingConnectProvider{
+		apiKey: "test_api_key",
+		client: nil,
+		pool:   nil,
+	}
 
 	// Missing account_number
 	details := json.RawMessage([]byte(`{
@@ -159,18 +216,11 @@ func TestDingConnectPayout_MissingAccountNumber(t *testing.T) {
 
 // TestDingConnectPayout_MissingDistributorRef verifies missing distributor_ref returns INVALID_PAYMENT_DETAILS error.
 func TestDingConnectPayout_MissingDistributorRef(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
-	provider, _ := NewDingConnectProvider(nil)
+	provider := &DingConnectProvider{
+		apiKey: "test_api_key",
+		client: nil,
+		pool:   nil,
+	}
 
 	// Missing distributor_ref
 	details := json.RawMessage([]byte(`{
@@ -191,18 +241,11 @@ func TestDingConnectPayout_MissingDistributorRef(t *testing.T) {
 
 // TestDingConnectPayout_NegativeSendValue verifies send_value <= 0 returns INVALID_PAYMENT_DETAILS error.
 func TestDingConnectPayout_NegativeSendValue(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
-	provider, _ := NewDingConnectProvider(nil)
+	provider := &DingConnectProvider{
+		apiKey: "test_api_key",
+		client: nil,
+		pool:   nil,
+	}
 
 	// send_value is 0
 	details := json.RawMessage([]byte(`{
@@ -224,18 +267,6 @@ func TestDingConnectPayout_NegativeSendValue(t *testing.T) {
 
 // TestDingConnectPayout_SuccessWithResultCode1 verifies successful payout with result_code=1.
 func TestDingConnectPayout_SuccessWithResultCode1(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
-	// Create mock server
 	response := `{
 		"transfer_record": {
 			"transfer_id": {
@@ -259,31 +290,12 @@ func TestDingConnectPayout_SuccessWithResultCode1(t *testing.T) {
 		"error_codes": []
 	}`
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "POST", r.Method)
-		assert.Equal(t, "/api/V1/SendTransfer", r.URL.Path)
-		assert.Equal(t, "test_api_key", r.Header.Get("X-Api-Key"))
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-		assert.Equal(t, "application/json", r.Header.Get("Accept"))
+	tc := TestClient(200, response, nil)
 
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, response)
-	}))
-	defer ts.Close()
-
-	// Create provider with mock client
 	provider := &DingConnectProvider{
 		apiKey: "test_api_key",
-		client: &http.Client{},
+		client: tc,
 		pool:   nil,
-	}
-
-	// Patch the URL for testing
-	originalDoFunc := provider.client.Do
-	provider.client = &http.Client{
-		Transport: &testTransport{
-			server: ts,
-		},
 	}
 
 	details := json.RawMessage([]byte(`{
@@ -306,23 +318,10 @@ func TestDingConnectPayout_SuccessWithResultCode1(t *testing.T) {
 	assert.NotNil(t, res.Response)
 	assert.NotNil(t, res.Timestamp)
 	assert.Equal(t, &details, res.PaymentDetails)
-
-	_ = originalDoFunc
 }
 
 // TestDingConnectPayout_TransientErrorWithResultCode3 verifies result_code=3 returns retryable error.
 func TestDingConnectPayout_TransientErrorWithResultCode3(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": null,
 		"result_code": 3,
@@ -361,17 +360,6 @@ func TestDingConnectPayout_TransientErrorWithResultCode3(t *testing.T) {
 
 // TestDingConnectPayout_PermanentFailureWithResultCode2 verifies result_code=2 returns non-retryable error.
 func TestDingConnectPayout_PermanentFailureWithResultCode2(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": null,
 		"result_code": 2,
@@ -410,17 +398,6 @@ func TestDingConnectPayout_PermanentFailureWithResultCode2(t *testing.T) {
 
 // TestDingConnectPayout_MapInsufficientBalance verifies INSUFFICIENT_BALANCE error code is mapped correctly.
 func TestDingConnectPayout_MapInsufficientBalance(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": null,
 		"result_code": 3,
@@ -458,17 +435,6 @@ func TestDingConnectPayout_MapInsufficientBalance(t *testing.T) {
 
 // TestDingConnectPayout_MapInvalidAccountNumber verifies INVALID_ACCOUNT_NUMBER error code is mapped correctly.
 func TestDingConnectPayout_MapInvalidAccountNumber(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": null,
 		"result_code": 3,
@@ -506,17 +472,6 @@ func TestDingConnectPayout_MapInvalidAccountNumber(t *testing.T) {
 
 // TestDingConnectPayout_HttpRequestFails verifies HTTP request failures are handled gracefully.
 func TestDingConnectPayout_HttpRequestFails(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	// Create client that returns error
 	tc := TestClient(0, "", fmt.Errorf("network error"))
 
@@ -545,17 +500,6 @@ func TestDingConnectPayout_HttpRequestFails(t *testing.T) {
 
 // TestDingConnectPayout_MalformedResponseJson verifies malformed JSON response is handled gracefully.
 func TestDingConnectPayout_MalformedResponseJson(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	// Malformed JSON response
 	tc := TestClient(200, `{"invalid json}`, nil)
 
@@ -584,17 +528,6 @@ func TestDingConnectPayout_MalformedResponseJson(t *testing.T) {
 
 // TestDingConnectPayout_RequestFormat verifies correct URL, headers, and JSON body are sent.
 func TestDingConnectPayout_RequestFormat(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key_123")
-
 	requestCaptured := false
 	var capturedBody []byte
 
@@ -691,17 +624,6 @@ func TestDingConnectPayout_RequestFormat(t *testing.T) {
 
 // TestDingConnectPayout_IncludesOptionalFields verifies optional fields are included in request when provided.
 func TestDingConnectPayout_IncludesOptionalFields(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	optionalFieldsPresent := false
 
 	response := `{
@@ -784,17 +706,6 @@ func TestDingConnectPayout_IncludesOptionalFields(t *testing.T) {
 
 // TestDingConnectPayout_OmitsOptionalFieldsWhenNotProvided verifies optional fields are NOT included when not provided.
 func TestDingConnectPayout_OmitsOptionalFieldsWhenNotProvided(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	optionalFieldsAbsent := false
 
 	response := `{
@@ -873,17 +784,6 @@ func TestDingConnectPayout_OmitsOptionalFieldsWhenNotProvided(t *testing.T) {
 
 // TestDingConnectPayout_IncludesResponseInResult verifies response is included in result.
 func TestDingConnectPayout_IncludesResponseInResult(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": {
 			"transfer_id": {
@@ -938,17 +838,6 @@ func TestDingConnectPayout_IncludesResponseInResult(t *testing.T) {
 
 // TestDingConnectPayout_IncludesPaymentDetails verifies payment details are included in result.
 func TestDingConnectPayout_IncludesPaymentDetails(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": {
 			"transfer_id": {
@@ -998,17 +887,6 @@ func TestDingConnectPayout_IncludesPaymentDetails(t *testing.T) {
 
 // TestDingConnectPayout_MissingTransferRecord verifies error when result_code=1 but transfer_record is nil.
 func TestDingConnectPayout_MissingTransferRecord(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": null,
 		"result_code": 1,
@@ -1041,17 +919,6 @@ func TestDingConnectPayout_MissingTransferRecord(t *testing.T) {
 
 // TestDingConnectPayout_UnexpectedProcessingState verifies error when ProcessingState is not Completed.
 func TestDingConnectPayout_UnexpectedProcessingState(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": {
 			"transfer_id": {
@@ -1099,17 +966,6 @@ func TestDingConnectPayout_UnexpectedProcessingState(t *testing.T) {
 
 // TestDingConnectPayout_TransientErrorWithoutErrorCodes verifies result_code=3 with no error codes.
 func TestDingConnectPayout_TransientErrorWithoutErrorCodes(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": null,
 		"result_code": 3,
@@ -1142,17 +998,6 @@ func TestDingConnectPayout_TransientErrorWithoutErrorCodes(t *testing.T) {
 
 // TestDingConnectPayout_FailureWithoutErrorCodes verifies failure without error codes.
 func TestDingConnectPayout_FailureWithoutErrorCodes(t *testing.T) {
-	originalKey := os.Getenv("DINGCONNECT_API_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("DINGCONNECT_API_KEY", originalKey)
-		} else {
-			os.Unsetenv("DINGCONNECT_API_KEY")
-		}
-	}()
-
-	os.Setenv("DINGCONNECT_API_KEY", "test_api_key")
-
 	response := `{
 		"transfer_record": null,
 		"result_code": 2,

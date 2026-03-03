@@ -298,11 +298,13 @@ DINERSCLUB_PROVIDERS=http
 
 Mobile top-ups via DingConnect API (https://api.dingconnect.com). Covers 850+ mobile operators across 150+ countries.
 
-**Configuration**:
-```bash
-# Add to environment (or .env-ding file)
-DINGCONNECT_API_KEY=your_api_key_here
+**Credentials** (stored in database per user):
+```sql
+INSERT INTO credentials(userid, entity, key, details)
+VALUES ('user-uuid', 'dingconnect', 'prod-key', '{"api_key": "dc_live_xxxxx..."}');
 ```
+
+The `key` field allows multiple DingConnect accounts per user (e.g., 'prod', 'staging', 'test'). The `details` JSON must contain an `api_key` field with the DingConnect API key from your account.
 
 **Payment Details Structure** (JSON in PaymentEvent.Details):
 ```json
@@ -330,7 +332,7 @@ DINGCONNECT_API_KEY=your_api_key_here
 
 **Features**:
 - **Instant mode only**: Synchronous processing - transfers are completed within 90 seconds
-- **Global API key**: Single API key per service (not per-user like Reloadly)
+- **Per-user API key**: Credentials stored in database per user and key (matching Reloadly pattern)
 - **90-second timeout**: Hard timeout for SendTransfer requests
 - **Error code passthrough**: Returns DingConnect error codes directly
 
@@ -348,11 +350,17 @@ DINGCONNECT_API_KEY=your_api_key_here
 DINERSCLUB_PROVIDERS=fake,reloadly,giftcard,http,dingconnect
 ```
 
-**API Key Setup**:
+**Setup Instructions**:
 1. Create DingConnect account at https://www.dingconnect.com
 2. Navigate to Account Settings → Developer tab
 3. Generate API key
-4. Store in `DINGCONNECT_API_KEY` environment variable or `.env-ding` file
+4. Insert credentials into the database for each user that needs DingConnect:
+   ```sql
+   INSERT INTO credentials(userid, entity, key, details)
+   VALUES ('user-uuid', 'dingconnect', 'prod', '{"api_key": "dc_live_xxxxx..."}');
+   ```
+   Replace `user-uuid` with the actual user ID and `dc_live_xxxxx...` with your DingConnect API key.
+5. Include the `key` field in PaymentEvent messages to specify which credentials to use
 
 ## Configuration Reference
 
@@ -407,6 +415,12 @@ DINERSCLUB_PROVIDERS=fake,reloadly,giftcard,http,dingconnect
 |----------|---------|----------|-------------|
 | BOTSERVER_URL | - | Yes | URL to botserver for sending payment results |
 
+## Environment Variables
+
+### Deprecated Variables
+
+**DINGCONNECT_API_KEY** - No longer used. API keys are now fetched from the database per-user. Remove this from your environment.
+
 ## Database Schema
 
 DinersClub expects the following database structure:
@@ -441,6 +455,11 @@ CREATE TABLE credentials (
 - **reloadly**: Reloadly API credentials
   ```json
   {"id": "reloadly-id", "secret": "reloadly-secret"}
+  ```
+
+- **dingconnect**: DingConnect API key
+  ```json
+  {"api_key": "dc_live_xxxxx..."}
   ```
 
 - **secrets**: Named secrets for HTTP provider templates
