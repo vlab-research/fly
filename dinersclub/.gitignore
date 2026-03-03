@@ -1,0 +1,27 @@
+# Environment files containing secrets - NEVER commit these
+.env-ding
+.env-*.local
+
+# Build artifacts
+/dinersclub
+*.o
+*.a
+
+# Go build cache
+/vendor/
+go.sum.bak
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+*.out
+coverage.txt

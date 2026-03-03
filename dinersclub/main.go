@@ -197,6 +197,8 @@ func getProvider(pool *pgxpool.Pool, event *PaymentEvent) (Provider, error) {
 		return NewGiftCardsProvider(pool)
 	case "http":
 		return NewHttpProvider(pool)
+	case "dingconnect":
+		return NewDingConnectProvider(pool)
 	}
 	return nil, nil
 }
