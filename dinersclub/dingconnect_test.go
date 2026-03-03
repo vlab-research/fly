@@ -112,7 +112,7 @@ func TestDingConnectAuth_EmptyKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "No key provided for DingConnect provider")
 }
 
-// TestDingConnectAuth_InvalidJSON verifies error when credentials JSON is malformed.
+// TestDingConnectAuth_InvalidJSON verifies error when credentials JSON is missing the api_key field.
 func TestDingConnectAuth_InvalidJSON(t *testing.T) {
 	cfg := getConfig()
 	pool := getPool(cfg)
@@ -127,10 +127,10 @@ func TestDingConnectAuth_InvalidJSON(t *testing.T) {
 	`
 	mustExec(t, pool, insertUserSql)
 
-	// Insert DingConnect credentials with malformed JSON
+	// Insert DingConnect credentials with valid JSON but missing the required api_key field
 	insertDingConnectSql := `
 		INSERT INTO credentials(userid, entity, key, details)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'dingconnect', 'test-key', '{invalid json}');
+		VALUES ('00000000-0000-0000-0000-000000000000', 'dingconnect', 'test-key', '{"wrong_field": "value"}');
 	`
 	mustExec(t, pool, insertDingConnectSql)
 

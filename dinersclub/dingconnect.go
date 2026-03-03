@@ -110,6 +110,10 @@ func (p *DingConnectProvider) Auth(user *User, key string) error {
 		return err
 	}
 
+	if auth.ApiKey == "" {
+		return fmt.Errorf(`DingConnect credentials for user %s are missing the "api_key" field`, user.Id)
+	}
+
 	// Store the API key in the provider instance for use in Payout()
 	p.apiKey = auth.ApiKey
 	return nil
