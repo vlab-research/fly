@@ -116,6 +116,7 @@ Conditions define **who** gets bailed. They form a recursive tree supporting AND
 | `current_question` | `states.state_json.question` | `{"type": "current_question", "value": "hello_again"}` |
 | `elapsed_time` | Time since a response event | See below |
 | `question_response` | `responses` table (form + question_ref + optional response) | See below |
+| `surveyid` | `states.current_form` (via subquery into `surveys.id`) | `{"type": "surveyid", "value": "550e8400-e29b-41d4-a716-446655440000"}` |
 
 **Elapsed time** is the most complex condition. It references a specific response event and checks if enough time has passed:
 
@@ -195,6 +196,16 @@ LIMIT 100000
 
 Parameters: `[$form, $question_ref]`
 
+**Survey ID** conditions select users whose current form belongs to the survey with the given UUID. This is useful when you want to target all users currently on any form within a specific survey, without having to enumerate the individual form shortcodes.
+
+```json
+{"type": "surveyid", "value": "550e8400-e29b-41d4-a716-446655440000"}
+```
+
+The `value` field must be the UUID of the survey (as stored in `surveys.id`). The condition matches users where `states.current_form` is any form belonging to that survey (resolved via a subquery).
+
+Unlike `elapsed_time` and `question_response`, `surveyid` is safe to wrap in a NOT operator. It does not use an INNER JOIN CTE against a separate table; the subquery operates on the states row itself, so negation works correctly.
+
 **Logical operators** combine conditions:
 
 - **`and`** -- all child conditions must match. Takes 1 or more children.
@@ -256,6 +267,7 @@ NOT inside an AND group (match users on a form whose state is NOT "END"):
 **NOT operator constraints:**
 - Must have exactly 1 child (validation rejects 0 or 2+ children).
 - Cannot negate `elapsed_time` or `question_response` conditions, directly or transitively. Both conditions use INNER JOIN CTEs against the responses table; negating them would require LEFT JOIN + IS NULL semantics to correctly include users who never responded, which is not yet supported.
+- `surveyid` IS safe to wrap in NOT. It resolves via a subquery on `states.current_form` and does not use an INNER JOIN CTE, so `{"op": "not", "vars": [{"type": "surveyid", "value": "..."}]}` correctly matches users whose current form does NOT belong to the given survey.
 
 **SQL generation for NOT:**
 
@@ -569,6 +581,12 @@ Content-Type: application/json
 
 Shows which users match the conditions without creating or executing the bail.
 
+#### Preview: Internal Mechanics
+
+The preview handler (`exodus/api/handlers.go:PreviewBail`) calls `query.BuildQuery` to generate the SQL and parameters, then immediately executes the query against the database. The generated SQL string and parameters are available in the handler but are **not currently returned in the response** — only `count` and `users` are sent. To expose the SQL to the frontend, `PreviewResponse` in `exodus/api/types.go` must gain `sql` and `params` fields, and the handler's return statement at line 439 must include them.
+
+The dashboard-server proxy is a pure pass-through for preview: `utils/bails/bails.util.js` calls `exodusRequest` which deserializes and re-serializes the response body without any field transformation. Adding new fields in the exodus response will flow through automatically with no dashboard-server changes.
+
 ### Data Structures
 
 **Condition** -- Union type discriminated by presence of `op` field:
@@ -580,7 +598,7 @@ Simple conditions:
 
 ```json
 { "type": "form", "value": "string" }
-{ "type": "state", "value": "START|RESPONDING|WAIT_EXTERNAL_EVENT|END|BLOCKED|ERROR" }
+{ "type": "state", "value": "START|RESPONDING|QOUT|WAIT_EXTERNAL_EVENT|END|BLOCKED|ERROR" }
 { "type": "error_code", "value": "string" }
 { "type": "current_question", "value": "string" }
 {
@@ -594,6 +612,7 @@ Simple conditions:
   "question_ref": "string (required)",
   "response": "string (optional, exact match against responses.response column)"
 }
+{ "type": "surveyid", "value": "string (required, UUID of the survey)" }
 ```
 
 Compound conditions:
@@ -733,10 +752,11 @@ BailDefinition.Validate()
 |   |   +-- "not" cannot contain elapsed_time or question_response (directly or transitively)
 |   |   +-- Validate each child condition recursively
 |   +-- (if simple) SimpleCondition.Validate()
-|       +-- Check type is valid (form, state, error_code, current_question, elapsed_time, question_response)
+|       +-- Check type is valid (form, state, error_code, current_question, elapsed_time, question_response, surveyid)
 |       +-- Check required fields for each type
 |       +-- If elapsed_time: validate TimeReference structure
 |       +-- If question_response: require form and question_ref (response is optional)
+|       +-- If surveyid: require value (must be a non-empty UUID string)
 |
 +-- Execution.Validate()
 |   +-- Check timing is valid (immediate, scheduled, absolute)
@@ -757,7 +777,9 @@ Frontend validation is minimal (required field checks via AntD Form rules). The 
 
 **Missing timing fields**: The frontend does not strictly enforce conditional required fields (e.g., `time_of_day` when timing is "scheduled"). The backend will reject with a clear error message.
 
-**Condition type errors**: Using an unsupported condition type name will be rejected by the backend with: `invalid condition type: <type>`. Valid types are: `form`, `state`, `error_code`, `current_question`, `elapsed_time`, `question_response`.
+**Condition type errors**: Using an unsupported condition type name will be rejected by the backend with: `invalid condition type: <type>`. Valid types are: `form`, `state`, `error_code`, `current_question`, `elapsed_time`, `question_response`, `surveyid`.
+
+**State values**: The backend accepts any string for `state` conditions. The meaningful values are: `START`, `RESPONDING`, `QOUT`, `WAIT_EXTERNAL_EVENT`, `END`, `BLOCKED`, `ERROR`, `USER_BLOCKED`. `QOUT` means a question has been delivered and the bot is waiting for the user's reply — it is the normal in-flight state for active participants.
 
 ---
 

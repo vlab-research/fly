@@ -33,6 +33,7 @@ const CONDITION_TYPES = {
 const STATE_OPTIONS = [
   'START',
   'RESPONDING',
+  'QOUT',
   'WAIT_EXTERNAL_EVENT',
   'END',
   'BLOCKED',
