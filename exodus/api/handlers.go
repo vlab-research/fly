@@ -149,13 +149,19 @@ func (s *Server) CreateBail(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "marshal_error", "Failed to marshal definition")
 	}
 
+	// Compute destination_form for the database
+	destForm := req.Definition.Action.DestinationForm
+	if req.Definition.Type == "user_list" && req.Definition.UserList != nil && len(req.Definition.UserList.Users) > 0 {
+		destForm = req.Definition.UserList.Users[0].Shortcode
+	}
+
 	dbBail := &db.Bail{
 		UserID:          userID,
 		Name:            req.Name,
 		Description:     req.Description,
 		Enabled:         req.Enabled,
 		Definition:      definitionJSON,
-		DestinationForm: req.Definition.Action.DestinationForm,
+		DestinationForm: destForm,
 	}
 
 	ctx, cancel := parseTimeout(c.Request().Context())
@@ -232,8 +238,14 @@ func (s *Server) UpdateBail(c echo.Context) error {
 			return respondError(c, http.StatusInternalServerError, "marshal_error", "Failed to marshal definition")
 		}
 
+		// Compute destination_form for the database
+		destForm := req.Definition.Action.DestinationForm
+		if req.Definition.Type == "user_list" && req.Definition.UserList != nil && len(req.Definition.UserList.Users) > 0 {
+			destForm = req.Definition.UserList.Users[0].Shortcode
+		}
+
 		dbBail.Definition = definitionJSON
-		dbBail.DestinationForm = req.Definition.Action.DestinationForm
+		dbBail.DestinationForm = destForm
 	}
 
 	if err := s.db.UpdateBail(ctx, dbBail); err != nil {
@@ -405,6 +417,21 @@ func (s *Server) PreviewBail(c echo.Context) error {
 
 	if err := req.Definition.Validate(); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
+	}
+
+	// For user_list bails, skip query building and return the user list directly
+	if req.Definition.Type == "user_list" && req.Definition.UserList != nil {
+		users := make([]UserPreview, len(req.Definition.UserList.Users))
+		for i, entry := range req.Definition.UserList.Users {
+			users[i] = UserPreview{
+				UserID: entry.UserID,
+				PageID: entry.PageID,
+			}
+		}
+		return c.JSON(http.StatusOK, PreviewResponse{
+			Users: users,
+			Count: len(users),
+		})
 	}
 
 	sqlQuery, params, err := query.BuildQuery(&req.Definition)

@@ -23,7 +23,7 @@ func ExampleBuildQuery() {
 	json.Unmarshal([]byte(condJSON), &cond)
 
 	def := &types.BailDefinition{
-		Conditions: cond,
+		Conditions: &cond,
 		Execution: types.Execution{
 			Timing: "immediate",
 		},
@@ -61,7 +61,7 @@ func TestQueryStructure_ElapsedTime(t *testing.T) {
 	}
 
 	def := &types.BailDefinition{
-		Conditions: cond,
+		Conditions: &cond,
 		Execution:  types.Execution{Timing: "immediate"},
 		Action:     types.Action{DestinationForm: "followup"},
 	}

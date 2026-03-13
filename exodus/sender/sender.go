@@ -39,8 +39,9 @@ type Sender struct {
 
 // UserTarget represents a user to be bailed
 type UserTarget struct {
-	UserID string
-	PageID string
+	UserID    string
+	PageID    string
+	Shortcode string // per-user destination override; empty means use default
 }
 
 // New creates a new Sender instance
@@ -116,8 +117,14 @@ func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, destinati
 		default:
 		}
 
+		// Use per-user shortcode if set, otherwise fall back to destinationForm
+		dest := destinationForm
+		if user.Shortcode != "" {
+			dest = user.Shortcode
+		}
+
 		// Send bailout for this user
-		err := s.SendBailout(ctx, user.UserID, user.PageID, destinationForm, metadata)
+		err := s.SendBailout(ctx, user.UserID, user.PageID, dest, metadata)
 		if err != nil {
 			log.Printf("Failed to bail user=%s page=%s: %v", user.UserID, user.PageID, err)
 			lastError = err

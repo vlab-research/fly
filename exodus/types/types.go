@@ -10,21 +10,48 @@ import (
 
 // BailDefinition represents a complete bail configuration
 type BailDefinition struct {
-	Conditions Condition `json:"conditions"`
-	Execution  Execution `json:"execution"`
-	Action     Action    `json:"action"`
+	Type       string     `json:"type,omitempty"`        // "conditions" (default) or "user_list"
+	Conditions *Condition `json:"conditions,omitempty"`  // Required when Type="conditions"
+	UserList   *UserList  `json:"user_list,omitempty"`   // Required when Type="user_list"
+	Execution  Execution  `json:"execution"`
+	Action     Action     `json:"action"`
 }
 
 // Validate checks if the BailDefinition is valid
 func (bd *BailDefinition) Validate() error {
-	if err := bd.Conditions.Validate(); err != nil {
-		return fmt.Errorf("invalid conditions: %w", err)
+	bailType := bd.Type
+	if bailType == "" {
+		bailType = "conditions" // backward compatibility
 	}
+
+	switch bailType {
+	case "conditions":
+		if bd.Conditions == nil {
+			return fmt.Errorf("conditions are required for conditions-type bail")
+		}
+		if err := bd.Conditions.Validate(); err != nil {
+			return fmt.Errorf("invalid conditions: %w", err)
+		}
+	case "user_list":
+		if bd.UserList == nil {
+			return fmt.Errorf("user_list is required for user_list-type bail")
+		}
+		if err := bd.UserList.Validate(); err != nil {
+			return fmt.Errorf("invalid user_list: %w", err)
+		}
+	default:
+		return fmt.Errorf("invalid bail type: %s (must be 'conditions' or 'user_list')", bailType)
+	}
+
 	if err := bd.Execution.Validate(); err != nil {
 		return fmt.Errorf("invalid execution: %w", err)
 	}
-	if err := bd.Action.Validate(); err != nil {
-		return fmt.Errorf("invalid action: %w", err)
+	// For user_list bails, action.destination_form is optional (destinations are per-user)
+	// Skip action validation for user_list type
+	if bailType != "user_list" {
+		if err := bd.Action.Validate(); err != nil {
+			return fmt.Errorf("invalid action: %w", err)
+		}
 	}
 	return nil
 }
@@ -72,6 +99,40 @@ type Action struct {
 func (a *Action) Validate() error {
 	if a.DestinationForm == "" {
 		return fmt.Errorf("destination_form is required")
+	}
+	return nil
+}
+
+// UserListEntry represents a single user in a user list bail
+type UserListEntry struct {
+	UserID    string `json:"userid"`
+	PageID    string `json:"pageid"`
+	Shortcode string `json:"shortcode"` // per-user destination form
+}
+
+// UserList represents a list of users for user_list-type bails
+type UserList struct {
+	Users []UserListEntry `json:"users"`
+}
+
+// Validate checks if the UserList is valid
+func (ul *UserList) Validate() error {
+	if len(ul.Users) == 0 {
+		return fmt.Errorf("user_list must contain at least one user")
+	}
+	if len(ul.Users) > 1000 {
+		return fmt.Errorf("user_list must contain at most 1000 users (got %d)", len(ul.Users))
+	}
+	for i, entry := range ul.Users {
+		if entry.UserID == "" {
+			return fmt.Errorf("userid is required at index %d", i)
+		}
+		if entry.PageID == "" {
+			return fmt.Errorf("pageid is required at index %d", i)
+		}
+		if entry.Shortcode == "" {
+			return fmt.Errorf("shortcode is required at index %d", i)
+		}
 	}
 	return nil
 }
@@ -325,9 +386,15 @@ func (b *Bail) Validate() error {
 	if err := b.Definition.Validate(); err != nil {
 		return fmt.Errorf("invalid definition: %w", err)
 	}
-	// Ensure destination_form in definition matches top-level field
-	if b.Definition.Action.DestinationForm != b.DestinationForm {
-		return fmt.Errorf("destination_form mismatch between bail and definition")
+	// Ensure destination_form in definition matches top-level field (only for conditions-type bails)
+	bailType := b.Definition.Type
+	if bailType == "" {
+		bailType = "conditions" // backward compatibility
+	}
+	if bailType == "conditions" {
+		if b.Definition.Action.DestinationForm != b.DestinationForm {
+			return fmt.Errorf("destination_form mismatch between bail and definition")
+		}
 	}
 	return nil
 }

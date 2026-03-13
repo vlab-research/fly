@@ -122,7 +122,7 @@ func (m *mockDB) Close() {
 // Helper to create a test bail definition
 func testBailDefinition() types.BailDefinition {
 	return types.BailDefinition{
-		Conditions: types.Condition{},
+		Conditions: &types.Condition{},
 		Execution: types.Execution{
 			Timing: "immediate",
 		},
@@ -134,10 +134,10 @@ func testBailDefinition() types.BailDefinition {
 }
 
 // Helper to create a valid simple condition
-func simpleFormCondition(formName string) types.Condition {
+func simpleFormCondition(formName string) *types.Condition {
 	cond := types.Condition{}
 	cond.UnmarshalJSON([]byte(`{"type":"form","value":"` + formName + `"}`))
-	return cond
+	return &cond
 }
 
 func TestHealth(t *testing.T) {

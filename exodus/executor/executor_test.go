@@ -115,6 +115,38 @@ func createTestBail(id uuid.UUID, name string, timing string, timeOfDay, timezon
 	}
 }
 
+// createTestUserListBail creates a user_list type bail for testing
+func createTestUserListBail(id uuid.UUID, name string, users []map[string]interface{}, timing string) *db.Bail {
+	userID := uuid.New()
+
+	def := map[string]interface{}{
+		"type": "user_list",
+		"user_list": map[string]interface{}{
+			"users": users,
+		},
+		"execution": map[string]interface{}{
+			"timing": timing,
+		},
+		"action": map[string]interface{}{
+			"destination_form": "bailout_form",
+		},
+	}
+
+	defJSON, _ := json.Marshal(def)
+
+	return &db.Bail{
+		ID:               id,
+		UserID:           userID,
+		Name:             name,
+		Description:      "Test user_list bail",
+		Enabled:          true,
+		Definition:       defJSON,
+		DestinationForm:  "bailout_form",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+}
+
 // Tests
 
 func TestExecutor_Run_NoEnabledBails(t *testing.T) {
@@ -541,5 +573,112 @@ func TestExecutor_Run_ContextCancellation(t *testing.T) {
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled error, got: %v", err)
+	}
+}
+
+func TestExecutor_Run_UserListBail(t *testing.T) {
+	bailID := uuid.New()
+
+	// Create a user_list type bail with 2 users
+	users := []map[string]interface{}{
+		{
+			"userid":    "user1",
+			"pageid":    "page1",
+			"shortcode": "form1",
+		},
+		{
+			"userid":    "user2",
+			"pageid":    "page2",
+			"shortcode": "form2",
+		},
+	}
+	bail := createTestUserListBail(bailID, "userlist_bail", users, "immediate")
+
+	store := &mockBailStore{
+		bails:         []*db.Bail{bail},
+		lastExecution: nil,
+	}
+	query := &mockQueryExecutor{} // No query should be executed for user_list type
+	sender := &mockBailSender{}
+
+	executor := New(store, query, sender, 100)
+
+	err := executor.Run(context.Background())
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Should have sent bailouts for both users from the list (not from query)
+	if len(sender.sentBailouts) != 2 {
+		t.Errorf("Expected 2 bailouts sent, got %d", len(sender.sentBailouts))
+	}
+
+	// Check that shortcodes were preserved
+	if sender.sentBailouts[0].Shortcode != "form1" {
+		t.Errorf("Expected first user shortcode 'form1', got '%s'", sender.sentBailouts[0].Shortcode)
+	}
+	if sender.sentBailouts[1].Shortcode != "form2" {
+		t.Errorf("Expected second user shortcode 'form2', got '%s'", sender.sentBailouts[1].Shortcode)
+	}
+
+	// Should have recorded a success event
+	if len(store.recordedEvents) != 1 {
+		t.Fatalf("Expected 1 event recorded, got %d", len(store.recordedEvents))
+	}
+
+	event := store.recordedEvents[0]
+	if event.EventType != "execution" {
+		t.Errorf("Expected event type 'execution', got '%s'", event.EventType)
+	}
+	if event.UsersMatched != 2 {
+		t.Errorf("Expected 2 users matched, got %d", event.UsersMatched)
+	}
+	if event.UsersBailed != 2 {
+		t.Errorf("Expected 2 users bailed, got %d", event.UsersBailed)
+	}
+}
+
+func TestExecutor_Run_UserListBail_WithLimit(t *testing.T) {
+	bailID := uuid.New()
+
+	// Create a user_list type bail with 3 users
+	users := []map[string]interface{}{
+		{"userid": "user1", "pageid": "page1", "shortcode": "form1"},
+		{"userid": "user2", "pageid": "page2", "shortcode": "form2"},
+		{"userid": "user3", "pageid": "page3", "shortcode": "form3"},
+	}
+	bail := createTestUserListBail(bailID, "userlist_limited_bail", users, "immediate")
+
+	store := &mockBailStore{
+		bails:         []*db.Bail{bail},
+		lastExecution: nil,
+	}
+	query := &mockQueryExecutor{}
+	sender := &mockBailSender{}
+
+	// Set limit to 2
+	executor := New(store, query, sender, 2)
+
+	err := executor.Run(context.Background())
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Should have sent bailouts for only 2 users (limit)
+	if len(sender.sentBailouts) != 2 {
+		t.Errorf("Expected 2 bailouts sent (limit), got %d", len(sender.sentBailouts))
+	}
+
+	// Should have recorded matched=3, bailed=2
+	if len(store.recordedEvents) != 1 {
+		t.Fatalf("Expected 1 event recorded, got %d", len(store.recordedEvents))
+	}
+
+	event := store.recordedEvents[0]
+	if event.UsersMatched != 3 {
+		t.Errorf("Expected 3 users matched, got %d", event.UsersMatched)
+	}
+	if event.UsersBailed != 2 {
+		t.Errorf("Expected 2 users bailed (limit), got %d", event.UsersBailed)
 	}
 }

@@ -36,7 +36,7 @@ func BuildQuery(def *types.BailDefinition) (string, []interface{}, error) {
 	builder := NewQueryBuilder()
 
 	// Build the WHERE clause from conditions
-	whereClause, err := builder.buildCondition(&def.Conditions)
+	whereClause, err := builder.buildCondition(def.Conditions)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to build conditions: %w", err)
 	}

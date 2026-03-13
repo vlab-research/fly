@@ -279,7 +279,7 @@ func TestBailValidation(t *testing.T) {
 				Name:            "timeout-bail",
 				DestinationForm: "exit-survey",
 				Definition: BailDefinition{
-					Conditions: Condition{
+					Conditions: &Condition{
 						simple: &SimpleCondition{
 							Type:  "state",
 							Value: strPtr("WAITING"),
@@ -301,7 +301,7 @@ func TestBailValidation(t *testing.T) {
 				Name:            "timeout-bail",
 				DestinationForm: "exit-survey",
 				Definition: BailDefinition{
-					Conditions: Condition{
+					Conditions: &Condition{
 						simple: &SimpleCondition{
 							Type:  "state",
 							Value: strPtr("WAITING"),
@@ -324,7 +324,7 @@ func TestBailValidation(t *testing.T) {
 				Name:            "timeout-bail",
 				DestinationForm: "exit-survey",
 				Definition: BailDefinition{
-					Conditions: Condition{
+					Conditions: &Condition{
 						simple: &SimpleCondition{
 							Type:  "state",
 							Value: strPtr("WAITING"),
@@ -372,7 +372,7 @@ func TestBailEventValidation(t *testing.T) {
 				UsersMatched: 10,
 				UsersBailed:  8,
 				DefinitionSnapshot: BailDefinition{
-					Conditions: Condition{
+					Conditions: &Condition{
 						simple: &SimpleCondition{
 							Type:  "state",
 							Value: strPtr("WAITING"),
@@ -399,7 +399,7 @@ func TestBailEventValidation(t *testing.T) {
 				UsersMatched: 10,
 				UsersBailed:  8,
 				DefinitionSnapshot: BailDefinition{
-					Conditions: Condition{
+					Conditions: &Condition{
 						simple: &SimpleCondition{
 							Type:  "state",
 							Value: strPtr("WAITING"),
@@ -426,7 +426,7 @@ func TestBailEventValidation(t *testing.T) {
 				UsersMatched: 5,
 				UsersBailed:  10,
 				DefinitionSnapshot: BailDefinition{
-					Conditions: Condition{
+					Conditions: &Condition{
 						simple: &SimpleCondition{
 							Type:  "state",
 							Value: strPtr("WAITING"),
@@ -628,6 +628,379 @@ func TestNotOperatorValidation(t *testing.T) {
 				t.Fatalf("Unmarshal() error = %v", err)
 			}
 			err = cond.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestUserListValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		ul      UserList
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid user list - single user",
+			ul: UserList{
+				Users: []UserListEntry{
+					{UserID: "user1", PageID: "page1", Shortcode: "exit-survey"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid user list - multiple users",
+			ul: UserList{
+				Users: []UserListEntry{
+					{UserID: "user1", PageID: "page1", Shortcode: "form1"},
+					{UserID: "user2", PageID: "page2", Shortcode: "form2"},
+					{UserID: "user3", PageID: "page3", Shortcode: "form3"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "empty user list",
+			ul:      UserList{Users: []UserListEntry{}},
+			wantErr: true,
+			errMsg:  "user_list must contain at least one user",
+		},
+		{
+			name:    "user list exceeds max 1000",
+			ul:      UserList{Users: make([]UserListEntry, 1001)},
+			wantErr: true,
+			errMsg:  "user_list must contain at most 1000 users",
+		},
+		{
+			name: "missing userid at index 0",
+			ul: UserList{
+				Users: []UserListEntry{
+					{UserID: "", PageID: "page1", Shortcode: "form1"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "userid is required at index 0",
+		},
+		{
+			name: "missing pageid at index 1",
+			ul: UserList{
+				Users: []UserListEntry{
+					{UserID: "user1", PageID: "page1", Shortcode: "form1"},
+					{UserID: "user2", PageID: "", Shortcode: "form2"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "pageid is required at index 1",
+		},
+		{
+			name: "missing shortcode at index 2",
+			ul: UserList{
+				Users: []UserListEntry{
+					{UserID: "user1", PageID: "page1", Shortcode: "form1"},
+					{UserID: "user2", PageID: "page2", Shortcode: "form2"},
+					{UserID: "user3", PageID: "page3", Shortcode: ""},
+				},
+			},
+			wantErr: true,
+			errMsg:  "shortcode is required at index 2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.ul.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestBailDefinitionValidation_UserListType(t *testing.T) {
+	tests := []struct {
+		name    string
+		def     BailDefinition
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid user_list definition",
+			def: BailDefinition{
+				Type: "user_list",
+				UserList: &UserList{
+					Users: []UserListEntry{
+						{UserID: "user1", PageID: "page1", Shortcode: "form1"},
+						{UserID: "user2", PageID: "page2", Shortcode: "form2"},
+					},
+				},
+				Execution: Execution{
+					Timing: "immediate",
+				},
+				Action: Action{
+					DestinationForm: "form1",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "user_list type but missing user_list field",
+			def: BailDefinition{
+				Type:     "user_list",
+				UserList: nil,
+				Execution: Execution{
+					Timing: "immediate",
+				},
+				Action: Action{
+					DestinationForm: "form1",
+				},
+			},
+			wantErr: true,
+			errMsg:  "user_list is required for user_list-type bail",
+		},
+		{
+			name: "conditions type still works",
+			def: BailDefinition{
+				Type: "conditions",
+				Conditions: &Condition{
+					simple: &SimpleCondition{
+						Type:  "state",
+						Value: strPtr("WAITING"),
+					},
+				},
+				Execution: Execution{
+					Timing: "immediate",
+				},
+				Action: Action{
+					DestinationForm: "exit-survey",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "conditions type missing conditions",
+			def: BailDefinition{
+				Type:       "conditions",
+				Conditions: nil,
+				Execution: Execution{
+					Timing: "immediate",
+				},
+				Action: Action{
+					DestinationForm: "exit-survey",
+				},
+			},
+			wantErr: true,
+			errMsg:  "conditions are required for conditions-type bail",
+		},
+		{
+			name: "invalid bail type",
+			def: BailDefinition{
+				Type: "invalid_type",
+				Conditions: &Condition{
+					simple: &SimpleCondition{
+						Type:  "state",
+						Value: strPtr("WAITING"),
+					},
+				},
+				Execution: Execution{
+					Timing: "immediate",
+				},
+				Action: Action{
+					DestinationForm: "exit-survey",
+				},
+			},
+			wantErr: true,
+			errMsg:  "invalid bail type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.def.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestBailDefinitionValidation_BackwardCompat(t *testing.T) {
+	jsonStr := `{
+		"conditions": {
+			"type": "state",
+			"value": "WAITING"
+		},
+		"execution": {
+			"timing": "immediate"
+		},
+		"action": {
+			"destination_form": "exit-survey"
+		}
+	}`
+
+	var def BailDefinition
+	err := json.Unmarshal([]byte(jsonStr), &def)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if def.Type != "" {
+		t.Errorf("Expected Type to be empty string, got %q", def.Type)
+	}
+
+	if def.Conditions == nil {
+		t.Error("Expected Conditions to be non-nil")
+	}
+
+	err = def.Validate()
+	if err != nil {
+		t.Errorf("Validate() error = %v, expected nil", err)
+	}
+}
+
+func TestBailDefinitionMarshalUnmarshal_UserList(t *testing.T) {
+	def := BailDefinition{
+		Type: "user_list",
+		UserList: &UserList{
+			Users: []UserListEntry{
+				{UserID: "user1", PageID: "page1", Shortcode: "form1"},
+				{UserID: "user2", PageID: "page2", Shortcode: "form2"},
+			},
+		},
+		Execution: Execution{
+			Timing: "immediate",
+		},
+		Action: Action{
+			DestinationForm: "form1",
+		},
+	}
+
+	data, err := json.Marshal(&def)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	var def2 BailDefinition
+	err = json.Unmarshal(data, &def2)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if def2.Type != "user_list" {
+		t.Errorf("Expected Type='user_list', got %q", def2.Type)
+	}
+
+	if def2.UserList == nil {
+		t.Error("Expected UserList to be non-nil")
+	} else if len(def2.UserList.Users) != 2 {
+		t.Errorf("Expected 2 users, got %d", len(def2.UserList.Users))
+	}
+}
+
+func TestBailValidation_UserListType(t *testing.T) {
+	userID := uuid.New()
+
+	tests := []struct {
+		name    string
+		bail    Bail
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid user_list bail",
+			bail: Bail{
+				UserID:          userID,
+				Name:            "user-list-bail",
+				DestinationForm: "form1",
+				Definition: BailDefinition{
+					Type: "user_list",
+					UserList: &UserList{
+						Users: []UserListEntry{
+							{UserID: "user1", PageID: "page1", Shortcode: "form1"},
+							{UserID: "user2", PageID: "page2", Shortcode: "form2"},
+						},
+					},
+					Execution: Execution{
+						Timing: "immediate",
+					},
+					Action: Action{
+						DestinationForm: "form1",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "user_list bail with mismatched destination_form",
+			bail: Bail{
+				UserID:          userID,
+				Name:            "user-list-bail",
+				DestinationForm: "form1",
+				Definition: BailDefinition{
+					Type: "user_list",
+					UserList: &UserList{
+						Users: []UserListEntry{
+							{UserID: "user1", PageID: "page1", Shortcode: "form1"},
+							{UserID: "user2", PageID: "page2", Shortcode: "form2"},
+						},
+					},
+					Execution: Execution{
+						Timing: "immediate",
+					},
+					Action: Action{
+						DestinationForm: "different-form",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "conditions bail with mismatched destination_form",
+			bail: Bail{
+				UserID:          userID,
+				Name:            "conditions-bail",
+				DestinationForm: "form1",
+				Definition: BailDefinition{
+					Type: "conditions",
+					Conditions: &Condition{
+						simple: &SimpleCondition{
+							Type:  "state",
+							Value: strPtr("WAITING"),
+						},
+					},
+					Execution: Execution{
+						Timing: "immediate",
+					},
+					Action: Action{
+						DestinationForm: "different-form",
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "destination_form mismatch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.bail.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}

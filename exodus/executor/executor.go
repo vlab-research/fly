@@ -135,8 +135,14 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 
 	log.Printf("Bail %s ready to execute", dbBail.Name)
 
+	// Branch on bail type: conditions-based or user_list-based
+	bailType := bailDef.Type
+	if bailType == "" {
+		bailType = "conditions" // backward compatibility
+	}
+
 	// Query users matching bail conditions
-	users, err := e.queryUsers(ctx, dbBail, &bailDef)
+	users, err := e.queryUsers(ctx, dbBail, &bailDef, bailType)
 	if err != nil {
 		err := fmt.Errorf("failed to query users: %w", err)
 		e.recordError(ctx, dbBail, err)
@@ -174,7 +180,19 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 }
 
 // queryUsers executes the SQL query and returns matching users
-func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition) ([]sender.UserTarget, error) {
+// For "conditions" type bails, it builds and executes a SQL query
+// For "user_list" type bails, it converts the UserList directly to UserTarget structs
+func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, bailType string) ([]sender.UserTarget, error) {
+	// Handle user_list type bails: skip query, convert UserList directly
+	if bailType == "user_list" {
+		if bailDef.UserList == nil {
+			return nil, fmt.Errorf("user_list is nil for user_list-type bail")
+		}
+		log.Printf("Converting user_list to targets for bail %s", dbBail.Name)
+		return userListToTargets(bailDef.UserList), nil
+	}
+
+	// Handle conditions-based bails: execute SQL query
 	// Build SQL query from bail definition
 	sql, params, err := query.BuildQuery(bailDef)
 	if err != nil {
@@ -211,6 +229,19 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 	}
 
 	return users, nil
+}
+
+// userListToTargets converts a UserList to a slice of UserTarget structs
+func userListToTargets(ul *types.UserList) []sender.UserTarget {
+	targets := make([]sender.UserTarget, len(ul.Users))
+	for i, entry := range ul.Users {
+		targets[i] = sender.UserTarget{
+			UserID:    entry.UserID,
+			PageID:    entry.PageID,
+			Shortcode: entry.Shortcode,
+		}
+	}
+	return targets
 }
 
 // recordSuccess logs successful execution
