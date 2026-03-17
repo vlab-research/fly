@@ -91,7 +91,7 @@ const BailSystems = () => {
       title: 'Type',
       key: 'type',
       render: (_, record) => {
-        const type = record.bail?.definition?.type;
+        const type = record.bail && record.bail.definition && record.bail.definition.type;
         return (
           <Tag color={type === 'user_list' ? 'purple' : 'cyan'}>
             {type === 'user_list' ? 'User List' : 'Conditions'}
