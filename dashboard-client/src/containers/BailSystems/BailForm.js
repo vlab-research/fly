@@ -45,6 +45,16 @@ const BailForm = () => {
     }
   }, [bailType, isEdit, form]);
 
+  useEffect(() => {
+    // When switching modes, clear fields that shouldn't be validated in the new mode
+    if (bailType === 'user_list') {
+      form.setFieldsValue({
+        conditions: undefined,
+        destination_form: undefined,
+      });
+    }
+  }, [bailType, form]);
+
   const loadUser = async () => {
     try {
       const res = await api.fetcher({ path: '/users', method: 'POST', body: {} });
@@ -153,6 +163,13 @@ const BailForm = () => {
   const onFinish = async (values) => {
     setSaving(true);
     try {
+      // Validate that user_list mode has users uploaded
+      if (bailType === 'user_list' && userList.length === 0) {
+        message.error('Please upload a CSV file with at least one user');
+        setSaving(false);
+        return;
+      }
+
       const definition = buildDefinition(values);
       const body = {
         name: values.name,

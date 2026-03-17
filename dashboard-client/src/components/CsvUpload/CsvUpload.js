@@ -67,6 +67,10 @@ const CsvUpload = ({ value, onChange }) => {
       setFileName(file.name);
       onChange(users);
     };
+    reader.onerror = () => {
+      setErrors(['Failed to read file. Please try again.']);
+      onChange([]);
+    };
     reader.readAsText(file);
     return false;
   };
