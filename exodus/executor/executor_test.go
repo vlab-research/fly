@@ -63,7 +63,7 @@ type mockBailSender struct {
 	sendError     error
 }
 
-func (m *mockBailSender) SendBailouts(ctx context.Context, users []sender.UserTarget, destinationForm string, metadata map[string]interface{}) (int, error) {
+func (m *mockBailSender) SendBailouts(ctx context.Context, users []sender.UserTarget, metadata map[string]interface{}) (int, error) {
 	if m.sendError != nil {
 		return m.successCount, m.sendError
 	}
@@ -141,7 +141,7 @@ func createTestUserListBail(id uuid.UUID, name string, users []map[string]interf
 		Description:      "Test user_list bail",
 		Enabled:          true,
 		Definition:       defJSON,
-		DestinationForm:  "bailout_form",
+		DestinationForm:  "",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
@@ -613,12 +613,12 @@ func TestExecutor_Run_UserListBail(t *testing.T) {
 		t.Errorf("Expected 2 bailouts sent, got %d", len(sender.sentBailouts))
 	}
 
-	// Check that shortcodes were preserved
-	if sender.sentBailouts[0].Shortcode != "form1" {
-		t.Errorf("Expected first user shortcode 'form1', got '%s'", sender.sentBailouts[0].Shortcode)
+	// Check that destination forms were set correctly (from shortcodes)
+	if sender.sentBailouts[0].DestinationForm != "form1" {
+		t.Errorf("Expected first user destination form 'form1', got '%s'", sender.sentBailouts[0].DestinationForm)
 	}
-	if sender.sentBailouts[1].Shortcode != "form2" {
-		t.Errorf("Expected second user shortcode 'form2', got '%s'", sender.sentBailouts[1].Shortcode)
+	if sender.sentBailouts[1].DestinationForm != "form2" {
+		t.Errorf("Expected second user destination form 'form2', got '%s'", sender.sentBailouts[1].DestinationForm)
 	}
 
 	// Should have recorded a success event

@@ -150,9 +150,11 @@ func (s *Server) CreateBail(c echo.Context) error {
 	}
 
 	// Compute destination_form for the database
-	destForm := req.Definition.Action.DestinationForm
-	if req.Definition.Type == "user_list" && req.Definition.UserList != nil && len(req.Definition.UserList.Users) > 0 {
-		destForm = req.Definition.UserList.Users[0].Shortcode
+	// For conditions-based bails, store the destination form from the action
+	// For user_list bails, store empty string (destinations are per-user in the definition)
+	destForm := ""
+	if req.Definition.Type != "user_list" {
+		destForm = req.Definition.Action.DestinationForm
 	}
 
 	dbBail := &db.Bail{
@@ -239,9 +241,11 @@ func (s *Server) UpdateBail(c echo.Context) error {
 		}
 
 		// Compute destination_form for the database
-		destForm := req.Definition.Action.DestinationForm
-		if req.Definition.Type == "user_list" && req.Definition.UserList != nil && len(req.Definition.UserList.Users) > 0 {
-			destForm = req.Definition.UserList.Users[0].Shortcode
+		// For conditions-based bails, store the destination form from the action
+		// For user_list bails, store empty string (destinations are per-user in the definition)
+		destForm := ""
+		if req.Definition.Type != "user_list" {
+			destForm = req.Definition.Action.DestinationForm
 		}
 
 		dbBail.Definition = definitionJSON

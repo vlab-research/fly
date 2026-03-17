@@ -28,7 +28,7 @@ type QueryExecutor interface {
 
 // BailSender defines the interface for sending bailouts
 type BailSender interface {
-	SendBailouts(ctx context.Context, users []sender.UserTarget, destinationForm string, metadata map[string]interface{}) (int, error)
+	SendBailouts(ctx context.Context, users []sender.UserTarget, metadata map[string]interface{}) (int, error)
 }
 
 // Executor runs bail execution loop
@@ -166,7 +166,7 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	}
 
 	// Send bailouts
-	usersBailed, err := e.sender.SendBailouts(ctx, usersToProcess, bailDef.Action.DestinationForm, bailDef.Action.Metadata)
+	usersBailed, err := e.sender.SendBailouts(ctx, usersToProcess, bailDef.Action.Metadata)
 	if err != nil {
 		// Even if some sends failed, record partial success
 		log.Printf("Partially failed to send bailouts: %v", err)
@@ -207,7 +207,7 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
-	// Convert results to UserTarget structs
+	// Convert results to UserTarget structs with resolved destination form
 	var users []sender.UserTarget
 	for _, row := range rows {
 		userID, ok := row["userid"].(string)
@@ -223,8 +223,9 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 		}
 
 		users = append(users, sender.UserTarget{
-			UserID: userID,
-			PageID: pageID,
+			UserID:          userID,
+			PageID:          pageID,
+			DestinationForm: bailDef.Action.DestinationForm,
 		})
 	}
 
@@ -232,13 +233,14 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 }
 
 // userListToTargets converts a UserList to a slice of UserTarget structs
+// Each entry's shortcode becomes the destination form for that user
 func userListToTargets(ul *types.UserList) []sender.UserTarget {
 	targets := make([]sender.UserTarget, len(ul.Users))
 	for i, entry := range ul.Users {
 		targets[i] = sender.UserTarget{
-			UserID:    entry.UserID,
-			PageID:    entry.PageID,
-			Shortcode: entry.Shortcode,
+			UserID:          entry.UserID,
+			PageID:          entry.PageID,
+			DestinationForm: entry.Shortcode,
 		}
 	}
 	return targets

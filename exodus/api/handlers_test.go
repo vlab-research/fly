@@ -671,9 +671,9 @@ func TestCreateBail_UserListType(t *testing.T) {
 		t.Errorf("Expected user ID %s, got %s", userID, response.Bail.UserID)
 	}
 
-	// Verify destination_form is set to the first user's shortcode
-	if response.Bail.DestinationForm != "first-form" {
-		t.Errorf("Expected destination_form 'first-form', got '%s'", response.Bail.DestinationForm)
+	// Verify destination_form is empty for user_list bails (destinations are per-user in the definition)
+	if response.Bail.DestinationForm != "" {
+		t.Errorf("Expected destination_form '', got '%s'", response.Bail.DestinationForm)
 	}
 
 	if len(mock.bails) != 1 {

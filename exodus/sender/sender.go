@@ -39,9 +39,9 @@ type Sender struct {
 
 // UserTarget represents a user to be bailed
 type UserTarget struct {
-	UserID    string
-	PageID    string
-	Shortcode string // per-user destination override; empty means use default
+	UserID          string
+	PageID          string
+	DestinationForm string // always set by caller; resolved before passing to sender
 }
 
 // New creates a new Sender instance
@@ -105,7 +105,7 @@ func (s *Sender) SendBailout(ctx context.Context, userID, pageID, destinationFor
 
 // SendBailouts sends multiple bailout events with rate limiting
 // Returns count of successful sends and any error encountered
-func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, destinationForm string, metadata map[string]interface{}) (int, error) {
+func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, metadata map[string]interface{}) (int, error) {
 	successCount := 0
 	var lastError error
 
@@ -117,14 +117,8 @@ func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, destinati
 		default:
 		}
 
-		// Use per-user shortcode if set, otherwise fall back to destinationForm
-		dest := destinationForm
-		if user.Shortcode != "" {
-			dest = user.Shortcode
-		}
-
-		// Send bailout for this user
-		err := s.SendBailout(ctx, user.UserID, user.PageID, dest, metadata)
+		// Send bailout for this user using their destination form
+		err := s.SendBailout(ctx, user.UserID, user.PageID, user.DestinationForm, metadata)
 		if err != nil {
 			log.Printf("Failed to bail user=%s page=%s: %v", user.UserID, user.PageID, err)
 			lastError = err
