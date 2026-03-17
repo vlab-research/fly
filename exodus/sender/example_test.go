@@ -17,8 +17,8 @@ func Example() {
 
 	// Define users to bail out
 	users := []sender.UserTarget{
-		{UserID: "user123", PageID: "page456"},
-		{UserID: "user789", PageID: "page101"},
+		{UserID: "user123", PageID: "page456", DestinationForm: "exit-form"},
+		{UserID: "user789", PageID: "page101", DestinationForm: "exit-form"},
 	}
 
 	// Define metadata for the bailout
@@ -28,7 +28,7 @@ func Example() {
 	}
 
 	// Send bailouts with rate limiting
-	count, err := s.SendBailouts(ctx, users, "exit-form", metadata)
+	count, err := s.SendBailouts(ctx, users, metadata)
 	if err != nil {
 		log.Printf("Bailout completed with errors: %v", err)
 	}
@@ -44,11 +44,11 @@ func Example_dryRun() {
 	ctx := context.Background()
 
 	users := []sender.UserTarget{
-		{UserID: "user123", PageID: "page456"},
+		{UserID: "user123", PageID: "page456", DestinationForm: "test-form"},
 	}
 
 	// This will log what would be sent without actually sending
-	count, err := s.SendBailouts(ctx, users, "test-form", nil)
+	count, err := s.SendBailouts(ctx, users, nil)
 	if err != nil {
 		log.Fatalf("Dry run failed: %v", err)
 	}
