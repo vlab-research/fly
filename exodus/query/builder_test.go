@@ -14,12 +14,12 @@ func strPtr(s string) *string {
 }
 
 // Helper function to create a condition from JSON
-func conditionFromJSON(jsonStr string) types.Condition {
+func conditionFromJSON(jsonStr string) *types.Condition {
 	var cond types.Condition
 	if err := json.Unmarshal([]byte(jsonStr), &cond); err != nil {
 		panic(err)
 	}
-	return cond
+	return &cond
 }
 
 func TestBuildQuery_SimpleFormCondition(t *testing.T) {

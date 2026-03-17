@@ -122,7 +122,7 @@ func (m *mockDB) Close() {
 // Helper to create a test bail definition
 func testBailDefinition() types.BailDefinition {
 	return types.BailDefinition{
-		Conditions: types.Condition{},
+		Conditions: &types.Condition{},
 		Execution: types.Execution{
 			Timing: "immediate",
 		},
@@ -134,10 +134,10 @@ func testBailDefinition() types.BailDefinition {
 }
 
 // Helper to create a valid simple condition
-func simpleFormCondition(formName string) types.Condition {
+func simpleFormCondition(formName string) *types.Condition {
 	cond := types.Condition{}
 	cond.UnmarshalJSON([]byte(`{"type":"form","value":"` + formName + `"}`))
-	return cond
+	return &cond
 }
 
 func TestHealth(t *testing.T) {
@@ -599,5 +599,191 @@ func TestPreviewBail(t *testing.T) {
 
 	if response.Params == nil {
 		t.Errorf("Expected non-nil Params slice in preview response")
+	}
+}
+
+func TestCreateBail_UserListType(t *testing.T) {
+	userID := uuid.New()
+	mock := &mockDB{
+		bails: []*db.Bail{},
+	}
+
+	server := New(mock)
+
+	// Create a user_list bail definition with 2 entries
+	def := types.BailDefinition{
+		Type: "user_list",
+		UserList: &types.UserList{
+			Users: []types.UserListEntry{
+				{
+					UserID:    "user1",
+					PageID:    "page1",
+					Shortcode: "first-form",
+				},
+				{
+					UserID:    "user2",
+					PageID:    "page2",
+					Shortcode: "second-form",
+				},
+			},
+		},
+		Execution: types.Execution{
+			Timing: "immediate",
+		},
+		Action: types.Action{
+			Metadata: map[string]interface{}{"reason": "test"},
+		},
+	}
+
+	reqBody := CreateBailRequest{
+		Name:        "User List Bail",
+		Description: "Test user list bail",
+		Definition:  def,
+	}
+	reqJSON, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/users/"+userID.String()+"/bails", strings.NewReader(string(reqJSON)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := server.echo.NewContext(req, rec)
+	c.SetPath("/users/:userId/bails")
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
+
+	if err := server.CreateBail(c); err != nil {
+		t.Fatalf("CreateBail failed: %v", err)
+	}
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d", rec.Code)
+	}
+
+	var response BailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	if response.Bail.Name != "User List Bail" {
+		t.Errorf("Expected bail name 'User List Bail', got '%s'", response.Bail.Name)
+	}
+
+	if response.Bail.UserID != userID {
+		t.Errorf("Expected user ID %s, got %s", userID, response.Bail.UserID)
+	}
+
+	// Verify destination_form is empty for user_list bails (destinations are per-user in the definition)
+	if response.Bail.DestinationForm != "" {
+		t.Errorf("Expected destination_form '', got '%s'", response.Bail.DestinationForm)
+	}
+
+	if len(mock.bails) != 1 {
+		t.Errorf("Expected 1 bail in mock, got %d", len(mock.bails))
+	}
+
+	// Verify the definition is correctly stored with the user list
+	if response.Bail.Definition.Type != "user_list" {
+		t.Errorf("Expected bail type 'user_list', got '%s'", response.Bail.Definition.Type)
+	}
+
+	if response.Bail.Definition.UserList == nil {
+		t.Error("Expected user_list in definition")
+	} else if len(response.Bail.Definition.UserList.Users) != 2 {
+		t.Errorf("Expected 2 users in user_list, got %d", len(response.Bail.Definition.UserList.Users))
+	}
+}
+
+func TestPreviewBail_UserListType(t *testing.T) {
+	userID := uuid.New()
+	mock := &mockDB{
+		// No queryFunc set - should not be called for user_list type
+	}
+
+	server := New(mock)
+
+	// Create a user_list bail preview request with 2 entries
+	def := types.BailDefinition{
+		Type: "user_list",
+		UserList: &types.UserList{
+			Users: []types.UserListEntry{
+				{
+					UserID:    "user1",
+					PageID:    "page1",
+					Shortcode: "first-form",
+				},
+				{
+					UserID:    "user2",
+					PageID:    "page2",
+					Shortcode: "second-form",
+				},
+			},
+		},
+		Execution: types.Execution{
+			Timing: "immediate",
+		},
+		Action: types.Action{
+			Metadata: map[string]interface{}{"reason": "test"},
+		},
+	}
+
+	reqBody := PreviewRequest{
+		Definition: def,
+	}
+	reqJSON, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/users/"+userID.String()+"/bails/preview", strings.NewReader(string(reqJSON)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := server.echo.NewContext(req, rec)
+	c.SetPath("/users/:userId/bails/preview")
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
+
+	if err := server.PreviewBail(c); err != nil {
+		t.Fatalf("PreviewBail failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+
+	var response PreviewResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	// Verify correct user count
+	if response.Count != 2 {
+		t.Errorf("Expected count 2, got %d", response.Count)
+	}
+
+	// Verify correct number of users in response
+	if len(response.Users) != 2 {
+		t.Errorf("Expected 2 users, got %d", len(response.Users))
+	}
+
+	// Verify correct user IDs and page IDs
+	if response.Users[0].UserID != "user1" {
+		t.Errorf("Expected first user ID to be 'user1', got '%s'", response.Users[0].UserID)
+	}
+
+	if response.Users[0].PageID != "page1" {
+		t.Errorf("Expected first page ID to be 'page1', got '%s'", response.Users[0].PageID)
+	}
+
+	if response.Users[1].UserID != "user2" {
+		t.Errorf("Expected second user ID to be 'user2', got '%s'", response.Users[1].UserID)
+	}
+
+	if response.Users[1].PageID != "page2" {
+		t.Errorf("Expected second page ID to be 'page2', got '%s'", response.Users[1].PageID)
+	}
+
+	// Verify SQL and Params are empty (not used for user_list type)
+	if response.SQL != "" {
+		t.Errorf("Expected empty SQL for user_list type, got '%s'", response.SQL)
+	}
+
+	if response.Params != nil && len(response.Params) > 0 {
+		t.Errorf("Expected empty Params for user_list type, got %v", response.Params)
 	}
 }

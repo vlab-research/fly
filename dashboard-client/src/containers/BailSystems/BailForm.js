@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useHistory } from 'react-router-dom';
 import {
-  Form, Input, Select, Button, Switch, Card, Space,
+  Form, Input, Select, Button, Switch, Card, Space, Radio,
   TimePicker, DatePicker, Spin, message, Alert
 } from 'antd';
 import { SaveOutlined, EyeOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import api from '../../services/api';
 import ConditionBuilder from '../../components/ConditionBuilder';
+import CsvUpload from '../../components/CsvUpload';
 import { Loading } from '../../components/UI';
 
 const { Option } = Select;
@@ -24,12 +25,35 @@ const BailForm = () => {
   const [showSql, setShowSql] = useState(false);
   const [timing, setTiming] = useState('immediate');
   const [userId, setUserId] = useState(null);
+  const [bailType, setBailType] = useState('conditions');
+  const [userList, setUserList] = useState([]);
 
   const isEdit = !!bailId;
 
   useEffect(() => {
     loadUser();
   }, []);
+
+  useEffect(() => {
+    // When switching to user_list mode, default to absolute timing with current datetime
+    if (bailType === 'user_list' && !isEdit) {
+      form.setFieldsValue({
+        timing: 'absolute',
+        datetime: moment(),
+      });
+      setTiming('absolute');
+    }
+  }, [bailType, isEdit, form]);
+
+  useEffect(() => {
+    // When switching modes, clear fields that shouldn't be validated in the new mode
+    if (bailType === 'user_list') {
+      form.setFieldsValue({
+        conditions: undefined,
+        destination_form: undefined,
+      });
+    }
+  }, [bailType, form]);
 
   const loadUser = async () => {
     try {
@@ -59,6 +83,13 @@ const BailForm = () => {
       var execution = def.execution || {};
       var action = def.action || {};
       setTiming(execution.timing || 'immediate');
+
+      // Detect bail type and set state accordingly
+      const bailDefType = def.type || 'conditions';
+      setBailType(bailDefType);
+      if (bailDefType === 'user_list' && def.user_list) {
+        setUserList(def.user_list.users || []);
+      }
 
       // Populate form
       form.setFieldsValue({
@@ -106,7 +137,20 @@ const BailForm = () => {
       }
     }
 
+    if (bailType === 'user_list') {
+      return {
+        type: 'user_list',
+        user_list: { users: userList },
+        execution,
+        action: {
+          destination_form: userList.length > 0 ? userList[0].shortcode : '',
+          metadata,
+        },
+      };
+    }
+
     return {
+      type: 'conditions',
       conditions: values.conditions,
       execution,
       action: {
@@ -119,6 +163,13 @@ const BailForm = () => {
   const onFinish = async (values) => {
     setSaving(true);
     try {
+      // Validate that user_list mode has users uploaded
+      if (bailType === 'user_list' && userList.length === 0) {
+        message.error('Please upload a CSV file with at least one user');
+        setSaving(false);
+        return;
+      }
+
       const definition = buildDefinition(values);
       const body = {
         name: values.name,
@@ -216,18 +267,38 @@ const BailForm = () => {
             </Form.Item>
           </Card>
 
-          {/* Conditions */}
-          <Card title="Conditions" style={{ marginBottom: 16 }}>
-            <p style={{ color: '#666', marginBottom: 16 }}>
-              Define which users should be bailed. You can combine multiple conditions using AND/OR logic.
-            </p>
-            <Form.Item
-              name="conditions"
-              rules={[{ required: true, message: 'Please define at least one condition' }]}
-            >
-              <ConditionBuilder />
-            </Form.Item>
+          {/* Bail Type */}
+          <Card title="Bail Type" style={{ marginBottom: 16 }}>
+            <Radio.Group value={bailType} onChange={(e) => setBailType(e.target.value)}>
+              <Radio.Button value="conditions">Conditions</Radio.Button>
+              <Radio.Button value="user_list">User List (CSV)</Radio.Button>
+            </Radio.Group>
           </Card>
+
+          {/* Conditions */}
+          {bailType === 'conditions' && (
+            <Card title="Conditions" style={{ marginBottom: 16 }}>
+              <p style={{ color: '#666', marginBottom: 16 }}>
+                Define which users should be bailed. You can combine multiple conditions using AND/OR logic.
+              </p>
+              <Form.Item
+                name="conditions"
+                rules={bailType === 'conditions' ? [{ required: true, message: 'Please define at least one condition' }] : []}
+              >
+                <ConditionBuilder />
+              </Form.Item>
+            </Card>
+          )}
+
+          {/* User List */}
+          {bailType === 'user_list' && (
+            <Card title="User List" style={{ marginBottom: 16 }}>
+              <p style={{ color: '#666', marginBottom: 16 }}>
+                Upload a CSV file with user IDs, page IDs, and destination forms. Each user can be bailed to a different form.
+              </p>
+              <CsvUpload value={userList} onChange={setUserList} />
+            </Card>
+          )}
 
           {/* Execution Timing */}
           <Card title="Execution Timing" style={{ marginBottom: 16 }}>
@@ -286,27 +357,29 @@ const BailForm = () => {
           </Card>
 
           {/* Action */}
-          <Card title="Action" style={{ marginBottom: 16 }}>
-            <Form.Item
-              name="destination_form"
-              label="Destination Form"
-              rules={[{ required: true, message: 'Please enter the destination form' }]}
-              extra="The form/survey shortcode to redirect bailed users to"
-            >
-              <Input placeholder="e.g., exit_survey_v2" />
-            </Form.Item>
+          {bailType === 'conditions' && (
+            <Card title="Action" style={{ marginBottom: 16 }}>
+              <Form.Item
+                name="destination_form"
+                label="Destination Form"
+                rules={bailType === 'conditions' ? [{ required: true, message: 'Please enter the destination form' }] : []}
+                extra="The form/survey shortcode to redirect bailed users to"
+              >
+                <Input placeholder="e.g., exit_survey_v2" />
+              </Form.Item>
 
-            <Form.Item
-              name="metadata"
-              label="Metadata (JSON)"
-              extra="Optional JSON metadata to include with the bail event"
-            >
-              <TextArea
-                rows={3}
-                placeholder='{"reason": "dropout_4weeks", "version": 1}'
-              />
-            </Form.Item>
-          </Card>
+              <Form.Item
+                name="metadata"
+                label="Metadata (JSON)"
+                extra="Optional JSON metadata to include with the bail event"
+              >
+                <TextArea
+                  rows={3}
+                  placeholder='{"reason": "dropout_4weeks", "version": 1}'
+                />
+              </Form.Item>
+            </Card>
+          )}
 
           {/* Preview */}
           <Card title="Preview" style={{ marginBottom: 16 }}>

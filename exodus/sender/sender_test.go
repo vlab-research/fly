@@ -133,13 +133,13 @@ func TestSendBailouts_RateLimiting(t *testing.T) {
 	ctx := context.Background()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1"},
-		{UserID: "user2", PageID: "page2"},
-		{UserID: "user3", PageID: "page3"},
+		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
+		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
 	}
 
 	startTime := time.Now()
-	count, err := sender.SendBailouts(ctx, users, "exit-form", nil)
+	count, err := sender.SendBailouts(ctx, users, nil)
 	duration := time.Since(startTime)
 
 	if err != nil {
@@ -187,11 +187,11 @@ func TestSendBailouts_DryRun(t *testing.T) {
 	ctx := context.Background()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1"},
-		{UserID: "user2", PageID: "page2"},
+		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
 	}
 
-	count, err := sender.SendBailouts(ctx, users, "exit-form", map[string]interface{}{"reason": "test"})
+	count, err := sender.SendBailouts(ctx, users, map[string]interface{}{"reason": "test"})
 	if err != nil {
 		t.Fatalf("SendBailouts failed in dry run: %v", err)
 	}
@@ -225,12 +225,12 @@ func TestSendBailouts_PartialFailure(t *testing.T) {
 	ctx := context.Background()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1"},
-		{UserID: "user2", PageID: "page2"},
-		{UserID: "user3", PageID: "page3"},
+		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
+		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
 	}
 
-	count, err := sender.SendBailouts(ctx, users, "exit-form", nil)
+	count, err := sender.SendBailouts(ctx, users, nil)
 
 	// Should have 2 successful sends (user1 and user3)
 	if count != 2 {
@@ -254,7 +254,7 @@ func TestSendBailouts_EmptyUsers(t *testing.T) {
 
 	users := []UserTarget{}
 
-	count, err := sender.SendBailouts(ctx, users, "exit-form", nil)
+	count, err := sender.SendBailouts(ctx, users, nil)
 	if err != nil {
 		t.Errorf("Expected no error for empty users, got %v", err)
 	}
@@ -277,12 +277,12 @@ func TestSendBailouts_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1"},
-		{UserID: "user2", PageID: "page2"},
-		{UserID: "user3", PageID: "page3"},
+		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
+		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
 	}
 
-	count, err := sender.SendBailouts(ctx, users, "exit-form", nil)
+	count, err := sender.SendBailouts(ctx, users, nil)
 
 	// Should complete at least one request before timeout
 	if count < 1 {

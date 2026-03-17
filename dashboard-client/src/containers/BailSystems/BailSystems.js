@@ -88,6 +88,18 @@ const BailSystems = () => {
       ),
     },
     {
+      title: 'Type',
+      key: 'type',
+      render: (_, record) => {
+        const type = record.bail?.definition?.type;
+        return (
+          <Tag color={type === 'user_list' ? 'purple' : 'cyan'}>
+            {type === 'user_list' ? 'User List' : 'Conditions'}
+          </Tag>
+        );
+      },
+    },
+    {
       title: 'Enabled',
       dataIndex: ['bail', 'enabled'],
       key: 'enabled',
