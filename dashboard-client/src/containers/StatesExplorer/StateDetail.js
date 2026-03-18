@@ -64,7 +64,7 @@ const StateDetail = ({ surveyName, backPath }) => {
   // Parse state_json
   const stateJson = state.state_json || {};
   const currentState = state.current_state;
-  const isError = currentState === 'ERROR';
+
   const isWaiting = currentState === 'WAIT_EXTERNAL_EVENT';
 
   // State color mapping
