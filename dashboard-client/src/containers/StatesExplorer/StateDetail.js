@@ -174,14 +174,24 @@ const StateDetail = ({ surveyName, backPath }) => {
           </Card>
         )}
 
-        {/* Error Details Card - shown if in ERROR state */}
-        {isError && stateJson.error && (
+        {/* Error Details Card - shown if error exists in state_json */}
+        {stateJson && stateJson.error && (
           <Card
             title="Error Details"
             style={{ marginBottom: 16 }}
             headStyle={{ backgroundColor: '#fff1f0' }}
           >
             <Descriptions bordered column={1}>
+              {stateJson.error.code && (
+                <Descriptions.Item label="Error Code">
+                  {stateJson.error.code}
+                </Descriptions.Item>
+              )}
+              {stateJson.error.type && (
+                <Descriptions.Item label="Error Type">
+                  {stateJson.error.type}
+                </Descriptions.Item>
+              )}
               {stateJson.error.tag && (
                 <Descriptions.Item label="Error Tag">
                   <Tag color="red">{stateJson.error.tag}</Tag>
@@ -192,14 +202,9 @@ const StateDetail = ({ surveyName, backPath }) => {
                   {stateJson.error.message}
                 </Descriptions.Item>
               )}
-              {stateJson.error.fb_error_code && (
-                <Descriptions.Item label="Facebook Error Code">
-                  {stateJson.error.fb_error_code}
-                </Descriptions.Item>
-              )}
-              {stateJson.error.payment_error_code && (
-                <Descriptions.Item label="Payment Error Code">
-                  {stateJson.error.payment_error_code}
+              {stateJson.error.fbtrace_id && (
+                <Descriptions.Item label="FB Trace ID">
+                  {stateJson.error.fbtrace_id}
                 </Descriptions.Item>
               )}
               {stateJson.error.details && (
