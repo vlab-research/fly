@@ -9,6 +9,7 @@ const { SpineSupervisor } = require('./spine-supervisor/spine-supervisor')
 const { publishChatLog } = require('./chat-log/publisher')
 
 const VLAB_CHAT_LOG_TOPIC = process.env.VLAB_CHAT_LOG_TOPIC
+const KAFKA_COMMANDS_TOPIC = process.env.KAFKA_COMMANDS_TOPIC || 'commands'
 
 const REPLYBOT_STATESTORE_TTL = process.env.REPLYBOT_STATESTORE_TTL || '24h'
 const REPLYBOT_MACHINE_TTL = process.env.REPLYBOT_MACHINE_TTL || '60m'
@@ -52,6 +53,13 @@ function publishPayment(message) {
   return produce(process.env.VLAB_PAYMENT_TOPIC, message, message.userid)
 }
 
+function publishCommands(commands) {
+  if (!commands || commands.length === 0) return
+  for (const cmd of commands) {
+    produce(KAFKA_COMMANDS_TOPIC, cmd, cmd.user_id)
+  }
+}
+
 
 // Does all the work
 function processor(machine, stateStore) {
@@ -77,6 +85,9 @@ function processor(machine, stateStore) {
       }
       if (report.payment) {
         await publishPayment(report.payment)
+      }
+      if (report.commands && report.commands.length > 0) {
+        await publishCommands(report.commands)
       }
       if (VLAB_CHAT_LOG_TOPIC) {
         await publishChatLog(produce, VLAB_CHAT_LOG_TOPIC, event, state)
