@@ -246,6 +246,43 @@ Located in `chart/`. Deploys two resources from the same image:
 
 See `chart/values.yaml` for resource limits and environment variable configuration.
 
+## Testing
+
+### Unit Tests
+
+No database required. Tests verify SQL string structure for all condition types and operators.
+
+```bash
+make test-unit
+# or: go test -count=1 ./...
+```
+
+### Integration Tests
+
+Tests in `query/db_integration_test.go` execute generated SQL against a real CockroachDB instance and assert on returned rows. They cover OR, AND, NOT, and no-match scenarios for `question_response` conditions — including a regression test for the LEFT JOIN fix that makes OR semantics work correctly.
+
+Integration tests skip automatically if no database is available, so `make test-unit` always works.
+
+```bash
+# Start test database (CockroachDB on port 5433 with all migrations applied)
+make test-db       # delegates to devops/Makefile
+
+# Run everything — use -p 1 to avoid races on the shared database
+make test
+# or: go test -count=1 -p 1 ./...
+
+# Integration tests only
+make test-integration
+```
+
+`-p 1` runs test packages sequentially. Without it, packages run in parallel and can race on the shared database (e.g., one package's cleanup truncates rows another package just inserted).
+
+To override the database URL (e.g. in CI):
+
+```bash
+TEST_DATABASE_URL=postgres://root@myhost:5433/chatroach make test
+```
+
 ## Dependencies
 
 ### Go Modules

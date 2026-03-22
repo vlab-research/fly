@@ -315,8 +315,8 @@ func TestBuildQuery_ElapsedTimeCondition(t *testing.T) {
 	if !strings.Contains(sql, "GROUP BY userid") {
 		t.Error("CTE missing GROUP BY")
 	}
-	if !strings.Contains(sql, "JOIN response_times_0 rt0 ON s.userid = rt0.userid") {
-		t.Error("SQL missing JOIN for CTE")
+	if !strings.Contains(sql, "LEFT JOIN response_times_0 rt0 ON s.userid = rt0.userid") {
+		t.Error("SQL missing LEFT JOIN for CTE")
 	}
 	if !strings.Contains(sql, "rt0.response_time + $3::INTERVAL < NOW()") {
 		t.Errorf("SQL missing elapsed time condition, got: %s", sql)
@@ -372,8 +372,8 @@ func TestBuildQuery_ComplexWithElapsedTime(t *testing.T) {
 	if !strings.Contains(sql, "WITH response_times_0 AS") {
 		t.Error("SQL missing CTE")
 	}
-	if !strings.Contains(sql, "JOIN response_times_0 rt0") {
-		t.Error("SQL missing CTE JOIN")
+	if !strings.Contains(sql, "LEFT JOIN response_times_0 rt0") {
+		t.Error("SQL missing CTE LEFT JOIN")
 	}
 
 	// $1=myform (WHERE), $2=WAIT (WHERE), $3=myform (CTE), $4=q1 (CTE), $5=duration
@@ -461,11 +461,11 @@ func TestBuildQuery_MultipleElapsedTimeConditions(t *testing.T) {
 	if !strings.Contains(sql, "response_times_1") {
 		t.Error("SQL missing second CTE (response_times_1)")
 	}
-	if !strings.Contains(sql, "JOIN response_times_0 rt0") {
-		t.Error("SQL missing first JOIN")
+	if !strings.Contains(sql, "LEFT JOIN response_times_0 rt0") {
+		t.Error("SQL missing first LEFT JOIN")
 	}
-	if !strings.Contains(sql, "JOIN response_times_1 rt1") {
-		t.Error("SQL missing second JOIN")
+	if !strings.Contains(sql, "LEFT JOIN response_times_1 rt1") {
+		t.Error("SQL missing second LEFT JOIN")
 	}
 
 	// $1=form1, $2=q1, $3=duration1, $4=form2, $5=q2, $6=duration2
@@ -652,9 +652,9 @@ func TestBuildQuery_QuestionResponseWithResponse(t *testing.T) {
 	if !strings.Contains(sql, "qr0.userid IS NOT NULL") {
 		t.Errorf("SQL missing 'qr0.userid IS NOT NULL', got: %s", sql)
 	}
-	// JOIN must link CTE to states table
-	if !strings.Contains(sql, "JOIN question_responses_0 qr0 ON s.userid = qr0.userid") {
-		t.Errorf("SQL missing JOIN clause, got: %s", sql)
+	// LEFT JOIN must link CTE to states table
+	if !strings.Contains(sql, "LEFT JOIN question_responses_0 qr0 ON s.userid = qr0.userid") {
+		t.Errorf("SQL missing LEFT JOIN clause, got: %s", sql)
 	}
 
 	// params: $1=myform, $2=q1, $3=yes
@@ -710,6 +710,52 @@ func TestBuildQuery_QuestionResponseWithoutResponse(t *testing.T) {
 	}
 	if params[1] != "q1" {
 		t.Errorf("Expected params[1]='q1', got %v", params[1])
+	}
+}
+
+func TestBuildQuery_ORQuestionResponseConditions(t *testing.T) {
+	// Regression test: OR with multiple question_response conditions must use LEFT JOIN
+	// so that users matching either condition are included. With INNER JOIN, only users
+	// matching BOTH conditions would be returned (AND semantics).
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"op": "or",
+			"vars": [
+				{"type": "question_response", "form": "myform", "question_ref": "hpv_girl", "response": "2"},
+				{"type": "question_response", "form": "myform", "question_ref": "hpv_girl", "response": "3"}
+			]
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	// Must use LEFT JOIN so users matching only one condition are included
+	if !strings.Contains(sql, "LEFT JOIN question_responses_0 qr0") {
+		t.Errorf("SQL must use LEFT JOIN for first CTE (OR semantics), got: %s", sql)
+	}
+	if !strings.Contains(sql, "LEFT JOIN question_responses_1 qr1") {
+		t.Errorf("SQL must use LEFT JOIN for second CTE (OR semantics), got: %s", sql)
+	}
+
+	// WHERE clause must use OR
+	if !strings.Contains(sql, "qr0.userid IS NOT NULL OR qr1.userid IS NOT NULL") {
+		t.Errorf("SQL WHERE clause must use OR, got: %s", sql)
+	}
+
+	// $1=myform, $2=hpv_girl, $3=2, $4=myform, $5=hpv_girl, $6=3
+	if len(params) != 6 {
+		t.Fatalf("Expected 6 parameters, got %d: %v", len(params), params)
+	}
+	if params[2] != "2" {
+		t.Errorf("Expected params[2]='2', got %v", params[2])
+	}
+	if params[5] != "3" {
+		t.Errorf("Expected params[5]='3', got %v", params[5])
 	}
 }
 

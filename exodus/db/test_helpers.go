@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -12,10 +13,14 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-// TestPool creates a connection pool to the test database on port 5433
-// Follows Dean's pattern - logs fatal on connection errors
+// TestPool creates a connection pool to the test database.
+// Uses TEST_DATABASE_URL env var if set, otherwise defaults to localhost:5433.
 func TestPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/chatroach")
+	connStr := os.Getenv("TEST_DATABASE_URL")
+	if connStr == "" {
+		connStr = "postgres://root@localhost:5433/chatroach"
+	}
+	config, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,7 +60,7 @@ func ResetDB(pool *pgxpool.Pool, tables []string) error {
 // This prepares the database for a clean test run
 func Before(pool *pgxpool.Pool) {
 	// Reset exodus tables and any dependent data
-	err := ResetDB(pool, []string{"bail_events", "bails", "surveys", "users"})
+	err := ResetDB(pool, []string{"bail_events", "bails", "responses", "states", "surveys", "users"})
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -189,8 +189,8 @@ func (qb *QueryBuilder) buildElapsedTimeCondition(cond *types.SimpleCondition) (
 
 	qb.ctes = append(qb.ctes, cte)
 
-	// Add JOIN clause for this CTE
-	joinClause := fmt.Sprintf("JOIN %s rt%d ON s.userid = rt%d.userid",
+	// Add JOIN clause for this CTE (LEFT JOIN so OR conditions work correctly)
+	joinClause := fmt.Sprintf("LEFT JOIN %s rt%d ON s.userid = rt%d.userid",
 		cteName, qb.cteIndex-1, qb.cteIndex-1)
 	qb.cteJoins = append(qb.cteJoins, joinClause)
 
@@ -236,7 +236,7 @@ func (qb *QueryBuilder) buildQuestionResponseCondition(cond *types.SimpleConditi
 	}
 
 	qb.ctes = append(qb.ctes, cte)
-	qb.cteJoins = append(qb.cteJoins, fmt.Sprintf("JOIN %s %s ON s.userid = %s.userid", cteName, alias, alias))
+	qb.cteJoins = append(qb.cteJoins, fmt.Sprintf("LEFT JOIN %s %s ON s.userid = %s.userid", cteName, alias, alias))
 
 	return fmt.Sprintf("%s.userid IS NOT NULL", alias), nil
 }
