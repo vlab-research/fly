@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useHistory } from 'react-router-dom';
-import { Layout, Card, Descriptions, Tag, Table, Typography, Button, message, Alert } from 'antd';
+import {
+  Layout, Card, Descriptions, Tag, Table, Typography, Button, message, Alert,
+} from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import { Loading } from '../../components/UI';
@@ -8,27 +10,29 @@ import { Loading } from '../../components/UI';
 const { Content } = Layout;
 const { Text } = Typography;
 
+// eslint-disable-next-line react/display-name
+const renderUserID = id => <Text code copyable>{id}</Text>;
+
+const userColumns = [
+  {
+    title: '#',
+    key: 'index',
+    render: (_, __, index) => index + 1,
+    width: 60,
+  },
+  {
+    title: 'User ID',
+    dataIndex: 'id',
+    key: 'id',
+    render: renderUserID,
+  },
+];
+
 const BailEventDetail = () => {
   const { bailId, eventId } = useParams();
   const history = useHistory();
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadUser();
-  }, []);
-
-  const loadUser = async () => {
-    try {
-      const res = await api.fetcher({ path: '/users', method: 'POST', body: {} });
-      const user = await res.json();
-      await loadData(user.id);
-    } catch (err) {
-      message.error('Failed to load user');
-      console.error(err);
-      setLoading(false);
-    }
-  };
 
   const loadData = async (userId) => {
     try {
@@ -41,11 +45,27 @@ const BailEventDetail = () => {
       setEvent(found || null);
     } catch (err) {
       message.error('Failed to load event');
-      console.error(err);
+      console.error(err); // eslint-disable-line no-console
     } finally {
       setLoading(false);
     }
   };
+
+  const loadUser = async () => {
+    try {
+      const res = await api.fetcher({ path: '/users', method: 'POST', body: {} });
+      const user = await res.json();
+      await loadData(user.id);
+    } catch (err) {
+      message.error('Failed to load user');
+      console.error(err); // eslint-disable-line no-console
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUser();
+  }, []);
 
   if (loading) return <Loading>Loading event...</Loading>;
 
@@ -53,7 +73,11 @@ const BailEventDetail = () => {
     return (
       <Layout>
         <Content style={{ padding: '30px' }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => history.push(`/bails/${bailId}/events`)} style={{ marginBottom: 16 }}>
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => history.push(`/bails/${bailId}/events`)}
+            style={{ marginBottom: 16 }}
+          >
             Back to Events
           </Button>
           <Alert type="error" message="Event not found" />
@@ -65,21 +89,6 @@ const BailEventDetail = () => {
   const bailedUserIDs = event.execution_results && event.execution_results.user_ids
     ? event.execution_results.user_ids
     : [];
-
-  const userColumns = [
-    {
-      title: '#',
-      key: 'index',
-      render: (_, __, index) => index + 1,
-      width: 60,
-    },
-    {
-      title: 'User ID',
-      dataIndex: 'id',
-      key: 'id',
-      render: (id) => <Text code copyable>{id}</Text>,
-    },
-  ];
 
   const userRows = bailedUserIDs.map(id => ({ id, key: id }));
 
@@ -123,17 +132,17 @@ const BailEventDetail = () => {
 
         {event.event_type === 'execution' && (
           <Card title={`Bailed User IDs (${bailedUserIDs.length})`}>
-            {bailedUserIDs.length === 0 ? (
-              <Text type="secondary">No users were bailed in this execution.</Text>
-            ) : (
-              <Table
-                columns={userColumns}
-                dataSource={userRows}
-                rowKey="id"
-                pagination={{ pageSize: 100 }}
-                size="small"
-              />
-            )}
+            {bailedUserIDs.length === 0
+              ? <Text type="secondary">No users were bailed in this execution.</Text>
+              : (
+                <Table
+                  columns={userColumns}
+                  dataSource={userRows}
+                  rowKey="id"
+                  pagination={{ pageSize: 100 }}
+                  size="small"
+                />
+              )}
           </Card>
         )}
       </Content>

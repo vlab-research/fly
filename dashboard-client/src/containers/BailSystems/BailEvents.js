@@ -90,6 +90,7 @@ const BailEvents = () => {
     {
       title: '',
       key: 'actions',
+      // eslint-disable-next-line react/display-name
       render: (_, record) => (
         <Button size="small" onClick={() => history.push(`/bails/${bailId}/events/${record.id}`)}>
           Details
