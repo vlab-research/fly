@@ -100,7 +100,7 @@ const BailForm = () => {
         timing: execution.timing || 'immediate',
         time_of_day: execution.time_of_day ? moment(execution.time_of_day, 'HH:mm') : null,
         timezone: execution.timezone || 'UTC',
-        tolerance_minutes: execution.tolerance_minutes ?? 30,
+        tolerance_minutes: execution.tolerance_minutes != null ? execution.tolerance_minutes : 30,
         datetime: execution.datetime ? moment(execution.datetime) : null,
         destination_form: action.destination_form,
         metadata: action.metadata ? JSON.stringify(action.metadata, null, 2) : '',
