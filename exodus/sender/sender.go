@@ -104,16 +104,16 @@ func (s *Sender) SendBailout(ctx context.Context, userID, pageID, destinationFor
 }
 
 // SendBailouts sends multiple bailout events with rate limiting
-// Returns count of successful sends and any error encountered
-func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, metadata map[string]interface{}) (int, error) {
-	successCount := 0
+// Returns the IDs of successfully bailed users and any error encountered
+func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, metadata map[string]interface{}) ([]string, error) {
+	var bailedIDs []string
 	var lastError error
 
 	for i, user := range users {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
-			return successCount, fmt.Errorf("context cancelled after %d successful sends: %w", successCount, ctx.Err())
+			return bailedIDs, fmt.Errorf("context cancelled after %d successful sends: %w", len(bailedIDs), ctx.Err())
 		default:
 		}
 
@@ -124,23 +124,23 @@ func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, metadata 
 			lastError = err
 			// Continue with remaining users even if one fails
 		} else {
-			successCount++
+			bailedIDs = append(bailedIDs, user.UserID)
 		}
 
 		// Apply rate limiting (except after the last user)
 		if i < len(users)-1 && s.rateLimit > 0 {
 			select {
 			case <-ctx.Done():
-				return successCount, fmt.Errorf("context cancelled during rate limit after %d successful sends: %w", successCount, ctx.Err())
+				return bailedIDs, fmt.Errorf("context cancelled during rate limit after %d successful sends: %w", len(bailedIDs), ctx.Err())
 			case <-time.After(s.rateLimit):
 			}
 		}
 	}
 
-	// If we had any failures, return the last error along with success count
-	if lastError != nil && successCount < len(users) {
-		return successCount, fmt.Errorf("failed to bail %d users, last error: %w", len(users)-successCount, lastError)
+	// If we had any failures, return the last error along with bailed IDs
+	if lastError != nil && len(bailedIDs) < len(users) {
+		return bailedIDs, fmt.Errorf("failed to bail %d users, last error: %w", len(users)-len(bailedIDs), lastError)
 	}
 
-	return successCount, nil
+	return bailedIDs, nil
 }

@@ -58,18 +58,21 @@ func (m *mockQueryExecutor) Query(ctx context.Context, sql string, args ...inter
 }
 
 type mockBailSender struct {
-	sentBailouts  []sender.UserTarget
-	successCount  int
-	sendError     error
+	sentBailouts []sender.UserTarget
+	returnIDs    []string // pre-set IDs to return when sendError is set (partial failure)
+	sendError    error
 }
 
-func (m *mockBailSender) SendBailouts(ctx context.Context, users []sender.UserTarget, metadata map[string]interface{}) (int, error) {
+func (m *mockBailSender) SendBailouts(ctx context.Context, users []sender.UserTarget, metadata map[string]interface{}) ([]string, error) {
 	if m.sendError != nil {
-		return m.successCount, m.sendError
+		return m.returnIDs, m.sendError
 	}
 	m.sentBailouts = append(m.sentBailouts, users...)
-	m.successCount = len(users)
-	return m.successCount, nil
+	ids := make([]string, len(users))
+	for i, u := range users {
+		ids[i] = u.UserID
+	}
+	return ids, nil
 }
 
 // Helper functions
@@ -253,6 +256,9 @@ func TestExecutor_Run_ExecutesBail(t *testing.T) {
 	if event.UsersBailed != 2 {
 		t.Errorf("Expected 2 users bailed, got %d", event.UsersBailed)
 	}
+	if event.ExecutionResults == nil {
+		t.Error("Expected ExecutionResults to be non-nil for execution event")
+	}
 }
 
 func TestExecutor_Run_ContinuesOnBailError(t *testing.T) {
@@ -304,14 +310,20 @@ func TestExecutor_Run_ContinuesOnBailError(t *testing.T) {
 		t.Fatalf("Expected 2 events recorded, got %d", len(store.recordedEvents))
 	}
 
-	// First event should be error
+	// First event should be error with nil ExecutionResults
 	if store.recordedEvents[0].EventType != "error" {
 		t.Errorf("Expected first event to be 'error', got '%s'", store.recordedEvents[0].EventType)
 	}
+	if store.recordedEvents[0].ExecutionResults != nil {
+		t.Error("Expected ExecutionResults to be nil for error event")
+	}
 
-	// Second event should be success
+	// Second event should be success with non-nil ExecutionResults
 	if store.recordedEvents[1].EventType != "execution" {
 		t.Errorf("Expected second event to be 'execution', got '%s'", store.recordedEvents[1].EventType)
+	}
+	if store.recordedEvents[1].ExecutionResults == nil {
+		t.Error("Expected ExecutionResults to be non-nil for execution event")
 	}
 }
 
@@ -425,8 +437,8 @@ func TestExecutor_Run_PartialSendFailure(t *testing.T) {
 
 	// Sender that partially fails
 	sender := &mockBailSender{
-		successCount: 2, // Only 2 out of 3 succeeded
-		sendError:    errors.New("some sends failed"),
+		returnIDs: []string{"user1", "user3"}, // 2 out of 3 succeeded
+		sendError: errors.New("some sends failed"),
 	}
 
 	executor := New(store, query, sender, 100)

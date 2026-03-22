@@ -139,14 +139,14 @@ func TestSendBailouts_RateLimiting(t *testing.T) {
 	}
 
 	startTime := time.Now()
-	count, err := sender.SendBailouts(ctx, users, nil)
+	ids, err := sender.SendBailouts(ctx, users, nil)
 	duration := time.Since(startTime)
 
 	if err != nil {
 		t.Fatalf("SendBailouts failed: %v", err)
 	}
-	if count != 3 {
-		t.Errorf("Expected 3 successful sends, got %d", count)
+	if len(ids) != 3 {
+		t.Errorf("Expected 3 successful sends, got %d", len(ids))
 	}
 
 	// Verify rate limiting: 3 requests with 100ms delay should take at least 200ms
@@ -191,14 +191,14 @@ func TestSendBailouts_DryRun(t *testing.T) {
 		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
 	}
 
-	count, err := sender.SendBailouts(ctx, users, map[string]interface{}{"reason": "test"})
+	ids, err := sender.SendBailouts(ctx, users, map[string]interface{}{"reason": "test"})
 	if err != nil {
 		t.Fatalf("SendBailouts failed in dry run: %v", err)
 	}
 
 	// In dry run mode, we still count "successful" sends
-	if count != 2 {
-		t.Errorf("Expected 2 successful dry run sends, got %d", count)
+	if len(ids) != 2 {
+		t.Errorf("Expected 2 successful dry run sends, got %d", len(ids))
 	}
 
 	// Verify server was never called
@@ -230,11 +230,11 @@ func TestSendBailouts_PartialFailure(t *testing.T) {
 		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
 	}
 
-	count, err := sender.SendBailouts(ctx, users, nil)
+	ids, err := sender.SendBailouts(ctx, users, nil)
 
 	// Should have 2 successful sends (user1 and user3)
-	if count != 2 {
-		t.Errorf("Expected 2 successful sends, got %d", count)
+	if len(ids) != 2 {
+		t.Errorf("Expected 2 successful sends, got %d", len(ids))
 	}
 
 	// Should return an error indicating failure
@@ -254,12 +254,12 @@ func TestSendBailouts_EmptyUsers(t *testing.T) {
 
 	users := []UserTarget{}
 
-	count, err := sender.SendBailouts(ctx, users, nil)
+	ids, err := sender.SendBailouts(ctx, users, nil)
 	if err != nil {
 		t.Errorf("Expected no error for empty users, got %v", err)
 	}
-	if count != 0 {
-		t.Errorf("Expected 0 successful sends, got %d", count)
+	if len(ids) != 0 {
+		t.Errorf("Expected 0 successful sends, got %d", len(ids))
 	}
 }
 
@@ -282,11 +282,11 @@ func TestSendBailouts_ContextCancellation(t *testing.T) {
 		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
 	}
 
-	count, err := sender.SendBailouts(ctx, users, nil)
+	ids, err := sender.SendBailouts(ctx, users, nil)
 
 	// Should complete at least one request before timeout
-	if count < 1 {
-		t.Errorf("Expected at least 1 successful send before cancellation, got %d", count)
+	if len(ids) < 1 {
+		t.Errorf("Expected at least 1 successful send before cancellation, got %d", len(ids))
 	}
 
 	// Should return error due to context cancellation

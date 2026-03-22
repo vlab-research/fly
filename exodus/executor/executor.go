@@ -28,7 +28,7 @@ type QueryExecutor interface {
 
 // BailSender defines the interface for sending bailouts
 type BailSender interface {
-	SendBailouts(ctx context.Context, users []sender.UserTarget, metadata map[string]interface{}) (int, error)
+	SendBailouts(ctx context.Context, users []sender.UserTarget, metadata map[string]interface{}) ([]string, error)
 }
 
 // Executor runs bail execution loop
@@ -154,7 +154,7 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 
 	if usersMatched == 0 {
 		// No users to bail, but still record as successful execution
-		e.recordSuccess(ctx, dbBail, &bailDef, 0, 0)
+		e.recordSuccess(ctx, dbBail, &bailDef, 0, nil)
 		return nil
 	}
 
@@ -166,16 +166,16 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	}
 
 	// Send bailouts
-	usersBailed, err := e.sender.SendBailouts(ctx, usersToProcess, bailDef.Action.Metadata)
+	bailedIDs, err := e.sender.SendBailouts(ctx, usersToProcess, bailDef.Action.Metadata)
 	if err != nil {
 		// Even if some sends failed, record partial success
 		log.Printf("Partially failed to send bailouts: %v", err)
-		e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, usersBailed)
+		e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs)
 		return fmt.Errorf("partially failed to send bailouts: %w", err)
 	}
 
-	log.Printf("Successfully bailed %d users", usersBailed)
-	e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, usersBailed)
+	log.Printf("Successfully bailed %d users", len(bailedIDs))
+	e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs)
 	return nil
 }
 
@@ -247,12 +247,24 @@ func userListToTargets(ul *types.UserList) []sender.UserTarget {
 }
 
 // recordSuccess logs successful execution
-func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, usersMatched, usersBailed int) {
+func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, usersMatched int, bailedIDs []string) {
 	// Marshal definition back to JSON for snapshot
 	defJSON, err := json.Marshal(bailDef)
 	if err != nil {
 		log.Printf("Warning: Failed to marshal bail definition for event: %v", err)
 		defJSON = []byte("{}")
+	}
+
+	// Build execution_results from bailed IDs
+	var executionResults *json.RawMessage
+	if bailedIDs != nil {
+		raw, err := json.Marshal(map[string]interface{}{"user_ids": bailedIDs})
+		if err != nil {
+			log.Printf("Warning: Failed to marshal execution results: %v", err)
+		} else {
+			msg := json.RawMessage(raw)
+			executionResults = &msg
+		}
 	}
 
 	event := &db.BailEvent{
@@ -261,8 +273,9 @@ func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *
 		BailName:           dbBail.Name,
 		EventType:          "execution",
 		UsersMatched:       usersMatched,
-		UsersBailed:        usersBailed,
+		UsersBailed:        len(bailedIDs),
 		DefinitionSnapshot: defJSON,
+		ExecutionResults:   executionResults,
 	}
 
 	if err := e.store.RecordEvent(ctx, event); err != nil {

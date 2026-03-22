@@ -22,6 +22,7 @@ type BailEvent struct {
 	UsersBailed        int              `json:"users_bailed"`
 	DefinitionSnapshot json.RawMessage  `json:"definition_snapshot"`
 	Error              *json.RawMessage `json:"error,omitempty"`
+	ExecutionResults   *json.RawMessage `json:"execution_results,omitempty"`
 }
 
 // RecordEvent inserts a new bail event into the database
@@ -30,9 +31,9 @@ func (d *DB) RecordEvent(ctx context.Context, event *BailEvent) error {
 	query := `
 		INSERT INTO chatroach.bail_events
 		  (bail_id, user_id, bail_name, event_type, users_matched, users_bailed,
-		   definition_snapshot, error)
+		   definition_snapshot, error, execution_results)
 		VALUES
-		  ($1, $2, $3, $4, $5, $6, $7, $8)
+		  ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, timestamp
 	`
 
@@ -47,6 +48,7 @@ func (d *DB) RecordEvent(ctx context.Context, event *BailEvent) error {
 		event.UsersBailed,
 		event.DefinitionSnapshot,
 		event.Error,
+		event.ExecutionResults,
 	).Scan(&event.ID, &event.Timestamp)
 
 	if err != nil {
@@ -60,7 +62,7 @@ func (d *DB) RecordEvent(ctx context.Context, event *BailEvent) error {
 func (d *DB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*BailEvent, error) {
 	query := `
 		SELECT id, bail_id, user_id, bail_name, event_type, timestamp,
-		       users_matched, users_bailed, definition_snapshot, error
+		       users_matched, users_bailed, definition_snapshot, error, execution_results
 		FROM chatroach.bail_events
 		WHERE bail_id = $1
 		ORDER BY timestamp DESC
@@ -80,7 +82,7 @@ func (d *DB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*BailEv
 func (d *DB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*BailEvent, error) {
 	query := `
 		SELECT id, bail_id, user_id, bail_name, event_type, timestamp,
-		       users_matched, users_bailed, definition_snapshot, error
+		       users_matched, users_bailed, definition_snapshot, error, execution_results
 		FROM chatroach.bail_events
 		WHERE user_id = $1
 		ORDER BY timestamp DESC
@@ -134,6 +136,7 @@ func scanEvent(row pgx.Row) (*BailEvent, error) {
 		&event.UsersBailed,
 		&event.DefinitionSnapshot,
 		&event.Error,
+		&event.ExecutionResults,
 	)
 	if err != nil {
 		return nil, err
@@ -158,6 +161,7 @@ func scanEvents(rows pgx.Rows) ([]*BailEvent, error) {
 			&event.UsersBailed,
 			&event.DefinitionSnapshot,
 			&event.Error,
+			&event.ExecutionResults,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan event: %w", err)

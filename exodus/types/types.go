@@ -411,6 +411,7 @@ type BailEvent struct {
 	UsersBailed        int              `json:"users_bailed"`
 	DefinitionSnapshot BailDefinition   `json:"definition_snapshot"`
 	Error              *json.RawMessage `json:"error,omitempty"`
+	ExecutionResults   *json.RawMessage `json:"execution_results,omitempty"`
 }
 
 // Validate checks if the BailEvent is valid

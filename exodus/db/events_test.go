@@ -31,16 +31,21 @@ func TestRecordEvent(t *testing.T) {
 		t.Fatalf("CreateBail failed: %v", err)
 	}
 
+	// Build execution_results
+	execResultsData, _ := json.Marshal(map[string]interface{}{"user_ids": []string{"uid1", "uid2"}})
+	execResults := json.RawMessage(execResultsData)
+
 	// Create an event
 	event := &BailEvent{
 		BailID:             &bail.ID,
-		UserID:           userID,
+		UserID:             userID,
 		BailName:           bail.Name,
 		EventType:          "execution",
 		UsersMatched:       10,
 		UsersBailed:        8,
 		DefinitionSnapshot: bail.Definition,
 		Error:              nil,
+		ExecutionResults:   &execResults,
 	}
 
 	// Test RecordEvent
@@ -55,6 +60,26 @@ func TestRecordEvent(t *testing.T) {
 	}
 	if event.Timestamp.IsZero() {
 		t.Error("Expected timestamp to be generated")
+	}
+
+	// Retrieve and verify ExecutionResults is stored and readable
+	events, err := db.GetEventsByBailID(context.Background(), bail.ID)
+	if err != nil {
+		t.Fatalf("GetEventsByBailID failed: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+	if events[0].ExecutionResults == nil {
+		t.Error("Expected ExecutionResults to be non-nil for execution event")
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(*events[0].ExecutionResults, &result); err != nil {
+		t.Fatalf("Failed to unmarshal ExecutionResults: %v", err)
+	}
+	userIDs, ok := result["user_ids"].([]interface{})
+	if !ok || len(userIDs) != 2 {
+		t.Errorf("Expected user_ids with 2 entries, got %v", result["user_ids"])
 	}
 }
 
@@ -119,6 +144,9 @@ func TestRecordErrorEvent(t *testing.T) {
 	}
 	if events[0].EventType != "error" {
 		t.Errorf("Expected event_type 'error', got %s", events[0].EventType)
+	}
+	if events[0].ExecutionResults != nil {
+		t.Error("Expected ExecutionResults to be nil for error event")
 	}
 }
 

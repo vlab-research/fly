@@ -28,12 +28,12 @@ func Example() {
 	}
 
 	// Send bailouts with rate limiting
-	count, err := s.SendBailouts(ctx, users, metadata)
+	ids, err := s.SendBailouts(ctx, users, metadata)
 	if err != nil {
 		log.Printf("Bailout completed with errors: %v", err)
 	}
 
-	log.Printf("Successfully bailed %d users", count)
+	log.Printf("Successfully bailed %d users", len(ids))
 }
 
 // Example_dryRun demonstrates using dry run mode for testing
@@ -48,12 +48,12 @@ func Example_dryRun() {
 	}
 
 	// This will log what would be sent without actually sending
-	count, err := s.SendBailouts(ctx, users, nil)
+	ids, err := s.SendBailouts(ctx, users, nil)
 	if err != nil {
 		log.Fatalf("Dry run failed: %v", err)
 	}
 
-	log.Printf("Dry run: would have bailed %d users", count)
+	log.Printf("Dry run: would have bailed %d users", len(ids))
 }
 
 // Example_singleBailout demonstrates sending a single bailout

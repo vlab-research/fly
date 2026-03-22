@@ -474,6 +474,7 @@ Every bail execution (successful or failed) is recorded in the `bail_events` tab
 | `users_bailed` | Number of users successfully bailed (may differ from matched if sends fail) |
 | `definition_snapshot` | Full JSON copy of the bail definition at execution time |
 | `error` | JSON error details (null for successful executions) |
+| `execution_results` | JSON object `{"user_ids": [...]}` listing user IDs successfully bailed in this execution (null for error events) |
 
 The `definition_snapshot` is critical: it captures exactly what definition was active when the bail ran, providing a full audit trail even if the bail is later edited or deleted.
 
@@ -531,7 +532,8 @@ Authorization: Bearer {token}
         "users_matched": 0,
         "users_bailed": 0,
         "definition_snapshot": {},
-        "error": null
+        "error": null,
+        "execution_results": {"user_ids": ["uid1", "uid2"]}
       }
     }
   ]
@@ -636,7 +638,8 @@ Returns full event history for a specific bail, most recent first.
       "users_matched": 0,
       "users_bailed": 0,
       "definition_snapshot": {},
-      "error": null
+      "error": null,
+      "execution_results": {"user_ids": ["uid1", "uid2"]}
     }
   ]
 }

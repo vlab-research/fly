@@ -513,5 +513,6 @@ func dbEventToTypesEvent(dbEvent *db.BailEvent) (*types.BailEvent, error) {
 		UsersBailed:        dbEvent.UsersBailed,
 		DefinitionSnapshot: definition,
 		Error:              dbEvent.Error,
+		ExecutionResults:   dbEvent.ExecutionResults,
 	}, nil
 }
