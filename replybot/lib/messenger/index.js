@@ -1,39 +1,34 @@
-const { MachineIOError } = require('../errors')
 const BASE_URL = process.env.FACEBOOK_GRAPH_URL || "https://graph.facebook.com/v8.0"
 const RETRIES = process.env.FACEBOOK_RETRIES || 5
 const BASE_RETRY_TIME = process.env.FACEBOOK_BASE_RETRY_TIME || 400
 
-// Helper function to create delay
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function facebookRequest(reqFn, retries = 0) {
-  
+
   let res;
 
   try {
     res = await reqFn()
 
   } catch (e) {
-    // RETRY ETIMEDOUT ERRORS
     if (e.code === 'ETIMEDOUT' && retries < RETRIES) {
-      // Add exponential backoff: 400ms, 800ms, 1600ms, 3200ms, 6400ms
       await delay(Math.pow(2, retries) * BASE_RETRY_TIME)
       res = await facebookRequest(reqFn, retries + 1)
     }
     else {
-      throw new MachineIOError('NETWORK', e.message, { code: e.code, message: e.message })
+      throw e
     }
   }
 
   if (res && res.error) {
     const retryCodes = [1200, 551]
     if (retryCodes.includes(res.error.code) && retries < RETRIES) {
-      // Add exponential backoff for Facebook API errors too
       await delay(Math.pow(2, retries) * BASE_RETRY_TIME)
       return await facebookRequest(reqFn, retries + 1)
     }
 
-    throw new MachineIOError('FB', res.error.message, res.error)
+    throw res.error
   }
 
   return res
@@ -49,35 +44,9 @@ async function getUserInfo(id, pageToken) {
     return user;
 
   } catch (e) {
-    // TODO: we should be removing getUserInfo anyways.
     console.error(e);
     return { id, name: '_', first_name: '_', last_name: '_' }
   }
 }
 
-
-async function sendMessage(data, pageToken) {
-  const headers = { Authorization: `Bearer ${pageToken}` }
-  const url = `${BASE_URL}/me/messages`
-  const fn = () => fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-  try {
-    return await facebookRequest(fn)
-  } catch (e) {
-    e.details = { ...e.details, payload: data }
-    throw e
-  }
-}
-
-async function passThreadControl(userId, targetAppId, metadata, pageToken) {
-  const headers = { Authorization: `Bearer ${pageToken}` }
-  const url = `${BASE_URL}/me/pass_thread_control`
-  const data = {
-    recipient: { id: userId },
-    target_app_id: targetAppId,
-    metadata: JSON.stringify(metadata || {})
-  }
-  const fn = () => fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-  return await facebookRequest(fn)
-}
-
-module.exports = { sendMessage, getUserInfo, passThreadControl }
+module.exports = { getUserInfo }
