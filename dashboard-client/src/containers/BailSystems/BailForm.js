@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useHistory } from 'react-router-dom';
 import {
-  Form, Input, Select, Button, Switch, Card, Space, Radio,
+  Form, Input, InputNumber, Select, Button, Switch, Card, Space, Radio,
   TimePicker, DatePicker, Spin, message, Alert
 } from 'antd';
 import { SaveOutlined, EyeOutlined, ArrowLeftOutlined } from '@ant-design/icons';
@@ -100,6 +100,7 @@ const BailForm = () => {
         timing: execution.timing || 'immediate',
         time_of_day: execution.time_of_day ? moment(execution.time_of_day, 'HH:mm') : null,
         timezone: execution.timezone || 'UTC',
+        tolerance_minutes: execution.tolerance_minutes ?? 30,
         datetime: execution.datetime ? moment(execution.datetime) : null,
         destination_form: action.destination_form,
         metadata: action.metadata ? JSON.stringify(action.metadata, null, 2) : '',
@@ -122,6 +123,9 @@ const BailForm = () => {
         execution.time_of_day = values.time_of_day.format('HH:mm');
       }
       execution.timezone = values.timezone || 'UTC';
+      if (values.tolerance_minutes != null) {
+        execution.tolerance_minutes = values.tolerance_minutes;
+      }
     } else if (values.timing === 'absolute') {
       if (values.datetime) {
         execution.datetime = values.datetime.toISOString();
@@ -245,6 +249,7 @@ const BailForm = () => {
             enabled: false,
             timing: 'immediate',
             timezone: 'UTC',
+            tolerance_minutes: 30,
             conditions: { type: 'form', value: '' },
           }}
         >
@@ -341,6 +346,15 @@ const BailForm = () => {
                     <Option value="Asia/Kolkata">Asia/Kolkata</Option>
                     <Option value="Australia/Sydney">Australia/Sydney</Option>
                   </Select>
+                </Form.Item>
+
+                <Form.Item
+                  name="tolerance_minutes"
+                  label="Tolerance (minutes)"
+                  tooltip="How many minutes after the scheduled time the executor can still fire this bail. Increase this if the executor job may be delayed or run infrequently."
+                  rules={[{ required: true, type: 'number', min: 0, max: 1440 }]}
+                >
+                  <InputNumber min={0} max={1440} style={{ width: 120 }} addonAfter="min" />
                 </Form.Item>
               </>
             )}

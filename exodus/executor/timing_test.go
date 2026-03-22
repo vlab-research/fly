@@ -54,12 +54,13 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 	testNow := time.Date(2025, 11, 30, 15, 30, 0, 0, time.UTC)
 
 	tests := []struct {
-		name          string
-		timeOfDay     string
-		timezone      string
-		now           time.Time
-		lastExecution *time.Time
-		want          bool
+		name             string
+		timeOfDay        string
+		timezone         string
+		now              time.Time
+		lastExecution    *time.Time
+		toleranceMinutes *int
+		want             bool
 	}{
 		{
 			name:          "exact time match in UTC, no prior execution",
@@ -86,11 +87,21 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			want:          false,
 		},
 		{
-			name:          "executed 23 hours ago - should not execute",
+			// lastExecution is 23 hours ago = previous calendar day in UTC → different day → should execute
+			name:          "executed 23 hours ago (previous calendar day) - should execute",
 			timeOfDay:     "15:30",
 			timezone:      "UTC",
-			now:           testNow,
-			lastExecution: timePtr(testNow.Add(-23 * time.Hour)),
+			now:           testNow,                              // 2025-11-30 15:30
+			lastExecution: timePtr(testNow.Add(-23 * time.Hour)), // 2025-11-29 16:30
+			want:          true,
+		},
+		{
+			// Ran earlier today (same calendar day in UTC) - should not execute again
+			name:          "executed earlier today same calendar day - should not execute",
+			timeOfDay:     "15:30",
+			timezone:      "UTC",
+			now:           testNow,                              // 2025-11-30 15:30
+			lastExecution: timePtr(testNow.Add(-5 * time.Second)), // 2025-11-30 15:29:55
 			want:          false,
 		},
 		{
@@ -107,6 +118,18 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			timezone:      "UTC",
 			now:           testNow,
 			lastExecution: timePtr(testNow.Add(-25 * time.Hour)),
+			want:          true,
+		},
+		{
+			// Simulates the real bug: bail ran at 21:00:05 UTC (05:00:05 Shanghai), next day
+			// at 21:00:00 UTC it's a new calendar day in Shanghai → should execute
+			name:      "Asia/Shanghai: ran 5 seconds late yesterday, today should execute",
+			timeOfDay: "05:00",
+			timezone:  "Asia/Shanghai",
+			// now = 2025-11-30 21:00:00 UTC = 2025-12-01 05:00:00 CST
+			now: time.Date(2025, 11, 30, 21, 0, 0, 0, time.UTC),
+			// lastExecution = 2025-11-29 21:00:05 UTC = 2025-11-30 05:00:05 CST (yesterday in Shanghai)
+			lastExecution: timePtr(time.Date(2025, 11, 29, 21, 0, 5, 0, time.UTC)),
 			want:          true,
 		},
 		{
@@ -145,6 +168,71 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			want:      true,
 		},
 		{
+			// Executor fired 15 minutes late — still within 30-minute tolerance window
+			name:          "15 minutes late - within tolerance, should execute",
+			timeOfDay:     "15:30",
+			timezone:      "UTC",
+			now:           testNow.Add(15 * time.Minute), // 15:45
+			lastExecution: nil,
+			want:          true,
+		},
+		{
+			// Executor fired exactly at the tolerance boundary — should execute
+			name:          "30 minutes late - at tolerance boundary, should execute",
+			timeOfDay:     "15:30",
+			timezone:      "UTC",
+			now:           testNow.Add(30 * time.Minute), // 16:00
+			lastExecution: nil,
+			want:          true,
+		},
+		{
+			// Executor fired one second past the tolerance boundary — should not execute
+			name:          "just past tolerance boundary - should not execute",
+			timeOfDay:     "15:30",
+			timezone:      "UTC",
+			now:           testNow.Add(30*time.Minute + time.Second), // 16:00:01
+			lastExecution: nil,
+			want:          false,
+		},
+		{
+			// Bail with custom tolerance of 60 minutes — 45 minutes late should execute
+			name:               "custom 60-min tolerance: 45 minutes late - should execute",
+			timeOfDay:          "15:30",
+			timezone:           "UTC",
+			now:                testNow.Add(45 * time.Minute), // 16:15
+			lastExecution:      nil,
+			toleranceMinutes:   intPtr(60),
+			want:               true,
+		},
+		{
+			// Bail with custom tolerance of 10 minutes — 15 minutes late should NOT execute
+			name:               "custom 10-min tolerance: 15 minutes late - should not execute",
+			timeOfDay:          "15:30",
+			timezone:           "UTC",
+			now:                testNow.Add(15 * time.Minute), // 15:45
+			lastExecution:      nil,
+			toleranceMinutes:   intPtr(10),
+			want:               false,
+		},
+		{
+			// now is before the target time — should not execute
+			name:          "1 minute before target time - should not execute",
+			timeOfDay:     "15:30",
+			timezone:      "UTC",
+			now:           testNow.Add(-1 * time.Minute), // 15:29
+			lastExecution: nil,
+			want:          false,
+		},
+		{
+			// Already ran today within tolerance window — should not execute again
+			name:          "already ran today within tolerance window - should not execute",
+			timeOfDay:     "15:30",
+			timezone:      "UTC",
+			now:           testNow.Add(15 * time.Minute),              // 15:45
+			lastExecution: timePtr(testNow.Add(1 * time.Minute)),      // ran at 15:31
+			want:          false,
+		},
+		{
 			name:      "invalid timezone",
 			timeOfDay: "15:30",
 			timezone:  "Invalid/Timezone",
@@ -162,8 +250,9 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			execution := &types.Execution{
-				Timing:   "scheduled",
-				Timezone: &tt.timezone,
+				Timing:           "scheduled",
+				Timezone:         &tt.timezone,
+				ToleranceMinutes: tt.toleranceMinutes,
 			}
 
 			if tt.timeOfDay != "" {
@@ -545,4 +634,9 @@ func TestScheduled_DSTTransition(t *testing.T) {
 // Helper function to create time pointer
 func timePtr(t time.Time) *time.Time {
 	return &t
+}
+
+// Helper function to create int pointer
+func intPtr(i int) *int {
+	return &i
 }

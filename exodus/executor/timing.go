@@ -34,6 +34,9 @@ func shouldExecute(execution *types.Execution, now time.Time, lastExecution *tim
 	}
 }
 
+// defaultScheduledTolerance is used when a bail has no tolerance_minutes configured.
+const defaultScheduledTolerance = 30 * time.Minute
+
 // shouldExecuteScheduled checks if a scheduled bail should execute now
 func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution *time.Time) bool {
 	// Parse required fields (validation should have caught missing fields)
@@ -57,15 +60,33 @@ func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution 
 		return false
 	}
 
-	// Check if current time matches the target time (minute precision)
-	if nowInTZ.Hour() != targetHour || nowInTZ.Minute() != targetMinute {
+	// Build the target datetime for today in the target timezone
+	y, m, d := nowInTZ.Date()
+	targetTime := time.Date(y, m, d, targetHour, targetMinute, 0, 0, loc)
+
+	// Resolve tolerance: use bail-level config if set, otherwise fall back to the default.
+	tolerance := defaultScheduledTolerance
+	if exec.ToleranceMinutes != nil {
+		tolerance = time.Duration(*exec.ToleranceMinutes) * time.Minute
+	}
+
+	// Allow execution if we're within the tolerance window after the target time.
+	// Using a forward-only window (0 to +tolerance) so we never fire before the
+	// scheduled time, but can catch up if the executor was delayed.
+	diff := now.Sub(targetTime)
+	if diff < 0 || diff > tolerance {
 		return false
 	}
 
-	// If we have a last execution, check if it was within the last 24 hours
+	// If we have a last execution, check if it already ran today (in the target timezone).
+	// Using a same-calendar-day check rather than "< 24 hours" so that a bail that
+	// records its event a few seconds after the window opens doesn't permanently miss
+	// the next day's window.
 	if lastExecution != nil {
-		hoursSinceLastExecution := now.Sub(*lastExecution).Hours()
-		if hoursSinceLastExecution < 24 {
+		lastInTZ := lastExecution.In(loc)
+		ly, lm, ld := lastInTZ.Date()
+		ny, nm, nd := nowInTZ.Date()
+		if ly == ny && lm == nm && ld == nd {
 			return false
 		}
 	}

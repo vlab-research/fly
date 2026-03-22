@@ -58,10 +58,11 @@ func (bd *BailDefinition) Validate() error {
 
 // Execution defines when a bail should be executed
 type Execution struct {
-	Timing    string  `json:"timing"` // "immediate", "scheduled", or "absolute"
-	TimeOfDay *string `json:"time_of_day,omitempty"`
-	Timezone  *string `json:"timezone,omitempty"`
-	Datetime  *string `json:"datetime,omitempty"`
+	Timing           string  `json:"timing"` // "immediate", "scheduled", or "absolute"
+	TimeOfDay        *string `json:"time_of_day,omitempty"`
+	Timezone         *string `json:"timezone,omitempty"`
+	Datetime         *string `json:"datetime,omitempty"`
+	ToleranceMinutes *int    `json:"tolerance_minutes,omitempty"` // Scheduled only: how many minutes after target time the bail can still fire. Defaults to 30.
 }
 
 // Validate checks if the Execution configuration is valid
