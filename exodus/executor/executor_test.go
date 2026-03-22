@@ -358,9 +358,9 @@ func TestExecutor_ProcessBail_PanicRecovery(t *testing.T) {
 		t.Errorf("Expected no error (panic should be recovered), got: %v", err)
 	}
 
-	// Should have recorded an event (since query succeeded, just no valid users)
-	if len(store.recordedEvents) == 0 {
-		t.Errorf("Expected at least one event recorded")
+	// No valid users were parsed from results, so no event should be recorded
+	if len(store.recordedEvents) != 0 {
+		t.Errorf("Expected no events recorded, got %d", len(store.recordedEvents))
 	}
 }
 
@@ -538,20 +538,9 @@ func TestExecutor_Run_NoUsersMatched(t *testing.T) {
 		t.Errorf("Expected no bailouts sent, got %d", len(sender.sentBailouts))
 	}
 
-	// Should still record a success event with 0 users
-	if len(store.recordedEvents) != 1 {
-		t.Fatalf("Expected 1 event recorded, got %d", len(store.recordedEvents))
-	}
-
-	event := store.recordedEvents[0]
-	if event.EventType != "execution" {
-		t.Errorf("Expected event type 'execution', got '%s'", event.EventType)
-	}
-	if event.UsersMatched != 0 {
-		t.Errorf("Expected 0 users matched, got %d", event.UsersMatched)
-	}
-	if event.UsersBailed != 0 {
-		t.Errorf("Expected 0 users bailed, got %d", event.UsersBailed)
+	// Should not record any event when no users matched
+	if len(store.recordedEvents) != 0 {
+		t.Fatalf("Expected 0 events recorded, got %d", len(store.recordedEvents))
 	}
 }
 

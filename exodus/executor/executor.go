@@ -153,8 +153,7 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	log.Printf("Found %d users matching bail conditions", usersMatched)
 
 	if usersMatched == 0 {
-		// No users to bail, but still record as successful execution
-		e.recordSuccess(ctx, dbBail, &bailDef, 0, nil)
+		log.Printf("Bail %s matched no users, skipping", dbBail.Name)
 		return nil
 	}
 
