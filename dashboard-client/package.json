@@ -5,8 +5,10 @@
     "@ant-design/icons": "^4.3.0",
     "@cubejs-client/core": "^0.7.10",
     "@cubejs-client/react": "^0.7.10",
+    "ajv": "^8.18.0",
     "antd": "^4.8.6",
     "auth0-js": "9.10.1",
+    "babel-eslint": "^10.1.0",
     "babel-plugin-macros": "^2.8.0",
     "core-js": "^2.6.11",
     "d3-array": "^2.4.0",
@@ -16,13 +18,13 @@
     "react": "^16.13.1",
     "react-dom": "^16.13.1",
     "react-router-dom": "^5.2.0",
-    "react-scripts": "2.1.8",
+    "react-scripts": "^5.0.1",
     "recharts": "1.5.0",
     "styled-components": "^4.4.1"
   },
   "scripts": {
     "start": "HTTPS=true env $(cat .env | xargs) react-scripts start",
-    "build": "react-scripts build",
+    "build": "DISABLE_ESLINT_PLUGIN=true react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "lint": "eslint ."
