@@ -5,7 +5,7 @@ import { Layout } from 'antd';
 import {
   App, LoginScreen, Surveys, ApiKeys, CreateExport, CreateChatLogExport, CreateFullMessagesExport,
 } from './containers';
-import { BailSystems, BailForm, BailEvents } from './containers/BailSystems';
+import { BailSystems, BailForm, BailEvents, BailEventDetail } from './containers/BailSystems';
 import { PrivateRoute, Spinner } from './components';
 import { TypeformCreateAuth } from './components/TypeformCreate/TypeformCreate';
 import { Auth, History } from './services';
@@ -35,6 +35,7 @@ const Root = () => (
       <PrivateRoute exact path="/connect/secrets" component={Secrets} auth={Auth} />
       <PrivateRoute exact path="/connect/api-keys" component={ApiKeys} auth={Auth} />
       <PrivateRoute path="/surveys/:survey?" component={Surveys} auth={Auth} />
+      <PrivateRoute exact path="/bails/:bailId/events/:eventId" component={BailEventDetail} auth={Auth} />
       <PrivateRoute exact path="/bails/:bailId/events" component={BailEvents} auth={Auth} />
       <PrivateRoute exact path="/bails/:bailId/edit" component={BailForm} auth={Auth} />
       <PrivateRoute exact path="/bails/create" component={BailForm} auth={Auth} />

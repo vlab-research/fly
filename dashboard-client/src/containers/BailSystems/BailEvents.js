@@ -87,6 +87,15 @@ const BailEvents = () => {
         <span style={{ color: 'red' }}>{error.message || JSON.stringify(error)}</span>
       ) : '-',
     },
+    {
+      title: '',
+      key: 'actions',
+      render: (_, record) => (
+        <Button size="small" onClick={() => history.push(`/bails/${bailId}/events/${record.id}`)}>
+          Details
+        </Button>
+      ),
+    },
   ];
 
   if (loading) return <Loading>Loading events...</Loading>;
