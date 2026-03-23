@@ -18,6 +18,7 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
+commandsTopic: &commandstopic "vlab-staging-commands"
 
 versionDashboard: &vdashboard v0.0.63
 versionBotserver: &vbotserver v0.0.12
@@ -29,6 +30,7 @@ versionDinersclub: &vdinersclub v0.0.40
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.7
 versionExodus: &vexodus v0.2.1
+versionMessageWorker: &vmessageworker v0.1.0
 
 processingAlerts: []
 laggingAlerts: []
@@ -62,6 +64,11 @@ kafkaTopics:
   - name: *chatlogtopic
     partitions: 12
     replicationFactor: 1
+    config:
+      "retention.ms": "2678400000" # 31 days
+  - name: *commandstopic
+    partitions: 6
+    replicationFactor: 2
     config:
       "retention.ms": "2678400000" # 31 days
 
@@ -337,6 +344,8 @@ replybot:
     value: *responsetopic
   - name: VLAB_PAYMENT_TOPIC
     value: *paymenttopic
+  - name: KAFKA_COMMANDS_TOPIC
+    value: *commandstopic
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
@@ -591,6 +600,46 @@ exodus:
       requests:
         cpu: 50m
         memory: 64Mi
+
+messageWorker:
+  replicaCount: 1
+  image:
+    repository: vlabresearch/message-worker
+    tag: *vmessageworker
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  envFrom: *botenvs
+  env:
+  - name: KAFKA_BROKERS
+    value: *kb
+  - name: KAFKA_COMMAND_TOPIC
+    value: *commandstopic
+  - name: KAFKA_EVENT_TOPIC
+    value: *topic
+  - name: KAFKA_GROUP_ID
+    value: "message-worker"
+  - name: KAFKA_AUTO_OFFSET_RESET
+    value: "latest"
+  - name: DATABASE_URL
+    value: "postgresql://chatroach@gbv-cockroachdb-public:26257/chatroach?sslmode=disable"
+  - name: BOTSERVER_URL
+    value: "http://gbv-botserver"
+  - name: FACEBOOK_GRAPH_URL
+    value: "https://graph.facebook.com/v18.0"
+  - name: NUM_WORKERS
+    value: "100"
+  - name: MAX_RETRY_ATTEMPTS
+    value: "3"
+  - name: INITIAL_BACKOFF_MS
+    value: "100"
+  - name: MAX_BACKOFF_MS
+    value: "1000"
 
 cockroachdb:
   image:
