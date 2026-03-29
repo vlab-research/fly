@@ -59,7 +59,7 @@ const CreateForm = ({ surveys }) => {
       setSurveys(surveys => [survey, ...surveys]);
 
       // go to the survey settings page for this survey... 
-      history.push(`/surveys/${survey.survey_name}/form/${survey.id}`)
+      history.push(`/surveys/${survey.survey_name}/edit/form/${survey.id}`)
     } catch (e) {
       setLoading(false);
       alert(`An error occurred while creating the form: ${e}`); // eslint-disable-line no-alert
