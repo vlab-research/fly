@@ -14,6 +14,23 @@ import { Loading } from '../../components/UI';
 const { Option } = Select;
 const { TextArea } = Input;
 
+const TimezoneFormItem = () => (
+  <Form.Item name="timezone" label="Timezone" rules={[{ required: true }]}>
+    <Select showSearch>
+      <Option value="UTC">UTC</Option>
+      <Option value="America/New_York">America/New_York</Option>
+      <Option value="America/Los_Angeles">America/Los_Angeles</Option>
+      <Option value="America/Chicago">America/Chicago</Option>
+      <Option value="Europe/London">Europe/London</Option>
+      <Option value="Europe/Paris">Europe/Paris</Option>
+      <Option value="Asia/Tokyo">Asia/Tokyo</Option>
+      <Option value="Asia/Shanghai">Asia/Shanghai</Option>
+      <Option value="Asia/Kolkata">Asia/Kolkata</Option>
+      <Option value="Australia/Sydney">Australia/Sydney</Option>
+    </Select>
+  </Form.Item>
+);
+
 const BailForm = () => {
   const { bailId } = useParams();
   const history = useHistory();
@@ -331,24 +348,7 @@ const BailForm = () => {
                   <TimePicker format="HH:mm" />
                 </Form.Item>
 
-                <Form.Item
-                  name="timezone"
-                  label="Timezone"
-                  rules={[{ required: true }]}
-                >
-                  <Select showSearch>
-                    <Option value="UTC">UTC</Option>
-                    <Option value="America/New_York">America/New_York</Option>
-                    <Option value="America/Los_Angeles">America/Los_Angeles</Option>
-                    <Option value="America/Chicago">America/Chicago</Option>
-                    <Option value="Europe/London">Europe/London</Option>
-                    <Option value="Europe/Paris">Europe/Paris</Option>
-                    <Option value="Asia/Tokyo">Asia/Tokyo</Option>
-                    <Option value="Asia/Shanghai">Asia/Shanghai</Option>
-                    <Option value="Asia/Kolkata">Asia/Kolkata</Option>
-                    <Option value="Australia/Sydney">Australia/Sydney</Option>
-                  </Select>
-                </Form.Item>
+                <TimezoneFormItem />
 
                 <Form.Item
                   name="tolerance_minutes"
@@ -371,24 +371,7 @@ const BailForm = () => {
                   <DatePicker showTime format="YYYY-MM-DD HH:mm" />
                 </Form.Item>
 
-                <Form.Item
-                  name="timezone"
-                  label="Timezone"
-                  rules={[{ required: true }]}
-                >
-                  <Select showSearch>
-                    <Option value="UTC">UTC</Option>
-                    <Option value="America/New_York">America/New_York</Option>
-                    <Option value="America/Los_Angeles">America/Los_Angeles</Option>
-                    <Option value="America/Chicago">America/Chicago</Option>
-                    <Option value="Europe/London">Europe/London</Option>
-                    <Option value="Europe/Paris">Europe/Paris</Option>
-                    <Option value="Asia/Tokyo">Asia/Tokyo</Option>
-                    <Option value="Asia/Shanghai">Asia/Shanghai</Option>
-                    <Option value="Asia/Kolkata">Asia/Kolkata</Option>
-                    <Option value="Australia/Sydney">Australia/Sydney</Option>
-                  </Select>
-                </Form.Item>
+                <TimezoneFormItem />
               </>
             )}
           </Card>
