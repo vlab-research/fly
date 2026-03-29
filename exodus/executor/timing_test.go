@@ -286,69 +286,87 @@ func TestShouldExecute_Absolute(t *testing.T) {
 	tests := []struct {
 		name          string
 		datetime      string
+		timezone      string
 		now           time.Time
 		lastExecution *time.Time
 		want          bool
 		wantErr       bool
 	}{
 		{
-			name:          "datetime is now, no prior execution",
-			datetime:      "2025-11-30T15:30:00Z",
+			name:          "datetime is now in UTC, no prior execution",
+			datetime:      "2025-11-30T15:30:00",
+			timezone:      "UTC",
 			now:           testNow,
 			lastExecution: nil,
 			want:          true,
 		},
 		{
-			name:          "datetime is in the past, no prior execution",
-			datetime:      "2025-11-30T14:00:00Z",
+			name:          "datetime is in the past in UTC, no prior execution",
+			datetime:      "2025-11-30T14:00:00",
+			timezone:      "UTC",
 			now:           testNow,
 			lastExecution: nil,
 			want:          true,
 		},
 		{
-			name:          "datetime is in the future",
-			datetime:      "2025-11-30T16:00:00Z",
+			name:          "datetime is in the future in UTC",
+			datetime:      "2025-11-30T16:00:00",
+			timezone:      "UTC",
 			now:           testNow,
 			lastExecution: nil,
 			want:          false,
 		},
 		{
 			name:          "datetime passed, but already executed",
-			datetime:      "2025-11-30T14:00:00Z",
+			datetime:      "2025-11-30T14:00:00",
+			timezone:      "UTC",
 			now:           testNow,
 			lastExecution: timePtr(time.Date(2025, 11, 30, 14, 5, 0, 0, time.UTC)),
 			want:          false,
 		},
 		{
 			name:          "datetime passed, executed long ago (should still not re-execute)",
-			datetime:      "2025-11-30T14:00:00Z",
+			datetime:      "2025-11-30T14:00:00",
+			timezone:      "UTC",
 			now:           testNow,
 			lastExecution: timePtr(time.Date(2025, 11, 29, 14, 0, 0, 0, time.UTC)),
 			want:          false,
 		},
 		{
-			name:     "datetime format without timezone",
-			datetime: "2025-11-30T15:30:00",
+			// 16:30 Europe/Paris (CET = UTC+1 in November) = 15:30 UTC = testNow
+			name:     "datetime in European timezone - should execute",
+			datetime: "2025-11-30T16:30:00",
+			timezone: "Europe/Paris",
 			now:      testNow,
 			want:     true,
 		},
 		{
-			name:     "datetime with positive timezone offset",
-			datetime: "2025-11-30T16:30:00+01:00",
-			now:      testNow, // 15:30 UTC = 16:30 +01:00
+			// 10:30 America/New_York (EST = UTC-5 in November) = 15:30 UTC = testNow
+			name:     "datetime in US Eastern timezone - should execute",
+			datetime: "2025-11-30T10:30:00",
+			timezone: "America/New_York",
+			now:      testNow,
 			want:     true,
 		},
 		{
-			name:     "datetime with negative timezone offset",
-			datetime: "2025-11-30T10:30:00-05:00",
-			now:      testNow, // 15:30 UTC = 10:30 -05:00
-			want:     true,
-		},
-		{
-			name:    "invalid datetime format returns error",
+			name:     "invalid datetime format returns error",
 			datetime: "not-a-date",
-			now:     testNow,
-			wantErr: true,
+			timezone: "UTC",
+			now:      testNow,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid timezone returns error",
+			datetime: "2025-11-30T15:30:00",
+			timezone: "Invalid/Timezone",
+			now:      testNow,
+			wantErr:  true,
+		},
+		{
+			name:     "missing timezone returns false",
+			datetime: "2025-11-30T15:30:00",
+			now:      testNow,
+			want:     false,
 		},
 	}
 
@@ -357,6 +375,9 @@ func TestShouldExecute_Absolute(t *testing.T) {
 			execution := &types.Execution{
 				Timing:   "absolute",
 				Datetime: &tt.datetime,
+			}
+			if tt.timezone != "" {
+				execution.Timezone = &tt.timezone
 			}
 
 			got, err := shouldExecute(execution, tt.now, tt.lastExecution)

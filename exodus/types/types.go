@@ -83,7 +83,11 @@ func (e *Execution) Validate() error {
 		if e.Datetime == nil {
 			return fmt.Errorf("datetime is required for absolute timing")
 		}
-		// TODO: Validate datetime is valid ISO 8601 format
+		if e.Timezone == nil {
+			return fmt.Errorf("timezone is required for absolute timing")
+		}
+		// TODO: Validate datetime is valid ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
+		// TODO: Validate timezone is valid IANA timezone
 	default:
 		return fmt.Errorf("invalid timing type: %s (must be immediate, scheduled, or absolute)", e.Timing)
 	}

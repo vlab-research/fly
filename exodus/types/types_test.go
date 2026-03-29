@@ -241,9 +241,18 @@ func TestExecutionValidation(t *testing.T) {
 			name: "absolute timing - valid",
 			exec: Execution{
 				Timing:   "absolute",
-				Datetime: strPtr("2025-12-15T10:00:00Z"),
+				Datetime: strPtr("2025-12-15T10:00:00"),
+				Timezone: strPtr("UTC"),
 			},
 			wantErr: false,
+		},
+		{
+			name: "absolute timing - missing timezone",
+			exec: Execution{
+				Timing:   "absolute",
+				Datetime: strPtr("2025-12-15T10:00:00"),
+			},
+			wantErr: true,
 		},
 		{
 			name: "invalid timing type",

@@ -37,6 +37,15 @@ func shouldExecute(execution *types.Execution, now time.Time, lastExecution *tim
 // defaultScheduledTolerance is used when a bail has no tolerance_minutes configured.
 const defaultScheduledTolerance = 30 * time.Minute
 
+// loadTimezone parses an IANA timezone name and returns its location.
+func loadTimezone(tz string) (*time.Location, error) {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load timezone %q: %w (is tzdata embedded?)", tz, err)
+	}
+	return loc, nil
+}
+
 // shouldExecuteScheduled checks if a scheduled bail should execute now
 func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution *time.Time) (bool, error) {
 	// Parse required fields (validation should have caught missing fields)
@@ -45,9 +54,9 @@ func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution 
 	}
 
 	// Load timezone
-	loc, err := time.LoadLocation(*exec.Timezone)
+	loc, err := loadTimezone(*exec.Timezone)
 	if err != nil {
-		return false, fmt.Errorf("failed to load timezone %q: %w (is tzdata embedded?)", *exec.Timezone, err)
+		return false, err
 	}
 
 	// Convert current time to target timezone
@@ -95,19 +104,21 @@ func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution 
 
 // shouldExecuteAbsolute checks if an absolute-timed bail should execute now
 func shouldExecuteAbsolute(exec *types.Execution, now time.Time, lastExecution *time.Time) (bool, error) {
-	// Parse required field (validation should have caught missing field)
-	if exec.Datetime == nil {
+	// Parse required fields (validation should have caught missing fields)
+	if exec.Datetime == nil || exec.Timezone == nil {
 		return false, nil
 	}
 
-	// Parse datetime (ISO 8601 format)
-	targetTime, err := time.Parse(time.RFC3339, *exec.Datetime)
+	// Load timezone
+	loc, err := loadTimezone(*exec.Timezone)
 	if err != nil {
-		// Try alternate ISO 8601 format without timezone
-		targetTime, err = time.Parse("2006-01-02T15:04:05", *exec.Datetime)
-		if err != nil {
-			return false, fmt.Errorf("invalid datetime %q: must be RFC3339 or ISO8601 without timezone", *exec.Datetime)
-		}
+		return false, err
+	}
+
+	// Parse datetime as local time in the specified timezone (YYYY-MM-DDTHH:MM:SS)
+	targetTime, err := time.ParseInLocation("2006-01-02T15:04:05", *exec.Datetime, loc)
+	if err != nil {
+		return false, fmt.Errorf("invalid datetime %q: must be in YYYY-MM-DDTHH:MM:SS format", *exec.Datetime)
 	}
 
 	// Don't execute if we're before the target time

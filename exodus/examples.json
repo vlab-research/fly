@@ -91,7 +91,8 @@
       },
       "execution": {
         "timing": "absolute",
-        "datetime": "2025-12-15T10:00:00Z"
+        "datetime": "2025-12-15T10:00:00",
+        "timezone": "UTC"
       },
       "action": {
         "destination_form": "completion-survey",
