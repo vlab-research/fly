@@ -41,7 +41,10 @@ func TestShouldExecute_Immediate(t *testing.T) {
 				Timing: "immediate",
 			}
 
-			got := shouldExecute(execution, time.Now(), tt.lastExecution)
+			got, err := shouldExecute(execution, time.Now(), tt.lastExecution)
+			if err != nil {
+				t.Fatalf("shouldExecute() unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}
@@ -61,6 +64,7 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 		lastExecution    *time.Time
 		toleranceMinutes *int
 		want             bool
+		wantErr          bool
 	}{
 		{
 			name:          "exact time match in UTC, no prior execution",
@@ -91,7 +95,7 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			name:          "executed 23 hours ago (previous calendar day) - should execute",
 			timeOfDay:     "15:30",
 			timezone:      "UTC",
-			now:           testNow,                              // 2025-11-30 15:30
+			now:           testNow,                               // 2025-11-30 15:30
 			lastExecution: timePtr(testNow.Add(-23 * time.Hour)), // 2025-11-29 16:30
 			want:          true,
 		},
@@ -100,7 +104,7 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			name:          "executed earlier today same calendar day - should not execute",
 			timeOfDay:     "15:30",
 			timezone:      "UTC",
-			now:           testNow,                              // 2025-11-30 15:30
+			now:           testNow,                               // 2025-11-30 15:30
 			lastExecution: timePtr(testNow.Add(-5 * time.Second)), // 2025-11-30 15:29:55
 			want:          false,
 		},
@@ -196,23 +200,23 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 		},
 		{
 			// Bail with custom tolerance of 60 minutes — 45 minutes late should execute
-			name:               "custom 60-min tolerance: 45 minutes late - should execute",
-			timeOfDay:          "15:30",
-			timezone:           "UTC",
-			now:                testNow.Add(45 * time.Minute), // 16:15
-			lastExecution:      nil,
-			toleranceMinutes:   intPtr(60),
-			want:               true,
+			name:             "custom 60-min tolerance: 45 minutes late - should execute",
+			timeOfDay:        "15:30",
+			timezone:         "UTC",
+			now:              testNow.Add(45 * time.Minute), // 16:15
+			lastExecution:    nil,
+			toleranceMinutes: intPtr(60),
+			want:             true,
 		},
 		{
 			// Bail with custom tolerance of 10 minutes — 15 minutes late should NOT execute
-			name:               "custom 10-min tolerance: 15 minutes late - should not execute",
-			timeOfDay:          "15:30",
-			timezone:           "UTC",
-			now:                testNow.Add(15 * time.Minute), // 15:45
-			lastExecution:      nil,
-			toleranceMinutes:   intPtr(10),
-			want:               false,
+			name:             "custom 10-min tolerance: 15 minutes late - should not execute",
+			timeOfDay:        "15:30",
+			timezone:         "UTC",
+			now:              testNow.Add(15 * time.Minute), // 15:45
+			lastExecution:    nil,
+			toleranceMinutes: intPtr(10),
+			want:             false,
 		},
 		{
 			// now is before the target time — should not execute
@@ -228,16 +232,16 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			name:          "already ran today within tolerance window - should not execute",
 			timeOfDay:     "15:30",
 			timezone:      "UTC",
-			now:           testNow.Add(15 * time.Minute),              // 15:45
-			lastExecution: timePtr(testNow.Add(1 * time.Minute)),      // ran at 15:31
+			now:           testNow.Add(15 * time.Minute),         // 15:45
+			lastExecution: timePtr(testNow.Add(1 * time.Minute)), // ran at 15:31
 			want:          false,
 		},
 		{
-			name:      "invalid timezone",
+			name:      "invalid timezone returns error",
 			timeOfDay: "15:30",
 			timezone:  "Invalid/Timezone",
 			now:       testNow,
-			want:      false,
+			wantErr:   true,
 		},
 		{
 			name:     "missing time_of_day",
@@ -259,7 +263,16 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 				execution.TimeOfDay = &tt.timeOfDay
 			}
 
-			got := shouldExecute(execution, tt.now, tt.lastExecution)
+			got, err := shouldExecute(execution, tt.now, tt.lastExecution)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("shouldExecute() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("shouldExecute() unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}
@@ -276,6 +289,7 @@ func TestShouldExecute_Absolute(t *testing.T) {
 		now           time.Time
 		lastExecution *time.Time
 		want          bool
+		wantErr       bool
 	}{
 		{
 			name:          "datetime is now, no prior execution",
@@ -331,10 +345,10 @@ func TestShouldExecute_Absolute(t *testing.T) {
 			want:     true,
 		},
 		{
-			name:     "invalid datetime format",
+			name:    "invalid datetime format returns error",
 			datetime: "not-a-date",
-			now:      testNow,
-			want:     false,
+			now:     testNow,
+			wantErr: true,
 		},
 	}
 
@@ -345,7 +359,16 @@ func TestShouldExecute_Absolute(t *testing.T) {
 				Datetime: &tt.datetime,
 			}
 
-			got := shouldExecute(execution, tt.now, tt.lastExecution)
+			got, err := shouldExecute(execution, tt.now, tt.lastExecution)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("shouldExecute() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("shouldExecute() unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}
@@ -623,7 +646,10 @@ func TestScheduled_DSTTransition(t *testing.T) {
 				Timezone:  &tt.timezone,
 			}
 
-			got := shouldExecute(execution, tt.now, tt.lastExecution)
+			got, err := shouldExecute(execution, tt.now, tt.lastExecution)
+			if err != nil {
+				t.Fatalf("shouldExecute() unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("shouldExecute() = %v, want %v", got, tt.want)
 			}

@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"log"
+	"fmt"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
@@ -13,18 +13,16 @@ type DB struct {
 }
 
 // New creates a new DB instance with a connection pool
-// Returns error for invalid connection strings, but logs fatal for connection failures
-// following the Dean pattern
 func New(connString string) (*DB, error) {
 	config, err := pgxpool.ParseConfig(connString)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse connection string: %w", err)
 	}
 
 	ctx := context.Background()
 	pool, err := pgxpool.ConnectConfig(ctx, config)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	return &DB{pool: pool}, nil

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed IANA timezone database so LoadLocation works in scratch/alpine images
 
 	"github.com/vlab-research/exodus/api"
 	"github.com/vlab-research/exodus/config"
@@ -53,16 +54,22 @@ func runAPI(cfg *config.Config, database *db.DB) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	serverErr := make(chan error, 1)
 	go func() {
 		addr := fmt.Sprintf(":%d", cfg.Port)
 		log.Printf("Starting exodus API server on %s", addr)
-		if err := server.Run(addr); err != nil {
-			log.Printf("Server error: %v", err)
-		}
+		serverErr <- server.Run(addr)
 	}()
 
-	<-ctx.Done()
-	log.Println("Shutting down gracefully...")
+	select {
+	case <-ctx.Done():
+		log.Println("Shutting down gracefully...")
+	case err := <-serverErr:
+		if err != nil {
+			log.Fatalf("Server failed: %v", err)
+		}
+		return
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

@@ -10,17 +10,18 @@ import (
 )
 
 // shouldExecute determines if a bail should execute based on its timing configuration
-// and the current time. It returns true if execution should proceed.
+// and the current time. It returns (true, nil) if execution should proceed, (false, nil)
+// if timing conditions are not met, or (false, err) if the bail configuration is invalid.
 //
 // Timing types:
 // - immediate: Always returns true (execute on every tick)
 // - scheduled: Returns true if current time matches time_of_day in the specified timezone,
 //   and no execution has occurred in the last 24 hours
 // - absolute: Returns true if current time >= datetime and no prior execution has occurred
-func shouldExecute(execution *types.Execution, now time.Time, lastExecution *time.Time) bool {
+func shouldExecute(execution *types.Execution, now time.Time, lastExecution *time.Time) (bool, error) {
 	switch execution.Timing {
 	case "immediate":
-		return true
+		return true, nil
 
 	case "scheduled":
 		return shouldExecuteScheduled(execution, now, lastExecution)
@@ -29,8 +30,7 @@ func shouldExecute(execution *types.Execution, now time.Time, lastExecution *tim
 		return shouldExecuteAbsolute(execution, now, lastExecution)
 
 	default:
-		// This should never happen if validation is correct, but fail fast if it does
-		return false
+		return false, fmt.Errorf("unknown timing type %q", execution.Timing)
 	}
 }
 
@@ -38,17 +38,16 @@ func shouldExecute(execution *types.Execution, now time.Time, lastExecution *tim
 const defaultScheduledTolerance = 30 * time.Minute
 
 // shouldExecuteScheduled checks if a scheduled bail should execute now
-func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution *time.Time) bool {
+func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution *time.Time) (bool, error) {
 	// Parse required fields (validation should have caught missing fields)
 	if exec.TimeOfDay == nil || exec.Timezone == nil {
-		return false
+		return false, nil
 	}
 
 	// Load timezone
 	loc, err := time.LoadLocation(*exec.Timezone)
 	if err != nil {
-		// Invalid timezone - fail fast
-		return false
+		return false, fmt.Errorf("failed to load timezone %q: %w (is tzdata embedded?)", *exec.Timezone, err)
 	}
 
 	// Convert current time to target timezone
@@ -57,7 +56,7 @@ func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution 
 	// Parse time_of_day
 	targetHour, targetMinute, err := parseTimeOfDay(*exec.TimeOfDay)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("invalid time_of_day %q: %w", *exec.TimeOfDay, err)
 	}
 
 	// Build the target datetime for today in the target timezone
@@ -75,7 +74,7 @@ func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution 
 	// scheduled time, but can catch up if the executor was delayed.
 	diff := now.Sub(targetTime)
 	if diff < 0 || diff > tolerance {
-		return false
+		return false, nil
 	}
 
 	// If we have a last execution, check if it already ran today (in the target timezone).
@@ -87,18 +86,18 @@ func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution 
 		ly, lm, ld := lastInTZ.Date()
 		ny, nm, nd := nowInTZ.Date()
 		if ly == ny && lm == nm && ld == nd {
-			return false
+			return false, nil
 		}
 	}
 
-	return true
+	return true, nil
 }
 
 // shouldExecuteAbsolute checks if an absolute-timed bail should execute now
-func shouldExecuteAbsolute(exec *types.Execution, now time.Time, lastExecution *time.Time) bool {
+func shouldExecuteAbsolute(exec *types.Execution, now time.Time, lastExecution *time.Time) (bool, error) {
 	// Parse required field (validation should have caught missing field)
 	if exec.Datetime == nil {
-		return false
+		return false, nil
 	}
 
 	// Parse datetime (ISO 8601 format)
@@ -107,21 +106,21 @@ func shouldExecuteAbsolute(exec *types.Execution, now time.Time, lastExecution *
 		// Try alternate ISO 8601 format without timezone
 		targetTime, err = time.Parse("2006-01-02T15:04:05", *exec.Datetime)
 		if err != nil {
-			return false
+			return false, fmt.Errorf("invalid datetime %q: must be RFC3339 or ISO8601 without timezone", *exec.Datetime)
 		}
 	}
 
 	// Don't execute if we're before the target time
 	if now.Before(targetTime) {
-		return false
+		return false, nil
 	}
 
 	// Don't execute if we've already executed
 	if lastExecution != nil {
-		return false
+		return false, nil
 	}
 
-	return true
+	return true, nil
 }
 
 // parseTimeOfDay parses a time string in HH:MM format

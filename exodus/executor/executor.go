@@ -94,11 +94,14 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	// Panic recovery to ensure one bad bail doesn't crash the entire executor
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("panic during bail execution: %v", r)
+			panicErr := fmt.Errorf("panic during bail execution: %v", r)
 			log.Printf("PANIC in bail %s (%s): %v", dbBail.Name, dbBail.ID, r)
 
-			// Record panic as error event
-			e.recordError(ctx, dbBail, err)
+			if recordErr := e.recordError(ctx, dbBail, panicErr); recordErr != nil {
+				err = fmt.Errorf("%w (also failed to record panic: %v)", panicErr, recordErr)
+			} else {
+				err = panicErr
+			}
 		}
 	}()
 
@@ -128,7 +131,13 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	}
 
 	// Check if should execute based on timing
-	if !shouldExecute(&bailDef.Execution, now, lastExecution) {
+	ready, err := shouldExecute(&bailDef.Execution, now, lastExecution)
+	if err != nil {
+		err := fmt.Errorf("timing check failed: %w", err)
+		e.recordError(ctx, dbBail, err)
+		return err
+	}
+	if !ready {
 		log.Printf("Bail %s not ready to execute (timing conditions not met)", dbBail.Name)
 		return nil
 	}
@@ -169,13 +178,14 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	if err != nil {
 		// Even if some sends failed, record partial success
 		log.Printf("Partially failed to send bailouts: %v", err)
-		e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs)
+		if recordErr := e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs); recordErr != nil {
+			log.Printf("Also failed to record partial success for bail %s: %v", dbBail.Name, recordErr)
+		}
 		return fmt.Errorf("partially failed to send bailouts: %w", err)
 	}
 
 	log.Printf("Successfully bailed %d users", len(bailedIDs))
-	e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs)
-	return nil
+	return e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs)
 }
 
 // queryUsers executes the SQL query and returns matching users
@@ -245,25 +255,23 @@ func userListToTargets(ul *types.UserList) []sender.UserTarget {
 	return targets
 }
 
-// recordSuccess logs successful execution
-func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, usersMatched int, bailedIDs []string) {
-	// Marshal definition back to JSON for snapshot
+// recordSuccess records a successful bail execution event.
+// Returns an error if marshaling fails (corrupt snapshot would be worse than no record)
+// or if the DB write fails.
+func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, usersMatched int, bailedIDs []string) error {
 	defJSON, err := json.Marshal(bailDef)
 	if err != nil {
-		log.Printf("Warning: Failed to marshal bail definition for event: %v", err)
-		defJSON = []byte("{}")
+		return fmt.Errorf("failed to marshal bail definition for success event: %w", err)
 	}
 
-	// Build execution_results from bailed IDs
 	var executionResults *json.RawMessage
 	if bailedIDs != nil {
 		raw, err := json.Marshal(map[string]interface{}{"user_ids": bailedIDs})
 		if err != nil {
-			log.Printf("Warning: Failed to marshal execution results: %v", err)
-		} else {
-			msg := json.RawMessage(raw)
-			executionResults = &msg
+			return fmt.Errorf("failed to marshal execution results for success event: %w", err)
 		}
+		msg := json.RawMessage(raw)
+		executionResults = &msg
 	}
 
 	event := &db.BailEvent{
@@ -278,16 +286,16 @@ func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *
 	}
 
 	if err := e.store.RecordEvent(ctx, event); err != nil {
-		log.Printf("Warning: Failed to record success event for bail %s: %v", dbBail.Name, err)
+		return fmt.Errorf("failed to record success event for bail %s: %w", dbBail.Name, err)
 	}
+	return nil
 }
 
-// recordError logs failed execution
-func (e *Executor) recordError(ctx context.Context, dbBail *db.Bail, execErr error) {
-	// Create error JSON
+// recordError records a failed bail execution event.
+// Returns an error if the DB write fails (so callers can include it in their own error).
+func (e *Executor) recordError(ctx context.Context, dbBail *db.Bail, execErr error) error {
 	errorJSON := json.RawMessage(fmt.Sprintf(`{"message": "%s"}`, execErr.Error()))
 
-	// Try to get definition, use empty object if fails
 	defJSON := json.RawMessage("{}")
 	if dbBail.Definition != nil {
 		defJSON = dbBail.Definition
@@ -306,5 +314,7 @@ func (e *Executor) recordError(ctx context.Context, dbBail *db.Bail, execErr err
 
 	if err := e.store.RecordEvent(ctx, event); err != nil {
 		log.Printf("Warning: Failed to record error event for bail %s: %v", dbBail.Name, err)
+		return fmt.Errorf("failed to record error event: %w", err)
 	}
+	return nil
 }
