@@ -40,6 +40,7 @@ const BailForm = () => {
       form.setFieldsValue({
         timing: 'absolute',
         datetime: moment(),
+        timezone: 'UTC',
       });
       setTiming('absolute');
     }
@@ -128,8 +129,9 @@ const BailForm = () => {
       }
     } else if (values.timing === 'absolute') {
       if (values.datetime) {
-        execution.datetime = values.datetime.toISOString();
+        execution.datetime = values.datetime.format('YYYY-MM-DDTHH:mm:ss');
       }
+      execution.timezone = values.timezone || 'UTC';
     }
 
     let metadata = {};
@@ -360,13 +362,34 @@ const BailForm = () => {
             )}
 
             {timing === 'absolute' && (
-              <Form.Item
-                name="datetime"
-                label="Execute At"
-                rules={[{ required: true, message: 'Please select a datetime' }]}
-              >
-                <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-              </Form.Item>
+              <>
+                <Form.Item
+                  name="datetime"
+                  label="Execute At"
+                  rules={[{ required: true, message: 'Please select a datetime' }]}
+                >
+                  <DatePicker showTime format="YYYY-MM-DD HH:mm" />
+                </Form.Item>
+
+                <Form.Item
+                  name="timezone"
+                  label="Timezone"
+                  rules={[{ required: true }]}
+                >
+                  <Select showSearch>
+                    <Option value="UTC">UTC</Option>
+                    <Option value="America/New_York">America/New_York</Option>
+                    <Option value="America/Los_Angeles">America/Los_Angeles</Option>
+                    <Option value="America/Chicago">America/Chicago</Option>
+                    <Option value="Europe/London">Europe/London</Option>
+                    <Option value="Europe/Paris">Europe/Paris</Option>
+                    <Option value="Asia/Tokyo">Asia/Tokyo</Option>
+                    <Option value="Asia/Shanghai">Asia/Shanghai</Option>
+                    <Option value="Asia/Kolkata">Asia/Kolkata</Option>
+                    <Option value="Australia/Sydney">Australia/Sydney</Option>
+                  </Select>
+                </Form.Item>
+              </>
             )}
           </Card>
 
