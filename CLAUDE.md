@@ -4,7 +4,29 @@
 
 For most tasks, work directly — read files, make edits, run commands. Use subagents when the task benefits from parallelism or isolation, not by default.
 
-For complex features that need structured exploration, planning, and implementation, invoke `/three-phase` to activate the full Scout → Plan → Build workflow with coordinator-only mode and git worktrees.
+For complex features that need structured exploration, planning, and implementation, invoke `/three-phase` to activate the full Scout → Plan → Build workflow with coordinator-only mode and git worktrees. Before Scouts touch code, read relevant `documentation/` and `<app>/README.md` files. After the Scout phase, complete a dedicated documentation update pass before planning begins.
+
+## Documentation-First Protocol
+
+**This is a hard rule — no exceptions.**
+
+### Before any work
+1. Check **both** locations for docs relevant to the feature or area:
+   - `documentation/` — cross-component feature docs
+   - `<app>/README.md` — per-app architecture, setup, and structure (e.g. `replybot/README.md`, `dashboard-client/README.md`)
+2. Read them before looking at code — treat them as ground truth for known behavior
+3. This applies to all work: ad-hoc edits, explore agents, and three-phase workflows alike
+
+### After any exploration that surfaces undocumented behavior
+1. Complete a **separate documentation update step** — do not mix it into the exploration
+2. Update the appropriate location:
+   - Cross-component or feature behavior → `documentation/<feature>.md`
+   - App-specific architecture or setup → `<app>/README.md`
+3. If creating a new doc, follow the existing format: cross-component behavior and data flows, not implementation details
+
+### When dispatching explore agents
+- Pass relevant `documentation/` files and/or app `README.md` files as context in the agent prompt
+- Instruct the agent to note gaps between docs and code for the follow-up doc step
 
 ## Core Principles
 
@@ -44,6 +66,8 @@ For complex features that need structured exploration, planning, and implementat
 - **All functionality verified** after changes
 - **Clear git commits** that tell the story
 - **Working software** over perfect architecture
+- **Documentation checked before exploring code** — read `documentation/` and relevant `<app>/README.md` first; treat them as ground truth
+- **Documentation updated after exploration** — new findings go in a dedicated doc step (`documentation/` for features, `<app>/README.md` for app structure), not mixed into exploration
 
 ## Agent Selection Quick Reference
 
@@ -51,7 +75,7 @@ When using subagents, pick the right type:
 
 | Task | Agent Type |
 |------|-----------|
-| Read/search/document code | `explore` (lowercase — has Write/Edit) |
+| Read/search/document code | `explore` (lowercase — has Write/Edit) — always receive relevant `documentation/` and `README.md` files as context |
 | Write/edit code | `fullstack-engineer` |
 | Run commands | `Bash` |
 | Test code | `qa-testing-engineer` |
@@ -61,12 +85,14 @@ When using subagents, pick the right type:
 - **NEVER use `subagent_type=general-purpose`** — too vague, use a specific type
 - **NEVER use `EnterPlanMode`** — use `/three-phase` for structured planning instead
 
+**Documentation rule**: After any exploration, always run a separate `explore` agent pass to update `documentation/` or the relevant `<app>/README.md` with new findings before moving to implementation.
+
 ## Documentation Locations
 
 | Location | Purpose | Contains |
 |----------|---------|----------|
-| **`<project>/README.md`** | Describe the PARTS | Architecture, structure, setup, dependencies |
-| **`documentation/<feature>.md`** | Describe the FEATURES | Cross-component behavior, data flows |
+| **`<project>/README.md`** | Describe the PARTS | Architecture, structure, setup, dependencies — **read before working in that app; update when app structure changes** |
+| **`documentation/<feature>.md`** | Describe the FEATURES | Cross-component behavior, data flows — **read before exploring code; update after exploration** |
 | **`planning/`** | Plans for WORK | Implementation plans, findings (temporary) |
 
 ## Git Worktree Workflow
