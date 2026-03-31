@@ -1036,3 +1036,42 @@ Exodus posts the following JSON to `BOTSERVER_URL` for each user:
   }
 }
 ```
+
+---
+
+## Debugging Guide
+
+This section covers common bail problems and how to diagnose them using the database.
+
+### Useful queries
+
+Look up a bail by name:
+
+```sql
+SELECT id, name, enabled, definition, created_at, updated_at
+FROM chatroach.bails
+WHERE name ILIKE '%<bail name>%';
+```
+
+Check recent execution history for a bail (includes the definition snapshot that was active at execution time):
+
+```sql
+SELECT id, event_type, timestamp, users_matched, users_bailed,
+       definition_snapshot->'execution' AS execution_def, error
+FROM chatroach.bail_events
+WHERE bail_id = '<bail_id>'
+ORDER BY timestamp DESC
+LIMIT 10;
+```
+
+Check a specific user's responses for a given form/question:
+
+```sql
+SELECT userid, shortcode, question_ref, response, timestamp
+FROM chatroach.responses
+WHERE userid = '<userid>'
+  AND shortcode = '<form_shortcode>'
+  AND question_ref = '<question_ref>'
+ORDER BY timestamp;
+```
+
