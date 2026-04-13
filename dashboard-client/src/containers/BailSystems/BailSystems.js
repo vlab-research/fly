@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { Table, Layout, Switch, Tag, Space, Button, Popconfirm, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, HistoryOutlined, CopyOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import { Loading, CreateBtn } from '../../components/UI';
 import './BailSystems.css';
@@ -158,6 +158,11 @@ const BailSystems = () => {
             icon={<EditOutlined />}
             size="small"
             onClick={() => history.push(`/bails/${record.bail.id}/edit`)}
+          />
+          <Button
+            icon={<CopyOutlined />}
+            size="small"
+            onClick={() => history.push('/bails/create', { duplicateFrom: record.bail })}
           />
           <Button
             icon={<HistoryOutlined />}

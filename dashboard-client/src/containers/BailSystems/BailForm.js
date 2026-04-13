@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useHistory } from 'react-router-dom';
+import { useParams, useHistory, useLocation } from 'react-router-dom';
 import {
   Form, Input, InputNumber, Select, Button, Switch, Card, Space, Radio,
   TimePicker, DatePicker, Spin, message, Alert
@@ -27,6 +27,7 @@ const TimezoneFormItem = () => (
 const BailForm = () => {
   const { bailId } = useParams();
   const history = useHistory();
+  const location = useLocation();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -74,6 +75,34 @@ const BailForm = () => {
       if (isEdit) {
         await loadBail(user.id);
       } else {
+        const duplicate = location.state && location.state.duplicateFrom;
+        if (duplicate) {
+          const def = duplicate.definition || {};
+          const execution = def.execution || {};
+          const action = def.action || {};
+
+          const defType = def.type || 'conditions';
+          setBailType(defType);
+          if (defType === 'user_list' && def.user_list) {
+            setUserList(def.user_list.users || []);
+          }
+
+          setTiming(execution.timing || 'immediate');
+
+          form.setFieldsValue({
+            name: `Copy of ${duplicate.name}`,
+            description: duplicate.description || '',
+            enabled: false,
+            conditions: def.conditions,
+            timing: execution.timing || 'immediate',
+            time_of_day: execution.time_of_day ? moment(execution.time_of_day, 'HH:mm') : null,
+            timezone: execution.timezone || 'UTC',
+            tolerance_minutes: execution.tolerance_minutes != null ? execution.tolerance_minutes : 30,
+            datetime: execution.datetime ? moment(execution.datetime) : null,
+            destination_form: action.destination_form || '',
+            metadata: action.metadata ? JSON.stringify(action.metadata, null, 2) : '',
+          });
+        }
         setLoading(false);
       }
     } catch (err) {
