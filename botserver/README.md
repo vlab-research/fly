@@ -4,6 +4,18 @@ Running botserver (dev.sh) will port-forward the app to your localhost:3000. You
 
 Also make sure you have the .env file at the root of the project. This is currently the SAME for both botserver and replybot, so symlink one to the other!
 
+## Webhook Event Types
+
+Botserver processes the following Facebook webhook event types from the `messaging` object:
+
+- **`messaging`**: Regular messages sent by users, including text, attachments, quick replies, and post-back events
+- **`messaging_handovers`**: Thread control handoff events when a user conversation is passed between apps
+- **`messaging_optin`**: Opt-in events when users grant permissions, including:
+  - `notification_messages`: User opts in to receive Marketing Messages
+  - `one_time_notif_req` (OTN): One-time notification requests
+
+All events are normalized and sent to the Kafka event topic for processing downstream.
+
 ## Setup Live Messenger Testing
 
 Go to the test application:

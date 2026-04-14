@@ -213,14 +213,106 @@ describe('Botserver Handlers', () => {
 
       // Should produce both events
       producerMock.produce.should.have.been.calledTwice
-      
+
       const calls = producerMock.produce.getCalls()
       const messagingEvent = JSON.parse(calls[0].args[2].toString())
       const handoverEvent = JSON.parse(calls[1].args[2].toString())
-      
+
       messagingEvent.should.have.property('message')
       messagingEvent.message.text.should.equal('Hello')
       handoverEvent.should.have.property('pass_thread_control')
+    })
+
+    it('should process messaging_optin events for notification_messages', async () => {
+      const webhookPayload = {
+        object: 'page',
+        entry: [{
+          messaging_optin: [{
+            sender: { id: 'user123' },
+            recipient: { id: 'page123' },
+            timestamp: 1640995200000,
+            optin: {
+              type: 'notification_messages',
+              notification_messages_token: 'test_nm_token_abc123',
+              notification_messages_timezone: 'America/New_York',
+              token_expiry_timestamp: 1672531200
+            },
+            payload: 'optin_payload_123'
+          }]
+        }]
+      }
+
+      const ctx = {
+        request: { body: webhookPayload },
+        status: 0
+      }
+
+      await handleMessengerEvents(ctx, producerMock, producerReadyMock, 'test-events')
+
+      ctx.status.should.equal(200)
+      producerMock.produce.should.have.been.calledOnce
+
+      const [topic, partition, data, user] = producerMock.produce.firstCall.args
+      topic.should.equal('test-events')
+      user.should.equal('user123')
+
+      const eventData = JSON.parse(data.toString())
+      eventData.source.should.equal('messenger')
+      eventData.should.have.property('optin')
+      eventData.optin.type.should.equal('notification_messages')
+      eventData.optin.notification_messages_token.should.equal('test_nm_token_abc123')
+      eventData.optin.notification_messages_timezone.should.equal('America/New_York')
+      eventData.optin.token_expiry_timestamp.should.equal(1672531200)
+      eventData.payload.should.equal('optin_payload_123')
+    })
+
+    it('should process multiple messaging_optin events', async () => {
+      const webhookPayload = {
+        object: 'page',
+        entry: [{
+          messaging_optin: [
+            {
+              sender: { id: 'user123' },
+              timestamp: 1640995200000,
+              optin: {
+                type: 'notification_messages',
+                notification_messages_token: 'token_user123',
+                notification_messages_timezone: 'America/Los_Angeles',
+                token_expiry_timestamp: 1672531200
+              },
+              payload: 'payload_123'
+            },
+            {
+              sender: { id: 'user456' },
+              timestamp: 1640995201000,
+              optin: {
+                type: 'one_time_notif_req',
+                notification_messages_token: 'token_user456'
+              },
+              payload: 'payload_456'
+            }
+          ]
+        }]
+      }
+
+      const ctx = {
+        request: { body: webhookPayload },
+        status: 0
+      }
+
+      await handleMessengerEvents(ctx, producerMock, producerReadyMock, 'test-events')
+
+      producerMock.produce.should.have.been.calledTwice
+
+      const calls = producerMock.produce.getCalls()
+      const firstEvent = JSON.parse(calls[0].args[2].toString())
+      const secondEvent = JSON.parse(calls[1].args[2].toString())
+
+      firstEvent.sender.id.should.equal('user123')
+      firstEvent.optin.type.should.equal('notification_messages')
+      firstEvent.optin.notification_messages_timezone.should.equal('America/Los_Angeles')
+      secondEvent.sender.id.should.equal('user456')
+      secondEvent.optin.type.should.equal('one_time_notif_req')
     })
 
     it('should handle missing event arrays gracefully', async () => {
