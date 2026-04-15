@@ -115,19 +115,6 @@ const optin = {
   }
 }
 
-const mmOptin = {
-  sender: { id: USER_ID },
-  recipient: { id: PAGE_ID },
-  timestamp: 25,
-  optin: {
-    type: 'notification_messages',
-    notification_messages_token: 'MM_TOKEN_123',
-    payload: { ref: 'foo' },
-    notification_messages_timezone: 'US/Pacific',
-    token_expiry_timestamp: 1704153600000
-  }
-}
-
 // is echo
 const echo = {
   sender: { id: PAGE_ID },
@@ -255,4 +242,4 @@ const reaction = {
 
 
 
-module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, syntheticBail, syntheticPR, optin, mmOptin, payloadReferral, syntheticRedo, synthetic }
+module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic }
