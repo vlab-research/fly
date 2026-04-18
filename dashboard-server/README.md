@@ -65,6 +65,8 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/surveys/:surveyId/bails` | Bail-out monitoring |
 | `/surveys/:surveyId/bail-events` | Survey-wide bail events |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
+| `/media` | Facebook `message_attachments` uploads (reusable image/video attachments) |
+| `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
 
 ### Database and Query Pattern
 

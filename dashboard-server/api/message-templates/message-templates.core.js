@@ -1,0 +1,96 @@
+'use strict';
+
+const MAX_BODY_LENGTH = 1024;
+const NAME_PATTERN = /^[a-z0-9_]+$/;
+const NAME_MAX_LENGTH = 512;
+const VALID_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'PAUSED', 'DISABLED'];
+
+function validateCreateInput({ pageId, name, language, body }) {
+  if (!pageId) return { valid: false, error: 'pageId is required' };
+  if (!name) return { valid: false, error: 'name is required' };
+  if (name.length > NAME_MAX_LENGTH) return { valid: false, error: `name exceeds ${NAME_MAX_LENGTH} characters` };
+  if (!NAME_PATTERN.test(name)) {
+    return { valid: false, error: 'name must be lowercase letters, digits, and underscores only (snake_case)' };
+  }
+  if (!language) return { valid: false, error: 'language is required' };
+  if (!body) return { valid: false, error: 'body is required' };
+  if (body.length > MAX_BODY_LENGTH) {
+    return { valid: false, error: `body exceeds maximum length of ${MAX_BODY_LENGTH} characters` };
+  }
+  return { valid: true };
+}
+
+function buildFacebookCreatePayload({ name, language, body }) {
+  return {
+    name,
+    language,
+    category: 'UTILITY',
+    components: [{ type: 'BODY', text: body }],
+  };
+}
+
+function parseCreateResponse(fbResponseBody) {
+  if (!fbResponseBody) {
+    return { ok: false, error: { message: 'Empty response from Facebook' } };
+  }
+  if (fbResponseBody.error) {
+    return { ok: false, error: fbResponseBody.error };
+  }
+  // FB returns { id: "...", status: "APPROVED|PENDING|REJECTED", category: "UTILITY" }
+  return {
+    ok: true,
+    fbTemplateId: fbResponseBody.id || null,
+    status: normalizeStatus(fbResponseBody.status) || 'PENDING',
+  };
+}
+
+function normalizeStatus(s) {
+  if (!s) return null;
+  const upper = String(s).toUpperCase();
+  return VALID_STATUSES.includes(upper) ? upper : null;
+}
+
+function parseListResponse(fbResponseBody) {
+  if (!fbResponseBody) return [];
+  if (fbResponseBody.error) return [];
+  const data = fbResponseBody.data || [];
+  return data.map(entry => ({
+    fbTemplateId: entry.id || null,
+    name: entry.name,
+    language: entry.language,
+    status: normalizeStatus(entry.status) || 'PENDING',
+    rejectionReason: entry.rejected_reason || null,
+  }));
+}
+
+function matchFbEntry(row, fbEntries) {
+  return fbEntries.find(e => e.name === row.name && e.language === row.language) || null;
+}
+
+function formatRecord(row) {
+  return {
+    id: row.id,
+    facebook_page_id: row.facebook_page_id,
+    fb_template_id: row.fb_template_id,
+    name: row.name,
+    language: row.language,
+    body: row.body,
+    status: row.status,
+    rejection_reason: row.rejection_reason,
+    created: row.created,
+    updated: row.updated,
+  };
+}
+
+module.exports = {
+  MAX_BODY_LENGTH,
+  NAME_PATTERN,
+  VALID_STATUSES,
+  validateCreateInput,
+  buildFacebookCreatePayload,
+  parseCreateResponse,
+  parseListResponse,
+  matchFbEntry,
+  formatRecord,
+  normalizeStatus,
+};
