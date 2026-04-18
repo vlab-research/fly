@@ -243,17 +243,9 @@ function tokenWrap(state, nxt, output) {
     return output
   }
 
-  const [tokenObj, ...remainingTokens] = state.tokens
+  const [token, ...tokens] = state.tokens
 
-  // Handle both object format (new) and string format (legacy) for backward compatibility
-  const tokenType = tokenObj.type || 'otn'
-  const tokenString = tokenObj.token || tokenObj
-
-  // Only consume OTN tokens; Marketing Messages tokens persist for reuse
-  const tokensAfterUse = tokenType === 'otn' ? remainingTokens : state.tokens
-
-  // Pass both the token string and type information for recipient field selection
-  return { ...output, token: { type: tokenType, token: tokenString }, stateUpdate: { ...output.stateUpdate, tokens: tokensAfterUse } }
+  return { ...output, token, stateUpdate: { ...output.stateUpdate, tokens } }
 }
 
 function exec(state, nxt) {
@@ -451,35 +443,20 @@ function exec(state, nxt) {
     }
 
     case 'OPTIN': {
-      if (nxt.optin.type === 'one_time_notif_req') {
-        const { one_time_notif_token: token, payload } = nxt.optin
-        const tokenObj = { type: 'otn', token }
-        const tokens = state.tokens ? [...state.tokens, tokenObj] : [tokenObj]
-        return {
-          action: 'RESPOND',
-          stateUpdate: { tokens },
-          response: payload,
-          responseValue: 'optin',
-          question: state.question
-        }
-      } else if (nxt.optin.type === 'notification_messages') {
-        const {
-          notification_messages_token: token,
-          payload,
-          notification_messages_timezone: timezone,
-          token_expiry_timestamp: expires
-        } = nxt.optin
-        const tokenObj = { type: 'marketing_messages', token, timezone, expires }
-        const tokens = state.tokens ? [...state.tokens, tokenObj] : [tokenObj]
-        return {
-          action: 'RESPOND',
-          stateUpdate: { tokens },
-          response: payload,
-          responseValue: 'optin',
-          question: state.question
-        }
-      } else {
+      // only one type of optin supported for now
+      if (nxt.optin.type !== 'one_time_notif_req') {
         return _noop()
+      }
+
+      const { one_time_notif_token: token, payload } = nxt.optin
+      const tokens = state.tokens ? [...state.tokens, token] : [token]
+
+      return {
+        action: 'RESPOND',
+        stateUpdate: { tokens },
+        response: payload,
+        responseValue: 'optin',
+        question: state.question
       }
     }
 
@@ -805,9 +782,7 @@ function _response(
     const message = translateField(ctx, qa, ctx.form.fields[0])
 
     if (token) {
-      const tokenString = token.token || token
-      const tokenType = token.type === 'marketing_messages' ? 'notification_messages_token' : 'one_time_notif_token'
-      return { recipient: { [tokenType]: tokenString }, ...message }
+      return { recipient: { one_time_notif_token: token }, ...message }
     }
 
     return message
@@ -831,10 +806,8 @@ function _response(
   }
 
   if (token) {
-    const tokenString = token.token || token
-    const tokenType = token.type === 'marketing_messages' ? 'notification_messages_token' : 'one_time_notif_token'
     return {
-      recipient: { [tokenType]: tokenString },
+      recipient: { one_time_notif_token: token },
       ...nextQuestion(ctx, qa, question)
     }
   }

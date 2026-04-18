@@ -61,12 +61,7 @@ async function sendMessage(data, pageToken) {
   const headers = { Authorization: `Bearer ${pageToken}` }
   const url = `${BASE_URL}/me/messages`
   const fn = () => r2.post(url, { headers, json: data }).json
-  try {
-    return await facebookRequest(fn)
-  } catch (e) {
-    e.details = { ...e.details, payload: data }
-    throw e
-  }
+  return await facebookRequest(fn)
 }
 
 async function passThreadControl(userId, targetAppId, metadata, pageToken) {
