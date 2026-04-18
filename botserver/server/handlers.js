@@ -28,11 +28,8 @@ const handleMessengerEvents = async (ctx, producer, producerReady, eventTopic) =
     try {
       console.log(util.inspect(entry, null, 8))
 
-      // Process all event types:
-      // - messaging: regular messages from users
-      // - messaging_handovers: thread control handoff events
-      // - messaging_optin: opt-in events (e.g., notification_messages, OTN)
-      const eventTypes = ['messaging', 'messaging_handovers', 'messaging_optin']
+      // Process all event types (messaging and messaging_handovers)
+      const eventTypes = ['messaging', 'messaging_handovers']
       
       for (const eventType of eventTypes) {
         if (entry[eventType]) {

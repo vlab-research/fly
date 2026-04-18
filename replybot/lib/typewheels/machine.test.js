@@ -7,7 +7,7 @@ const { parseLogJSON } = require('./utils')
 const { followUpMessage, offMessage } = require('@vlab-research/translate-typeform')
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, mmOptin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
 const _echo = md => ({ ...echo, message: { ...echo.message, metadata: md.ref ? md : { ref: md } } })
 
@@ -637,7 +637,7 @@ describe('getState', () => {
     const state = getState(log)
     state.state.should.equal('RESPONDING')
     state.forms[1].should.equal('BAR')
-    state.tokens.should.eql([{ type: 'otn', token: 'FOOBAR' }])
+    state.tokens.should.eql(['FOOBAR'])
   })
 
   it('It moves to next form on bailout when response never sent', () => {
@@ -747,7 +747,7 @@ describe('getState', () => {
     const state = getState(log)
 
     state.state.should.equal('RESPONDING')
-    state.tokens.should.eql([{ type: 'otn', token: 'FOOBAR' }])
+    state.tokens.should.eql(['FOOBAR'])
     state.question.should.equal('foo')
     state.qa.should.eql([['foo', 'optin']])
   })
@@ -1615,128 +1615,6 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user)
     JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
-  })
-
-  it('Validates a Marketing Messages optin when it is a response to a notification_messages request', () => {
-    const form = {
-      logic: [],
-      fields: [{
-        type: 'statement', title: 'foo', ref: 'foo', properties:
-          { description: 'type: notify' }  // Use notify for now since we're testing token extraction, not field translation
-      },
-      { type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-
-    const log = [referral, echo, mmOptin]
-
-    const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
-  })
-
-  it('stores MM token with metadata (timezone, expires)', () => {
-    const form = {
-      logic: [],
-      fields: [{
-        type: 'statement', title: 'foo', ref: 'foo', properties:
-          { description: 'type: notification_messages' }
-      },
-      { type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-
-    const log = [referral, echo, mmOptin]
-    const state = getState(log)
-
-    state.tokens.should.exist
-    state.tokens.length.should.equal(1)
-    state.tokens[0].should.have.property('type', 'marketing_messages')
-    state.tokens[0].should.have.property('token', 'MM_TOKEN_123')
-    state.tokens[0].should.have.property('timezone', 'US/Pacific')
-    state.tokens[0].should.have.property('expires', 1704153600000)
-  })
-
-  it('sends messages to MM token with notification_messages_token recipient field', () => {
-    const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
-
-    const externalEvent = {
-      source: 'synthetic',
-      timestamp: Date.now() + 1000 * 60 * 60 * 25,
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
-    }
-
-    const d = Date.now()
-
-    const form = {
-      logic: [],
-      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: '' } },
-      { type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-
-    const log = [referral, mmOptin, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, externalEvent]
-
-    const actions = getMessage(log, form, user)
-    actions.messages.length.should.equal(1)
-    actions.messages[0].recipient.should.have.property('notification_messages_token', 'MM_TOKEN_123')
-    actions.messages[0].message.text.should.equal('bar')
-  })
-
-  it('does not consume MM token after use (persists for reuse)', () => {
-    const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
-
-    const externalEvent = {
-      source: 'synthetic',
-      timestamp: Date.now() + 1000 * 60 * 60 * 25,
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
-    }
-
-    const d = Date.now()
-
-    const form = {
-      logic: [],
-      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: '' } },
-      { type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-
-    const log = [referral, mmOptin, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, externalEvent]
-
-    const state = getState(log)
-
-    // After using MM token, it should still exist (not consumed)
-    state.tokens.should.exist
-    state.tokens.length.should.equal(1)
-    state.tokens[0].type.should.equal('marketing_messages')
-  })
-
-  it('OTN token is consumed after use but MM token persists', () => {
-    const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
-
-    const externalEvent = {
-      source: 'synthetic',
-      timestamp: Date.now() + 1000 * 60 * 60 * 25,
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
-    }
-
-    const d = Date.now()
-
-    const form = {
-      logic: [],
-      fields: [{ type: 'statement', title: 'foo', ref: 'foo', properties: { description: '' } },
-      { type: 'short_text', title: 'bar', ref: 'bar' }]
-    }
-
-    // Test with OTN token
-    const logOTN = [referral, optin, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, externalEvent]
-    const stateOTN = getState(logOTN)
-
-    // OTN token should be consumed
-    stateOTN.tokens.length.should.equal(0)
-
-    // Test with MM token
-    const logMM = [referral, mmOptin, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, externalEvent]
-    const stateMM = getState(logMM)
-
-    // MM token should persist
-    stateMM.tokens.length.should.equal(1)
-    stateMM.tokens[0].type.should.equal('marketing_messages')
   })
 
 
