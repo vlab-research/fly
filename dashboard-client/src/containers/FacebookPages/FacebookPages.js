@@ -52,7 +52,7 @@ const getPages = (access_token, cursor) => new Promise((resolve, reject) => {
 
 const fb = () => new Promise((resolve, reject) => {
   const cnf = {
-    scope: 'pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,business_management',
+    scope: 'pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,business_management,page_utility_messaging',
     return_scopes: true,
   };
 
