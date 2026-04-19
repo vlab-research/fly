@@ -32,7 +32,7 @@ exports.addWebhooks = async (req, res) => {
                         'messaging_policy_enforcement']
   }
 
-  const url = `https://graph.facebook.com/v9.0/${pageid}/subscribed_apps?access_token=${token}`
+  const url = `${fb.url}/${pageid}/subscribed_apps?access_token=${token}`
   const r = await r2.post(url, { json }).json
 
   if (r.error) {
@@ -49,7 +49,7 @@ exports.addGetStarted = async (req, res) => {
   const {token} = req.body;
 
   const json = {get_started: {payload: 'get_started'}}
-  const url = `https://graph.facebook.com/v9.0/me/messenger_profile?access_token=${token}`
+  const url = `${fb.url}/me/messenger_profile?access_token=${token}`
   const r = await r2.post(url, { json }).json
 
   if (r.error) {
