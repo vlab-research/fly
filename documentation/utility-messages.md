@@ -10,13 +10,16 @@ Facebook deprecated all out-of-window messaging mechanisms in early 2026:
 | Recurring Notifications / Marketing Messages | February 10, 2026 (globally; still live in AU/EU/JP/KR/UK) |
 | **Utility Messages** | **Current replacement — globally available** |
 
-Utility Messages are the only remaining global mechanism for sending non-promotional
-content (survey results, prize notifications, appointment reminders) to a user after
-the 24-hour Messenger window closes. They require a pre-approved template per Facebook
-Page and do not require user opt-in.
+[Utility Messages](https://developers.facebook.com/docs/messenger-platform/send-messages/utility-messages/)
+are the only remaining global mechanism for sending non-promotional content (survey
+results, prize notifications, appointment reminders) to a user after the 24-hour
+Messenger window closes. They require a pre-approved template per Facebook Page
+and do not require user opt-in.
 
 This document describes the end-to-end integration across dashboard-server,
-dashboard-client, translate-typeform, and replybot.
+dashboard-client, translate-typeform, and replybot. Meta's API docs were the
+primary design input — see [References](#references) at the bottom for the
+specific pages consulted.
 
 ---
 
@@ -77,7 +80,7 @@ Route: `/message-templates`
 |-------|-----------|
 | Page | Must be a Facebook Page already connected via `/connect/facebook-messenger` |
 | Name | `snake_case` — lowercase letters, digits, underscores only. Unique per (page, language). |
-| Language | Searchable Select, Facebook-supported locales (see `dashboard-client/src/containers/MessageTemplates/locales.js`). No freetext. |
+| Language | Searchable Select, Facebook-supported locales (see `dashboard-client/src/containers/MessageTemplates/locales.js`; source: [Meta's supported languages list](https://developers.facebook.com/docs/whatsapp/api/messages/message-templates#supported-languages)). No freetext. |
 | Body | Up to 1024 characters. Uses `{{1}}`, `{{2}}`, etc. for positional parameters. |
 | Quick-reply buttons | Up to 3 buttons, label ≤ 20 chars, unique within the template. Optional — leave empty for text-only templates. |
 
@@ -90,7 +93,7 @@ reason surfaced from Facebook's `rejected_reason` field.
 
 ### Quick-reply buttons
 
-A template can declare up to 3 `QUICK_REPLY` buttons. **Labels are fixed at approval time** — Facebook renders them; we can't change them after the fact. Per-send **payloads** (what the survey logic branches on) come from the survey JSON, not the template.
+A template can declare up to 3 [`QUICK_REPLY`](https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates/components#quick-reply-buttons) buttons. **Labels are fixed at approval time** — Facebook renders them; we can't change them after the fact. Per-send **payloads** (what the survey logic branches on) come from the survey JSON, not the template.
 
 Why `QUICK_REPLY` and not postback buttons? Taps on `QUICK_REPLY` buttons arrive as a Messenger `message.quick_reply` event — the same webhook shape native Messenger quick replies use. Replybot's existing `QUICK_REPLY` handler (`replybot/lib/typewheels/machine.js:473-486`) already parses `{value, ref}` payloads, so button taps need no new code paths. Postback buttons (from `translateButtonChoice`) go through a different webhook (`messaging_postbacks`) and would require parallel plumbing — we intentionally avoid that.
 
@@ -100,7 +103,7 @@ The translator emits per-button payloads as `JSON.stringify({value, ref})`, mirr
 
 ## Delete semantics
 
-Facebook exposes two delete paths:
+[Facebook exposes two delete paths on the `message_templates` edge](https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates#deleting-templates):
 
 | Endpoint | Effect |
 |----------|--------|
@@ -262,3 +265,21 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 2. Publish `@vlab-research/translate-typeform@0.2.10` to npm
 3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.10`) and redeploy
 4. Redeploy dashboard-server and dashboard-client
+
+---
+
+## References
+
+Meta documentation that informed the implementation. If you're debugging a
+payload shape, rejection reason, or locale code, these pages are the source
+of truth — our code mirrors them.
+
+- [Messenger Platform — Send Utility Messages](https://developers.facebook.com/docs/messenger-platform/send-messages/utility-messages/) — the top-level feature overview; explains `messaging_type: UTILITY`, the `utility_messages` template type, and why no user opt-in is required.
+- [WhatsApp Business Management API — Message Templates](https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates) — CRUD for templates. Messenger's `utility_messages` template system inherits this API, including the `(page_id, name, language)` identity model and the `hsm_id` vs `name` delete semantics.
+- [Template Components](https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates/components) — the `BODY` / `BUTTONS` component model used at template creation time, including the `QUICK_REPLY` button sub-type and its label constraints.
+- [Supported Languages](https://developers.facebook.com/docs/whatsapp/api/messages/message-templates#supported-languages) — the full set of language codes; the source for `dashboard-client/src/containers/MessageTemplates/locales.js`.
+- [Meta deprecation notices for Message Tags and Recurring Notifications](https://developers.facebook.com/docs/messenger-platform/changelog/) — context for why this replacement was needed (also covered in `documentation/marketing-messages.md`).
+
+Related internal documentation:
+
+- [`marketing-messages.md`](./marketing-messages.md) — the now-deprecated Recurring Notifications integration that this feature replaces. Kept for historical context.
