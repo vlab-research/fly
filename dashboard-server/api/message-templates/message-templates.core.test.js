@@ -4,6 +4,7 @@ const chai = require('chai');
 const should = chai.should(); // eslint-disable-line no-unused-vars
 
 const {
+  validateButtons,
   validateCreateInput,
   buildFacebookCreatePayload,
   parseCreateResponse,
@@ -12,6 +13,8 @@ const {
   formatRecord,
   normalizeStatus,
   MAX_BODY_LENGTH,
+  MAX_BUTTONS,
+  BUTTON_LABEL_MAX,
 } = require('./message-templates.core');
 
 describe('message-templates.core', () => {
@@ -22,7 +25,7 @@ describe('message-templates.core', () => {
     const valid = { pageId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}' };
 
     it('accepts complete, correct input', () => {
-      validateCreateInput(valid).should.deep.equal({ valid: true });
+      validateCreateInput(valid).should.deep.equal({ valid: true, buttons: [] });
     });
 
     it('rejects missing pageId', () => {
@@ -57,7 +60,7 @@ describe('message-templates.core', () => {
     });
 
     it('accepts digits and underscores in name', () => {
-      validateCreateInput({ ...valid, name: 'prize_2_ready' }).should.deep.equal({ valid: true });
+      validateCreateInput({ ...valid, name: 'prize_2_ready' }).should.deep.equal({ valid: true, buttons: [] });
     });
 
     it('rejects missing language', () => {
@@ -80,13 +83,62 @@ describe('message-templates.core', () => {
 
     it('accepts body at exactly the character limit (boundary)', () => {
       const r = validateCreateInput({ ...valid, body: 'x'.repeat(MAX_BODY_LENGTH) });
-      r.should.deep.equal({ valid: true });
+      r.should.deep.equal({ valid: true, buttons: [] });
     });
 
     it('reports pageId error before name when both are missing', () => {
       // Predictable short-circuit order: authors see the first missing field first
       const r = validateCreateInput({ pageId: '', name: '', language: 'en_US', body: 'x' });
       r.error.should.include('pageId');
+    });
+  });
+
+  // -------------------------------------------------------
+  // validateButtons — quick-reply button validation
+  // -------------------------------------------------------
+  describe('validateButtons', () => {
+    it('treats undefined / null as no buttons (backward-compatible)', () => {
+      validateButtons(undefined).should.deep.equal({ valid: true, normalized: [] });
+      validateButtons(null).should.deep.equal({ valid: true, normalized: [] });
+    });
+
+    it('accepts an empty array', () => {
+      validateButtons([]).should.deep.equal({ valid: true, normalized: [] });
+    });
+
+    it('rejects non-array', () => {
+      validateButtons('yes,no').valid.should.equal(false);
+    });
+
+    it(`rejects more than ${MAX_BUTTONS} buttons`, () => {
+      // Meta's utility template caps QR buttons at 3; mirror the constraint up front
+      const tooMany = Array.from({ length: MAX_BUTTONS + 1 }, (_, i) => ({ label: `b${i}` }));
+      const r = validateButtons(tooMany);
+      r.valid.should.equal(false);
+      r.error.should.include(String(MAX_BUTTONS));
+    });
+
+    it('rejects empty label', () => {
+      const r = validateButtons([{ label: '   ' }]);
+      r.valid.should.equal(false);
+      r.error.should.include('buttons[0]');
+    });
+
+    it('rejects label over the length cap', () => {
+      const r = validateButtons([{ label: 'x'.repeat(BUTTON_LABEL_MAX + 1) }]);
+      r.valid.should.equal(false);
+      r.error.should.include(String(BUTTON_LABEL_MAX));
+    });
+
+    it('rejects duplicate labels — Facebook would reject the template too', () => {
+      const r = validateButtons([{ label: 'Yes' }, { label: 'Yes' }]);
+      r.valid.should.equal(false);
+      r.error.should.include('duplicate');
+    });
+
+    it('trims whitespace and returns normalized {label} objects', () => {
+      const r = validateButtons([{ label: '  Yes  ' }, { label: 'No' }]);
+      r.should.deep.equal({ valid: true, normalized: [{ label: 'Yes' }, { label: 'No' }] });
     });
   });
 
@@ -109,6 +161,27 @@ describe('message-templates.core', () => {
       // this dashboard only authors UTILITY templates.
       const payload = buildFacebookCreatePayload({ name: 'x', language: 'fr', body: 'b' });
       payload.category.should.equal('UTILITY');
+    });
+
+    it('appends a BUTTONS component with QUICK_REPLY entries when buttons are supplied', () => {
+      const payload = buildFacebookCreatePayload({
+        name: 'x', language: 'en_US', body: 'b',
+        buttons: [{ label: 'Yes' }, { label: 'No' }],
+      });
+      payload.components.should.have.length(2);
+      payload.components[1].should.deep.equal({
+        type: 'BUTTONS',
+        buttons: [
+          { type: 'QUICK_REPLY', text: 'Yes' },
+          { type: 'QUICK_REPLY', text: 'No' },
+        ],
+      });
+    });
+
+    it('omits the BUTTONS component when buttons array is empty (text-only template)', () => {
+      // Facebook rejects a BUTTONS component with zero buttons; skip it entirely.
+      const payload = buildFacebookCreatePayload({ name: 'x', language: 'en', body: 'b', buttons: [] });
+      payload.components.should.have.length(1);
     });
   });
 
@@ -260,6 +333,12 @@ describe('message-templates.core', () => {
       out.should.have.property('facebook_page_id', 'p1');
       out.should.have.property('fb_template_id', 'fb1');
       out.should.have.property('language', 'en_US');
+    });
+
+    it('includes buttons, defaulting to empty array when missing', () => {
+      formatRecord({ id: 'u1' }).buttons.should.deep.equal([]);
+      formatRecord({ id: 'u1', buttons: [{ label: 'Yes' }] }).buttons
+        .should.deep.equal([{ label: 'Yes' }]);
     });
   });
 });

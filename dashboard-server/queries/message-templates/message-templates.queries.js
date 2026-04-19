@@ -1,12 +1,12 @@
 'use strict';
 
-async function create({ email, facebookPageId, fbTemplateId, name, language, body, status, rejectionReason }) {
+async function create({ email, facebookPageId, fbTemplateId, name, language, body, status, rejectionReason, buttons }) {
   const q = `
     INSERT INTO message_templates
-      (userid, facebook_page_id, fb_template_id, name, language, body, status, rejection_reason)
+      (userid, facebook_page_id, fb_template_id, name, language, body, status, rejection_reason, buttons)
     VALUES (
       (SELECT id FROM users WHERE email = $1),
-      $2, $3, $4, $5, $6, $7, $8
+      $2, $3, $4, $5, $6, $7, $8, $9
     )
     RETURNING *
   `;
@@ -19,6 +19,7 @@ async function create({ email, facebookPageId, fbTemplateId, name, language, bod
     body,
     status || 'PENDING',
     rejectionReason || null,
+    JSON.stringify(Array.isArray(buttons) ? buttons : []),
   ];
   const { rows } = await this.query(q, values);
   return rows[0];
@@ -27,7 +28,7 @@ async function create({ email, facebookPageId, fbTemplateId, name, language, bod
 async function list({ email, facebookPageId }) {
   const q = `
     SELECT m.id, m.facebook_page_id, m.fb_template_id, m.name, m.language,
-           m.body, m.status, m.rejection_reason, m.created, m.updated
+           m.body, m.status, m.rejection_reason, m.buttons, m.created, m.updated
     FROM message_templates m
     JOIN users u ON m.userid = u.id
     WHERE u.email = $1
@@ -42,7 +43,7 @@ async function list({ email, facebookPageId }) {
 async function get({ email, id }) {
   const q = `
     SELECT m.id, m.facebook_page_id, m.fb_template_id, m.name, m.language,
-           m.body, m.status, m.rejection_reason, m.created, m.updated
+           m.body, m.status, m.rejection_reason, m.buttons, m.created, m.updated
     FROM message_templates m
     JOIN users u ON m.userid = u.id
     WHERE u.email = $1 AND m.id = $2

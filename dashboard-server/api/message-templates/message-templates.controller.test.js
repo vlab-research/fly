@@ -173,6 +173,47 @@ describe('message-templates.controller (makeHandlers)', () => {
       captured.pid.should.equal(pageId);
       captured.token.should.equal('tok123');
     });
+
+    it('threads buttons through FB create + DB insert when supplied', async () => {
+      // End-to-end: buttons in the request body land on BOTH the FB payload
+      // (as a BUTTONS component with QUICK_REPLY entries) AND the DB record
+      // (as the stored buttons JSONB). If this routing breaks, button-less
+      // templates would leak through silently.
+      let fbPayload;
+      let dbRecord;
+      const res = mockRes();
+      await makeTestHandlers({
+        facebookClient: {
+          ...defaultFacebookClient,
+          createTemplate: async (pid, token, payload) => { fbPayload = payload; return { id: 'fb', status: 'APPROVED' }; },
+        },
+        templateQuery: {
+          ...defaultTemplateQuery,
+          create: async (r) => { dbRecord = r; return { id: 'u', ...r, buttons: r.buttons }; },
+        },
+      }).create(
+        { user: { email }, body: { ...validBody, buttons: [{ label: '  Yes  ' }, { label: 'No' }] } },
+        res,
+      );
+
+      res.statusCode.should.equal(201);
+      fbPayload.components.should.have.length(2);
+      fbPayload.components[1].buttons.should.deep.equal([
+        { type: 'QUICK_REPLY', text: 'Yes' },
+        { type: 'QUICK_REPLY', text: 'No' },
+      ]);
+      dbRecord.buttons.should.deep.equal([{ label: 'Yes' }, { label: 'No' }]);
+    });
+
+    it('returns 400 with the validation error when buttons violate constraints', async () => {
+      const res = mockRes();
+      await makeTestHandlers().create(
+        { user: { email }, body: { ...validBody, buttons: [{ label: 'Yes' }, { label: 'Yes' }] } },
+        res,
+      );
+      res.statusCode.should.equal(400);
+      res.body.error.should.include('duplicate');
+    });
   });
 
   // -------------------------------------------------------

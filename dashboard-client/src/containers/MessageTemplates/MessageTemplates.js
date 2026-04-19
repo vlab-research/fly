@@ -3,7 +3,7 @@ import {
   Layout, Table, Select, Row, Col, Tag, message, Card, Tooltip,
   Input, Button, Form, Alert, Popconfirm, Space, Typography,
 } from 'antd';
-import { CheckCircleTwoTone, CloseCircleTwoTone, LoadingOutlined } from '@ant-design/icons';
+import { CheckCircleTwoTone, CloseCircleTwoTone, LoadingOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import { Loading } from '../../components/UI';
 import LOCALES from './locales';
@@ -16,6 +16,8 @@ const { Text, Paragraph } = Typography;
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 const MAX_BODY_LENGTH = 1024;
 const POLL_INTERVAL_MS = 4000;
+const MAX_BUTTONS = 3;
+const BUTTON_LABEL_MAX = 20;
 
 const MessageTemplates = () => {
   const [pages, setPages] = useState([]);
@@ -106,6 +108,8 @@ const MessageTemplates = () => {
           name: values.name,
           language: values.language,
           body: values.body,
+          buttons: (values.buttons || []).filter(b => b && b.label && b.label.trim())
+                                          .map(b => ({ label: b.label.trim() })),
         },
       });
       const record = await res.json();
@@ -113,7 +117,7 @@ const MessageTemplates = () => {
         const byName = a.name.localeCompare(b.name);
         return byName !== 0 ? byName : a.language.localeCompare(b.language);
       }));
-      form.resetFields(['name', 'body']);
+      form.resetFields(['name', 'body', 'buttons']);
       message.success('Template submitted to Facebook for approval');
 
       if (!pollRef.current) {
@@ -182,6 +186,15 @@ const MessageTemplates = () => {
       render: code => {
         const hit = LOCALES.find(l => l.code === code);
         return hit ? `${hit.name} (${code})` : code;
+      },
+    },
+    {
+      title: 'Buttons',
+      dataIndex: 'buttons',
+      key: 'buttons',
+      render: btns => {
+        if (!Array.isArray(btns) || btns.length === 0) return <Text type="secondary">—</Text>;
+        return btns.map(b => b.label).join(' · ');
       },
     },
     { title: 'Status', dataIndex: 'status', key: 'status', render: statusCell },
@@ -311,6 +324,66 @@ const MessageTemplates = () => {
                   showCount
                   placeholder="Your {{1}} results are ready, {{2}}."
                 />
+              </Form.Item>
+
+              <Form.Item
+                label="Quick-reply buttons (optional)"
+                extra={(
+                  <span>
+                    Let users tap instead of typing. Up to {MAX_BUTTONS} buttons, label max {BUTTON_LABEL_MAX} chars.
+                    Labels are <b>locked after Facebook approves the template</b> — to change them, delete and recreate.
+                    In your survey JSON, pass <Text code>buttons: ["value1", "value2", ...]</Text> in the same order.
+                  </span>
+                )}
+              >
+                <Form.List name="buttons">
+                  {(fields, { add, remove }) => (
+                    <>
+                      {fields.map((field, i) => (
+                        <Space key={field.key} align="baseline" style={{ display: 'flex', marginBottom: 8 }}>
+                          <Form.Item
+                            {...field}
+                            name={[field.name, 'label']}
+                            fieldKey={[field.fieldKey, 'label']}
+                            style={{ marginBottom: 0, width: 320 }}
+                            rules={[
+                              { required: true, message: 'Label required' },
+                              { max: BUTTON_LABEL_MAX, message: `Max ${BUTTON_LABEL_MAX} chars` },
+                              ({ getFieldValue }) => ({
+                                validator(_, value) {
+                                  if (!value) return Promise.resolve();
+                                  const all = (getFieldValue('buttons') || []).map(b => b && b.label && b.label.trim());
+                                  const trimmed = value.trim();
+                                  const count = all.filter(l => l === trimmed).length;
+                                  return count > 1
+                                    ? Promise.reject(new Error('Duplicate label'))
+                                    : Promise.resolve();
+                                },
+                              }),
+                            ]}
+                          >
+                            <Input
+                              placeholder={`Button ${i + 1} label`}
+                              maxLength={BUTTON_LABEL_MAX}
+                              showCount
+                            />
+                          </Form.Item>
+                          <MinusCircleOutlined onClick={() => remove(field.name)} />
+                        </Space>
+                      ))}
+                      <Form.Item style={{ marginBottom: 0 }}>
+                        <Button
+                          type="dashed"
+                          onClick={() => add({ label: '' })}
+                          icon={<PlusOutlined />}
+                          disabled={fields.length >= MAX_BUTTONS}
+                        >
+                          Add button {fields.length > 0 ? `(${fields.length}/${MAX_BUTTONS})` : ''}
+                        </Button>
+                      </Form.Item>
+                    </>
+                  )}
+                </Form.List>
               </Form.Item>
 
               <Form.Item>

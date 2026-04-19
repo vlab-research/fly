@@ -3,9 +3,38 @@
 const MAX_BODY_LENGTH = 1024;
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 const NAME_MAX_LENGTH = 512;
+const MAX_BUTTONS = 3;
+const BUTTON_LABEL_MAX = 20;
 const VALID_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'PAUSED', 'DISABLED'];
 
-function validateCreateInput({ pageId, name, language, body }) {
+function validateButtons(buttons) {
+  if (buttons === undefined || buttons === null) return { valid: true, normalized: [] };
+  if (!Array.isArray(buttons)) return { valid: false, error: 'buttons must be an array' };
+  if (buttons.length > MAX_BUTTONS) {
+    return { valid: false, error: `at most ${MAX_BUTTONS} buttons are allowed on a utility template` };
+  }
+
+  const seen = new Set();
+  const normalized = [];
+  for (let i = 0; i < buttons.length; i++) {
+    const b = buttons[i];
+    if (!b || typeof b.label !== 'string' || !b.label.trim()) {
+      return { valid: false, error: `buttons[${i}] must have a non-empty label` };
+    }
+    const label = b.label.trim();
+    if (label.length > BUTTON_LABEL_MAX) {
+      return { valid: false, error: `buttons[${i}] label exceeds ${BUTTON_LABEL_MAX} characters` };
+    }
+    if (seen.has(label)) {
+      return { valid: false, error: `duplicate button label "${label}"` };
+    }
+    seen.add(label);
+    normalized.push({ label });
+  }
+  return { valid: true, normalized };
+}
+
+function validateCreateInput({ pageId, name, language, body, buttons }) {
   if (!pageId) return { valid: false, error: 'pageId is required' };
   if (!name) return { valid: false, error: 'name is required' };
   if (name.length > NAME_MAX_LENGTH) return { valid: false, error: `name exceeds ${NAME_MAX_LENGTH} characters` };
@@ -17,15 +46,24 @@ function validateCreateInput({ pageId, name, language, body }) {
   if (body.length > MAX_BODY_LENGTH) {
     return { valid: false, error: `body exceeds maximum length of ${MAX_BODY_LENGTH} characters` };
   }
-  return { valid: true };
+  const btn = validateButtons(buttons);
+  if (!btn.valid) return btn;
+  return { valid: true, buttons: btn.normalized };
 }
 
-function buildFacebookCreatePayload({ name, language, body }) {
+function buildFacebookCreatePayload({ name, language, body, buttons }) {
+  const components = [{ type: 'BODY', text: body }];
+  if (Array.isArray(buttons) && buttons.length > 0) {
+    components.push({
+      type: 'BUTTONS',
+      buttons: buttons.map(b => ({ type: 'QUICK_REPLY', text: b.label })),
+    });
+  }
   return {
     name,
     language,
     category: 'UTILITY',
-    components: [{ type: 'BODY', text: body }],
+    components,
   };
 }
 
@@ -77,6 +115,7 @@ function formatRecord(row) {
     body: row.body,
     status: row.status,
     rejection_reason: row.rejection_reason,
+    buttons: Array.isArray(row.buttons) ? row.buttons : [],
     created: row.created,
     updated: row.updated,
   };
@@ -85,7 +124,10 @@ function formatRecord(row) {
 module.exports = {
   MAX_BODY_LENGTH,
   NAME_PATTERN,
+  MAX_BUTTONS,
+  BUTTON_LABEL_MAX,
   VALID_STATUSES,
+  validateButtons,
   validateCreateInput,
   buildFacebookCreatePayload,
   parseCreateResponse,
