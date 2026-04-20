@@ -268,6 +268,91 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 
 ---
 
+## Facebook app permissions and rollout
+
+Getting a Facebook app to the point where it can actually call
+`POST /{pageId}/message_templates` is not automatic. The steps below are
+ordered — each is necessary, none is sufficient alone.
+
+### 1. OAuth scope on page connect
+
+The dashboard-client Facebook Login flow (`FacebookPages.js`) must request
+`pages_utility_messaging` in the `scope` string.
+
+**Gotcha**: Meta's docs refer to the permission as `page_utility_messaging`
+(singular), but Facebook's OAuth endpoint rejects that with
+`Invalid Scope: page_utility_messaging`. The name accepted at the
+OAuth layer is `pages_utility_messaging` (plural, matching the other
+`pages_*` Messenger permissions). Verify the granted token's scopes via
+the Access Token Debugger.
+
+### 2. Graph API version
+
+- dashboard-client SDK: `REACT_APP_FACEBOOK_GRAPH_VERSION=25.0` (netlify.toml)
+- dashboard-server: `FACEBOOK_GRAPH_URL=https://graph.facebook.com/v22.0` (Helm values)
+
+Older versions (v17 and below) do not expose the utility message template
+endpoint.
+
+### 3. Webhook subscription
+
+`POST /{pageId}/subscribed_apps` must include **`message_template_status_update`**
+in `subscribed_fields`. Meta's utility messages guide lists this as a core
+prerequisite for using the `message_templates` edge — not just for receiving
+approval notifications. The dashboard's `addWebhooks` call
+(`dashboard-server/api/facebook/facebook.controller.js`) sends the full list;
+pages connected before this field was added need to re-run the webhook
+subscription (use the **Update** link on the page in `/connect/facebook-messenger`).
+
+### 4. App-level permission grant
+
+In the Facebook App Dashboard under **App Review → Permissions and Features**,
+`pages_utility_messaging` must be added and show as **Standard Access Granted**.
+Standard Access is enough for pages where the connecting user has a role on
+the app (developer/tester/admin); Advanced Access (full App Review) is needed
+for production use by arbitrary page admins.
+
+To unlock the "Request Advanced Access" button in the portal, Meta requires
+one successful test API call (`POST /{pageId}/message_templates`) on the
+permission. The button can take up to 24h to activate after the first
+successful call.
+
+### Known issue — April 2026
+
+Even with all four steps above completed, `POST /{pageId}/message_templates`
+can return:
+
+```
+(#10) Application does not have permission for this action
+```
+
+A Meta bug investigator looking at app `699455733740842` reported that they
+"couldn't find any standard access permissions" on the app backend, despite
+the App Review UI showing Standard Access as granted for
+`pages_utility_messaging`. This appears to be a backend/UI mismatch on
+Meta's side.
+
+**Things verified NOT to be the cause:**
+- OAuth scope missing or misnamed — scope is present in the issued token
+- Graph API version too old — on v22.0
+- Wrong endpoint — `/{pageId}/message_templates` is confirmed correct for
+  Messenger; WhatsApp's equivalent uses WABA IDs, not page IDs
+- Missing `message_template_status_update` webhook subscription — added
+- User without a role on the app — same developer connecting the page
+
+**Next steps when resuming:**
+1. Wait ≥24h after the permission was granted in the portal — Meta's
+   permission state can take time to propagate.
+2. Confirm Business Verification is complete on the business that owns the
+   app — some Messenger permissions silently require this.
+3. Follow up with the Meta bug investigator; the key question is whether
+   `pages_utility_messaging` is actually granted at the app backend for
+   `699455733740842`, not just displayed as granted in the UI. Make clear
+   this is about Messenger, not WhatsApp — the token happens to also carry
+   WhatsApp scopes which can mislead triage.
+
+---
+
 ## References
 
 Meta documentation that informed the implementation. If you're debugging a
