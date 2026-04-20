@@ -16,15 +16,16 @@ exports.setGetStarted = async (token) => {
 exports.subscribe = async (page)  => {
   const pseudotoken = `${fb.id}|${fb.secret}`;
   const url = `${fb.url}/${page}/subscribed_apps?access_token=${pseudotoken}`;
-  const json = { subscribed_fields: ['messages', 
+  const json = { subscribed_fields: ['messages',
                                      'message_echoes',
-                                     'messaging_account_linking', 
+                                     'messaging_account_linking',
                                      'messaging_optins',
                                      'messaging_postbacks',
                                      'messaging_referrals',
                                      'messaging_handovers',
                                      'messaging_fblogin_account_linking',
-                                     'messaging_account_linking']}
+                                     'messaging_account_linking',
+                                     'message_template_status_update']}
   const r = await r2.post(url, { json });
   if (r.error) {
     throw new Error(JSON.stringify(r.error))

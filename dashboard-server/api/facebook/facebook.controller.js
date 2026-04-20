@@ -29,7 +29,8 @@ exports.addWebhooks = async (req, res) => {
                         'messaging_referrals',
                         'message_echoes',
                         'messaging_handovers',
-                        'messaging_policy_enforcement']
+                        'messaging_policy_enforcement',
+                        'message_template_status_update']
   }
 
   const url = `${fb.url}/${pageid}/subscribed_apps?access_token=${token}`
