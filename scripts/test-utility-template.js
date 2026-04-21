@@ -89,22 +89,26 @@ function buildPayload(variant) {
         ],
       };
     case 'body_with_example':
-      // Full end-to-end dashboard-server shape: POSTBACK buttons + BODY
-      // placeholder with sample values (TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES
-      // workaround).
+      // Full end-to-end dashboard-server shape: POSTBACK buttons whose
+      // payload carries a {{1}} placeholder for the per-send field ref,
+      // plus a BODY with its own independent {{1}} for the appointment
+      // subject. BODY placeholders require sample values; POSTBACK payload
+      // placeholders do NOT accept an `example` field (FB rejects with
+      // error_subcode 2388051). Body text is worded as a utility reminder
+      // to avoid category-based rejection.
       return {
         ...base,
         components: [
           {
             type: 'BODY',
-            text: 'Hi {{1}}, your prize is {{2}}.',
-            example: { body_text: [['Alice', '$5']] },
+            text: 'This is a reminder that your appointment about {{1}} is scheduled for tomorrow at 10am. Please confirm below so we can prepare.',
+            example: { body_text: [['your annual checkup']] },
           },
           {
             type: 'BUTTONS',
             buttons: [
-              { type: 'POSTBACK', text: 'Claim', payload: '{"value":"Claim","ref":"{{1}}"}' },
-              { type: 'POSTBACK', text: 'Skip', payload: '{"value":"Skip","ref":"{{1}}"}' },
+              { type: 'POSTBACK', text: 'Confirm', payload: '{"value":"Confirm","ref":"{{1}}"}' },
+              { type: 'POSTBACK', text: 'Reschedule', payload: '{"value":"Reschedule","ref":"{{1}}"}' },
             ],
           },
         ],

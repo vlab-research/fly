@@ -103,6 +103,8 @@ Why `POSTBACK` and not `QUICK_REPLY`? Messenger's utility template API rejects `
 {"value":"<button-label>","ref":"{{1}}"}
 ```
 
+Unlike BODY placeholders, Facebook does **not** require (and in fact rejects) an `example` field on POSTBACK buttons — payload placeholders are considered internal and approved without samples. Returning an `example` here triggers `error_subcode: 2388051` ("Button at index N has unexpected field(s) (example)").
+
 At send time, `translateUtilityMessage` emits a per-button component with `sub_type: 'postback'` and a single `text` parameter carrying the actual field `ref`. Facebook substitutes `{{1}}` in the baked payload to produce the delivered payload:
 
 ```
