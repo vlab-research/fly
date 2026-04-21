@@ -355,14 +355,22 @@ Two separate issues were seen during rollout, both now resolved:
 2. Confirm Business Verification is complete on the business that owns the
    app — some Messenger permissions silently require this.
 
-### Open: BODY placeholder examples
+### BODY placeholder examples
 
 Facebook rejects any template whose BODY contains `{{N}}` placeholders but
 omits sample values, with `specific_rejection_reason: TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES`.
-The dashboard form does not currently collect example values, so users
-must avoid placeholders in the body or accept rejection. Follow-up work:
-detect placeholders in the form, render a sample-value field per placeholder,
-and emit `example: { body_text: [[...]] }` on the BODY component.
+
+The dashboard form detects `{{N}}` placeholders in the body field as the
+user types and renders one "Sample value" input per unique placeholder.
+The examples array is sent to dashboard-server as a positional array
+(examples[0] → {{1}}, examples[1] → {{2}}, …), validated server-side
+against placeholder count and sequentiality, and emitted on the BODY
+component as `example: { body_text: [examples] }` (a single variation).
+
+The examples are only used at approval time — the actual runtime values
+come from `params` in the survey JSON at send time. Placeholder numbering
+must be sequential starting from `{{1}}`; both the client (live validation)
+and server (rejection) enforce this.
 
 ---
 

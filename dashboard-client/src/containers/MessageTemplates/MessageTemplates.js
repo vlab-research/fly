@@ -18,6 +18,20 @@ const MAX_BODY_LENGTH = 1024;
 const POLL_INTERVAL_MS = 4000;
 const MAX_BUTTONS = 3;
 const BUTTON_LABEL_MAX = 20;
+const PLACEHOLDER_PATTERN = /\{\{(\d+)\}\}/g;
+
+// Returns the sorted, unique 1-based placeholder indices found in `body`.
+// Facebook requires one sample value per unique placeholder.
+const extractPlaceholderIndices = (body) => {
+  if (!body) return [];
+  const indices = new Set();
+  let match;
+  PLACEHOLDER_PATTERN.lastIndex = 0;
+  while ((match = PLACEHOLDER_PATTERN.exec(body)) !== null) {
+    indices.add(Number(match[1]));
+  }
+  return Array.from(indices).sort((a, b) => a - b);
+};
 
 const MessageTemplates = () => {
   const [pages, setPages] = useState([]);
@@ -25,6 +39,7 @@ const MessageTemplates = () => {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [placeholderIndices, setPlaceholderIndices] = useState([]);
   const [form] = Form.useForm();
 
   const pollRef = useRef(null);
@@ -100,6 +115,11 @@ const MessageTemplates = () => {
     }
     setSubmitting(true);
     try {
+      const indices = extractPlaceholderIndices(values.body);
+      const examples = indices.map((_, i) => {
+        const v = values.examples && values.examples[i];
+        return typeof v === 'string' ? v.trim() : '';
+      });
       const res = await api.fetcher({
         path: '/message-templates',
         method: 'POST',
@@ -110,6 +130,7 @@ const MessageTemplates = () => {
           body: values.body,
           buttons: (values.buttons || []).filter(b => b && b.label && b.label.trim())
                                           .map(b => ({ label: b.label.trim() })),
+          examples,
         },
       });
       const record = await res.json();
@@ -117,7 +138,8 @@ const MessageTemplates = () => {
         const byName = a.name.localeCompare(b.name);
         return byName !== 0 ? byName : a.language.localeCompare(b.language);
       }));
-      form.resetFields(['name', 'body', 'buttons']);
+      form.resetFields(['name', 'body', 'buttons', 'examples']);
+      setPlaceholderIndices([]);
       message.success('Template submitted to Facebook for approval');
 
       if (!pollRef.current) {
@@ -316,6 +338,19 @@ const MessageTemplates = () => {
                 rules={[
                   { required: true, message: 'Body is required' },
                   { max: MAX_BODY_LENGTH, message: `Body must be at most ${MAX_BODY_LENGTH} characters` },
+                  () => ({
+                    validator(_, value) {
+                      const idx = extractPlaceholderIndices(value);
+                      for (let i = 0; i < idx.length; i++) {
+                        if (idx[i] !== i + 1) {
+                          return Promise.reject(new Error(
+                            `Placeholders must be sequential starting from {{1}} (found {{${idx[i]}}} where {{${i + 1}}} expected)`
+                          ));
+                        }
+                      }
+                      return Promise.resolve();
+                    },
+                  }),
                 ]}
               >
                 <TextArea
@@ -323,8 +358,32 @@ const MessageTemplates = () => {
                   maxLength={MAX_BODY_LENGTH}
                   showCount
                   placeholder="Your {{1}} results are ready, {{2}}."
+                  onChange={e => setPlaceholderIndices(extractPlaceholderIndices(e.target.value))}
                 />
               </Form.Item>
+
+              {placeholderIndices.length > 0 && (
+                <Form.Item
+                  label="Sample values for placeholders"
+                  extra={(
+                    <span>
+                      Facebook requires a realistic example for every <Text code>{'{{N}}'}</Text> in the body.
+                      These are only used at approval time — actual values come from <Text code>params</Text> at send time.
+                    </span>
+                  )}
+                >
+                  {placeholderIndices.map((n, i) => (
+                    <Form.Item
+                      key={n}
+                      name={['examples', i]}
+                      rules={[{ required: true, message: `Sample value for {{${n}}} is required`, whitespace: true }]}
+                      style={{ marginBottom: 8 }}
+                    >
+                      <Input addonBefore={`{{${n}}}`} placeholder={`Sample value for {{${n}}}`} />
+                    </Form.Item>
+                  ))}
+                </Form.Item>
+              )}
 
               <Form.Item
                 label="Quick-reply buttons (optional)"

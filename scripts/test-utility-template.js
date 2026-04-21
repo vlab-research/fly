@@ -88,6 +88,27 @@ function buildPayload(variant) {
           },
         ],
       };
+    case 'body_with_example':
+      // Full end-to-end dashboard-server shape: POSTBACK buttons + BODY
+      // placeholder with sample values (TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES
+      // workaround).
+      return {
+        ...base,
+        components: [
+          {
+            type: 'BODY',
+            text: 'Hi {{1}}, your prize is {{2}}.',
+            example: { body_text: [['Alice', '$5']] },
+          },
+          {
+            type: 'BUTTONS',
+            buttons: [
+              { type: 'POSTBACK', text: 'Claim', payload: '{"value":"Claim","ref":"{{1}}"}' },
+              { type: 'POSTBACK', text: 'Skip', payload: '{"value":"Skip","ref":"{{1}}"}' },
+            ],
+          },
+        ],
+      };
     case 'single_button':
       return {
         ...base,

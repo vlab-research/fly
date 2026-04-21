@@ -6,6 +6,19 @@ const NAME_MAX_LENGTH = 512;
 const MAX_BUTTONS = 3;
 const BUTTON_LABEL_MAX = 20;
 const VALID_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'PAUSED', 'DISABLED'];
+const PLACEHOLDER_PATTERN = /\{\{(\d+)\}\}/g;
+
+// Returns the 1-based placeholder indices used in `body`, in sorted order.
+// Facebook requires a sample value per unique placeholder.
+function extractPlaceholderIndices(body) {
+  const indices = new Set();
+  let match;
+  PLACEHOLDER_PATTERN.lastIndex = 0;
+  while ((match = PLACEHOLDER_PATTERN.exec(body)) !== null) {
+    indices.add(Number(match[1]));
+  }
+  return Array.from(indices).sort((a, b) => a - b);
+}
 
 function validateButtons(buttons) {
   if (buttons === undefined || buttons === null) return { valid: true, normalized: [] };
@@ -34,7 +47,7 @@ function validateButtons(buttons) {
   return { valid: true, normalized };
 }
 
-function validateCreateInput({ pageId, name, language, body, buttons }) {
+function validateCreateInput({ pageId, name, language, body, buttons, examples }) {
   if (!pageId) return { valid: false, error: 'pageId is required' };
   if (!name) return { valid: false, error: 'name is required' };
   if (name.length > NAME_MAX_LENGTH) return { valid: false, error: `name exceeds ${NAME_MAX_LENGTH} characters` };
@@ -46,13 +59,44 @@ function validateCreateInput({ pageId, name, language, body, buttons }) {
   if (body.length > MAX_BODY_LENGTH) {
     return { valid: false, error: `body exceeds maximum length of ${MAX_BODY_LENGTH} characters` };
   }
+
+  const indices = extractPlaceholderIndices(body);
+  // Facebook requires placeholders to be sequential starting from {{1}}.
+  for (let i = 0; i < indices.length; i++) {
+    if (indices[i] !== i + 1) {
+      return { valid: false, error: `body placeholders must be sequential starting from {{1}} (found {{${indices[i]}}} at position ${i + 1})` };
+    }
+  }
+
+  const exampleList = Array.isArray(examples) ? examples : [];
+  if (indices.length > 0) {
+    if (exampleList.length !== indices.length) {
+      return { valid: false, error: `body has ${indices.length} placeholder(s); examples must provide ${indices.length} sample value(s)` };
+    }
+    for (let i = 0; i < exampleList.length; i++) {
+      if (typeof exampleList[i] !== 'string' || !exampleList[i].trim()) {
+        return { valid: false, error: `examples[${i}] must be a non-empty string` };
+      }
+    }
+  } else if (exampleList.length > 0) {
+    return { valid: false, error: 'examples must be empty when body has no {{N}} placeholders' };
+  }
+
   const btn = validateButtons(buttons);
   if (!btn.valid) return btn;
-  return { valid: true, buttons: btn.normalized };
+  return { valid: true, buttons: btn.normalized, examples: exampleList };
 }
 
-function buildFacebookCreatePayload({ name, language, body, buttons }) {
-  const components = [{ type: 'BODY', text: body }];
+function buildFacebookCreatePayload({ name, language, body, buttons, examples }) {
+  const bodyComponent = { type: 'BODY', text: body };
+  // Facebook requires sample values for every {{N}} placeholder; templates
+  // without them are rejected with TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES.
+  // The `example.body_text` field is an array-of-arrays (outer = variation,
+  // inner = positional samples matching {{1}}, {{2}}, …). We send one variation.
+  if (Array.isArray(examples) && examples.length > 0) {
+    bodyComponent.example = { body_text: [examples.map(String)] };
+  }
+  const components = [bodyComponent];
   if (Array.isArray(buttons) && buttons.length > 0) {
     // POSTBACK buttons are the only interactive type Messenger utility
     // templates accept (QUICK_REPLY is rejected with a "Fatal" error at
@@ -138,6 +182,7 @@ module.exports = {
   MAX_BUTTONS,
   BUTTON_LABEL_MAX,
   VALID_STATUSES,
+  extractPlaceholderIndices,
   validateButtons,
   validateCreateInput,
   buildFacebookCreatePayload,

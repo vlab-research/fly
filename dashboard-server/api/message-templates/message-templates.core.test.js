@@ -4,6 +4,7 @@ const chai = require('chai');
 const should = chai.should(); // eslint-disable-line no-unused-vars
 
 const {
+  extractPlaceholderIndices,
   validateButtons,
   validateCreateInput,
   buildFacebookCreatePayload,
@@ -19,13 +20,66 @@ const {
 
 describe('message-templates.core', () => {
   // -------------------------------------------------------
+  // extractPlaceholderIndices — parses {{N}} tokens in the body
+  // -------------------------------------------------------
+  describe('extractPlaceholderIndices', () => {
+    it('returns [] for a body without placeholders', () => {
+      extractPlaceholderIndices('static text only').should.deep.equal([]);
+    });
+
+    it('extracts unique sorted indices from duplicated placeholders', () => {
+      extractPlaceholderIndices('Hi {{2}}, again {{1}}, {{2}}').should.deep.equal([1, 2]);
+    });
+
+    it('handles null/empty bodies gracefully', () => {
+      extractPlaceholderIndices('').should.deep.equal([]);
+    });
+  });
+
+  // -------------------------------------------------------
   // validateCreateInput — branching validation logic
   // -------------------------------------------------------
   describe('validateCreateInput', () => {
-    const valid = { pageId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}' };
+    const valid = { pageId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
 
     it('accepts complete, correct input', () => {
-      validateCreateInput(valid).should.deep.equal({ valid: true, buttons: [] });
+      validateCreateInput(valid).should.deep.equal({ valid: true, buttons: [], examples: ['Alice'] });
+    });
+
+    it('accepts a body without placeholders and no examples', () => {
+      const r = validateCreateInput({ ...valid, body: 'No placeholders here.', examples: undefined });
+      r.valid.should.equal(true);
+      r.examples.should.deep.equal([]);
+    });
+
+    it('rejects a body with placeholders but no examples', () => {
+      const r = validateCreateInput({ ...valid, examples: undefined });
+      r.valid.should.equal(false);
+      r.error.should.match(/examples/);
+    });
+
+    it('rejects examples count mismatched with placeholder count', () => {
+      const r = validateCreateInput({ ...valid, body: 'Hi {{1}} and {{2}}', examples: ['Alice'] });
+      r.valid.should.equal(false);
+      r.error.should.match(/2 placeholder/);
+    });
+
+    it('rejects non-sequential placeholders (e.g. body uses {{2}} without {{1}})', () => {
+      const r = validateCreateInput({ ...valid, body: 'Hi {{2}}', examples: ['Alice'] });
+      r.valid.should.equal(false);
+      r.error.should.match(/sequential/);
+    });
+
+    it('rejects empty-string example values', () => {
+      const r = validateCreateInput({ ...valid, examples: ['  '] });
+      r.valid.should.equal(false);
+      r.error.should.match(/examples\[0\]/);
+    });
+
+    it('rejects examples supplied when body has no placeholders', () => {
+      const r = validateCreateInput({ ...valid, body: 'Static text.', examples: ['stray'] });
+      r.valid.should.equal(false);
+      r.error.should.match(/no \{\{N\}\} placeholders/);
     });
 
     it('rejects missing pageId', () => {
@@ -60,7 +114,7 @@ describe('message-templates.core', () => {
     });
 
     it('accepts digits and underscores in name', () => {
-      validateCreateInput({ ...valid, name: 'prize_2_ready' }).should.deep.equal({ valid: true, buttons: [] });
+      validateCreateInput({ ...valid, name: 'prize_2_ready' }).should.deep.equal({ valid: true, buttons: [], examples: ['Alice'] });
     });
 
     it('rejects missing language', () => {
@@ -82,8 +136,8 @@ describe('message-templates.core', () => {
     });
 
     it('accepts body at exactly the character limit (boundary)', () => {
-      const r = validateCreateInput({ ...valid, body: 'x'.repeat(MAX_BODY_LENGTH) });
-      r.should.deep.equal({ valid: true, buttons: [] });
+      const r = validateCreateInput({ ...valid, body: 'x'.repeat(MAX_BODY_LENGTH), examples: undefined });
+      r.should.deep.equal({ valid: true, buttons: [], examples: [] });
     });
 
     it('reports pageId error before name when both are missing', () => {
@@ -147,13 +201,33 @@ describe('message-templates.core', () => {
   // -------------------------------------------------------
   describe('buildFacebookCreatePayload', () => {
     it('builds the canonical UTILITY template shape', () => {
-      const payload = buildFacebookCreatePayload({ name: 'prize', language: 'en_US', body: 'Hi {{1}}' });
+      const payload = buildFacebookCreatePayload({ name: 'prize', language: 'en_US', body: 'No placeholders.' });
       payload.should.deep.equal({
         name: 'prize',
         language: 'en_US',
         category: 'UTILITY',
-        components: [{ type: 'BODY', text: 'Hi {{1}}' }],
+        components: [{ type: 'BODY', text: 'No placeholders.' }],
       });
+    });
+
+    it('attaches example.body_text when placeholder examples are supplied', () => {
+      // Facebook rejects templates with {{N}} placeholders and no samples
+      // (TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES). The examples array maps
+      // positionally to {{1}}, {{2}}, … and is sent as a single variation
+      // in example.body_text.
+      const payload = buildFacebookCreatePayload({
+        name: 'prize', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'],
+      });
+      payload.components[0].should.deep.equal({
+        type: 'BODY',
+        text: 'Hi {{1}}',
+        example: { body_text: [['Alice']] },
+      });
+    });
+
+    it('omits the example field when no examples are supplied', () => {
+      const payload = buildFacebookCreatePayload({ name: 'x', language: 'en_US', body: 'hi' });
+      payload.components[0].should.not.have.property('example');
     });
 
     it('always sets category to UTILITY (never promotional/auth)', () => {

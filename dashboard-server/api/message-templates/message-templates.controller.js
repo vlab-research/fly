@@ -28,13 +28,14 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
 
   async function create(req, res) {
     const { email } = req.user;
-    const { pageId, name, language, body, buttons } = req.body;
+    const { pageId, name, language, body, buttons, examples } = req.body;
 
-    const validation = validateCreateInput({ pageId, name, language, body, buttons });
+    const validation = validateCreateInput({ pageId, name, language, body, buttons, examples });
     if (!validation.valid) {
       return res.status(400).json({ error: validation.error });
     }
     const normalizedButtons = validation.buttons || [];
+    const normalizedExamples = validation.examples || [];
 
     try {
       const pageToken = await getPageToken(email, pageId);
@@ -42,7 +43,9 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
         return res.status(404).json({ error: 'Page not found or not connected' });
       }
 
-      const payload = buildFacebookCreatePayload({ name, language, body, buttons: normalizedButtons });
+      const payload = buildFacebookCreatePayload({
+        name, language, body, buttons: normalizedButtons, examples: normalizedExamples,
+      });
       const fbResponse = await createTemplate(pageId, pageToken, payload);
       const parsed = parseCreateResponse(fbResponse);
 
