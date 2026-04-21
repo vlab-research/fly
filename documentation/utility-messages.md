@@ -91,13 +91,25 @@ wording *or buttons*, delete and recreate.
 usually auto-approve in seconds. Rejected rows carry a tooltip-visible rejection
 reason surfaced from Facebook's `rejected_reason` field.
 
-### Quick-reply buttons
+### Postback buttons
 
-A template can declare up to 3 [`QUICK_REPLY`](https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates/components#quick-reply-buttons) buttons. **Labels are fixed at approval time** — Facebook renders them; we can't change them after the fact. Per-send **payloads** (what the survey logic branches on) come from the survey JSON, not the template.
+A template can declare up to 3 `POSTBACK` buttons. **Labels are fixed at approval time** — Facebook renders them; we can't change them after the fact. The per-button `value` (what the survey logic branches on) is also baked in at approval time. Only the survey field `ref` is substituted per send.
 
-Why `QUICK_REPLY` and not postback buttons? Taps on `QUICK_REPLY` buttons arrive as a Messenger `message.quick_reply` event — the same webhook shape native Messenger quick replies use. Replybot's existing `QUICK_REPLY` handler (`replybot/lib/typewheels/machine.js:473-486`) already parses `{value, ref}` payloads, so button taps need no new code paths. Postback buttons (from `translateButtonChoice`) go through a different webhook (`messaging_postbacks`) and would require parallel plumbing — we intentionally avoid that.
+Why `POSTBACK` and not `QUICK_REPLY`? Messenger's utility template API rejects `QUICK_REPLY` at template creation with a `Fatal` error (`error_subcode: 2018416`) — `POSTBACK`, `URL`, and `PHONE_NUMBER` are the only accepted button types. This was validated by direct testing against v25.0 of the Graph API (see `scripts/test-utility-template.js`).
 
-The translator emits per-button payloads as `JSON.stringify({value, ref})`, mirroring `makeMultipleChoice` at `translate-typeform/translate-fields.js:37`.
+**How per-send `ref` substitution works**. Each approved button carries a payload of the form:
+
+```
+{"value":"<button-label>","ref":"{{1}}"}
+```
+
+At send time, `translateUtilityMessage` emits a per-button component with `sub_type: 'postback'` and a single `text` parameter carrying the actual field `ref`. Facebook substitutes `{{1}}` in the baked payload to produce the delivered payload:
+
+```
+{"value":"<button-label>","ref":"<actual-field-ref>"}
+```
+
+Taps arrive as a `messaging_postbacks` webhook event. Replybot's existing `POSTBACK` case handler (`replybot/lib/typewheels/machine.js:463-471`) already extracts `postback.payload.value` and advances the state machine identically to a `QUICK_REPLY` tap — no new code paths are needed. The `messaging_postbacks` field is already in the `subscribed_apps` list created by the dashboard's `addWebhooks` call.
 
 ---
 
@@ -184,18 +196,18 @@ so the request Facebook receives looks like:
           },
           {
             "type": "button",
-            "sub_type": "quick_reply",
+            "sub_type": "postback",
             "index": 0,
             "parameters": [
-              { "type": "payload", "payload": "{\"value\":\"yes\",\"ref\":\"<field-ref>\"}" }
+              { "type": "text", "text": "<field-ref>" }
             ]
           },
           {
             "type": "button",
-            "sub_type": "quick_reply",
+            "sub_type": "postback",
             "index": 1,
             "parameters": [
-              { "type": "payload", "payload": "{\"value\":\"no\",\"ref\":\"<field-ref>\"}" }
+              { "type": "text", "text": "<field-ref>" }
             ]
           }
         ]
@@ -207,9 +219,11 @@ so the request Facebook receives looks like:
 ```
 
 No changes were needed in replybot's send layer — the `sendParams` mechanism
-already hoists top-level fields from the translated payload. Button payloads
-use the same `{value, ref}` shape as `translateMultipleChoice`, so taps come
-back on the existing `QUICK_REPLY` code path.
+already hoists top-level fields from the translated payload. Button taps arrive
+as `messaging_postbacks` events and are handled by the existing POSTBACK branch
+in `replybot/lib/typewheels/machine.js:463-471`, which extracts
+`postback.payload.value` exactly the same way the QUICK_REPLY branch extracts
+`quick_reply.payload.value`.
 
 ---
 
@@ -256,14 +270,16 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 | Send fails with "template not found" | The `(template, language)` pair in survey JSON does not match any APPROVED row. Check spelling and create the missing language variant. |
 | Unique constraint error on create | A template with that `(name, language)` on this page already exists. Use a different name or delete the existing row first. |
 | Send fails with "placeholder count mismatch" | Survey `params` array length does not match the number of `{{N}}` placeholders in the approved body. Count and align. |
+| Template rejected with `TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES` | Facebook requires sample values for every `{{N}}` placeholder in the BODY. The dashboard currently does not collect these — if a body uses placeholders, either remove them or provide examples at creation time (see "Examples / sample values" section). |
+| Template creation returns `{"error":"Fatal"}` (subcode `2018416`) | The template BUTTONS component uses `QUICK_REPLY`. Messenger utility templates only accept `POSTBACK`, `URL`, or `PHONE_NUMBER` at creation. Use `buildFacebookCreatePayload`'s current POSTBACK output. |
 
 ---
 
 ## Deployment notes
 
 1. Run `devops/migrations/13-message-templates.sql` and `devops/migrations/14-message-templates-buttons.sql` on CockroachDB
-2. Publish `@vlab-research/translate-typeform@0.2.10` to npm
-3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.10`) and redeploy
+2. Publish `@vlab-research/translate-typeform@0.2.11` to npm
+3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.11`) and redeploy
 4. Redeploy dashboard-server and dashboard-client
 
 ---
@@ -317,39 +333,36 @@ one successful test API call (`POST /{pageId}/message_templates`) on the
 permission. The button can take up to 24h to activate after the first
 successful call.
 
-### Known issue — April 2026
+### Resolved: the `#10` and `Fatal` errors
 
-Even with all four steps above completed, `POST /{pageId}/message_templates`
-can return:
+Two separate issues were seen during rollout, both now resolved:
 
-```
-(#10) Application does not have permission for this action
-```
+1. `(#10) Application does not have permission for this action` — seen on
+   pages owned by a business that wasn't the one connected to the app. The
+   fix was to create the template from a page connected to the same business
+   as the Facebook App.
 
-A Meta bug investigator looking at app `699455733740842` reported that they
-"couldn't find any standard access permissions" on the app backend, despite
-the App Review UI showing Standard Access as granted for
-`pages_utility_messaging`. This appears to be a backend/UI mismatch on
-Meta's side.
-
-**Things verified NOT to be the cause:**
-- OAuth scope missing or misnamed — scope is present in the issued token
-- Graph API version too old — on v22.0
-- Wrong endpoint — `/{pageId}/message_templates` is confirmed correct for
-  Messenger; WhatsApp's equivalent uses WABA IDs, not page IDs
-- Missing `message_template_status_update` webhook subscription — added
-- User without a role on the app — same developer connecting the page
+2. `{"error":"Fatal"}` (Graph `error_subcode: 2018416`, user title
+   "Message Template Creation Failed") — returned whenever the template's
+   BUTTONS component used `type: QUICK_REPLY`. Messenger utility templates
+   reject `QUICK_REPLY` at creation; only `POSTBACK`, `URL`, and
+   `PHONE_NUMBER` are accepted. Fixed by switching to `POSTBACK` with a
+   `{{1}}`-templated payload (see "Postback buttons" section).
 
 **Next steps when resuming:**
 1. Wait ≥24h after the permission was granted in the portal — Meta's
    permission state can take time to propagate.
 2. Confirm Business Verification is complete on the business that owns the
    app — some Messenger permissions silently require this.
-3. Follow up with the Meta bug investigator; the key question is whether
-   `pages_utility_messaging` is actually granted at the app backend for
-   `699455733740842`, not just displayed as granted in the UI. Make clear
-   this is about Messenger, not WhatsApp — the token happens to also carry
-   WhatsApp scopes which can mislead triage.
+
+### Open: BODY placeholder examples
+
+Facebook rejects any template whose BODY contains `{{N}}` placeholders but
+omits sample values, with `specific_rejection_reason: TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES`.
+The dashboard form does not currently collect example values, so users
+must avoid placeholders in the body or accept rejection. Follow-up work:
+detect placeholders in the form, render a sample-value field per placeholder,
+and emit `example: { body_text: [[...]] }` on the BODY component.
 
 ---
 

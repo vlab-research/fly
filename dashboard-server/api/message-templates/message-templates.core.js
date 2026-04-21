@@ -54,9 +54,20 @@ function validateCreateInput({ pageId, name, language, body, buttons }) {
 function buildFacebookCreatePayload({ name, language, body, buttons }) {
   const components = [{ type: 'BODY', text: body }];
   if (Array.isArray(buttons) && buttons.length > 0) {
+    // POSTBACK buttons are the only interactive type Messenger utility
+    // templates accept (QUICK_REPLY is rejected with a "Fatal" error at
+    // creation time). POSTBACK requires a payload at template time, so we
+    // bake in the per-button value and leave a {{1}} placeholder for the
+    // survey field ref — the ref is identical across all buttons of one
+    // field, so a single placeholder suffices. At send time, translate-
+    // typeform substitutes the real ref.
     components.push({
       type: 'BUTTONS',
-      buttons: buttons.map(b => ({ type: 'QUICK_REPLY', text: b.label })),
+      buttons: buttons.map(b => ({
+        type: 'POSTBACK',
+        text: b.label,
+        payload: JSON.stringify({ value: b.label, ref: '{{1}}' }),
+      })),
     });
   }
   return {

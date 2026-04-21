@@ -163,7 +163,11 @@ describe('message-templates.core', () => {
       payload.category.should.equal('UTILITY');
     });
 
-    it('appends a BUTTONS component with QUICK_REPLY entries when buttons are supplied', () => {
+    it('appends a BUTTONS component with POSTBACK entries when buttons are supplied', () => {
+      // Messenger utility templates reject QUICK_REPLY at creation (Fatal
+      // error); POSTBACK is the only interactive button type accepted. We
+      // bake in the per-button value and leave {{1}} for the survey ref,
+      // which translate-typeform substitutes at send time.
       const payload = buildFacebookCreatePayload({
         name: 'x', language: 'en_US', body: 'b',
         buttons: [{ label: 'Yes' }, { label: 'No' }],
@@ -172,8 +176,8 @@ describe('message-templates.core', () => {
       payload.components[1].should.deep.equal({
         type: 'BUTTONS',
         buttons: [
-          { type: 'QUICK_REPLY', text: 'Yes' },
-          { type: 'QUICK_REPLY', text: 'No' },
+          { type: 'POSTBACK', text: 'Yes', payload: '{"value":"Yes","ref":"{{1}}"}' },
+          { type: 'POSTBACK', text: 'No', payload: '{"value":"No","ref":"{{1}}"}' },
         ],
       });
     });
