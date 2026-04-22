@@ -15,7 +15,7 @@ import FacebookPages from './containers/FacebookPages';
 import Reloadly from './containers/Reloadly';
 import Secrets from './containers/Secrets';
 import Media from './containers/Media';
-import MessageTemplates, { NewMessageTemplate } from './containers/MessageTemplates';
+import MessageTemplates, { NewMessageTemplate, TemplateDetail } from './containers/MessageTemplates';
 
 const handleAuthentication = ({ location }) => {
   if (/access_token|id_token|error/.test(location.hash)) {
@@ -46,6 +46,7 @@ const Root = () => (
       <PrivateRoute exact path="/media" component={Media} auth={Auth} />
       <PrivateRoute exact path="/message-templates" component={MessageTemplates} auth={Auth} />
       <PrivateRoute exact path="/message-templates/new" component={NewMessageTemplate} auth={Auth} />
+      <PrivateRoute exact path="/message-templates/:id" component={TemplateDetail} auth={Auth} />
       <PrivateRoute exact path="/exports/create-full-messages" component={CreateFullMessagesExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create-chat-log" component={CreateChatLogExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create" component={CreateExport} auth={Auth} />

@@ -160,7 +160,25 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
     }
   }
 
-  return { create, list, remove };
+  async function getOne(req, res) {
+    const { email } = req.user;
+    const { id } = req.params;
+    try {
+      const row = await templateQuery.get({ email, id });
+      if (!row) return res.status(404).json({ error: 'Template not found' });
+
+      if (row.status === 'PENDING') {
+        await refreshPendingRows([row], email);
+      }
+
+      return res.status(200).json(formatRecord(row));
+    } catch (e) {
+      console.error('message-templates getOne error:', e);
+      return res.status(500).json({ error: e.message || 'Internal server error' });
+    }
+  }
+
+  return { create, list, getOne, remove };
 }
 
 module.exports = { makeHandlers };

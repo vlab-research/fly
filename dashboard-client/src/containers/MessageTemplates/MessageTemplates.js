@@ -3,7 +3,7 @@ import React, {
 } from 'react';
 import {
   Layout, Table, Tag, message, Card, Tooltip,
-  Button, Popconfirm, Typography,
+  Button, Popconfirm, Space, Typography,
 } from 'antd';
 import { CheckCircleTwoTone, CloseCircleTwoTone, LoadingOutlined } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
@@ -115,14 +115,23 @@ const MessageTemplates = () => {
   };
 
   const renderActions = (_, row) => (
-    <Popconfirm
-      title="Delete this template?"
-      okText="Delete"
-      okButtonProps={{ danger: true }}
-      onConfirm={() => onDelete(row.id)}
-    >
-      <Button danger size="small" type="link">Delete</Button>
-    </Popconfirm>
+    <Space>
+      <Button
+        size="small"
+        type="link"
+        onClick={() => history.push(`/message-templates/${row.id}`)}
+      >
+        View
+      </Button>
+      <Popconfirm
+        title="Delete this template?"
+        okText="Delete"
+        okButtonProps={{ danger: true }}
+        onConfirm={() => onDelete(row.id)}
+      >
+        <Button danger size="small" type="link">Delete</Button>
+      </Popconfirm>
+    </Space>
   );
 
   const columns = [

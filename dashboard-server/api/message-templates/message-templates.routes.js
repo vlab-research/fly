@@ -22,6 +22,7 @@ const handlers = makeHandlers({
 router
   .post('/', handlers.create)
   .get('/', handlers.list)
+  .get('/:id', handlers.getOne)
   .delete('/:id', handlers.remove);
 
 module.exports = router;
