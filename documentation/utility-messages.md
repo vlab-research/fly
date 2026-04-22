@@ -157,10 +157,6 @@ labels, because the approved payload bakes in `value == label` at creation
 time — the label is both what the user sees and what the survey branches
 on.
 
-Do **not** set `keepMoving: true` on a `multiple_choice` utility message —
-you want the survey to wait for the user's tap so logic jumps can branch on
-the response.
-
 Survey JSON equivalent (multiple_choice wiring):
 
 ```json
