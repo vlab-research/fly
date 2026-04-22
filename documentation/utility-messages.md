@@ -132,9 +132,14 @@ why `fb_template_id` is stored on every row.
 
 ## Survey JSON shape
 
-Place in a Typeform statement's description as YAML. Both `template` and `language`
-are required. `params` is a positional array, matching Facebook's `{{1}}`, `{{2}}`, …
-numbering in the approved body:
+**Question type**: if the approved template has buttons, the Typeform
+question must be a `multiple_choice` — its `properties.choices` define the
+buttons and Typeform's native logic editor branches on their labels. If the
+template is text-only, any statement-style question works.
+
+The utility-message metadata lives in the question's description as YAML.
+Both `template` and `language` are required. `params` is a positional array
+matching the approved body's `{{1}}`, `{{2}}`, … placeholders:
 
 ```yaml
 type: utility_message
@@ -143,24 +148,35 @@ language: en_US
 params:
   - "{{hidden:name}}"
   - "$5"
-buttons:   # optional; one value per button on the approved template, in order
-  - "yes"
-  - "no"
 ```
 
-Omit `buttons` entirely for a text-only template. Do **not** set `keepMoving: true` when the template has buttons — you want the survey to wait for the user's tap so logic jumps can branch on the response.
+The `buttons` key is **no longer used** — button labels come from the
+question's own `properties.choices` (the same place Typeform's logic editor
+reads them). The choice labels must equal the approved template's button
+labels, because the approved payload bakes in `value == label` at creation
+time — the label is both what the user sees and what the survey branches
+on.
 
-Survey JSON equivalent:
+Do **not** set `keepMoving: true` on a `multiple_choice` utility message —
+you want the survey to wait for the user's tap so logic jumps can branch on
+the response.
+
+Survey JSON equivalent (multiple_choice wiring):
 
 ```json
 {
-  "type": "utility_message",
-  "template": "prize_notification",
-  "language": "en_US",
-  "params": ["{{hidden:name}}", "$5"],
-  "buttons": ["yes", "no"]
+  "type": "multiple_choice",
+  "properties": {
+    "description": "type: utility_message\ntemplate: prize_notification\nlanguage: en_US\nparams:\n  - \"{{hidden:name}}\"\n  - \"$5\"",
+    "choices": [{ "label": "yes" }, { "label": "no" }]
+  }
 }
 ```
+
+If the `choices` count doesn't match the approved template's button count,
+Facebook will reject the send (or deliver a malformed template). The
+translator does not pre-validate against the stored template record — the
+error surfaces at send time and flows through replybot's normal error path.
 
 **Hidden-field interpolation** happens on `properties.description` as a string
 *before* the YAML is parsed (`replybot/lib/typewheels/form.js` `interpolateField`
@@ -280,8 +296,8 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 ## Deployment notes
 
 1. Run `devops/migrations/13-message-templates.sql` and `devops/migrations/14-message-templates-buttons.sql` on CockroachDB
-2. Publish `@vlab-research/translate-typeform@0.2.11` to npm
-3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.11`) and redeploy
+2. Publish `@vlab-research/translate-typeform@0.2.12` to npm
+3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.12`) and redeploy
 4. Redeploy dashboard-server and dashboard-client
 
 ---
