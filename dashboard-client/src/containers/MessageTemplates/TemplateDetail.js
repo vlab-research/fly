@@ -118,11 +118,11 @@ const TemplateDetail = () => {
           </Descriptions>
         </Card>
 
-        {template.status === 'REJECTED' && template.rejection_reason && (
+        {template.status === 'REJECTED' && (
           <Alert
             type="error"
             message="Rejection reason"
-            description={template.rejection_reason}
+            description={template.rejection_reason || 'No reason was provided by Facebook.'}
             showIcon
             style={{ marginBottom: 24 }}
           />
