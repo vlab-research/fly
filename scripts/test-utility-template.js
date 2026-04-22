@@ -88,6 +88,25 @@ function buildPayload(variant) {
           },
         ],
       };
+    case 'user_repro':
+      // Reproduces the exact shape the dashboard is currently sending that
+      // fails with "Fatal" — one BODY placeholder, one POSTBACK button.
+      return {
+        ...base,
+        components: [
+          {
+            type: 'BODY',
+            text: "Hello!\n\nThank you for taking part in our previous survey.  We're back with the next survey you requested and the additional {{1}}.\n\nReady to get started?",
+            example: { body_text: [['$5 in mobile credit']] },
+          },
+          {
+            type: 'BUTTONS',
+            buttons: [
+              { type: 'POSTBACK', text: 'Yes!', payload: '{"value":"Yes!","ref":"{{1}}"}' },
+            ],
+          },
+        ],
+      };
     case 'body_with_example':
       // Full end-to-end dashboard-server shape: POSTBACK buttons whose
       // payload carries a {{1}} placeholder for the per-send field ref,
