@@ -61,6 +61,7 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
         language,
         body,
         status: parsed.status,
+        rejectionReason: parsed.rejectionReason,
         buttons: normalizedButtons,
       });
 
@@ -77,26 +78,25 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
   }
 
   async function refreshTemplateStatus(rows, email) {
-    // Refresh PENDING rows (status may have changed) and REJECTED rows that
-    // still have no reason (Facebook sometimes populates it on a later poll).
-    const toRefresh = rows.filter(r => r.status === 'PENDING' || (r.status === 'REJECTED' && !r.rejection_reason));
-    if (toRefresh.length === 0) return;
+    // Only PENDING rows can transition — Facebook's GET endpoint never returns
+    // rejection_reason or specific_rejection_reason, so polling REJECTED rows
+    // is useless. Rejection reasons are captured from the create response only.
+    const pending = rows.filter(r => r.status === 'PENDING');
+    if (pending.length === 0) return;
 
-    const pageIds = [...new Set(toRefresh.map(r => r.facebook_page_id))];
+    const pageIds = [...new Set(pending.map(r => r.facebook_page_id))];
     for (const pid of pageIds) {
       const pageToken = await getPageToken(email, pid);
       if (!pageToken) continue;
-      const namesToRefresh = [...new Set(toRefresh.filter(r => r.facebook_page_id === pid).map(r => r.name))];
+      const namesToRefresh = [...new Set(pending.filter(r => r.facebook_page_id === pid).map(r => r.name))];
       for (const name of namesToRefresh) {
         try {
           const fbResponse = await getTemplatesByName(pid, pageToken, name);
           const fbEntries = parseListResponse(fbResponse);
-          const rowsWithName = toRefresh.filter(r => r.facebook_page_id === pid && r.name === name);
+          const rowsWithName = pending.filter(r => r.facebook_page_id === pid && r.name === name);
           for (const row of rowsWithName) {
             const entry = matchFbEntry(row, fbEntries);
-            const statusChanged = entry && entry.status !== row.status;
-            const reasonArrived = entry && entry.rejectionReason && !row.rejection_reason;
-            if (statusChanged || reasonArrived) {
+            if (entry && entry.status !== row.status) {
               const updated = await templateQuery.updateStatus({
                 id: row.id,
                 status: entry.status,

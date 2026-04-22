@@ -129,11 +129,18 @@ function parseCreateResponse(fbResponseBody) {
   if (fbResponseBody.error) {
     return { ok: false, error: fbResponseBody.error };
   }
-  // FB returns { id: "...", status: "APPROVED|PENDING|REJECTED", category: "UTILITY" }
+  // FB returns { id, status, category, rejection_reason?, specific_rejection_reason? }
+  // specific_rejection_reason is more descriptive; rejection_reason is the broad category.
+  // The GET polling endpoint never returns these fields — they must be saved from the
+  // create response only.
+  const rejectionReason = fbResponseBody.specific_rejection_reason
+    || fbResponseBody.rejection_reason
+    || null;
   return {
     ok: true,
     fbTemplateId: fbResponseBody.id || null,
     status: normalizeStatus(fbResponseBody.status) || 'PENDING',
+    rejectionReason,
   };
 }
 
