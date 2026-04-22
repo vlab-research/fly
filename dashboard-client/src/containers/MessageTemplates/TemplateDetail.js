@@ -122,7 +122,7 @@ const TemplateDetail = () => {
           <Alert
             type="error"
             message="Rejection reason"
-            description={template.rejection_reason || 'No reason was provided by Facebook.'}
+            description={template.rejection_reason || '—'}
             showIcon
             style={{ marginBottom: 24 }}
           />
