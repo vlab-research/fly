@@ -5,7 +5,9 @@ import { Layout } from 'antd';
 import {
   App, LoginScreen, Surveys, ApiKeys, CreateExport, CreateChatLogExport, CreateFullMessagesExport,
 } from './containers';
-import { BailSystems, BailForm, BailEvents, BailEventDetail } from './containers/BailSystems';
+import {
+  BailSystems, BailForm, BailEvents, BailEventDetail,
+} from './containers/BailSystems';
 import { PrivateRoute, Spinner } from './components';
 import { TypeformCreateAuth } from './components/TypeformCreate/TypeformCreate';
 import { Auth, History } from './services';
@@ -13,7 +15,7 @@ import FacebookPages from './containers/FacebookPages';
 import Reloadly from './containers/Reloadly';
 import Secrets from './containers/Secrets';
 import Media from './containers/Media';
-import MessageTemplates from './containers/MessageTemplates';
+import MessageTemplates, { NewMessageTemplate } from './containers/MessageTemplates';
 
 const handleAuthentication = ({ location }) => {
   if (/access_token|id_token|error/.test(location.hash)) {
@@ -43,6 +45,7 @@ const Root = () => (
       <PrivateRoute exact path="/bails" component={BailSystems} auth={Auth} />
       <PrivateRoute exact path="/media" component={Media} auth={Auth} />
       <PrivateRoute exact path="/message-templates" component={MessageTemplates} auth={Auth} />
+      <PrivateRoute exact path="/message-templates/new" component={NewMessageTemplate} auth={Auth} />
       <PrivateRoute exact path="/exports/create-full-messages" component={CreateFullMessagesExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create-chat-log" component={CreateChatLogExport} auth={Auth} />
       <PrivateRoute exact path="/exports/create" component={CreateExport} auth={Auth} />

@@ -40,6 +40,19 @@ async function list({ email, facebookPageId }) {
   return rows;
 }
 
+async function listAll({ email }) {
+  const q = `
+    SELECT m.id, m.facebook_page_id, m.fb_template_id, m.name, m.language,
+           m.body, m.status, m.rejection_reason, m.buttons, m.created, m.updated
+    FROM message_templates m
+    JOIN users u ON m.userid = u.id
+    WHERE u.email = $1
+    ORDER BY m.name ASC, m.language ASC
+  `;
+  const { rows } = await this.query(q, [email]);
+  return rows;
+}
+
 async function get({ email, id }) {
   const q = `
     SELECT m.id, m.facebook_page_id, m.fb_template_id, m.name, m.language,
@@ -86,6 +99,7 @@ module.exports = {
   queries: pool => ({
     create: create.bind(pool),
     list: list.bind(pool),
+    listAll: listAll.bind(pool),
     get: get.bind(pool),
     updateStatus: updateStatus.bind(pool),
     remove: remove.bind(pool),

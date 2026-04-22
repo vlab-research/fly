@@ -76,47 +76,49 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
     }
   }
 
+  async function refreshPendingRows(rows, email) {
+    const pending = rows.filter(r => r.status === 'PENDING');
+    if (pending.length === 0) return;
+
+    const pageIds = [...new Set(pending.map(r => r.facebook_page_id))];
+    for (const pid of pageIds) {
+      const pageToken = await getPageToken(email, pid);
+      if (!pageToken) continue;
+      const namesToRefresh = [...new Set(pending.filter(r => r.facebook_page_id === pid).map(r => r.name))];
+      for (const name of namesToRefresh) {
+        try {
+          const fbResponse = await getTemplatesByName(pid, pageToken, name);
+          const fbEntries = parseListResponse(fbResponse);
+          const rowsWithName = rows.filter(r => r.facebook_page_id === pid && r.name === name && r.status === 'PENDING');
+          for (const row of rowsWithName) {
+            const entry = matchFbEntry(row, fbEntries);
+            if (entry && entry.status !== row.status) {
+              const updated = await templateQuery.updateStatus({
+                id: row.id,
+                status: entry.status,
+                rejectionReason: entry.rejectionReason,
+                fbTemplateId: entry.fbTemplateId,
+              });
+              Object.assign(row, updated);
+            }
+          }
+        } catch (refreshErr) {
+          console.error(`Failed to refresh template status for "${name}":`, refreshErr);
+        }
+      }
+    }
+  }
+
   async function list(req, res) {
     const { email } = req.user;
     const { pageId } = req.query;
 
-    if (!pageId) {
-      return res.status(400).json({ error: 'pageId query parameter is required' });
-    }
-
     try {
-      const rows = await templateQuery.list({ email, facebookPageId: pageId });
+      const rows = pageId
+        ? await templateQuery.list({ email, facebookPageId: pageId })
+        : await templateQuery.listAll({ email });
 
-      const pending = rows.filter(r => r.status === 'PENDING');
-      if (pending.length > 0) {
-        const pageToken = await getPageToken(email, pageId);
-        if (pageToken) {
-          const namesToRefresh = [...new Set(pending.map(r => r.name))];
-          for (const name of namesToRefresh) {
-            try {
-              const fbResponse = await getTemplatesByName(pageId, pageToken, name);
-              const fbEntries = parseListResponse(fbResponse);
-              const rowsWithName = rows.filter(r => r.name === name && r.status === 'PENDING');
-              for (const row of rowsWithName) {
-                const entry = matchFbEntry(row, fbEntries);
-                if (entry && entry.status !== row.status) {
-                  const updated = await templateQuery.updateStatus({
-                    id: row.id,
-                    status: entry.status,
-                    rejectionReason: entry.rejectionReason,
-                    fbTemplateId: entry.fbTemplateId,
-                  });
-                  Object.assign(row, updated);
-                }
-              }
-            } catch (refreshErr) {
-              console.error(`Failed to refresh template status for "${name}":`, refreshErr);
-              // Keep going — stale status is better than a failed list response
-            }
-          }
-        }
-      }
-
+      await refreshPendingRows(rows, email);
       return res.status(200).json(rows.map(formatRecord));
     } catch (e) {
       console.error('message-templates list error:', e);
