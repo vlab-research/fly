@@ -64,6 +64,9 @@ requires both values explicitly.
      → addCustomType() parses the YAML into field.md
      → translateUtilityMessage() emits Facebook's UTILITY payload with
        messaging_type: 'UTILITY' at the top level (via metadata.sendParams)
+       and message.template directly (Messenger's utility-messages shape —
+       *not* the attachment/template_type wrapper used by other Messenger
+       templates).
      → replybot sends the payload to Facebook, which matches the
        (name, language) pair against an approved template and delivers
 ```
@@ -105,7 +108,7 @@ Why `POSTBACK` and not `QUICK_REPLY`? Messenger's utility template API rejects `
 
 Unlike BODY placeholders, Facebook does **not** require (and in fact rejects) an `example` field on POSTBACK buttons — payload placeholders are considered internal and approved without samples. Returning an `example` here triggers `error_subcode: 2388051` ("Button at index N has unexpected field(s) (example)").
 
-At send time, `translateUtilityMessage` emits a per-button component with `sub_type: 'postback'` and a single `text` parameter carrying the actual field `ref`. Facebook substitutes `{{1}}` in the baked payload to produce the delivered payload:
+At send time, `translateUtilityMessage` emits one `type: "buttons"` component per button with a single `POSTBACK` parameter whose `payload` carries the actual field `ref`. Facebook substitutes `{{1}}` in the baked payload to produce the delivered payload:
 
 ```
 {"value":"<button-label>","ref":"<actual-field-ref>"}
@@ -194,43 +197,43 @@ so the request Facebook receives looks like:
   "recipient": { "id": "<PSID>" },
   "messaging_type": "UTILITY",
   "message": {
-    "attachment": {
-      "type": "template",
-      "payload": {
-        "template_type": "utility_messages",
-        "name": "prize_notification",
-        "language": { "code": "en_US" },
-        "components": [
-          {
-            "type": "body",
-            "parameters": [
-              { "type": "text", "text": "Alice" },
-              { "type": "text", "text": "$5" }
-            ]
-          },
-          {
-            "type": "button",
-            "sub_type": "postback",
-            "index": 0,
-            "parameters": [
-              { "type": "text", "text": "<field-ref>" }
-            ]
-          },
-          {
-            "type": "button",
-            "sub_type": "postback",
-            "index": 1,
-            "parameters": [
-              { "type": "text", "text": "<field-ref>" }
-            ]
-          }
-        ]
-      },
-      "metadata": "…"
-    }
+    "template": {
+      "name": "prize_notification",
+      "language": { "code": "en_US" },
+      "components": [
+        {
+          "type": "body",
+          "parameters": [
+            { "type": "text", "text": "Alice" },
+            { "type": "text", "text": "$5" }
+          ]
+        },
+        {
+          "type": "buttons",
+          "index": 0,
+          "parameters": [
+            { "type": "POSTBACK", "payload": "<field-ref>" }
+          ]
+        },
+        {
+          "type": "buttons",
+          "index": 1,
+          "parameters": [
+            { "type": "POSTBACK", "payload": "<field-ref>" }
+          ]
+        }
+      ]
+    },
+    "metadata": "…"
   }
 }
 ```
+
+**Messenger utility messages do NOT use the `message.attachment.payload` wrapper
+or a `template_type` field** — that shape is WhatsApp's model and Messenger's
+Send API rejects it with `Invalid template type` (code 100). The template object
+sits directly under `message.template`. See Meta's [Send Utility Messages](https://developers.facebook.com/docs/messenger-platform/send-messages/utility-messages/)
+page — the payload there is the source of truth.
 
 No changes were needed in replybot's send layer — the `sendParams` mechanism
 already hoists top-level fields from the translated payload. Button taps arrive
@@ -281,19 +284,21 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 |---------|--------------|
 | Template stays PENDING forever | Facebook approval is unusually slow or failed silently. Refresh the page; if still stuck after an hour, delete and recreate. |
 | Template rejected with "promotional" reason | UTILITY is strictly non-promotional. Rewrite the body to be transactional (confirmations, reminders, results) — not marketing. |
+| Template rejected with `TAG_SHOULD_BE_MARKETING` | Facebook's review classified the body as promotional. Delete the template, remove calls-to-action, offer language, or persuasive framing, and recreate with a purely informational body (e.g. "Your result: X" not "Claim your reward now!"). |
 | Send fails with "template not found" | The `(template, language)` pair in survey JSON does not match any APPROVED row. Check spelling and create the missing language variant. |
 | Unique constraint error on create | A template with that `(name, language)` on this page already exists. Use a different name or delete the existing row first. |
 | Send fails with "placeholder count mismatch" | Survey `params` array length does not match the number of `{{N}}` placeholders in the approved body. Count and align. |
 | Template rejected with `TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES` | Facebook requires sample values for every `{{N}}` placeholder in the BODY. The dashboard currently does not collect these — if a body uses placeholders, either remove them or provide examples at creation time (see "Examples / sample values" section). |
 | Template creation returns `{"error":"Fatal"}` (subcode `2018416`) | The template BUTTONS component uses `QUICK_REPLY`. Messenger utility templates only accept `POSTBACK`, `URL`, or `PHONE_NUMBER` at creation. Use `buildFacebookCreatePayload`'s current POSTBACK output. |
+| Send fails with `Invalid template type` (code 100) | The outgoing send payload is nested as `message.attachment.payload` with a `template_type: "utility_messages"` field (WhatsApp's shape). Messenger's utility messages Send API uses `message.template.*` directly, with no `template_type`. Upgrade to `@vlab-research/translate-typeform` ≥ 0.2.13 — the fix is in `translateUtilityMessage`. |
 
 ---
 
 ## Deployment notes
 
 1. Run `devops/migrations/13-message-templates.sql` and `devops/migrations/14-message-templates-buttons.sql` on CockroachDB
-2. Publish `@vlab-research/translate-typeform@0.2.12` to npm
-3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.12`) and redeploy
+2. Publish `@vlab-research/translate-typeform@0.2.13` to npm (0.2.12 emitted the WhatsApp shape; 0.2.13 emits Messenger's `message.template.*` shape)
+3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.13`) and redeploy
 4. Redeploy dashboard-server and dashboard-client
 
 ---
