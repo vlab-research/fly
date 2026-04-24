@@ -210,15 +210,8 @@ so the request Facebook receives looks like:
         },
         {
           "type": "buttons",
-          "index": 0,
           "parameters": [
-            { "type": "POSTBACK", "payload": "<field-ref>" }
-          ]
-        },
-        {
-          "type": "buttons",
-          "index": 1,
-          "parameters": [
+            { "type": "POSTBACK", "payload": "<field-ref>" },
             { "type": "POSTBACK", "payload": "<field-ref>" }
           ]
         }
@@ -232,7 +225,15 @@ so the request Facebook receives looks like:
 **Messenger utility messages do NOT use the `message.attachment.payload` wrapper
 or a `template_type` field** — that shape is WhatsApp's model and Messenger's
 Send API rejects it with `Invalid template type` (code 100). The template object
-sits directly under `message.template`. See Meta's [Send Utility Messages](https://developers.facebook.com/docs/messenger-platform/send-messages/utility-messages/)
+sits directly under `message.template`.
+
+**Multiple buttons share a single `buttons` component.** Facebook rejects the
+WhatsApp-style per-button component with an `index` key (`Invalid keys "index"`,
+code 100). Instead, emit ONE `buttons` component whose `parameters` array has
+one POSTBACK entry per approved button, matched positionally to the approved
+template's button list. If the parameter count doesn't match the approved
+button count, Facebook returns `User pass less payload than required for
+POSTBACK button` (code 100, subcode 1893029). See Meta's [Send Utility Messages](https://developers.facebook.com/docs/messenger-platform/send-messages/utility-messages/)
 page — the payload there is the source of truth.
 
 No changes were needed in replybot's send layer — the `sendParams` mechanism
@@ -290,15 +291,17 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 | Send fails with "placeholder count mismatch" | Survey `params` array length does not match the number of `{{N}}` placeholders in the approved body. Count and align. |
 | Template rejected with `TEMPLATE_VARIABLES_MISSING_SAMPLE_VALUES` | Facebook requires sample values for every `{{N}}` placeholder in the BODY. The dashboard currently does not collect these — if a body uses placeholders, either remove them or provide examples at creation time (see "Examples / sample values" section). |
 | Template creation returns `{"error":"Fatal"}` (subcode `2018416`) | The template BUTTONS component uses `QUICK_REPLY`. Messenger utility templates only accept `POSTBACK`, `URL`, or `PHONE_NUMBER` at creation. Use `buildFacebookCreatePayload`'s current POSTBACK output. |
-| Send fails with `Invalid template type` (code 100) | The outgoing send payload is nested as `message.attachment.payload` with a `template_type: "utility_messages"` field (WhatsApp's shape). Messenger's utility messages Send API uses `message.template.*` directly, with no `template_type`. Upgrade to `@vlab-research/translate-typeform` ≥ 0.2.13 — the fix is in `translateUtilityMessage`. |
+| Send fails with `Invalid template type` (code 100) | The outgoing send payload is nested as `message.attachment.payload` with a `template_type: "utility_messages"` field (WhatsApp's shape). Messenger's utility messages Send API uses `message.template.*` directly, with no `template_type`. Upgrade to `@vlab-research/translate-typeform` ≥ 0.2.14 — the fix is in `translateUtilityMessage`. |
+| Send fails with `Invalid keys "index"` on `message[template][components][…]` (code 100) | A `buttons` component has an `index` field (WhatsApp's per-button shape). Messenger rejects it — emit a single `buttons` component with positional POSTBACK parameters instead. Fixed in `@vlab-research/translate-typeform` 0.2.14. |
+| Send fails with `User pass less payload than required for POSTBACK button` (code 100, subcode 1893029) | The `buttons` component has fewer POSTBACK parameters than the approved template has buttons. The Typeform question's `properties.choices` count must equal the approved template's button count. |
 
 ---
 
 ## Deployment notes
 
 1. Run `devops/migrations/13-message-templates.sql` and `devops/migrations/14-message-templates-buttons.sql` on CockroachDB
-2. Publish `@vlab-research/translate-typeform@0.2.13` to npm (0.2.12 emitted the WhatsApp shape; 0.2.13 emits Messenger's `message.template.*` shape)
-3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.13`) and redeploy
+2. Publish `@vlab-research/translate-typeform@0.2.14` to npm. Lineage: 0.2.12 emitted the WhatsApp shape; 0.2.13 moved to `message.template.*` but kept a per-button `index`; 0.2.14 collapses buttons into a single `buttons` component with positional POSTBACK parameters and was verified end-to-end against Messenger (Perspectives Collective, 2026-04-24).
+3. Update `replybot` lockfile (`npm install @vlab-research/translate-typeform@0.2.14`) and redeploy
 4. Redeploy dashboard-server and dashboard-client
 
 ---
