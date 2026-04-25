@@ -243,6 +243,15 @@ in `replybot/lib/typewheels/machine.js:463-471`, which extracts
 `postback.payload.value` exactly the same way the QUICK_REPLY branch extracts
 `quick_reply.payload.value`.
 
+**Validator wiring**. translate-typeform has TWO dispatch tables: `translator`
+(send-time) and `validator` (response-time, called by replybot when a user
+taps a button). Both must register `utility_message` or replybot crashes with
+`There is no translator for the question of type utility_message` on the
+first button tap. `validateUtilityMessage` accepts the labels of
+`properties.choices` as the valid response set — same source the translator
+emits buttons from, and the approved template bakes `value == button_label`
+per button.
+
 ---
 
 ## Database schema
@@ -294,6 +303,7 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 | Send fails with `Invalid template type` (code 100) | The outgoing send payload is nested as `message.attachment.payload` with a `template_type: "utility_messages"` field (WhatsApp's shape). Messenger's utility messages Send API uses `message.template.*` directly, with no `template_type`. Upgrade to `@vlab-research/translate-typeform` ≥ 0.2.14 — the fix is in `translateUtilityMessage`. |
 | Send fails with `Invalid keys "index"` on `message[template][components][…]` (code 100) | A `buttons` component has an `index` field (WhatsApp's per-button shape). Messenger rejects it — emit a single `buttons` component with positional POSTBACK parameters instead. Fixed in `@vlab-research/translate-typeform` 0.2.14. |
 | Send fails with `User pass less payload than required for POSTBACK button` (code 100, subcode 1893029) | The `buttons` component has fewer POSTBACK parameters than the approved template has buttons. The Typeform question's `properties.choices` count must equal the approved template's button count. |
+| Replybot crashes on button tap with `There is no translator for the question of type utility_message` | The validator dispatch table in translate-typeform is missing `utility_message`. Fixed in 0.2.15 — bump replybot's lockfile. |
 
 ---
 
