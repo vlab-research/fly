@@ -1,2 +1,18 @@
 certManager:
   enabled: true
+
+# Watch all namespaces. Adobe's chart defaults `operator.namespaces` to
+# "kafka, cert-manager", which would skip our KafkaCluster in the `default`
+# namespace. Empty string means no `--namespaces` flag → cluster-wide watch.
+operator:
+  namespaces: ""
+
+# Override the kube-rbac-proxy sidecar image. Adobe's chart default (v0.21.2)
+# works fine, but we pin a known-good current release so a chart bump can't
+# regress us back to a deprecated registry path (the gcr.io/kubebuilder image
+# that Banzaicloud v0.24.1 shipped with was retired by Google in 2023).
+prometheusMetrics:
+  authProxy:
+    image:
+      repository: quay.io/brancz/kube-rbac-proxy
+      tag: v0.22.0

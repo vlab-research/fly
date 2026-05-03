@@ -37,8 +37,27 @@ helm install --namespace monitoring prometheus prometheus-community/kube-prometh
 # Create zookeeper operator and kafka operator
 helm install zookeeper-operator banzaicloud-stable/zookeeper-operator
 
-kubectl create --validate=false -f https://github.com/banzaicloud/kafka-operator/releases/download/v0.15.1/kafka-operator.crds.yaml
-helm install kafka-operator banzaicloud-stable/kafka-operator
+# Kafka operator: Adobe's maintained fork of Banzaicloud Koperator (the original
+# repo was archived in March 2025). CRD group is still kafka.banzaicloud.io,
+# so existing KafkaCluster / KafkaTopic / KafkaUser / CruiseControlOperation
+# resources apply unchanged.
+KOPERATOR_VERSION=0.28.0-adobe-20250923
+
+for crd in cruisecontroloperations kafkaclusters kafkatopics kafkausers; do
+    kubectl apply -f "https://raw.githubusercontent.com/adobe/koperator/${KOPERATOR_VERSION}/config/base/crds/kafka.banzaicloud.io_${crd}.yaml"
+done
+
+# Project Contour CRDs — Adobe Koperator watches HTTPProxy.projectcontour.io
+# even when Contour is unused, and crash-loops if the CRDs are absent
+# (adobe/koperator#229). Only httpproxies is strictly required; the others
+# are inert.
+kubectl apply --server-side --force-conflicts \
+    -f https://raw.githubusercontent.com/projectcontour/contour/release-1.28/examples/contour/01-crds.yaml
+
+helm install kafka-operator oci://ghcr.io/adobe/helm-charts/kafka-operator \
+    --version "${KOPERATOR_VERSION}" \
+    --namespace default \
+    --values ./kafka-operator/prod/values.yaml
 
 # wait for kafka-operator to be ready and make kafka/zk cluster
 sleep 20
