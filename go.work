@@ -1,0 +1,11 @@
+go 1.26.2
+
+use (
+	./dean
+	./dinersclub
+	./exodus
+	./formcentral
+	./linksniffer
+	./scribble
+	./system
+)
