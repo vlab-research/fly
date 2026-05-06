@@ -4,6 +4,7 @@ const producer = new Kafka.Producer({
   'metadata.broker.list': process.env.KAFKA_BROKERS,
   'retry.backoff.ms': 200,
   'message.send.max.retries': 10,
+  'request.required.acks': 1,
   'socket.keepalive.enable': true,
   'queue.buffering.max.messages': 100000,
   'queue.buffering.max.ms': 1000,
