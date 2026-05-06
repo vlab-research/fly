@@ -367,6 +367,7 @@ function exec(state, nxt) {
     }
 
     case 'EXTERNAL_EVENT': {
+      if (state.state === 'USER_BLOCKED') return _noop()
       return _handleExternalEvent(state, nxt, true)
     }
 
@@ -402,6 +403,8 @@ function exec(state, nxt) {
       // it shouldn't happen but it does and indicates
       // an error
       const md = nxt.message.metadata
+
+      if (state.state === 'USER_BLOCKED') return _noop()
 
       // handles reset scenario
       if (state.state === 'START') {

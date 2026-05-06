@@ -60,9 +60,10 @@ type Config struct {
 	SendDelay          time.Duration `env:"DEAN_SEND_DELAY,required"`
 	FollowUpMin        string        `env:"DEAN_FOLLOWUP_MIN,required"`
 	FollowUpMax        string        `env:"DEAN_FOLLOWUP_MAX,required"`
-	PaymentGrace       string        `env:"DEAN_PAYMENT_GRACE,required"`
-	PaymentInterval    string        `env:"DEAN_PAYMENT_INTERVAL,required"`
-	TimeoutMaxPast     string        `env:"DEAN_TIMEOUT_MAX_PAST,required"`
+	PaymentGrace             string        `env:"DEAN_PAYMENT_GRACE,required"`
+	PaymentInterval          string        `env:"DEAN_PAYMENT_INTERVAL,required"`
+	TimeoutMaxPast           string        `env:"DEAN_TIMEOUT_MAX_PAST,required"`
+	SpammerExternalEventsMax int           `env:"DEAN_SPAMMER_EXTERNAL_EVENTS_MAX,required"`
 }
 
 func send(cfg *Config, client *http.Client, e *ExternalEvent) error {

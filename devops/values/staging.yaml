@@ -161,6 +161,8 @@ dean:
     value: "24 hours"
   - name: DEAN_TIMEOUT_BLACKLIST
     value: "bebborsbaseserb"
+  - name: DEAN_SPAMMER_EXTERNAL_EVENTS_MAX
+    value: "100"
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"
@@ -172,6 +174,13 @@ dean:
     - name: timeouts
       queries: "timeouts,followups"
       schedule: "*/1 * * * *"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 10Mi
+    - name: spammers
+      queries: "spammers"
+      schedule: "30 3 * * *"
       resources:
         requests:
           cpu: 10m
@@ -541,12 +550,12 @@ cockroachdb:
       requests:
         cpu: 100m
         memory: 500Mi
+    budget:
+      maxUnavailable: 0
   conf:
     cache: 250MiB
     max-sql-memory: 250MiB
     max-disk-temp-storage: 4GiB
-    budget:
-      maxUnavailable: 0
   tls:
     enabled: no
   storage:

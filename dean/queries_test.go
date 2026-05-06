@@ -775,7 +775,7 @@ func TestGetSpammersGetsTheSpammer(t *testing.T) {
 		fmt.Sprintf(`{"state": "QOUT", "qa": %s,
                       "forms": ["closed", "open"]}`, qaString))
 
-	cfg := &Config{TimeoutMaxPast: "48 hours"}
+	cfg := &Config{TimeoutMaxPast: "48 hours", SpammerExternalEventsMax: 100}
 	ch := Spammers(cfg, pool)
 	events := getEvents(ch)
 
@@ -785,4 +785,79 @@ func TestGetSpammersGetsTheSpammer(t *testing.T) {
 	assert.Equal(t, "block_user", events[0].Event.Type)
 	ev, _ := json.Marshal(events[0].Event)
 	assert.Equal(t, string(ev), `{"type":"block_user","value":null}`)
+}
+
+func TestGetSpammersGetsBloatedExternalEvents(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-30 * time.Minute)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	// normal user with no externalEvents
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"QOUT",
+		`{"state": "QOUT", "forms": ["open"]}`)
+
+	// user with 101 externalEvents (above threshold of 100)
+	events := make([]string, 101)
+	for i := range events {
+		events[i] = `{"type":"timeout"}`
+	}
+	b, _ := json.Marshal(events)
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		ts,
+		"QOUT",
+		fmt.Sprintf(`{"state": "QOUT", "forms": ["open"], "externalEvents": %s}`, string(b)))
+
+	cfg := &Config{SpammerExternalEventsMax: 100}
+	ch := Spammers(cfg, pool)
+	result := getEvents(ch)
+
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, "baz", result[0].User)
+	assert.Equal(t, "block_user", result[0].Event.Type)
+}
+
+func TestGetSpammersSkipsAlreadyBlockedUsers(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-30 * time.Minute)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+
+	// user is already blocked but has >100 externalEvents AND repeated qa
+	qa := make([][]string, 50)
+	for i := range qa {
+		qa[i] = []string{"foo", fmt.Sprintf(`bar %d`, i)}
+	}
+	qaBytes, _ := json.Marshal(qa)
+	events := make([]string, 101)
+	for i := range events {
+		events[i] = `{"type":"timeout"}`
+	}
+	evBytes, _ := json.Marshal(events)
+	mustExec(t, pool, insertQuery,
+		"blocked_user",
+		"bar",
+		ts,
+		"USER_BLOCKED",
+		fmt.Sprintf(`{"state": "USER_BLOCKED", "qa": %s, "externalEvents": %s}`, string(qaBytes), string(evBytes)))
+
+	cfg := &Config{SpammerExternalEventsMax: 100}
+	ch := Spammers(cfg, pool)
+	result := getEvents(ch)
+
+	assert.Equal(t, 0, len(result))
 }

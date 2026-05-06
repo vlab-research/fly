@@ -258,6 +258,34 @@ describe('getCurrentForm', () => {
     state1.forms.should.eql(['FOO']) // Should NOT add BAR to forms
   })
 
+  it('Ignores EXTERNAL_EVENT after block_user', () => {
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+
+    const state = getState(log)
+    state.state.should.equal('USER_BLOCKED')
+
+    const externalEvent = {
+      source: 'synthetic',
+      timestamp: 30,
+      event: { type: 'external', value: { type: 'payment:complete', id: 'foo' } }
+    }
+    const state1 = getState([...log, externalEvent])
+    state1.state.should.equal('USER_BLOCKED')
+    // externalEvents should not accumulate after block
+    should.not.exist(state1.externalEvents)
+  })
+
+  it('Ignores ECHO after block_user', () => {
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+
+    const state = getState(log)
+    state.state.should.equal('USER_BLOCKED')
+
+    const echoAfterBlock = { ...echo, timestamp: 30 }
+    const state1 = getState([...log, echoAfterBlock])
+    state1.state.should.equal('USER_BLOCKED')
+  })
+
   it('Changes form with new referral', () => {
     const ref2 = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
 

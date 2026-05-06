@@ -19,16 +19,16 @@ chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 chatLogTopic: &chatlogtopic "vlab-prod-chat-log"
 
-versionDashboard: &vdashboard v0.0.47
-versionBotserver: &vbotserver v0.0.11
-versionReplybot: &vreplybot v0.0.180
+versionDashboard: &vdashboard v0.0.56
+versionBotserver: &vbotserver v0.0.12
+versionReplybot: &vreplybot v0.0.188
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.38
 versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.5.2
-versionExodus: &vexodus v0.1.1
+versionExodus: &vexodus v0.2.1
 
 processingAlerts:
   - consumergroup: replybot
@@ -194,6 +194,8 @@ dean:
     value: "bebborsbaseserb,bebbobg2basebul,nciaim2followup2pay,nciaim2followup1pay,nciaim2baselinepay"
   - name: DEAN_TIMEOUT_MAX_PAST
     value: "72 hours"
+  - name: DEAN_SPAMMER_EXTERNAL_EVENTS_MAX
+    value: "100"
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"
@@ -565,6 +567,8 @@ botserver:
     value: *kb
   - name: PORT
     value: "80"
+  - name: DASHBOARD_URL
+    value: "http://gbv-dashboard"
 
   resources:
     requests:
@@ -653,19 +657,23 @@ exodus:
 
 cockroachdb:
   image:
-    tag: v21.2.17
+    tag: v24.1.28
   statefulset:
     replicas: 4
     resources:
       requests:
         cpu: 200m
         memory: 8000Mi
+    budget:
+      maxUnavailable: 1
+    serviceAccount:
+      create: true
+      annotations:
+        iam.gke.io/gcp-service-account: cockroachdb-backup@toixotoixo.iam.gserviceaccount.com
   conf:
     cache: 3500Mi
     max-sql-memory: 3000Mi
     max-disk-temp-storage: 24GiB
-    budget:
-      maxUnavailable: 1
   tls:
     enabled: no
   storage:
