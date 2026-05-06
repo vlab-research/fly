@@ -149,10 +149,18 @@ dean:
     value: "23 hours"
   - name: DEAN_RESPONDING_GRACE
     value: "1 hour"
+  - name: DEAN_RETRY_MAX_ATTEMPTS
+    value: "30"
   - name: DEAN_PAYMENT_GRACE
     value: "2 hours"
   - name: DEAN_PAYMENT_INTERVAL
     value: "14 days"
+  - name: DEAN_PAYMENT_MAX_ATTEMPTS
+    value: "30"
+  - name: DEAN_TIMEOUT_MAX_PAST
+    value: "48 hours"
+  - name: DEAN_TIMEOUT_MAX_ATTEMPTS
+    value: "5"
   - name: DEAN_SEND_DELAY
     value: "1s"
   - name: DEAN_FOLLOWUP_MIN

@@ -148,12 +148,13 @@ func Payments(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	      FROM states
 	      WHERE current_state = 'WAIT_EXTERNAL_EVENT'
 	      AND state_json->'wait'->>'type' != 'timeout'
-	      AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($1)::INTERVAL)) < $3
-              AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($2)::INTERVAL)) > $3
+	      AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($1)::INTERVAL)) < $4
+              AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($2)::INTERVAL)) > $4
+              AND jsonb_array_length(COALESCE(state_json->'externalEvents','[]'::jsonb)) < $3
         `
 	d := time.Now().UTC()
 
-	return get(conn, getPayment, query, cfg.PaymentGrace, cfg.PaymentInterval, d)
+	return get(conn, getPayment, query, cfg.PaymentGrace, cfg.PaymentInterval, cfg.PaymentMaxAttempts, d)
 }
 
 func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
@@ -187,7 +188,8 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                   AND settings.name = s.state_json->'wait'->'value'->>'variable'
                 WHERE
                   surv.created <= s.form_start_time AND
-                  current_state = 'WAIT_EXTERNAL_EVENT'
+                  current_state = 'WAIT_EXTERNAL_EVENT' AND
+                  jsonb_array_length(COALESCE(s.state_json->'externalEvents','[]'::jsonb)) < $3
               )
               SELECT waitStart, userid, pageid
               FROM timeout_dates
@@ -198,13 +200,13 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	d := time.Now().UTC()
 
 	if len(cfg.TimeoutBlacklist) > 0 {
-		query += ` AND NOT (current_form = ANY($3))`
-		return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast, cfg.TimeoutBlacklist)
+		query += ` AND NOT (current_form = ANY($4))`
+		return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast, cfg.TimeoutMaxAttempts, cfg.TimeoutBlacklist)
 	}
 
 	query += ` ORDER BY calculated_timeout_date DESC LIMIT 1`
 
-	return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast)
+	return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast, cfg.TimeoutMaxAttempts)
 }
 
 // TODO: test cockroach perf and index

@@ -184,6 +184,10 @@ dean:
     value: "2 hours"
   - name: DEAN_PAYMENT_INTERVAL
     value: "14 days"
+  - name: DEAN_PAYMENT_MAX_ATTEMPTS
+    value: "30"
+  - name: DEAN_TIMEOUT_MAX_ATTEMPTS
+    value: "5"
   - name: DEAN_SEND_DELAY
     value: "3s"
   - name: DEAN_FOLLOWUP_MIN

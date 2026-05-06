@@ -861,3 +861,152 @@ func TestGetSpammersSkipsAlreadyBlockedUsers(t *testing.T) {
 
 	assert.Equal(t, 0, len(result))
 }
+
+func TestGetPaymentsIgnoresThoseAtOrAboveCap(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-10 * time.Hour)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "waitStart": %v,
+                      "question": "q1",
+                      "externalEvents": [1, 2, 3],
+                      "wait": { "type": "external:reloadly", "value": {}}}`, ms))
+
+	mustExec(t, pool, insertQuery,
+		"baz",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "waitStart": %v,
+                      "question": "q1",
+                      "externalEvents": [1, 2],
+                      "wait": { "type": "external:reloadly", "value": {}}}`, ms))
+
+	cfg := &Config{
+		PaymentGrace:       "8 hours",
+		PaymentInterval:    "2 days",
+		PaymentMaxAttempts: 3,
+	}
+
+	ch := Payments(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "baz", events[0].User)
+}
+
+func TestGetPaymentsIncludesThoseWithNoExternalEvents(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-10 * time.Hour)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "waitStart": %v,
+                      "question": "q1",
+                      "wait": { "type": "external:reloadly", "value": {}}}`, ms))
+
+	cfg := &Config{
+		PaymentGrace:       "8 hours",
+		PaymentInterval:    "2 days",
+		PaymentMaxAttempts: 3,
+	}
+
+	ch := Payments(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "foo", events[0].User)
+}
+
+func TestGetTimeoutsIgnoresThoseAtOrAboveCap(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-30 * time.Minute)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+	mustExec(t, pool, surveyInsertSql, "short1", time.Now().UTC().Add(-1*time.Hour), "{}")
+
+	mustExec(t, pool, insertQuery,
+		"capped",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "externalEvents": [1, 2, 3, 4, 5],
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
+
+	mustExec(t, pool, insertQuery,
+		"under_cap",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "externalEvents": [1, 2, 3, 4],
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
+
+	cfg := &Config{TimeoutMaxPast: "48 hours", TimeoutMaxAttempts: 5}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "under_cap", events[0].User)
+}
+
+func TestGetTimeoutsIncludesThoseWithNoExternalEvents(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	ts := time.Now().UTC().Add(-30 * time.Minute)
+	ms := ts.Unix() * 1000
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+	mustExec(t, pool, surveyInsertSql, "short1", time.Now().UTC().Add(-1*time.Hour), "{}")
+
+	mustExec(t, pool, insertQuery,
+		"foo",
+		"bar",
+		ts,
+		"WAIT_EXTERNAL_EVENT",
+		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
+                      "forms": ["short1"],
+                      "waitStart": %v,
+                      "md": { "startTime": %v },
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
+
+	cfg := &Config{TimeoutMaxPast: "48 hours", TimeoutMaxAttempts: 5}
+	ch := Timeouts(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 1, len(events))
+	assert.Equal(t, "foo", events[0].User)
+}
