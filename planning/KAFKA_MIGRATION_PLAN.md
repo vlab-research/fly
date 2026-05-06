@@ -1,6 +1,6 @@
 # Kafka cluster upgrade plan
 
-Status as of **2026-05-03**: Phase 0 + Phase 1a complete. Soak in progress before Phase 1b.
+Status as of **2026-05-06**: Phase 0 + Phase 1a + Phase 1b complete. Brokers on Kafka 3.9.1 (adobe/kafka:2.13-3.9.1, digest-pinned). Next: Phase 0.3 (ZK pin, pending) then Phase 3 planning.
 
 ## Context
 
@@ -29,13 +29,13 @@ Client-side audit (already done) shows every Kafka client is on a modern librdka
 - **Phase 0.3 (ZK image pin)** — pending; standalone change with its own rolling restart of ZK pods. Low urgency.
 - **Phase 3 strategy**: drain-and-cutover (no MirrorMaker2), since CockroachDB is the replay source.
 
-## Current state (as of 2026-05-03, post Phase 1a)
+## Current state (as of 2026-05-06, post Phase 1b)
 
 | Component | Image | Version | Status |
 |---|---|---|---|
-| Kafka brokers (×3) | `ghcr.io/banzaicloud/kafka:latest` digest `87b86792…` | Kafka 3.4.1 | Running, rolled during 1a |
-| ZooKeeper (×3) | `pravega/zookeeper:latest` digest `c498ebfb…` | 0.2.15 | Running |
-| Koperator (`kafka-kafka-operator-operator`) | `ghcr.io/adobe/koperator:0.28.0-adobe-20250923` + `quay.io/brancz/kube-rbac-proxy:v0.22.0` | Adobe 0.28.0 | **2/2 Running**, 0 restarts post-fix |
+| Kafka brokers (×3) | `adobe/kafka:2.13-3.9.1@sha256:279358e7bc789aba1e3457421e251278ec993a57d0ad2b9691274f1f3ddae134` | Kafka 3.9.1 | Running, rolled during 1b |
+| ZooKeeper (×3) | `pravega/zookeeper:0.2.15` (`pullPolicy: IfNotPresent`) | 0.2.15 | Running, rolled 2026-05-06 |
+| Koperator (`kafka-kafka-operator-operator`) | `ghcr.io/adobe/koperator:0.28.0-adobe-20250923` + `quay.io/brancz/kube-rbac-proxy:v0.22.0` | Adobe 0.28.0 | **2/2 Running**, 0 restarts |
 | Cruise Control | `ghcr.io/banzaicloud/cruise-control:2.5.101` | 2.5.101 | Running |
 | KafkaCluster CR `kafka` | — | `ClusterRunning`, 0 alerts | Healthy |
 | Helm release | `kafka` (NOT `kafka-operator`) | chart `0.28.0-adobe-20250923` | Deployed |
@@ -64,28 +64,14 @@ Clients (all green, no upgrade needed):
 - dinersclub: confluent-kafka-go 2.1.1 via spine (consumer)
 - scribble: confluent-kafka-go 2.1.1 via spine (consumer, multiple groups)
 
-## Phase 0 — Stabilization (DONE 2026-05-03 except 0.3)
+## Phase 0 — Stabilization (DONE 2026-05-06)
 
 | Step | Status | Notes |
 |---|---|---|
 | 0.1 — kube-rbac-proxy fix on legacy operator | **Skipped** | Superseded by Phase 1a — Adobe chart ships a working `quay.io/brancz/kube-rbac-proxy:v0.21.2` natively, and our `values.yaml` overrides it to `v0.22.0`. No need to patch the to-be-uninstalled Banzaicloud operator. |
 | 0.2 — Pin `kafka:latest` to digest | **Folded into Phase 1b** | Same `clusterImage` field; bundling avoids a duplicate rolling restart. |
-| 0.3 — Pin `pravega/zookeeper:latest` to `0.2.15` | **Pending** | Standalone change. The Pravega ZK operator does not support digest pinning (`spec.image` only takes `repository` + `tag`), so we'll pin tag `0.2.15` with `pullPolicy: IfNotPresent` to prevent re-pulls. Will trigger a rolling restart of all 3 ZK pods (~2–5 min). |
+| 0.3 — Pin `pravega/zookeeper:latest` to `0.2.15` | **Done 2026-05-06** | Tag `0.2.15` + `pullPolicy: IfNotPresent` applied to `zookeeper.yaml`. All 3 ZK pods rolled, quorum maintained throughout. |
 | 0.4 — Snapshot consumer-group offsets | **Done** | Baseline at `~/.claude/plans/kafka-snapshots/offsets-baseline-2026-05-03.txt` (all 7 groups at lag 0 pre-cutover). |
-
-### Phase 0.3 — ZK image pin (pending, runbook)
-
-```yaml
-# devops/kafka-operator/prod/zookeeper.yaml
-spec:
-  replicas: 3
-  image:
-    repository: pravega/zookeeper
-    tag: 0.2.15
-    pullPolicy: IfNotPresent
-```
-
-Apply with `kubectl apply -f devops/kafka-operator/prod/zookeeper.yaml`. Pravega zookeeper-operator will rolling-restart the 3 ZK pods one at a time; quorum stays available (RF=3). Watch `kubectl -n default get pods | grep zk-` and confirm `:0.2.15` tag on the new pods.
 
 ## Phase 1a — Banzaicloud Koperator → Adobe fork (DONE 2026-05-03)
 
@@ -258,16 +244,14 @@ Strategy locked: **drain-and-cutover** (no MirrorMaker2), enabled by the user's 
 
 ## Open items now
 
-- Phase 0.3 (ZK pin) — apply when convenient. ~2–5 min ZK rolling restart, low impact.
-- Stale `CruiseControlOperation kafka-rebalance-7lnjp` (2y332d old, `GracefulDiskRebalanceCompletedWithError`). New operator polls it every 10s; not crashing anything but log noise. Safe to `kubectl delete`.
-- Verify `kafka-prometheus.yaml` ServiceMonitors / alert rules still resolve under the Adobe operator (selector labels may have changed).
+No open items. All stabilization and upgrade work through Phase 1b is complete. Next milestone is Phase 3 (Strimzi migration, separate planning cycle).
 
 ## End-to-end verification per phase
 
 | Phase | Quick check | Status |
 |---|---|---|
-| 0 | Operator `2/2 Ready`; ZK image pinned; offset snapshots filed | Partial — ZK pin pending |
+| 0 | Operator `2/2 Ready`; ZK image pinned; offset snapshots filed | **Done 2026-05-06** |
 | 1a | Adobe operator running; KafkaCluster `ClusterRunning`; brokers operational; round-trip message works | **Done 2026-05-03** |
-| 1b | Brokers on Kafka 3.9 jar; protocol version bumped; consumer lag returns to baseline; offsets advance not rewind | Pending soak |
+| 1b | Brokers on Kafka 3.9 jar; protocol version bumped; consumer lag returns to baseline; offsets advance not rewind | **Done 2026-05-06** |
 | 3 | All clients connect to Strimzi bootstrap; lag = 0 → produce → consume cycle works on every topic | Months out |
 | 4 | Orphan PVCs gone; legacy chart files removed; bootstrap script reflects new world | After 3 |

@@ -13,7 +13,7 @@ spec:
       kafka_cr: kafka
   namespaceSelector:
     matchNames:
-    - kafka
+    - default
   endpoints:
   - interval: 10s
     port: metrics
@@ -53,7 +53,7 @@ spec:
       app: cruisecontrol
   namespaceSelector:
     matchNames:
-    - kafka
+    - default
   endpoints:
   - interval: 10s
     port: metrics

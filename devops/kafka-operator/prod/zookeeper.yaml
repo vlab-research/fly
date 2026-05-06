@@ -4,6 +4,10 @@ metadata:
   name: zk
 spec:
   replicas: 3
+  image:
+    repository: pravega/zookeeper
+    tag: "0.2.15"
+    pullPolicy: IfNotPresent
   pod:
     resources:
       requests:

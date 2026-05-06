@@ -7,7 +7,7 @@ This directory holds the production `KafkaCluster`, `ZookeeperCluster`, and oper
 | Component | Version / digest |
 |---|---|
 | Kafka operator chart | `oci://ghcr.io/adobe/helm-charts/kafka-operator` `0.28.0-adobe-20250923` |
-| Kafka broker image | `ghcr.io/banzaicloud/kafka@sha256:87b867929ebfcad242e4bdd2e5557d249790918ed3da337db257edf8e26590ef` (Kafka 3.4.1) |
+| Kafka broker image | `adobe/kafka:2.13-3.9.1@sha256:279358e7bc789aba1e3457421e251278ec993a57d0ad2b9691274f1f3ddae134` (Kafka 3.9.1) |
 | ZooKeeper image | `pravega/zookeeper:0.2.15` (digest `sha256:c498ebfb76a66f038075e2fa6148528d74d31ca1664f3257fdf82ee779eec9c8`) |
 | kube-rbac-proxy sidecar | `quay.io/brancz/kube-rbac-proxy:v0.22.0` (set in `values.yaml`) |
 
