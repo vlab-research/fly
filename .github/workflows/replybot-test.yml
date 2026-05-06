@@ -1,0 +1,26 @@
+name: replybot-test
+
+on:
+  pull_request:
+    paths:
+      - 'replybot/**'
+      - '.github/workflows/replybot-test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'replybot/**'
+      - '.github/workflows/replybot-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: replybot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: replybot/.nvmrc
+      - run: npm ci
+      - run: npm test
