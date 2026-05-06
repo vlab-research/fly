@@ -251,7 +251,7 @@ func Spammers(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 s.current_state != 'USER_BLOCKED'
                 AND (
                   s.state_json->'qa'->-1->>0 = s.state_json->'qa'->-25->>0
-                  OR jsonb_array_length(COALESCE(s.state_json->'externalEvents','[]'::jsonb)) > $1
+                  OR (s.state_json ? 'externalEvents' AND jsonb_array_length(s.state_json->'externalEvents') > $1)
                 )
         `
 
