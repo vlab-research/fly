@@ -21,7 +21,7 @@ chatLogTopic: &chatlogtopic "vlab-prod-chat-log"
 
 versionDashboard: &vdashboard v0.0.56
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.191
+versionReplybot: &vreplybot v0.0.192
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
