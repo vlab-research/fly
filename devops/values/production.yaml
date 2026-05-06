@@ -23,7 +23,7 @@ versionDashboard: &vdashboard v0.0.56
 versionBotserver: &vbotserver v0.0.12
 versionReplybot: &vreplybot v0.0.191
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.40
+versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
