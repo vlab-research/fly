@@ -93,6 +93,7 @@ async function all(email, surveyName, after = null, pageSize = 25) {
   responses = responses.map(r => (
     {
       ...r,
+      timestamp: new Date(r.timestamp).toISOString(),
       token: token.encoded([r.timestamp, r.userid, r.question_ref])
     }
   ))
