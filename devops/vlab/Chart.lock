@@ -43,12 +43,12 @@ dependencies:
   version: 0.0.1
 - name: cockroachdb
   repository: https://charts.cockroachdb.com/
-  version: 10.0.4
+  version: 13.0.3
 - name: kafka
-  repository: https://charts.bitnami.com/bitnami
-  version: 22.0.1
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 32.4.3
 - name: redis
-  repository: https://charts.bitnami.com/bitnami
+  repository: oci://registry-1.docker.io/bitnamicharts
   version: 18.0.0
-digest: sha256:7f67d6b31e7de5157a7d885502c745dfdc3b202b12249be18c41c1b1d82749bc
-generated: "2026-02-08T23:51:04.562943332-05:00"
+digest: sha256:07df86f1f0a48b380ead45dd20e9f42ebfb337a6ab4e900126af54c9b30ea7b9
+generated: "2026-05-03T13:39:27.062562066-04:00"

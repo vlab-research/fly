@@ -68,22 +68,22 @@ dependencies:
 # TODO: move database out of here (treat as provider)
 # add init job to create database and users
   - name: cockroachdb
-    version: 10.0.4
+    version: 13.0.3
     condition: cockroachdb.enabled
     repository: https://charts.cockroachdb.com/
     tags:
       - cockroach
 
   - name: kafka
-    version: 22.0.1
-    repository: https://charts.bitnami.com/bitnami
+    version: 32.4.3
+    repository: oci://registry-1.docker.io/bitnamicharts
     condition: kafka.enabled
     tags:
       - kafka
 
   - name: redis
     version: 18.0.0
-    repository: https://charts.bitnami.com/bitnami
+    repository: oci://registry-1.docker.io/bitnamicharts
     condition: redis.enabled
     tags:
       - redis

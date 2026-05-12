@@ -242,7 +242,7 @@ replybot:
   - name: NUM_SPINES
     value: "6"
   - name: REDIS_HOST
-    value: "fly-redis-master"
+    value: "redis-redis-ha-haproxy"
   - name: REDIS_PORT
     value: "6379"
   - name: REDIS_DB
@@ -416,6 +416,40 @@ exporter:
     pullPolicy: Always
     tag: 0.1.0
 
+exodus:
+  env:
+  - name: CHATBASE_DATABASE
+    value: "chatroach"
+  - name: CHATBASE_USER
+    value: "chatroach"
+  - name: CHATBASE_PASSWORD
+    value: ""
+  - name: CHATBASE_HOST
+    value: *host
+  - name: CHATBASE_PORT
+    value: "26257"
+  - name: BOTSERVER_URL
+    value: "http://fly-botserver/synthetic"
+  - name: DRY_RUN
+    value: "true"
+  - name: EXODUS_RATE_LIMIT
+    value: "1s"
+  - name: EXODUS_MAX_BAIL_USERS
+    value: "100000"
+  executor:
+    enabled: true
+    schedule: "* * * * *"
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+  api:
+    enabled: true
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+
 cockroachdb:
   # disable cockroachdb as we run it as a service
   enabled: false
@@ -425,37 +459,7 @@ kafka:
   enabled: false
 
 
+# Redis is deployed via dev/redis-dev.yaml using official redis:7-alpine.
+# The bitnami chart dependency is disabled to avoid the Bitnami image subscription requirement.
 redis:
-  enabled: true
-  architecture: standalone
-  auth:
-    enabled: false
-  master:
-    persistence:
-      enabled: true
-      size: 1Gi
-    resources:
-      requests:
-        memory: 64Mi
-        cpu: 50m
-      limits:
-        memory: 128Mi
-        cpu: 100m
-    podAnnotations:
-      prometheus.io/scrape: "true"
-      prometheus.io/port: "6379"
-  metrics:
-    enabled: false
-    serviceMonitor:
-      enabled: false
-      interval: 30s
-  networkPolicy:
-    enabled: false
-  podSecurityContext:
-    enabled: true
-    fsGroup: 1001
-    runAsUser: 1001
-  containerSecurityContext:
-    enabled: true
-    runAsUser: 1001
-    runAsNonRoot: true
+  enabled: false

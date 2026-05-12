@@ -1,0 +1,68 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topic-provisioning
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: create-topics
+        image: apache/kafka:latest
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+
+          # Wait for Kafka to be ready
+          echo "Waiting for Kafka to be ready..."
+          until /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka.default.svc.cluster.local:9092 > /dev/null 2>&1; do
+            echo "Kafka not ready yet, waiting..."
+            sleep 5
+          done
+          echo "Kafka is ready!"
+
+          # Create topics
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.default.svc.cluster.local:9092 \
+            --create --if-not-exists \
+            --topic chat-events \
+            --partitions 6 \
+            --replication-factor 1 \
+            --config retention.ms=1209600000
+
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.default.svc.cluster.local:9092 \
+            --create --if-not-exists \
+            --topic vlab-state \
+            --partitions 6 \
+            --replication-factor 1 \
+            --config retention.ms=1209600000
+
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.default.svc.cluster.local:9092 \
+            --create --if-not-exists \
+            --topic vlab-response \
+            --partitions 6 \
+            --replication-factor 1 \
+            --config retention.ms=1209600000
+
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.default.svc.cluster.local:9092 \
+            --create --if-not-exists \
+            --topic vlab-payment \
+            --partitions 2 \
+            --replication-factor 1 \
+            --config retention.ms=1209600000
+
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.default.svc.cluster.local:9092 \
+            --create --if-not-exists \
+            --topic vlab-exports \
+            --partitions 2 \
+            --replication-factor 1 \
+            --config retention.ms=1209600000
+
+          echo "All topics created successfully!"
+
+          # List topics to verify
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.default.svc.cluster.local:9092 --list

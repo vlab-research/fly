@@ -126,12 +126,12 @@ CREATE TABLE IF NOT EXISTS chatroach.states(
           ELSE NULL 
        END) STORED,
        timeout_date TIMESTAMPTZ AS (CASE
-          WHEN state_json->'wait'->>'type' = 'timeout' AND state_json->'wait'->'value'->>'type' = 'absolute' 
+          WHEN state_json->'wait'->>'type' = 'timeout' AND state_json->'wait'->'value'->>'type' = 'absolute'
             THEN (timezone('UCT',parse_timestamp(state_json->'wait'->'value'->>'timeout')))
-          WHEN state_json->'wait'->>'type' = 'timeout' AND state_json->'wait'->'value'->>'type' = 'relative' 
-            THEN  (timezone('UCT',(CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + (state_json->'wait'->'value'->>'timeout')::INTERVAL)))
-          WHEN state_json->'wait'->>'type' = 'timeout' 
-            THEN (timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + (state_json->'wait'->>'value')::INTERVAL)))
+          WHEN state_json->'wait'->>'type' = 'timeout' AND state_json->'wait'->'value'->>'type' = 'relative'
+            THEN  (timezone('UCT',(CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + parse_interval(state_json->'wait'->'value'->>'timeout'))))
+          WHEN state_json->'wait'->>'type' = 'timeout'
+            THEN (timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + parse_interval(state_json->'wait'->>'value'))))
           ELSE NULL
        END) STORED,
        next_retry TIMESTAMP AS (

@@ -3,9 +3,9 @@ set -e
 ######################
 # add third party charts
 ######################
-helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo add cockroachdb https://charts.cockroachdb.com/
-helm repo update
+helm repo add dandydev https://dandydeveloper.github.io/charts
+helm repo update cockroachdb dandydev
 
 ######################
 # install infrastructure in parallel
@@ -18,37 +18,65 @@ helm upgrade --install db cockroachdb/cockroachdb \
   --timeout 10m &
 DB_PID=$!
 
-helm upgrade --install kafka bitnami/kafka \
-  --values values/integrations/kafka.yaml \
-  --version 22.1.6 \
-  --timeout 10m0s &
+# Deploy Kafka using simple K8s manifests (Bitnami images unavailable as of Aug 2025)
+kubectl apply -f dev/kafka-dev.yaml &
 KAFKA_PID=$!
 
-helm upgrade --install minio oci://registry-1.docker.io/bitnamicharts/minio \
-  --values values/integrations/minio.yaml \
-  --timeout 10m0s &
-MINIO_PID=$!
+# Deploy Redis via dandydeveloper/redis-ha with official redis:7-alpine and haproxy:3.0-alpine.
+# kind clusters have intermittent DNS issues pulling from registry-1.docker.io, so pre-load
+# images if this is a fresh kind cluster.
+for img in redis:7-alpine haproxy:3.0-alpine; do
+  if ! docker image inspect "$img" > /dev/null 2>&1; then
+    docker pull "$img"
+  fi
+  kind load docker-image "$img" 2>/dev/null || true
+done
+helm upgrade --install redis dandydev/redis-ha \
+  --values values/integrations/redis-ha-dev.yaml \
+  --timeout 5m &
+REDIS_PID=$!
+
+# TODO: Minio is disabled — bitnami image requires a paid subscription and the
+# exporter (the only consumer) is disabled in dev. Re-enable once we have
+# integration tests that need it and have switched to the official MinIO Operator.
 
 # Wait for all to complete
 echo "Waiting for database installation..."
 wait $DB_PID
 echo "Waiting for kafka installation..."
 wait $KAFKA_PID
-echo "Waiting for minio installation..."
-wait $MINIO_PID
+echo "Waiting for redis installation..."
+wait $REDIS_PID
 
 # Apply the cockroachdb hack after DB is ready
 kubectl apply -f dev/cockroachdb.hack.yaml
 
+# Wait for Kafka StatefulSet to be ready
+echo "Waiting for Kafka to be ready..."
+kubectl rollout status statefulset/kafka -n default --timeout=5m
+
+# Provision Kafka topics
+echo "Provisioning Kafka topics..."
+kubectl delete job kafka-topic-provisioning -n default 2>/dev/null || true
+kubectl apply -f dev/kafka-topics.yaml
+kubectl wait --for=condition=complete --timeout=300s job/kafka-topic-provisioning -n default
+
 ######################
 # create database
 ######################
-# Migrations should be idempotent
-cat migrations/* | kubectl run -i \
-  --rm cockroach-client \
-  --image=cockroachdb/cockroach:v21.2.17 \
-  --restart=Never \
-  --command -- ./cockroach sql --insecure --host db-cockroachdb-public
+# Glob is *.sql to skip the migrations/prod/ subdir, which holds prod-only
+# migrations (e.g. backup schedule) that require external resources unavailable
+# in dev (GCS bucket, GKE Workload Identity).
+kubectl wait --for=condition=ready pod/db-cockroachdb-0 --timeout=5m
+
+# Check if migrations have already been applied by looking for the messages table
+INITIALIZED=$(kubectl exec db-cockroachdb-0 -- ./cockroach sql --insecure --database chatroach --execute="SELECT count(*) FROM information_schema.tables WHERE table_name = 'messages';" --format=tsv 2>/dev/null | tail -1)
+if [ "${INITIALIZED}" = "0" ]; then
+  echo "Running migrations..."
+  cat migrations/*.sql | kubectl exec -i db-cockroachdb-0 -- ./cockroach sql --insecure --database chatroach
+else
+  echo "Database already initialized, skipping migrations"
+fi
 
 ######################
 # install fly

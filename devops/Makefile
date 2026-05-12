@@ -1,4 +1,4 @@
-DB_VERSION=v21.2.17
+DB_VERSION=v24.1.28
 PORT=5433
 DATABASE=chatroach
 KAFKA_CLIENT_VERSION=7.4.0
@@ -73,7 +73,7 @@ test-db:
 	@docker run --name vlab-cockroach -d \
 		-p $(PORT):26257 \
 		cockroachdb/cockroach:$(DB_VERSION) start-single-node --insecure
-	@cat ./migrations/* | docker run -i \
+	@cat ./migrations/*.sql | docker run -i \
 		--net=host \
 		--rm cockroachdb/cockroach:$(DB_VERSION) \
 		sql --insecure --host localhost --port $(PORT) --database chatroach
@@ -100,7 +100,7 @@ kafka-producer:
 cockroach-client:
 	@kubectl run -it \
   	--rm cockroach-client \
-  	--image=cockroachdb/cockroach:v2.1.4 \
+  	--image=cockroachdb/cockroach:v24.1.28 \
   	--restart=Never \
   	--command -- ./cockroach sql --insecure --host gbv-cockroachdb-public
 

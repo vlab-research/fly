@@ -4,34 +4,44 @@ responseTopic: &responsetopic vlab-response
 paymentTopic: &paymenttopic vlab-payment
 exportTopic: &exporttopic vlab-exports
 
-image:
-  tag: 3.4.0-debian-11-r22
-  debug: true
+# KRaft mode configuration
+kraft:
+  enabled: true
+  clusterId: ""  # Will be auto-generated on first init
+
+# Controller configuration (combined controller+broker mode)
+controller:
+  replicaCount: 1
+  controllerOnly: false
+
 resources:
   requests:
     cpu: 25m
     memory: 200Mi
-zookeeper:
-  resources:
-    requests:
-      cpu: 5m
-      memory: 50Mi
-heapOpts: "-Xmx500M -Xms500M"
+
+# Kafka broker configuration
 autoCreateTopicsEnable: false
 defaultReplicationFactor: 1
 offsetsTopicReplicationFactor: 1
+heapOpts: "-Xmx500M -Xms500M"
+
+# External access via NodePort for local dev testing
 externalAccess:
   enabled: true
-  service:
-    enabled: true
-    type: NodePort
-    ports: 
-      external: 30092
-    nodePorts:
-    - 30092
-    domain: 127.0.0.1
+  autoDiscovery:
+    enabled: false
+  controller:
+    service:
+      type: NodePort
+      nodePorts:
+        - 30092
+      domain: "127.0.0.1"
+      useHostIPs: false
+
 persistence:
   size: 1Gi
+
+# Topic provisioning
 provisioning:
   enabled: true
   topics:
