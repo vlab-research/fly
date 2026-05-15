@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-05-15
 
-Virtual Lab, LLC ("VLab", "we", "us") operates a research platform that enables academic institutions and nonprofits to design, recruit for, and run behavioral studies. This policy describes what data we collect, why, how we use it, and the choices you have. It applies to both the VLab Dashboard & API (study configuration, recruitment, and analytics) and Fly, our survey-delivery service that runs over chat, messaging, SMS, and web channels — including Facebook Messenger and other platforms researchers may connect.
+Virtual Lab, LLC ("Virtual Lab", "we", "us") operates a research platform that enables academic institutions and nonprofits to design, recruit for, and run behavioral studies. This policy describes what data we collect, why, how we use it, and the choices you have. It applies to all parts of our service — including the dashboard and API used by researchers (for study configuration, recruitment, and analytics) and our survey-delivery service, which runs over chat, messaging, SMS, and web channels (including Facebook Messenger and other platforms researchers may connect).
 
 ---
 
@@ -10,10 +10,10 @@ Virtual Lab, LLC ("VLab", "we", "us") operates a research platform that enables 
 
 This policy applies to two groups:
 
-- **Researchers** — staff at academic, nonprofit, or partner organizations who use the VLab Dashboard to configure studies and connect external messaging and advertising platforms.
-- **Participants** — individuals who answer a VLab-powered survey.
+- **Researchers** — staff at academic, nonprofit, or partner organizations who use our dashboard to configure studies and connect external messaging and advertising platforms.
+- **Participants** — individuals who answer a survey delivered through our platform.
 
-For participant data, the researcher's institution is normally the **data controller** and VLab acts as a **data processor** on their behalf. For researcher account data, VLab is the controller.
+For participant data, the researcher's institution is normally the **data controller** and we act as a **data processor** on their behalf. For researcher account data, we are the controller.
 
 ---
 
@@ -40,7 +40,7 @@ We do not ask researchers to collect, and we do not knowingly process, payment c
 
 ### 2.3 Special category data
 
-Some studies may involve special categories of personal data within the meaning of GDPR Article 9 (e.g. health, political opinion, religion, ethnic origin, or sexual orientation). Where such data is collected, the researcher's institution is responsible for obtaining the explicit consent required under Article 9(2)(a) and any necessary ethics-committee or IRB approval. VLab processes such data only on the controller's documented instructions.
+Some studies may involve special categories of personal data within the meaning of GDPR Article 9 (e.g. health, political opinion, religion, ethnic origin, or sexual orientation). Where such data is collected, the researcher's institution is responsible for obtaining the explicit consent required under Article 9(2)(a) and any necessary ethics-committee or IRB approval. We process such data only on the controller's documented instructions.
 
 ### 2.4 Cookies and local storage
 
@@ -83,7 +83,7 @@ We share information only as needed to operate the service:
 - **With the researcher / their institution** — all data collected under a researcher's study is available to that researcher and their authorized colleagues.
 - **With infrastructure providers** — Google Cloud (EU regions) hosts our application servers, databases, and storage, and Auth0 (an Okta company) provides authentication. These providers process data on our behalf under their standard data processing terms.
 - **With connected third-party platforms** — when a researcher connects an external messaging, social, or advertising platform (for example, Meta / Facebook), we exchange data with that platform strictly to perform the actions the researcher has requested. Use of that data is also governed by the platform's own terms (e.g. [Meta's Platform Terms](https://developers.facebook.com/terms/)).
-- **For legal reasons** — when required by law, subpoena, or to protect the rights, property, or safety of VLab, our users, or others.
+- **For legal reasons** — when required by law, subpoena, or to protect the rights, property, or safety of Virtual Lab, our users, or others.
 
 We do not sell or rent personal data to third parties.
 
@@ -91,7 +91,7 @@ We do not sell or rent personal data to third parties.
 
 ## 6. International transfers
 
-VLab production infrastructure is hosted in the European Union (Google Cloud, `europe-west` regions). VLab, LLC is incorporated in the United States, so data may be accessed by our staff and U.S.-based subprocessors. Where required for transfers out of the EEA, we rely on Standard Contractual Clauses and equivalent safeguards.
+Our production infrastructure is hosted in the European Union (Google Cloud, `europe-west` regions). Virtual Lab, LLC is incorporated in the United States, so data may be accessed by our staff and U.S.-based subprocessors. Where required for transfers out of the EEA, we rely on Standard Contractual Clauses and equivalent safeguards.
 
 ---
 
@@ -139,13 +139,13 @@ You also have the right to **lodge a complaint with a data protection supervisor
 
 ### 9.1 California residents
 
-If you are a California resident, the CCPA (as amended by the CPRA) gives you the right to know, delete, correct, opt out of sale or sharing, and not be discriminated against for exercising these rights. VLab does **not** sell or share personal information as defined by the CCPA. To exercise these rights, contact `privacy@vlab.digital`.
+If you are a California resident, the CCPA (as amended by the CPRA) gives you the right to know, delete, correct, opt out of sale or sharing, and not be discriminated against for exercising these rights. We do **not** sell or share personal information as defined by the CCPA. To exercise these rights, contact `privacy@vlab.digital`.
 
 ---
 
 ## 10. Automated decision-making
 
-VLab does not make decisions about participants based solely on automated processing that produce legal or similarly significant effects within the meaning of GDPR Article 22.
+We do not make decisions about participants based solely on automated processing that produce legal or similarly significant effects within the meaning of GDPR Article 22.
 
 ---
 
@@ -168,4 +168,4 @@ We may update this policy from time to time. Material changes will be announced 
 Corvallis, OR 97330, USA
 Email: privacy@vlab.digital
 
-For data processing matters where VLab is acting as a processor on behalf of a researcher institution, please also contact that institution's data protection officer.
+For data processing matters where we are acting as a processor on behalf of a researcher institution, please also contact that institution's data protection officer.
