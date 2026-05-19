@@ -471,6 +471,7 @@ kafka:
 
 message-worker:
   enabled: false
+  envFrom: bot-envs
 
 # Redis is deployed via dev/redis-dev.yaml using official redis:7-alpine.
 # The bitnami chart dependency is disabled to avoid the Bitnami image subscription requirement.
