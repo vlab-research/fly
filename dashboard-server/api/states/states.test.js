@@ -29,9 +29,15 @@ describe('States API', () => {
     // Create test user
     const user = await User.create({ email });
 
+    // Anchor times: surveys created BEFORE state start times so the lateral
+    // version-resolution join (created <= form_start_time) matches.
+    const surveyCreated = new Date(Date.now() - 60000);
+    const formStartMs = Date.now() - 30000;
+    const formStartJson = { md: { startTime: String(formStartMs) } };
+
     // Create two test surveys with the same survey_name but different shortcodes
     await Survey.create({
-      created: new Date(),
+      created: surveyCreated,
       formid: 'test-form-id-1',
       form: { fields: [] },
       messages: {},
@@ -44,7 +50,7 @@ describe('States API', () => {
     });
 
     await Survey.create({
-      created: new Date(),
+      created: surveyCreated,
       formid: 'test-form-id-2',
       form: { fields: [] },
       messages: {},
@@ -56,14 +62,16 @@ describe('States API', () => {
       translation_conf: {},
     });
 
-    // Insert test state rows with various states
+    // Insert test state rows with various states. state_json carries
+    // md.startTime so form_start_time (generated column) is non-null and the
+    // version-resolution lateral join can pick a surveys row.
     const stateRows = [
       {
         userid: 'test-user-1',
         pageid: 'page-123',
         current_state: 'RESPONDING',
         current_form: shortcode1,
-        state_json: { qa: [{ question: 'Q1', answer: 'A1' }] },
+        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }] },
         updated: new Date(),
       },
       {
@@ -73,7 +81,7 @@ describe('States API', () => {
         current_form: shortcode1,
         error_tag: 'VALIDATION_ERROR',
         stuck_on_question: 'Q2',
-        state_json: { qa: [{ question: 'Q1', answer: 'A1' }], error: 'Validation failed' },
+        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }], error: 'Validation failed' },
         updated: new Date(),
       },
       {
@@ -82,7 +90,7 @@ describe('States API', () => {
         current_state: 'WAIT_EXTERNAL_EVENT',
         current_form: shortcode2,
         timeout_date: new Date(Date.now() + 86400000), // 1 day from now
-        state_json: { qa: [{ question: 'Q1', answer: 'A1' }], wait_condition: 'payment' },
+        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }], wait_condition: 'payment' },
         updated: new Date(),
       },
       {
@@ -90,7 +98,7 @@ describe('States API', () => {
         pageid: 'page-123',
         current_state: 'END',
         current_form: shortcode2,
-        state_json: { qa: [{ question: 'Q1', answer: 'A1' }, { question: 'Q2', answer: 'A2' }] },
+        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }, { question: 'Q2', answer: 'A2' }] },
         updated: new Date(),
       },
       {
@@ -99,7 +107,7 @@ describe('States API', () => {
         current_state: 'ERROR',
         current_form: shortcode1,
         error_tag: 'TIMEOUT_ERROR',
-        state_json: { qa: [], error: 'Timeout occurred' },
+        state_json: { ...formStartJson, qa: [], error: 'Timeout occurred' },
         updated: new Date(),
       },
     ];
@@ -355,7 +363,7 @@ describe('States API', () => {
           'page-123',
           'RESPONDING',
           otherShortcode,
-          { qa: [] },
+          { md: { startTime: String(Date.now()) }, qa: [] },
           new Date(),
         ]
       );
@@ -371,6 +379,139 @@ describe('States API', () => {
       await vlabPool.query(`DELETE FROM states WHERE userid = $1`, [otherUserId]);
       await vlabPool.query(`DELETE FROM surveys WHERE shortcode = $1`, [otherShortcode]);
       await vlabPool.query(`DELETE FROM users WHERE email = $1`, [otherEmail]);
+    });
+  });
+
+  describe('cross-survey shortcode isolation', () => {
+    // Same owner, same shortcode reused across two survey_names, with
+    // different versions over time. Monitor must attribute each state row
+    // to the correct survey_name via timestamp-based version resolution.
+    const collisionEmail = 'states-collision@vlab.com';
+    const sharedShortcode = 'collision-shortcode';
+    const surveyNameA = 'Collision Survey A';
+    const surveyNameB = 'Collision Survey B';
+    const userInA = 'collision-user-a';
+    const userInB = 'collision-user-b';
+    let collisionToken;
+
+    before(async () => {
+      collisionToken = await makeAPIToken({ email: collisionEmail });
+      const u = await User.create({ email: collisionEmail });
+
+      // v1 belongs to survey_name A (older)
+      const v1Created = new Date(Date.now() - 120000);
+      // v2 belongs to survey_name B (newer)
+      const v2Created = new Date(Date.now() - 60000);
+
+      await Survey.create({
+        created: v1Created,
+        formid: 'collision-v1',
+        form: { fields: [] },
+        messages: {},
+        shortcode: sharedShortcode,
+        userid: u.id,
+        title: surveyNameA,
+        survey_name: surveyNameA,
+        metadata: {},
+        translation_conf: {},
+      });
+
+      await Survey.create({
+        created: v2Created,
+        formid: 'collision-v2',
+        form: { fields: [] },
+        messages: {},
+        shortcode: sharedShortcode,
+        userid: u.id,
+        title: surveyNameB,
+        survey_name: surveyNameB,
+        metadata: {},
+        translation_conf: {},
+      });
+
+      // User A started while only v1 existed -> belongs to survey_name A
+      const userAStart = new Date(Date.now() - 90000).getTime();
+      // User B started after v2 was created -> belongs to survey_name B
+      const userBStart = new Date(Date.now() - 30000).getTime();
+
+      await vlabPool.query(
+        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [userInA, 'page-c', 'RESPONDING', sharedShortcode, { md: { startTime: String(userAStart) }, qa: [] }, new Date()],
+      );
+      await vlabPool.query(
+        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [userInB, 'page-c', 'RESPONDING', sharedShortcode, { md: { startTime: String(userBStart) }, qa: [] }, new Date()],
+      );
+    });
+
+    after(async () => {
+      await vlabPool.query(`DELETE FROM states WHERE userid = ANY($1)`, [[userInA, userInB]]);
+      await vlabPool.query(`DELETE FROM surveys WHERE shortcode = $1`, [sharedShortcode]);
+      await vlabPool.query(`DELETE FROM users WHERE email = $1`, [collisionEmail]);
+    });
+
+    it('list scoped to survey_name A returns only the v1-era user', async () => {
+      const response = await request(app)
+        .get(`/api/v1/surveys/${encodeURIComponent(surveyNameA)}/states`)
+        .set('Authorization', `Bearer ${collisionToken}`)
+        .set('Accept', 'application/json')
+        .expect(200);
+
+      response.body.total.should.equal(1);
+      response.body.states[0].userid.should.equal(userInA);
+    });
+
+    it('list scoped to survey_name B returns only the v2-era user', async () => {
+      const response = await request(app)
+        .get(`/api/v1/surveys/${encodeURIComponent(surveyNameB)}/states`)
+        .set('Authorization', `Bearer ${collisionToken}`)
+        .set('Accept', 'application/json')
+        .expect(200);
+
+      response.body.total.should.equal(1);
+      response.body.states[0].userid.should.equal(userInB);
+    });
+
+    it('detail rejects a user that belongs to the other survey_name as 404', async () => {
+      // userInB exists but is attributed to survey_name B, so a lookup
+      // under survey_name A must not find them.
+      await request(app)
+        .get(`/api/v1/surveys/${encodeURIComponent(surveyNameA)}/states/${userInB}`)
+        .set('Authorization', `Bearer ${collisionToken}`)
+        .set('Accept', 'application/json')
+        .expect(404);
+    });
+  });
+
+  describe('unattributable states (form_start_time NULL)', () => {
+    // A state row that hasn't started a form yet — e.g. user is in START
+    // and state_json has no md.startTime — must not appear under any
+    // survey_name (intentional: nothing meaningful to monitor yet).
+    const unattribUser = 'unattributable-user';
+
+    before(async () => {
+      await vlabPool.query(
+        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [unattribUser, 'page-123', 'START', shortcode1, { qa: [] }, new Date()],
+      );
+    });
+
+    after(async () => {
+      await vlabPool.query(`DELETE FROM states WHERE userid = $1`, [unattribUser]);
+    });
+
+    it('excludes state rows with NULL form_start_time from list', async () => {
+      const response = await request(app)
+        .get(`/api/v1/surveys/${encodeURIComponent(surveyName)}/states`)
+        .query({ search: unattribUser })
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Accept', 'application/json')
+        .expect(200);
+
+      response.body.total.should.equal(0);
     });
   });
 });
