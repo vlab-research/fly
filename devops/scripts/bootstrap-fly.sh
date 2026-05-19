@@ -3,8 +3,8 @@ set -e
 ######################
 # add third party charts
 ######################
-helm repo add cockroachdb https://charts.cockroachdb.com/
-helm repo add dandydev https://dandydeveloper.github.io/charts
+helm repo add cockroachdb https://charts.cockroachdb.com/ --force-update
+helm repo add dandydev https://dandydeveloper.github.io/charts --force-update
 helm repo update cockroachdb dandydev
 
 ######################
@@ -71,9 +71,9 @@ kubectl wait --for=condition=ready pod/db-cockroachdb-0 --timeout=5m
 
 # Check if migrations have already been applied by looking for the messages table
 INITIALIZED=$(kubectl exec db-cockroachdb-0 -- ./cockroach sql --insecure --database chatroach --execute="SELECT count(*) FROM information_schema.tables WHERE table_name = 'messages';" --format=tsv 2>/dev/null | tail -1)
-if [ "${INITIALIZED}" = "0" ]; then
+if [ "${INITIALIZED}" != "1" ]; then
   echo "Running migrations..."
-  cat migrations/*.sql | kubectl exec -i db-cockroachdb-0 -- ./cockroach sql --insecure --database chatroach
+  cat migrations/*.sql | kubectl exec -i db-cockroachdb-0 -- ./cockroach sql --insecure
 else
   echo "Database already initialized, skipping migrations"
 fi
