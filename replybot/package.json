@@ -35,6 +35,9 @@
   "overrides": {
     "pg": "^8.11.0"
   },
+  "overrides": {
+    "pg": "^8.11.3"
+  },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.10.10",
