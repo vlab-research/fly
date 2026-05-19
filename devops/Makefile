@@ -10,7 +10,7 @@ MINIO_HOST=minio.fly.local
 HOST_FILE=/etc/hosts
 DEV_USER=nandanmarkrao@gmail.com
 
-dev: create-kind-cluster parallel-setup certs-secret bootstrap-fly
+dev: create-kind-cluster wait-api-server parallel-setup certs-secret bootstrap-fly
 
 # Run these tasks in parallel after cluster creation
 parallel-setup:
@@ -37,6 +37,14 @@ integration-tests:	create-integration-secret bootstrap-fly start-testrunner
 	@kubectl wait --for=condition=complete job/testrunner --timeout 20m || true
 	@kubectl logs -l app=testrunner --tail -1
 	$(MAKE) check-test-status
+
+wait-api-server:
+	@echo "Waiting for Kubernetes API server to be ready..."
+	@until kubectl --context=kind-kind cluster-info >/dev/null 2>&1; do \
+		echo "  API server not ready, retrying in 2s..."; \
+		sleep 2; \
+	done
+	@echo "API server is ready"
 
 create-kind-cluster:
 	@kind create cluster --config dev/kind-cluster.yaml || true
