@@ -357,6 +357,82 @@ go test -v ./...
 
 See [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) for detailed implementation documentation.
 
+## Local Development
+
+### Overview
+
+The dev workflow uses a local Kind cluster. `make dev` (from `devops/`) bootstraps
+the full cluster including Kafka, CockroachDB, and redis-ha, then deploys all
+services via Helm using `devops/values/integrations/fly.yaml`. The Helm-deployed
+replybot is the tagged release image; `dev.sh` scripts replace individual services
+with locally-built images.
+
+### Prerequisites
+
+- Kind cluster running: `cd devops && make dev`
+- Local registry at `localhost:5000` (created by `make dev` via `kind-with-registry.sh`)
+- Facebot deployed: `kubectl apply -f devops/testing/facebot.yaml`
+
+### Deploy message-worker locally
+
+```bash
+cd message-worker
+./dev.sh
+```
+
+This builds the image, pushes to the local Kind registry, and applies `kube-dev/dev.yaml`.
+
+### Deploy replybot locally (required — Helm image lacks message-worker changes)
+
+```bash
+cd replybot
+./dev.sh
+```
+
+The Helm-deployed replybot (`v0.0.168`) still calls Facebook directly. The branch
+version publishes to `KAFKA_COMMAND_TOPIC=commands` instead, so this step is required
+for the end-to-end flow to work.
+
+### Full local dev workflow
+
+```bash
+# 1. Bootstrap cluster (first time or after cluster reset)
+cd devops && make dev
+
+# 2. Deploy facebot mock
+kubectl apply -f devops/testing/facebot.yaml
+kubectl wait --for=condition=available deployment/gbv-facebot --timeout=5m
+
+# 3. Replace replybot with local build
+cd replybot && ./dev.sh
+
+# 4. Deploy message-worker
+cd message-worker && ./dev.sh
+
+# 5. Run integration tests
+cd devops && make start-testrunner
+kubectl wait --for=condition=complete job/testrunner --timeout=20m
+kubectl logs -l app=testrunner --tail=-1
+```
+
+### Kafka topics in dev
+
+The `commands` topic is provisioned by `devops/dev/kafka-topics.yaml` (applied
+during `make dev`). Message-worker reads from `commands`; replybot publishes to
+`commands` (default for `KAFKA_COMMAND_TOPIC` / `KAFKA_COMMANDS_TOPIC`).
+
+### Environment variables (kube-dev)
+
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `KAFKA_BROKERS` | `kafka:9092` | Dev cluster Kafka service |
+| `KAFKA_COMMAND_TOPIC` | `commands` | Input topic from replybot |
+| `KAFKA_EVENT_TOPIC` | `chat-events` | Output topic for message_sent/failed events |
+| `DATABASE_URL` | `postgresql://chatroach@db-cockroachdb-public:26257/chatroach?sslmode=disable` | Token lookup |
+| `BOTSERVER_URL` | `http://fly-botserver` | Error reporting via `/synthetic` |
+| `FACEBOOK_GRAPH_URL` | `http://gbv-facebot` | Points to facebot mock in dev |
+| `NUM_WORKERS` | `10` | Reduced from production default of 100 |
+
 ## Dependencies
 
 - Go 1.21+

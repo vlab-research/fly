@@ -62,6 +62,13 @@ spec:
             --replication-factor 1 \
             --config retention.ms=1209600000
 
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.default.svc.cluster.local:9092 \
+            --create --if-not-exists \
+            --topic commands \
+            --partitions 2 \
+            --replication-factor 1 \
+            --config retention.ms=604800000
+
           echo "All topics created successfully!"
 
           # List topics to verify
