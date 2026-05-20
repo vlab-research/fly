@@ -31,21 +31,31 @@
  *    -> surveyid). This SQL mirrors it; keep in sync if that rule changes.
  */
 
-// Pre-filter on shortcode (uses states indexes) + lateral version resolution.
-// Params: $1 email, $2 surveyName, $3 shortcodes (string[]).
+// Pre-filter on shortcode (uses states indexes) + scalar-subquery version
+// resolution. Params: $1 email, $2 surveyName, $3 shortcodes (string[]).
+//
+// We use a scalar subquery (rather than `JOIN LATERAL`) because CockroachDB's
+// planner rewrites the LATERAL form into a surveys×states cross product that
+// scanned ~1M KV rows and ran in ~46s for a real survey (28 versions, 14
+// shortcodes). The scalar form is evaluated per state row and runs in ~5s
+// on the same input. Both forms are semantically equivalent — same result
+// set verified against production.
+//
+// `detail` uses the same shape but is fast either way — the userid = $4
+// filter reduces to a single row, so resolution only runs once per call.
 const SCOPE_SQL = `
   FROM states
-  JOIN LATERAL (
-    SELECT s.survey_name
-    FROM surveys s
-    JOIN users u ON s.userid = u.id
-    WHERE u.email = $1
-      AND s.shortcode = states.current_form
-      AND s.created <= states.form_start_time
-    ORDER BY s.created DESC
-    LIMIT 1
-  ) v ON v.survey_name = $2
   WHERE states.current_form = ANY($3)
+    AND (
+      SELECT s.survey_name
+      FROM surveys s
+      JOIN users u ON s.userid = u.id
+      WHERE u.email = $1
+        AND s.shortcode = states.current_form
+        AND s.created <= states.form_start_time
+      ORDER BY s.created DESC
+      LIMIT 1
+    ) = $2
 `;
 
 async function summary(email, surveyName, shortcodes) {

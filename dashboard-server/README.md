@@ -107,12 +107,14 @@ The `queries/states/` module provides three functions for querying participant s
 
 **Why each query takes both `surveyName` and `shortcodes`**: the `states` table only carries `current_form` (the shortcode), but a single shortcode can belong to multiple `survey_name`s under the same owner with different historical versions. Each query does two things:
 
-1. **Pre-filter on `current_form = ANY(shortcodes)`** — uses the `states (current_state, current_form, ...)` indexes to prune the scan down to candidate rows. Without this the lateral runs against every row in `states`.
-2. **LATERAL join to `surveys`** — for each candidate row, resolves which historical version of the shortcode the user was on (`s.created <= states.form_start_time`, ordered DESC, LIMIT 1) and filters on the resolved `survey_name`. This is the bit that disambiguates between sibling surveys that share a shortcode.
+1. **Pre-filter on `current_form = ANY(shortcodes)`** — uses the `states (current_state, current_form, ...)` indexes to prune the scan down to candidate rows. Without this the resolution runs against every row in `states`.
+2. **Scalar subquery against `surveys`** — for each candidate row, resolves which historical version of the shortcode the user was on (`s.created <= states.form_start_time`, ordered DESC, LIMIT 1) and filters on the resolved `survey_name`. This is the bit that disambiguates between sibling surveys that share a shortcode.
+
+The resolution is written as a scalar subquery rather than `JOIN LATERAL` because CockroachDB's planner rewrites the LATERAL form into a surveys×states cross product. On HPV Nigeria Study (28 versions, 14 shortcodes, ~150k candidate state rows) the LATERAL form took ~46s and the scalar form takes ~5s for the same result.
 
 State rows with NULL `form_start_time` (haven't started a form) are excluded. Killed versions (`off_time` set) are intentionally kept so historical attribution stays correct.
 
-If the resolution rule in formcentral ever changes (shortcode + timestamp → surveyid), update this lateral to match — formcentral is the canonical source.
+If the resolution rule in formcentral ever changes (shortcode + timestamp → surveyid), update this subquery to match — formcentral is the canonical source.
 
 ### External Integrations
 
