@@ -1,9 +1,9 @@
-FROM node:14-bullseye
+FROM node:18-bullseye
 
 WORKDIR /usr/src/app
 
-COPY package.json .
-RUN npm i
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
