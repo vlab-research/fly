@@ -103,20 +103,16 @@ Key aspects:
 
 #### States Query Module
 
-The `queries/states/` module provides three functions for querying participant state data:
+The `queries/states/` module provides three functions for querying participant state data: `summary`, `list`, and `detail`. All three are scoped to `(email, surveyName, shortcodes)` and apply the same scoping logic — see the docstring at the top of `queries/states/states.queries.js` for the full explanation.
 
-1. **`summary(shortcodes)`** - Aggregated counts grouped by `current_state` and `current_form`
-   - Input: Array of shortcodes to filter by
-   - Output: Array of `{ current_state, current_form, count }` objects
+**Why each query takes both `surveyName` and `shortcodes`**: the `states` table only carries `current_form` (the shortcode), but a single shortcode can belong to multiple `survey_name`s under the same owner with different historical versions. Each query does two things:
 
-2. **`list(shortcodes, { state, errorTag, search, limit, offset })`** - Paginated participant list with filtering
-   - Input: Shortcodes array + optional filters
-   - Output: `{ states: Array, total: number }`
-   - Supports filtering by state, error_tag, and userid search (LIKE)
+1. **Pre-filter on `current_form = ANY(shortcodes)`** — uses the `states (current_state, current_form, ...)` indexes to prune the scan down to candidate rows. Without this the lateral runs against every row in `states`.
+2. **LATERAL join to `surveys`** — for each candidate row, resolves which historical version of the shortcode the user was on (`s.created <= states.form_start_time`, ordered DESC, LIMIT 1) and filters on the resolved `survey_name`. This is the bit that disambiguates between sibling surveys that share a shortcode.
 
-3. **`detail(shortcodes, userid)`** - Full state detail including `state_json`
-   - Input: Shortcodes array + participant userid
-   - Output: Single state object with all computed columns and full JSON, or null if not found
+State rows with NULL `form_start_time` (haven't started a form) are excluded. Killed versions (`off_time` set) are intentionally kept so historical attribution stays correct.
+
+If the resolution rule in formcentral ever changes (shortcode + timestamp → surveyid), update this lateral to match — formcentral is the canonical source.
 
 ### External Integrations
 

@@ -12,6 +12,15 @@
  * That row's `survey_name` determines whether the state belongs to the
  * survey being monitored.
  *
+ * Performance note: the controller pre-collects all shortcodes the owner
+ * uses under this survey_name (and any sibling survey_names that share a
+ * shortcode — i.e. anything that could possibly match) and passes them in
+ * as $3. The pre-filter `current_form = ANY($3)` prunes states down to a
+ * tiny candidate set using the `states (current_state, current_form, ...)`
+ * indexes before the lateral fires; the lateral then only disambiguates
+ * versions on those candidate rows. Without that pre-filter the lateral
+ * runs against every row in `states`.
+ *
  * Notes:
  *  - State rows with NULL form_start_time (user hasn't started a form yet)
  *    are intentionally excluded — nothing to monitor yet.
@@ -22,7 +31,10 @@
  *    -> surveyid). This SQL mirrors it; keep in sync if that rule changes.
  */
 
-const RESOLVE_VERSION_SQL = `
+// Pre-filter on shortcode (uses states indexes) + lateral version resolution.
+// Params: $1 email, $2 surveyName, $3 shortcodes (string[]).
+const SCOPE_SQL = `
+  FROM states
   JOIN LATERAL (
     SELECT s.survey_name
     FROM surveys s
@@ -33,21 +45,21 @@ const RESOLVE_VERSION_SQL = `
     ORDER BY s.created DESC
     LIMIT 1
   ) v ON v.survey_name = $2
+  WHERE states.current_form = ANY($3)
 `;
 
-async function summary(email, surveyName) {
+async function summary(email, surveyName, shortcodes) {
   const query = `
     SELECT
       states.current_state,
       states.current_form,
       COUNT(*)::int as count
-    FROM states
-    ${RESOLVE_VERSION_SQL}
+    ${SCOPE_SQL}
     GROUP BY states.current_state, states.current_form
     ORDER BY states.current_state, states.current_form
   `;
 
-  const { rows } = await this.query(query, [email, surveyName]);
+  const { rows } = await this.query(query, [email, surveyName, shortcodes]);
   const summary = rows.map(row => ({
     ...row,
     count: parseInt(row.count, 10),
@@ -55,30 +67,30 @@ async function summary(email, surveyName) {
   return { summary };
 }
 
-async function list(email, surveyName, { state, errorTag, search, limit = 50, offset = 0 } = {}) {
-  let whereConditions = [];
-  let params = [email, surveyName];
-  let paramIndex = 3;
+async function list(email, surveyName, shortcodes, { state, errorTag, search, limit = 50, offset = 0 } = {}) {
+  let extraConditions = [];
+  let params = [email, surveyName, shortcodes];
+  let paramIndex = 4;
 
   if (state) {
-    whereConditions.push(`states.current_state = $${paramIndex}`);
+    extraConditions.push(`states.current_state = $${paramIndex}`);
     params.push(state);
     paramIndex++;
   }
 
   if (errorTag) {
-    whereConditions.push(`states.error_tag = $${paramIndex}`);
+    extraConditions.push(`states.error_tag = $${paramIndex}`);
     params.push(errorTag);
     paramIndex++;
   }
 
   if (search) {
-    whereConditions.push(`states.userid LIKE $${paramIndex}`);
+    extraConditions.push(`states.userid LIKE $${paramIndex}`);
     params.push(`%${search}%`);
     paramIndex++;
   }
 
-  const extraWhere = whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : '';
+  const extraWhere = extraConditions.length ? `AND ${extraConditions.join(' AND ')}` : '';
 
   const listQuery = `
     SELECT
@@ -91,8 +103,7 @@ async function list(email, surveyName, { state, errorTag, search, limit = 50, of
       states.stuck_on_question,
       states.timeout_date,
       states.form_start_time
-    FROM states
-    ${RESOLVE_VERSION_SQL}
+    ${SCOPE_SQL}
     ${extraWhere}
     ORDER BY states.updated DESC
     LIMIT $${paramIndex}
@@ -101,8 +112,7 @@ async function list(email, surveyName, { state, errorTag, search, limit = 50, of
 
   const countQuery = `
     SELECT COUNT(*)::int as total
-    FROM states
-    ${RESOLVE_VERSION_SQL}
+    ${SCOPE_SQL}
     ${extraWhere}
   `;
 
@@ -117,7 +127,7 @@ async function list(email, surveyName, { state, errorTag, search, limit = 50, of
   };
 }
 
-async function detail(email, surveyName, userid) {
+async function detail(email, surveyName, shortcodes, userid) {
   const query = `
     SELECT
       states.userid,
@@ -135,13 +145,12 @@ async function detail(email, surveyName, userid) {
       states.previous_is_followup,
       states.previous_with_token,
       states.state_json
-    FROM states
-    ${RESOLVE_VERSION_SQL}
-    WHERE states.userid = $3
+    ${SCOPE_SQL}
+    AND states.userid = $4
     LIMIT 1
   `;
 
-  const { rows } = await this.query(query, [email, surveyName, userid]);
+  const { rows } = await this.query(query, [email, surveyName, shortcodes, userid]);
   return rows.length > 0 ? rows[0] : null;
 }
 

@@ -8,9 +8,11 @@ function handle(err, res) {
   res.status(status).json({ error: { message: err.message } });
 }
 
-// Middleware: verify the authenticated user owns at least one survey under
-// the requested survey_name. Version resolution (which states actually
-// belong to this survey_name) is done at query time in states.queries.js.
+// Middleware: verify ownership of the survey_name and collect the shortcodes
+// it uses. The shortcodes are passed to queries as a pre-filter so the
+// lateral version-resolution join doesn't have to scan every row in states.
+// (Same shortcode shared with a sibling survey_name is fine — the lateral
+// then disambiguates by version.)
 async function validateSurveyNameAccess(req, res, next) {
   try {
     const { email } = req.user;
@@ -21,14 +23,15 @@ async function validateSurveyNameAccess(req, res, next) {
     }
 
     const surveys = await Survey.retrieve({ email });
-    const owns = surveys.some(s => s.survey_name === surveyName);
+    const matching = surveys.filter(s => s.survey_name === surveyName);
 
-    if (!owns) {
+    if (matching.length === 0) {
       return res.status(403).json({ error: { message: 'Access denied to this survey' } });
     }
 
     req.surveyEmail = email;
     req.surveyName = surveyName;
+    req.surveyShortcodes = [...new Set(matching.map(s => s.shortcode))];
     next();
   } catch (err) {
     handle(err, res);
@@ -37,7 +40,7 @@ async function validateSurveyNameAccess(req, res, next) {
 
 exports.getSummary = async (req, res) => {
   try {
-    const result = await statesQueries.summary(req.surveyEmail, req.surveyName);
+    const result = await statesQueries.summary(req.surveyEmail, req.surveyName, req.surveyShortcodes);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);
@@ -54,7 +57,7 @@ exports.listStates = async (req, res) => {
       limit: limit ? parseInt(limit) : 50,
       offset: offset ? parseInt(offset) : 0,
     };
-    const result = await statesQueries.list(req.surveyEmail, req.surveyName, filters);
+    const result = await statesQueries.list(req.surveyEmail, req.surveyName, req.surveyShortcodes, filters);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);
@@ -64,7 +67,7 @@ exports.listStates = async (req, res) => {
 exports.getStateDetail = async (req, res) => {
   try {
     const { userid } = req.params;
-    const result = await statesQueries.detail(req.surveyEmail, req.surveyName, userid);
+    const result = await statesQueries.detail(req.surveyEmail, req.surveyName, req.surveyShortcodes, userid);
 
     if (!result) {
       return res.status(404).json({ error: { message: 'State not found' } });
