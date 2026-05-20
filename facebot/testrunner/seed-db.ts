@@ -31,15 +31,14 @@ async function reloadly(pool: Pool, userid: string): Promise<void> {
   })]);
 }
 
-async function surveyExists(pool: Pool, userid: string, shortcode: string): Promise<boolean> {
-  const query = `SELECT id from surveys where userid = $1 and shortcode = $2;`;
-  const {rows} = await pool.query(query, [userid, shortcode]);
-  return !!rows && !!rows.length;
-}
-
 async function insertSurvey(pool: Pool, filename: string, body: string, userid: string, shortcode?: string): Promise<void> {
   const query = `INSERT INTO surveys(created, formid, form, messages, shortcode, userid, title, translation_conf)
        values($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (userid, shortcode) DO UPDATE SET
+         form = EXCLUDED.form,
+         messages = EXCLUDED.messages,
+         translation_conf = EXCLUDED.translation_conf,
+         formid = EXCLUDED.formid
        RETURNING *`;
 
   const form: Survey = JSON.parse(body);
@@ -48,9 +47,6 @@ async function insertSurvey(pool: Pool, filename: string, body: string, userid: 
   const formid = filename.split('.')[0];
 
   shortcode = shortcode || formid;
-
-  const exists = await surveyExists(pool, userid, shortcode);
-  if (exists) return;
 
   const values = [created, formid, JSON.stringify(form), JSON.stringify(messages), shortcode, userid, '', {}];
   await pool.query(query, values);

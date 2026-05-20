@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scribble-states
+  labels:
+    app: scribble-states
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scribble-states
+  template:
+    metadata:
+      labels:
+        app: scribble-states
+    spec:
+      containers:
+      - name: scribble
+        image: localhost:5000/scribble:registry
+        imagePullPolicy: Always
+        env:
+        - name: CHATBASE_DATABASE
+          value: "chatroach"
+        - name: CHATBASE_USER
+          value: "chatroach"
+        - name: CHATBASE_PASSWORD
+          value: ""
+        - name: CHATBASE_HOST
+          value: "cockroach"
+        - name: CHATBASE_PORT
+          value: "26257"
+        - name: KAFKA_BROKERS
+          value: "redpanda:9092"
+        - name: KAFKA_POLL_TIMEOUT
+          value: "2s"
+        - name: KAFKA_TOPIC
+          value: "vlab-state"
+        - name: KAFKA_GROUP
+          value: "scribble-states"
+        - name: SCRIBBLE_DESTINATION
+          value: "states"
+        - name: SCRIBBLE_BATCH_SIZE
+          value: "32"
+        - name: SCRIBBLE_CHUNK_SIZE
+          value: "32"
+        - name: SCRIBBLE_ERROR_HANDLERS
+          value: ""
+        - name: SCRIBBLE_STRICT_MODE
+          value: "false"

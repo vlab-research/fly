@@ -7,7 +7,7 @@ import { snooze } from './utils';
 
 should();
 
-const facebot = 'http://gbv-facebot';
+const facebot = process.env.FACEBOT_URL || 'http://gbv-facebot';
 
 export interface SentResponse {
   data?: {

@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gbv-dean
+  labels:
+    app: gbv-dean
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gbv-dean
+  template:
+    metadata:
+      labels:
+        app: gbv-dean
+    spec:
+      containers:
+      - name: gbv-dean
+        image: localhost:5000/dean:registry
+        imagePullPolicy: Always
+        env:
+        - name: CHATBASE_DATABASE
+          value: "chatroach"
+        - name: CHATBASE_USER
+          value: "chatroach"
+        - name: CHATBASE_PASSWORD
+          value: ""
+        - name: CHATBASE_HOST
+          value: "cockroach"
+        - name: CHATBASE_PORT
+          value: "26257"
+        - name: BOTSERVER_URL
+          value: "http://botserver/synthetic"
+        - name: DEAN_ERROR_TAGS
+          value: "NETWORK,INTERNAL,STATE_ACTIONS"
+        - name: DEAN_ERROR_INTERVAL
+          value: "48 hours"
+        - name: DEAN_FB_CODES
+          value: "2022,613,-1,190,80006,551"
+        - name: DEAN_BLOCKED_INTERVAL
+          value: "48 hours"
+        - name: DEAN_RESPONDING_INTERVAL
+          value: "48 hours"
+        - name: DEAN_RESPONDING_GRACE
+          value: "20 minutes"
+        - name: DEAN_RETRY_MAX_ATTEMPTS
+          value: "30"
+        - name: DEAN_QUERIES
+          value: "timeouts"
+        - name: DEAN_SEND_DELAY
+          value: "0s"
+        - name: DEAN_FOLLOWUP_MIN
+          value: "0s"
+        - name: DEAN_FOLLOWUP_MAX
+          value: "1s"
+        - name: DEAN_TIMEOUT_BLACKLIST
+          value: ""
+        - name: DEAN_TIMEOUT_MAX_PAST
+          value: "72 hours"
+        - name: DEAN_TIMEOUT_MAX_ATTEMPTS
+          value: "5"
+        - name: DEAN_PAYMENT_GRACE
+          value: "2 hours"
+        - name: DEAN_PAYMENT_INTERVAL
+          value: "14 days"
+        - name: DEAN_PAYMENT_MAX_ATTEMPTS
+          value: "30"
+        - name: DEAN_SPAMMER_EXTERNAL_EVENTS_MAX
+          value: "100"
