@@ -186,3 +186,10 @@ The states API tests (`api/states/states.test.js`) verify:
 - Two surveys with same `survey_name` but different shortcodes
 - Multiple state rows with different states (RESPONDING, ERROR, WAIT_EXTERNAL_EVENT, END)
 - Includes rows with error_tag, stuck_on_question, and timeout_date for comprehensive testing
+
+## Build
+
+The Dockerfile is pinned to `node:14-bullseye` and installs deps with `npm i`. Two things to know before touching it:
+
+- **Don't use `node:14-stretch`.** Debian stretch is EOL and Docker stopped updating it, so that tag is stuck at Node ≤14.17. The `require('util/types')` subpath needs Node ≥14.18 (it's pulled in by current `pg` transitives), and on stretch the container crashes at startup with `Cannot find module 'util/types'`. The `bullseye` tag tracks the latest 14.x (currently 14.21.x) and has the subpath.
+- **Don't switch to `npm ci` without also bumping Node.** Node 14 ships npm 6, and the committed `package-lock.json` is lockfile v2, which npm 6 can't parse (`Cannot read property '@cubejs-backend/postgres-driver' of undefined`). `npm i` is the workaround until someone upgrades Node — replybot's Node 12 → 22 LTS bump (`replybot-v0.0.192`) is the template for that work. The downside of `npm i` is that builds re-resolve dependencies, so a transitive bump can cause runtime surprises like the `util/types` one.
