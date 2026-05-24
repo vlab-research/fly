@@ -22,12 +22,12 @@ async function _bySurvey(email, surveyName, pool) {
   return rows;
 }
 
-async function _insert(id, email, surveyName, source, pool) {
+async function _insert(id, email, surveyName, source, options, pool) {
   const query = `
-    INSERT INTO export_status (id, user_id, survey_id, status, export_link, source)
-    VALUES ($1, $2, $3, 'Started', 'Not Found', $4)
+    INSERT INTO export_status (id, user_id, survey_id, status, export_link, source, options)
+    VALUES ($1, $2, $3, 'Requested', 'Not Found', $4, $5)
   `;
-  await pool.query(query, [id, email, surveyName, source]);
+  await pool.query(query, [id, email, surveyName, source, JSON.stringify(options)]);
 }
 
 async function all(email) {
@@ -49,8 +49,8 @@ async function bySurvey(email, surveyName) {
   return { responses };
 }
 
-async function insert(id, email, surveyName, source) {
-  await _insert(id, email, surveyName, source, this);
+async function insert(id, email, surveyName, source, options) {
+  await _insert(id, email, surveyName, source, options, this);
 }
 
 module.exports = {

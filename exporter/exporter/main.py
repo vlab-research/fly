@@ -1,22 +1,22 @@
-import json
 import os
+import threading
+import time
+from datetime import datetime
 
-from confluent_kafka import Consumer, KafkaError
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from .exporter import ExportOptions, export_data, export_chat_log, export_full_messages
+from .db import query, execute
 from .log import log
 
-# load the env file into the environment
 load_dotenv()
 
-# Settings
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "vlab-exports")
-KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "")
-KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "exporter")
-KAFKA_MAX_POLL_INTERVAL = os.getenv("KAFKA_MAX_POLL_INTERVAL", "1200000")
 DATABASE_URL = os.getenv("DATABASE_URL")
+POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "5"))
+MAX_EXPORT_RETRIES = int(os.getenv("MAX_EXPORT_RETRIES", "3"))
+STUCK_TIMEOUT_MINUTES = int(os.getenv("STUCK_TIMEOUT_MINUTES", "120"))
+WORKER_THREADS = int(os.getenv("WORKER_THREADS", "4"))
 
 
 class ChatLogExportOptions(BaseModel):
@@ -30,95 +30,131 @@ class FullMessagesExportOptions(BaseModel):
         "external_tracking", "retries", "system", "other",
     ]
     include_raw_json: bool = False
+    start_time: datetime | None = None
+    end_time: datetime | None = None
 
 
-class KafkaMessage(BaseModel):
-    event: str
-    survey: str
-    user: str
-    export_id: str
-    source: str = "responses"
-    options: ExportOptions = ExportOptions()
-    chat_log_options: ChatLogExportOptions = ChatLogExportOptions()
-    full_messages_options: FullMessagesExportOptions = FullMessagesExportOptions()
+def claim_job(cnf, max_retries, stuck_timeout_minutes):
+    """
+    Atomically claim one Requested job for processing.
+
+    First resets any stale Processing jobs (pod crashed mid-export) back to
+    Requested so they get retried. Then does a two-step guarded claim:
+    SELECT a candidate, then UPDATE only if it's still Requested — safe for
+    concurrent workers since only one UPDATE will succeed per job_id.
+
+    Returns the claimed row dict, or None if no work is available.
+    If retry_count exceeds max_retries after claiming, marks the job Failed
+    and returns None.
+    """
+    # Reset stale Processing jobs (idempotent — safe for all threads to run)
+    execute(cnf, """
+        UPDATE export_status
+        SET status = 'Requested', locked_at = NULL
+        WHERE status = 'Processing'
+          AND locked_at < NOW() - INTERVAL '%s minutes'
+    """, vals=(stuck_timeout_minutes,))
+
+    # Step 1: find a candidate
+    rows = list(query(cnf, """
+        SELECT id FROM export_status
+        WHERE status = 'Requested'
+        ORDER BY updated ASC
+        LIMIT 1
+    """))
+    if not rows:
+        return None
+    job_id = rows[0][0]
+
+    # Step 2: guarded UPDATE — concurrent workers safely lose the race
+    rows = list(query(cnf, """
+        UPDATE export_status
+        SET status = 'Processing', locked_at = NOW(), retry_count = retry_count + 1
+        WHERE id = %s AND status = 'Requested'
+        RETURNING id, user_id, survey_id, source, options, retry_count
+    """, vals=(job_id,), as_dict=True))
+
+    if not rows:
+        return None
+
+    job = rows[0]
+
+    if job['retry_count'] > max_retries:
+        execute(cnf, """
+            UPDATE export_status SET status = 'Failed', locked_at = NULL WHERE id = %s
+        """, vals=(job['id'],))
+        log.error(f"export {job['id']} exceeded max retries ({max_retries}), marked Failed")
+        return None
+
+    return job
+
+
+def reset_for_retry(cnf, export_id):
+    execute(cnf, """
+        UPDATE export_status SET status = 'Requested', locked_at = NULL WHERE id = %s
+    """, vals=(export_id,))
+
+
+def process_job(cnf, job):
+    export_id = job['id']
+    user = job['user_id']
+    survey = job['survey_id']
+    source = job['source']
+    options_dict = job['options'] or {}
+
+    log.info(f"processing {source} export for study {survey} (id={export_id})")
+
+    if source == 'chat_log':
+        opts = ChatLogExportOptions(**options_dict)
+        export_chat_log(cnf, export_id, user, survey, opts)
+    elif source == 'full_messages':
+        opts = FullMessagesExportOptions(**options_dict)
+        export_full_messages(cnf, export_id, user, survey, opts)
+    else:
+        opts = ExportOptions(**options_dict)
+        export_data(cnf, export_id, user, survey, opts)
+
+
+def worker_loop(thread_id, database_url, max_retries, stuck_timeout_minutes, poll_interval):
+    log.info(f"worker {thread_id} started")
+    while True:
+        try:
+            job = claim_job(database_url, max_retries, stuck_timeout_minutes)
+            if job is None:
+                time.sleep(poll_interval)
+                continue
+            try:
+                process_job(database_url, job)
+            except BaseException as e:
+                log.error(f"worker {thread_id} export {job['id']} failed (attempt {job['retry_count']}): {e}")
+                if job['retry_count'] < max_retries:
+                    reset_for_retry(database_url, job['id'])
+        except BaseException as e:
+            log.error(f"worker {thread_id} unexpected error: {e}")
+            time.sleep(poll_interval)
 
 
 def app():
-    """
-    the entrypoint to the application
-    """
+    log.info(f"starting {WORKER_THREADS} export worker threads (poll={POLL_INTERVAL_SECONDS}s, max_retries={MAX_EXPORT_RETRIES})")
 
-    # Setup consumer
-    consumer = setup_kafka_consumer()
+    def start_worker(i):
+        t = threading.Thread(
+            target=worker_loop,
+            args=(i, DATABASE_URL, MAX_EXPORT_RETRIES, STUCK_TIMEOUT_MINUTES, POLL_INTERVAL_SECONDS),
+            daemon=True,
+            name=f"export-worker-{i}",
+        )
+        t.start()
+        return t
 
-    log.info("ready to start receiving messages")
+    threads = [start_worker(i) for i in range(WORKER_THREADS)]
 
-    try:
-
-        while True:
-            msg = consumer.poll(1.0)
-
-            if msg is None:
-                continue
-
-            if msg.error():
-                err = msg.error()
-                if err.fatal() or err.code() == KafkaError._MAX_POLL_EXCEEDED:
-                    log.error("Fatal consumer error, exiting to restart: {}".format(err))
-                    raise SystemExit(1)
-                log.error("Consumer error: {}".format(err))
-                continue
-
-            try:
-                value = parse_message(msg)
-                process(DATABASE_URL, value)
-                consumer.commit(asynchronous=False)
-
-            except BaseException as e:
-                log.error(e)
-
-    finally:
-        consumer.close()
-
-
-def parse_message(msg):
-    data = msg.value().decode("utf-8")
-    return KafkaMessage(**json.loads(data))
-
-
-def process(cnf, data: KafkaMessage):
-    """
-    The main message processor
-    """
-    log.info(f"processing {data.source} export for study {data.survey} (id={data.export_id})")
-    if data.source == "chat_log":
-        export_chat_log(cnf, data.export_id, data.user, data.survey, data.chat_log_options)
-    elif data.source == "full_messages":
-        export_full_messages(cnf, data.export_id, data.user, data.survey, data.full_messages_options)
-    else:
-        export_data(cnf, data.export_id, data.user, data.survey, data.options)
-
-
-def setup_kafka_consumer():
-    """
-    setting up the Kafka consumer to subscriber to the KAFKA_TOPIC
-    """
-
-    consumer = Consumer(
-        {
-            "bootstrap.servers": KAFKA_BROKERS,
-            "group.id": KAFKA_GROUP_ID,
-            "auto.offset.reset": "latest",
-            "enable.auto.commit": "false",
-            "max.poll.interval.ms": KAFKA_MAX_POLL_INTERVAL,
-            "session.timeout.ms": "30000",  # 30s heartbeat
-            "socket.keepalive.enable": "true",
-        }
-    )
-
-    consumer.subscribe([KAFKA_TOPIC])
-
-    return consumer
+    while True:
+        for i, t in enumerate(threads):
+            if not t.is_alive():
+                log.warning(f"worker {i} died unexpectedly, restarting")
+                threads[i] = start_worker(i)
+        time.sleep(30)
 
 
 if __name__ == "__main__":
