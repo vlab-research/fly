@@ -228,10 +228,13 @@ def export_data(cnf, export_id, user, survey, options: ExportOptions):
     try:
         # Get responses and form data from database
         responses = get_responses(cnf, user, survey)
+        set_metadata(cnf, export_id, responses=len(responses))
         form_data = get_form_data(cnf, user, survey)
+        set_metadata(cnf, export_id, forms=len(form_data))
 
         # process data using the vlab prepro library
         dd = format_data(responses, form_data, options)
+        set_metadata(cnf, export_id, rows=len(dd))
 
         # store as csv on configured backend
         storage_backend.save_to_csv(dd)
@@ -254,6 +257,19 @@ def set_export_status(cnf, export_id, url="Not Found", status="Failed"):
         WHERE id = %s
     """
     execute(cnf, q, vals=(status, url, export_id))
+
+
+def set_metadata(cnf, export_id, **fields):
+    """
+    Merge fields into the export_status.metadata JSONB column. Keys persist
+    after Finished/Failed so users see context on past exports.
+    """
+    execute(cnf, """
+        UPDATE export_status
+        SET metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb
+        WHERE id = %s
+    """, vals=(json.dumps(fields), export_id))
+    log.info(f"export {export_id} metadata: {fields}")
 
 
 def get_responses(cnf, user, survey):
@@ -362,6 +378,7 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         log.info(
             f"full messages export {export_id}: found {len(userids)} users"
         )
+        set_metadata(cnf, export_id, users=len(userids))
 
         stats = {"total": 0, "json_errors": 0, "filtered": 0, "yielded": 0}
 
@@ -399,6 +416,7 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
                 writer.writerow(row)
             tmp.close()
 
+            set_metadata(cnf, export_id, rows=stats["yielded"], messages_scanned=stats["total"])
             storage_backend.save_file(tmp.name)
         finally:
             os.unlink(tmp.name)
@@ -437,6 +455,7 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options):
 
     try:
         chat_data = get_chat_log(cnf, user, survey, chat_log_options)
+        set_metadata(cnf, export_id, rows=len(chat_data))
 
         if chat_data.empty:
             log.warning(f"no chat log data found for survey: {survey}")

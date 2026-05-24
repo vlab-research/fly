@@ -2,10 +2,24 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
 
 from exporter.db import execute
+
+
+@pytest.fixture(autouse=True)
+def _stub_set_metadata(request):
+    """
+    Unit tests don't have a real DB; stub set_metadata so its UPDATE no-ops.
+    Integration tests (marked) opt out and exercise the real call.
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+    with patch("exporter.exporter.set_metadata"):
+        yield
 
 # Set DATABASE_URL to the test CockroachDB to run integration tests.
 # Quick start: `make test-db` in devops/, then:

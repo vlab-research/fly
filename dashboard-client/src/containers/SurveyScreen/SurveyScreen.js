@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 import {
   Switch, Route, useRouteMatch, useLocation, useHistory, Link, Redirect
 } from 'react-router-dom';
-import { Table, Spin, Tabs } from 'antd';
+import { Table, Spin, Tabs, Tag } from 'antd';
 import './SurveyScreen.css';
 import { FormScreen, StatesSummary, StatesList, StateDetail } from '..';
 import { groupBy } from '../../helpers';
@@ -162,6 +162,21 @@ const isStale = (updated) => Date.now() - new Date(updated).getTime() > STALE_MS
 const IN_PROGRESS_STATUSES = ['Requested', 'Processing', 'Started'];
 const isInProgress = (status) => IN_PROGRESS_STATUSES.includes(status);
 
+const renderMetadata = (metadata) => {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const entries = Object.entries(metadata);
+  if (entries.length === 0) return null;
+  return (
+    <span>
+      {entries.map(([k, v]) => (
+        <Tag key={k} color="blue" style={{ marginBottom: 4 }}>
+          {`${k}: ${typeof v === 'number' ? v.toLocaleString() : v}`}
+        </Tag>
+      ))}
+    </span>
+  );
+};
+
 const exportColumns = [
   { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
   { title: 'Status', dataIndex: 'status', render: (status, record) => {
@@ -172,6 +187,7 @@ const exportColumns = [
     }
     return status;
   }},
+  { title: 'Details', dataIndex: 'metadata', render: renderMetadata },
   { title: 'Time', dataIndex: 'updated' },
   { title: 'Download', dataIndex: 'export_link', render: (text, record) => (
     isInProgress(record.status) && !isStale(record.updated)
