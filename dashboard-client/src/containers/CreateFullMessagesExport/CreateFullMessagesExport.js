@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
 import {
-  Form, Switch, Checkbox, Spin,
+  Form, Switch, Checkbox, DatePicker, Spin,
 } from 'antd';
+import moment from 'moment';
 import { PrimaryBtn } from '../../components/UI';
 
 import startExport from '../../services/api/startExport';
@@ -27,8 +28,12 @@ const CreateFullMessagesExport = () => {
   const survey = decodeURIComponent(query.get('survey_name'));
   const [loading, setLoading] = useState(false);
 
-  const onFinish = async (body) => {
+  const onFinish = async (formValues) => {
     setLoading(true);
+    const { start_time, end_time, ...rest } = formValues;
+    const body = { ...rest };
+    if (start_time) body.start_time = moment(start_time).utc().toISOString();
+    if (end_time) body.end_time = moment(end_time).utc().toISOString();
     await startExport(survey, body, 'full_messages');
 
     setLoading(false);
@@ -67,6 +72,22 @@ const CreateFullMessagesExport = () => {
           name="event_groups"
         >
           <Checkbox.Group options={EVENT_GROUP_OPTIONS} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} />
+        </Form.Item>
+
+        <Form.Item
+          label="Start time (UTC, optional)"
+          name="start_time"
+          help="Only include messages at or after this UTC instant. Leave blank for no lower bound."
+        >
+          <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Form.Item
+          label="End time (UTC, optional)"
+          name="end_time"
+          help="Only include messages strictly before this UTC instant. Leave blank for no upper bound."
+        >
+          <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item
