@@ -318,8 +318,18 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
     """
     log.info(f"starting full messages export for survey: {survey}")
     set_export_status(cnf, export_id, status="Started")
+
+    start_time = full_messages_options.start_time
+    end_time = full_messages_options.end_time
+
+    suffix = ""
+    if start_time or end_time:
+        def _stamp(dt):
+            return dt.strftime("%Y%m%dT%H%M%SZ") if dt else "open"
+        suffix = f"_{_stamp(start_time)}_to_{_stamp(end_time)}"
+
     storage_backend = storage.get_storage_backend(
-        file_path=f"exports/{survey}_full_messages.csv"
+        file_path=f"exports/{survey}_full_messages{suffix}.csv"
     )
 
     try:
@@ -331,7 +341,8 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
             f"full messages export {export_id}: "
             f"groups={full_messages_options.event_groups}, "
             f"allowed_types={sorted(allowed_types)}, "
-            f"include_raw_json={include_raw}"
+            f"include_raw_json={include_raw}, "
+            f"start_time={start_time}, end_time={end_time}"
         )
 
         if not allowed_types:
@@ -361,13 +372,20 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
             for i in range(0, len(userids), batch_size):
                 batch = userids[i : i + batch_size]
                 placeholders = ",".join(["%s"] * len(batch))
-                q = f"""
-                    SELECT m.userid, m.timestamp::string AS timestamp, m.content
-                    FROM messages m
-                    WHERE m.userid IN ({placeholders})
-                    ORDER BY m.userid, m.timestamp ASC
-                """
-                yield from query(cnf, q, vals=tuple(batch), as_dict=True)
+                q = (
+                    f"SELECT m.userid, m.timestamp::string AS timestamp, m.content "
+                    f"FROM messages m "
+                    f"WHERE m.userid IN ({placeholders})"
+                )
+                extra_vals = []
+                if start_time is not None:
+                    q += " AND m.timestamp >= %s"
+                    extra_vals.append(start_time)
+                if end_time is not None:
+                    q += " AND m.timestamp < %s"
+                    extra_vals.append(end_time)
+                q += " ORDER BY m.userid, m.timestamp ASC"
+                yield from query(cnf, q, vals=tuple(batch) + tuple(extra_vals), as_dict=True)
 
         rows = _iter_messages(_batched_message_rows(), allowed_types, include_raw, stats)
 

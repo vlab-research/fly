@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -378,3 +379,76 @@ class TestExportFullMessages:
 
         # Should be 3 calls: 1 userid query + 2 message batches (500 + 250)
         assert mock_query.call_count == 3
+
+    @patch("exporter.exporter.query")
+    @patch("exporter.exporter.storage.get_storage_backend")
+    @patch("exporter.exporter.set_export_status")
+    def test_no_time_bounds_omits_predicates(self, mock_status, mock_backend_factory, mock_query):
+        mock_backend = MagicMock()
+        mock_backend.generate_link.return_value = "http://link"
+        mock_backend_factory.return_value = mock_backend
+        mock_query.side_effect = _mock_query_two_step(["u1"], [[]])
+
+        opts = FullMessagesExportOptions()
+        export_full_messages("db-url", "uuid-8", "user@test.com", "survey1", opts)
+
+        # Unbounded run keeps the original filename
+        mock_backend_factory.assert_called_once_with(
+            file_path="exports/survey1_full_messages.csv"
+        )
+
+        # Messages query should not mention timestamp filters
+        msg_sql = mock_query.call_args_list[1][0][1]
+        msg_vals = mock_query.call_args_list[1][1]["vals"]
+        assert "m.timestamp >=" not in msg_sql
+        assert "m.timestamp <" not in msg_sql
+        assert msg_vals == ("u1",)
+
+    @patch("exporter.exporter.query")
+    @patch("exporter.exporter.storage.get_storage_backend")
+    @patch("exporter.exporter.set_export_status")
+    def test_both_time_bounds_appended(self, mock_status, mock_backend_factory, mock_query):
+        mock_backend = MagicMock()
+        mock_backend.generate_link.return_value = "http://link"
+        mock_backend_factory.return_value = mock_backend
+        mock_query.side_effect = _mock_query_two_step(["u1"], [[]])
+
+        start = datetime(2025, 10, 1, tzinfo=timezone.utc)
+        end = datetime(2025, 11, 1, tzinfo=timezone.utc)
+        opts = FullMessagesExportOptions(start_time=start, end_time=end)
+        export_full_messages("db-url", "uuid-9", "user@test.com", "survey1", opts)
+
+        # Filename suffix encodes the window
+        mock_backend_factory.assert_called_once_with(
+            file_path="exports/survey1_full_messages_20251001T000000Z_to_20251101T000000Z.csv"
+        )
+
+        msg_sql = mock_query.call_args_list[1][0][1]
+        msg_vals = mock_query.call_args_list[1][1]["vals"]
+        assert "m.timestamp >= %s" in msg_sql
+        assert "m.timestamp < %s" in msg_sql
+        # batch userid + start + end
+        assert msg_vals == ("u1", start, end)
+
+    @patch("exporter.exporter.query")
+    @patch("exporter.exporter.storage.get_storage_backend")
+    @patch("exporter.exporter.set_export_status")
+    def test_start_only_bound(self, mock_status, mock_backend_factory, mock_query):
+        mock_backend = MagicMock()
+        mock_backend.generate_link.return_value = "http://link"
+        mock_backend_factory.return_value = mock_backend
+        mock_query.side_effect = _mock_query_two_step(["u1"], [[]])
+
+        start = datetime(2025, 10, 1, tzinfo=timezone.utc)
+        opts = FullMessagesExportOptions(start_time=start)
+        export_full_messages("db-url", "uuid-10", "user@test.com", "survey1", opts)
+
+        mock_backend_factory.assert_called_once_with(
+            file_path="exports/survey1_full_messages_20251001T000000Z_to_open.csv"
+        )
+
+        msg_sql = mock_query.call_args_list[1][0][1]
+        msg_vals = mock_query.call_args_list[1][1]["vals"]
+        assert "m.timestamp >= %s" in msg_sql
+        assert "m.timestamp <" not in msg_sql
+        assert msg_vals == ("u1", start)
