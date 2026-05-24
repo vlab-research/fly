@@ -27,7 +27,7 @@ versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
-versionExporter: &vexporter v0.5.2
+versionExporter: &vexporter v0.6.3
 versionExodus: &vexodus v0.2.1
 
 processingAlerts:
@@ -604,20 +604,12 @@ botserver:
 exporter:
   replicaCount: 2
   image:
-    repository: "vlabresearch/exporter"
+    repository: "ghcr.io/vlab-research/exporter"
     pullPolicy: Always
     tag: *vexporter
   env:
-    - name: "KAFKA_TOPIC"
-      value: *exportertopic
-    - name: "KAFKA_BROKERS"
-      value: *kb
-    - name: "KAFKA_GROUP_ID"
-      value: "exporter"
     - name: "APP_NAME"
       value: "exporter"
-    - name: "KAFKA_MAX_POLL_INTERVAL"
-      value: "3600000"
   envSecrets:
     - exporter
 
