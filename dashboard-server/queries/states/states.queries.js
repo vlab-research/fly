@@ -46,6 +46,13 @@
 const SCOPE_SQL = `
   FROM states
   WHERE states.current_form = ANY($3)
+    AND states.pageid IN (
+      SELECT facebook_page_id
+      FROM credentials
+      JOIN users u ON credentials.userid = u.id
+      WHERE u.email = $1
+        AND facebook_page_id IS NOT NULL
+    )
     AND (
       SELECT s.survey_name
       FROM surveys s
