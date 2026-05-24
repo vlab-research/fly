@@ -47,11 +47,13 @@ def claim_job(cnf, max_retries, stuck_timeout_minutes):
     If retry_count exceeds max_retries after claiming, marks the job Failed
     and returns None.
     """
-    # Reset stale Processing jobs (idempotent — safe for all threads to run)
+    # Reset stale in-flight jobs (any worker-managed status with an old lock).
+    # Idempotent — safe for all threads to run on every poll.
     execute(cnf, """
         UPDATE export_status
         SET status = 'Requested', locked_at = NULL
-        WHERE status = 'Processing'
+        WHERE status NOT IN ('Requested', 'Finished', 'Failed')
+          AND locked_at IS NOT NULL
           AND locked_at < NOW() - %s
     """, vals=(timedelta(minutes=stuck_timeout_minutes),))
 

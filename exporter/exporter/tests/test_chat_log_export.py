@@ -130,9 +130,9 @@ class TestExportChatLog:
             file_path="exports/survey1_chat_log.csv"
         )
 
-        # Verify status updates: Started, then Finished
-        assert mock_status.call_count == 2
-        mock_status.assert_any_call("db-url", "uuid-1", status="Started")
+        # Verify status progressed through stages and ended Finished
+        mock_status.assert_any_call("db-url", "uuid-1", status="Querying")
+        mock_status.assert_any_call("db-url", "uuid-1", status="Writing")
         mock_status.assert_any_call("db-url", "uuid-1", "http://download-link", status="Finished")
 
         # Verify data was saved
@@ -148,9 +148,8 @@ class TestExportChatLog:
         with pytest.raises(RuntimeError, match="db error"):
             export_chat_log("db-url", "uuid-2", "user@test.com", "survey1", opts)
 
-        # Verify status: Started, then Failed
-        assert mock_status.call_count == 2
-        mock_status.assert_any_call("db-url", "uuid-2", status="Started")
+        # Failure during the Querying stage terminates with Failed
+        mock_status.assert_any_call("db-url", "uuid-2", status="Querying")
         mock_status.assert_any_call("db-url", "uuid-2", status="Failed")
 
     @patch("exporter.exporter.get_chat_log")

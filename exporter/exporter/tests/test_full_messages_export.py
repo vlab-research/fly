@@ -264,8 +264,9 @@ class TestExportFullMessages:
         mock_backend_factory.assert_called_once_with(
             file_path="exports/survey1_full_messages.csv"
         )
-        assert mock_status.call_count == 2
-        mock_status.assert_any_call("db-url", "uuid-1", status="Started")
+        mock_status.assert_any_call("db-url", "uuid-1", status="Querying")
+        mock_status.assert_any_call("db-url", "uuid-1", status="Writing")
+        mock_status.assert_any_call("db-url", "uuid-1", status="Uploading")
         mock_status.assert_any_call("db-url", "uuid-1", "http://download-link", status="Finished")
         mock_backend.save_file.assert_called_once()
 
@@ -279,8 +280,7 @@ class TestExportFullMessages:
         with pytest.raises(RuntimeError, match="db error"):
             export_full_messages("db-url", "uuid-2", "user@test.com", "survey1", opts)
 
-        assert mock_status.call_count == 2
-        mock_status.assert_any_call("db-url", "uuid-2", status="Started")
+        mock_status.assert_any_call("db-url", "uuid-2", status="Querying")
         mock_status.assert_any_call("db-url", "uuid-2", status="Failed")
 
     @patch("exporter.exporter.query")

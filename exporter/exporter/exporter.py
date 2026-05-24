@@ -222,21 +222,23 @@ def format_data(
 
 def export_data(cnf, export_id, user, survey, options: ExportOptions):
     log.info(f"starting csv export for survey: {survey}")
-    set_export_status(cnf, export_id, status="Started")
+    set_export_status(cnf, export_id, status="Querying")
     storage_backend = storage.get_storage_backend(file_path=f"exports/{survey}.csv")
 
     try:
         # Get responses and form data from database
         responses = get_responses(cnf, user, survey)
-        set_metadata(cnf, export_id, responses=len(responses))
+        users = int(responses['userid'].nunique()) if len(responses) else 0
+        set_metadata(cnf, export_id, responses=len(responses), users=users)
         form_data = get_form_data(cnf, user, survey)
-        set_metadata(cnf, export_id, forms=len(form_data))
 
         # process data using the vlab prepro library
+        set_export_status(cnf, export_id, status="Formatting")
         dd = format_data(responses, form_data, options)
         set_metadata(cnf, export_id, rows=len(dd))
 
         # store as csv on configured backend
+        set_export_status(cnf, export_id, status="Writing")
         storage_backend.save_to_csv(dd)
         url = storage_backend.generate_link()
         set_export_status(cnf, export_id, url, status="Finished")
@@ -333,7 +335,7 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
     Event type filtering happens in the generator before rows hit disk.
     """
     log.info(f"starting full messages export for survey: {survey}")
-    set_export_status(cnf, export_id, status="Started")
+    set_export_status(cnf, export_id, status="Querying")
 
     start_time = full_messages_options.start_time
     end_time = full_messages_options.end_time
@@ -406,6 +408,7 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
 
         rows = _iter_messages(_batched_message_rows(), allowed_types, include_raw, stats)
 
+        set_export_status(cnf, export_id, status="Writing")
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".csv", delete=False, newline=""
         )
@@ -416,7 +419,8 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
                 writer.writerow(row)
             tmp.close()
 
-            set_metadata(cnf, export_id, rows=stats["yielded"], messages_scanned=stats["total"])
+            set_metadata(cnf, export_id, rows=stats["yielded"])
+            set_export_status(cnf, export_id, status="Uploading")
             storage_backend.save_file(tmp.name)
         finally:
             os.unlink(tmp.name)
@@ -448,7 +452,7 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options):
     Optional columns (raw_payload, metadata) are controlled by chat_log_options.
     """
     log.info(f"starting chat log export for survey: {survey}")
-    set_export_status(cnf, export_id, status="Started")
+    set_export_status(cnf, export_id, status="Querying")
     storage_backend = storage.get_storage_backend(
         file_path=f"exports/{survey}_chat_log.csv"
     )
@@ -460,6 +464,7 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options):
         if chat_data.empty:
             log.warning(f"no chat log data found for survey: {survey}")
 
+        set_export_status(cnf, export_id, status="Writing")
         storage_backend.save_to_csv(chat_data)
         url = storage_backend.generate_link()
         set_export_status(cnf, export_id, url, status="Finished")

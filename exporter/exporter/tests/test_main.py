@@ -134,18 +134,18 @@ class TestClaimJob:
         result = claim_job("db-url", max_retries=3, stuck_timeout_minutes=120)
         assert result is None
         # Should have called execute to mark it Failed
-        failed_calls = [c for c in mock_execute.call_args_list if "Failed" in str(c)]
+        failed_calls = [c for c in mock_execute.call_args_list if "SET status = 'Failed'" in str(c)]
         assert len(failed_calls) == 1
 
     @patch("exporter.main.query")
     @patch("exporter.main.execute")
-    def test_resets_stale_processing_jobs(self, mock_execute, mock_query):
+    def test_resets_stale_in_flight_jobs(self, mock_execute, mock_query):
         mock_query.return_value = iter([])
         claim_job("db-url", max_retries=3, stuck_timeout_minutes=60)
-        # First execute call should reset stale jobs
+        # First execute call resets any stale in-flight row back to Requested
         first_call_sql = mock_execute.call_args_list[0][0][1]
-        assert "Requested" in first_call_sql
-        assert "Processing" in first_call_sql
+        assert "SET status = 'Requested'" in first_call_sql
+        assert "NOT IN ('Requested', 'Finished', 'Failed')" in first_call_sql
 
 
 class TestResetForRetry:

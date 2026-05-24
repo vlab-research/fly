@@ -159,7 +159,11 @@ const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 const isStale = (updated) => Date.now() - new Date(updated).getTime() > STALE_MS;
 
-const IN_PROGRESS_STATUSES = ['Requested', 'Processing', 'Started'];
+const IN_PROGRESS_STATUSES = [
+  'Requested', 'Processing',
+  'Querying', 'Formatting', 'Writing', 'Uploading',
+  'Started', // legacy — pre-v0.6.6 exports may still carry this
+];
 const isInProgress = (status) => IN_PROGRESS_STATUSES.includes(status);
 
 const renderMetadata = (metadata) => {
