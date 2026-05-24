@@ -349,10 +349,12 @@ class TestExportFullMessages:
         opts = FullMessagesExportOptions()
         export_full_messages("db-url", "uuid-6", "user@test.com", "survey1", opts)
 
-        # First call: userid query
+        # First call: userid query — joins through surveyid (not shortcode) so
+        # foreign owners' surveys sharing a shortcode aren't pulled in.
         first_sql = mock_query.call_args_list[0][0][1]
-        assert "SELECT DISTINCT userid" in first_sql
-        assert "FROM responses" in first_sql
+        assert "SELECT DISTINCT r.userid" in first_sql
+        assert "FROM responses r" in first_sql
+        assert "JOIN surveys s ON r.surveyid = s.id" in first_sql
         assert "survey_name = %s" in first_sql
         assert "email = %s" in first_sql
 

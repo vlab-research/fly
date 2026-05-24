@@ -366,17 +366,17 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         if not allowed_types:
             log.warning(f"full messages export {export_id}: allowed_types is empty, no rows will match")
 
-        # Step 1: collect distinct userids for this survey (small result set)
+        # Step 1: collect distinct userids for this survey (small result set).
+        # Filter via surveyid (not shortcode) — shortcodes are reused across
+        # different owners' surveys, so a shortcode-IN filter pulls foreign users.
         userid_q = """
-            SELECT DISTINCT userid
-            FROM responses
-            WHERE shortcode IN (
-                SELECT shortcode FROM surveys
-                WHERE survey_name = %s
-                AND userid = (SELECT id FROM users WHERE email = %s)
-            )
+            SELECT DISTINCT r.userid
+            FROM responses r
+            JOIN surveys s ON r.surveyid = s.id
+            JOIN users u ON s.userid = u.id
+            WHERE u.email = %s AND s.survey_name = %s
         """
-        userids = [row[0] for row in query(cnf, userid_q, vals=(survey, user))]
+        userids = [row[0] for row in query(cnf, userid_q, vals=(user, survey))]
         log.info(
             f"full messages export {export_id}: found {len(userids)} users"
         )
