@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -52,8 +52,8 @@ def claim_job(cnf, max_retries, stuck_timeout_minutes):
         UPDATE export_status
         SET status = 'Requested', locked_at = NULL
         WHERE status = 'Processing'
-          AND locked_at < NOW() - INTERVAL '%s minutes'
-    """, vals=(stuck_timeout_minutes,))
+          AND locked_at < NOW() - %s
+    """, vals=(timedelta(minutes=stuck_timeout_minutes),))
 
     # Step 1: find a candidate
     rows = list(query(cnf, """
@@ -96,7 +96,7 @@ def reset_for_retry(cnf, export_id):
 
 
 def process_job(cnf, job):
-    export_id = job['id']
+    export_id = str(job['id'])
     user = job['user_id']
     survey = job['survey_id']
     source = job['source']

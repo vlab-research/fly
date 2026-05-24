@@ -16,6 +16,12 @@ minio = "^7.2.0"
 google-cloud-storage = "^2.14.0"
 
 
+[tool.pytest.ini_options]
+testpaths = ["exporter/tests"]
+markers = [
+    "integration: requires a live database (run 'make test-db' in devops/ first)",
+]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
