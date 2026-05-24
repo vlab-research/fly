@@ -159,10 +159,13 @@ const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 const isStale = (updated) => Date.now() - new Date(updated).getTime() > STALE_MS;
 
+const IN_PROGRESS_STATUSES = ['Requested', 'Processing', 'Started'];
+const isInProgress = (status) => IN_PROGRESS_STATUSES.includes(status);
+
 const exportColumns = [
   { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
   { title: 'Status', dataIndex: 'status', render: (status, record) => {
-    if (status === 'Started') {
+    if (isInProgress(status)) {
       return isStale(record.updated)
         ? <span style={{ color: '#faad14' }}>Stale</span>
         : status;
@@ -171,7 +174,7 @@ const exportColumns = [
   }},
   { title: 'Time', dataIndex: 'updated' },
   { title: 'Download', dataIndex: 'export_link', render: (text, record) => (
-    record.status === 'Started' && !isStale(record.updated)
+    isInProgress(record.status) && !isStale(record.updated)
       ? <Spin size="small" />
       : DownloadLink(text)
   )},
@@ -192,7 +195,7 @@ const ExportPanel = ({ selected }) => {
             const rows = data || [];
             setExports(rows);
             // Stop polling once no active (non-stale) exports remain
-            if (intervalId && !rows.some(r => r.status === 'Started' && !isStale(r.updated))) {
+            if (intervalId && !rows.some(r => isInProgress(r.status) && !isStale(r.updated))) {
               clearInterval(intervalId);
               intervalId = null;
             }
