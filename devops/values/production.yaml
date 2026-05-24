@@ -27,7 +27,7 @@ versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.38
 versionFormcentral: &vformcentral v0.0.12
-versionExporter: &vexporter v0.6.3
+versionExporter: &vexporter v0.6.4
 versionExodus: &vexodus v0.2.1
 
 processingAlerts:
