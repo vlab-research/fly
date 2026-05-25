@@ -86,7 +86,7 @@ const StatesSummary = ({ surveyName }) => {
       align: 'right',
       render: (count, record) => (
         <Link
-          to={`${match.url}/list?state=${encodeURIComponent(record.current_state)}`}
+          to={`${match.url}/list?state=${encodeURIComponent(record.current_state)}&form=${encodeURIComponent(record.current_form)}`}
           style={{ color: '#1890ff' }}
         >
           {parseInt(count, 10).toLocaleString()}

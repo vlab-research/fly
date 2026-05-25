@@ -84,7 +84,7 @@ async function summary(email, surveyName, shortcodes) {
   return { summary };
 }
 
-async function list(email, surveyName, shortcodes, { state, errorTag, search, limit = 50, offset = 0 } = {}) {
+async function list(email, surveyName, shortcodes, { state, errorTag, form, search, limit = 50, offset = 0 } = {}) {
   let extraConditions = [];
   let params = [email, surveyName, shortcodes];
   let paramIndex = 4;
@@ -98,6 +98,12 @@ async function list(email, surveyName, shortcodes, { state, errorTag, search, li
   if (errorTag) {
     extraConditions.push(`states.error_tag = $${paramIndex}`);
     params.push(errorTag);
+    paramIndex++;
+  }
+
+  if (form) {
+    extraConditions.push(`states.current_form = $${paramIndex}`);
+    params.push(form);
     paramIndex++;
   }
 

@@ -25,6 +25,7 @@ const StatesList = ({ surveyName }) => {
     const stateParam = params.get('state');
     return {
       state: (stateParam && VALID_STATES.has(stateParam)) ? stateParam : null,
+      form: params.get('form') || '',
       error_tag: params.get('error_tag') || '',
       search: params.get('search') || '',
     };
@@ -49,6 +50,7 @@ const StatesList = ({ surveyName }) => {
 
       // Add filters if present
       if (filters.state) params.append('state', filters.state);
+      if (filters.form) params.append('form', filters.form);
       if (filters.error_tag) params.append('error_tag', filters.error_tag);
       if (filters.search) params.append('search', filters.search);
 
@@ -86,6 +88,7 @@ const StatesList = ({ surveyName }) => {
   const handleReset = () => {
     setFilters({
       state: null,
+      form: '',
       error_tag: '',
       search: '',
     });
@@ -204,6 +207,17 @@ const StatesList = ({ surveyName }) => {
               <Option value="WAIT_EXTERNAL_EVENT">WAIT_EXTERNAL_EVENT</Option>
               <Option value="USER_BLOCKED">USER_BLOCKED</Option>
             </Select>
+          </Col>
+
+          <Col xs={24} sm={12} md={6}>
+            <div style={{ marginBottom: 8, fontWeight: 500 }}>Form</div>
+            <Input
+              allowClear
+              placeholder="Filter by form"
+              value={filters.form}
+              onChange={(e) => handleFilterChange('form', e.target.value)}
+              prefix={<SearchOutlined />}
+            />
           </Col>
 
           <Col xs={24} sm={12} md={6}>

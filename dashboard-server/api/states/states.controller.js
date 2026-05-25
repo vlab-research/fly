@@ -49,10 +49,11 @@ exports.getSummary = async (req, res) => {
 
 exports.listStates = async (req, res) => {
   try {
-    const { state, error_tag, search, limit, offset } = req.query;
+    const { state, error_tag, form, search, limit, offset } = req.query;
     const filters = {
       state,
       errorTag: error_tag,
+      form,
       search,
       limit: limit ? parseInt(limit) : 50,
       offset: offset ? parseInt(offset) : 0,
