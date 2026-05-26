@@ -2,7 +2,7 @@
 import 'chai';
 import parallel from 'mocha.parallel';
 import sendMessage from './sender';
-import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, makeNotify, makeEcho, Field } from '@vlab-research/mox';
+import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, makeNotify, makeEcho, Field } from './mox';
 import { v4 as uuid } from 'uuid';
 import farmhash from 'farmhash';
 import { seed } from './seed-db';
@@ -24,7 +24,7 @@ interface Message {
 }
 
 function makeRepeat(field: Field, text: string): Message {
-  const ref = JSON.parse(field.metadata).ref;
+  const ref = JSON.parse(field.metadata || '{}').ref;
   return {
     text: text,
     metadata: JSON.stringify({ repeat: true, ref })
@@ -32,7 +32,7 @@ function makeRepeat(field: Field, text: string): Message {
 }
 
 function makeRepeated(field: Field): Field {
-  return { ...field, metadata: JSON.stringify({ isRepeat: true, ...JSON.parse(field.metadata) }) };
+  return { ...field, metadata: JSON.stringify({ isRepeat: true, ...JSON.parse(field.metadata || '{}') }) };
 }
 
 interface OffMessage {

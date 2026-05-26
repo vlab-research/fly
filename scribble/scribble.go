@@ -101,6 +101,7 @@ func main() {
 	// Write forever
 	// getwriter takes the struct, not marshalwriteable
 	writer := GetWriter(getMarshaller(&cfg, pool), &cfg)
+	log.Printf("Scribble %s ready — consuming topic %s\n", cfg.Destination, cfg.Topic)
 	for {
 		c.SideEffect(writer.Write, checkError, errs)
 	}

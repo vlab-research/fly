@@ -14,7 +14,7 @@ COPY . /app/
 RUN go build -tags dynamic -a -o main .
 
 
-FROM alpine:latest
+FROM alpine:3.22
 RUN apk add --no-cache librdkafka-dev
 WORKDIR /app
 COPY --from=build /app/main /app/

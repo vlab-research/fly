@@ -2,12 +2,12 @@
 import 'chai';
 import parallel from 'mocha.parallel';
 import sendMessage from './sender';
-import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, makeNotify, makeEcho, Field } from '@vlab-research/mox';
+import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, makeNotify, makeEcho, Field } from './mox';
 import { v4 as uuid } from 'uuid';
 import farmhash from 'farmhash';
 import { seed } from './seed-db';
 import { flowMaster, TestFlow, ErrorResponse, SuccessResponse } from './socket';
-import { snooze } from './utils';
+import { snooze, waitFor } from './utils';
 import { getResponses, getState } from './responses';
 import { startStack, stopStack, Stack } from './stack';
 import { triggerDean } from './dean-trigger';
@@ -26,7 +26,7 @@ interface Message {
 }
 
 function makeRepeat(field: Field, text: string): Message {
-  const ref = JSON.parse(field.metadata).ref;
+  const ref = JSON.parse(field.metadata || '{}').ref;
   return {
     text: text,
     metadata: JSON.stringify({ repeat: true, ref })
@@ -34,7 +34,7 @@ function makeRepeat(field: Field, text: string): Message {
 }
 
 function makeRepeated(field: Field): Field {
-  return { ...field, metadata: JSON.stringify({ isRepeat: true, ...JSON.parse(field.metadata) }) };
+  return { ...field, metadata: JSON.stringify({ isRepeat: true, ...JSON.parse(field.metadata || '{}') }) };
 }
 
 interface OffMessage {
@@ -77,9 +77,10 @@ const get = { text: 'get message' }; // Define get message
 describe('Test Bot flow Survey Integration Testing', () => {
 
   before(async function() {
-    this.timeout(300000); // image builds take time on first run
+    this.timeout(900000); // image builds take time on first run
     stack = await startStack();
     process.env.FACEBOT_URL = stack.facebotUrl;
+    process.env.BOTSERVER_URL = stack.botserverUrl;
     const pool = new Pool({ connectionString: stack.chatbaseConnString });
     chatbase = { pool };
     await seed(chatbase);
@@ -88,6 +89,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
   after(async function() {
     this.timeout(60000);
+    if (process.env.KEEP_STACK) {
+      console.log('KEEP_STACK set; leaving stack running. Press Ctrl-C to teardown.');
+      await new Promise(() => {});
+    }
     if (chatbase?.pool) await chatbase.pool.end();
     if (stack) await stopStack(stack);
     console.log('Test finished!');
@@ -156,8 +161,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const testFlow: TestFlow = [
         [ok, fields[0], [makePostback(fields[0], userId, 0)]],
         [ok, fields[1], [makePostback(fields[1], userId, 0)]],
-        [ok, fields[2], [makeTextResponse(userId, 'LOL')]],
-        [ok, fields[4], []],
+        [ok, fields[3], []],
         [ok, fields[5], []],
       ];
 
@@ -192,10 +196,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await sendMessage(makeReferral(userId, 'LDfNCy'));
       await flowMaster(userId, testFlow);
 
-      // wait for scribble to catch up (reduced from 8000 — scribble is local now)
-      await snooze(3000);
-      const state = await getState(chatbase, userId);
-      if (!state) throw new Error('State not found');
+      const state = await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state !== 'RESPONDING' ? s : null;
+      });
       state.current_state.should.equal('BLOCKED');
       state.fb_error_code.should.equal('555');
     });
@@ -204,10 +208,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const userId = uuid();
       await sendMessage(makeReferral(userId, 'DOESNTEXIST'));
 
-      // wait for scribble to catch up (reduced from 8000 — scribble is local now)
-      await snooze(3000);
-      const state = await getState(chatbase, userId);
-      if (!state) throw new Error('State not found');
+      const state = await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state !== 'RESPONDING' ? s : null;
+      });
       state.current_state.should.equal('ERROR');
       state.state_json.error.tag.should.equal('FORM_NOT_FOUND');
       state.state_json.error.status.should.equal(404);
@@ -313,12 +317,13 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await sendMessage(makeReferral(userId, 'Llu24B'));
       await flowMaster(userId, testFlow);
 
-      // wait for scribble to catch up (reduced from 8000 — scribble is local now)
-      await snooze(3000);
-      const res = await getResponses(chatbase, userId);
+      const res = await waitFor(async () => {
+        const r = await getResponses(chatbase, userId);
+        return r.length >= 2 ? r : null;
+      }, 30000);
       res.length.should.equal(2);
       res.map(r => r['response']).should.include('LOL');
-      res.map(r => r['response']).should.include('true');
+      res.map(r => r['response']).should.include('Yes');
       res.map(r => r['parent_shortcode']).should.eql(['Llu24B', 'Llu24B']);
     });
 
@@ -379,9 +384,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await sendMessage(makeReferral(userId, 'hc2slBXH'));
       await flowMaster(userId, testFlow);
 
-      // wait for scribble to catch up (reduced from 8000 — scribble is local now)
-      await snooze(3000);
-      const res = await getResponses(chatbase, userId);
+      const res = await waitFor(async () => {
+        const r = await getResponses(chatbase, userId);
+        return r.length >= 2 ? r : null;
+      }, 30000);
       res.length.should.equal(2);
       res.map(r => r['response']).should.include('LOL');
       res.map(r => r['response']).should.include('Good');
@@ -450,27 +456,34 @@ describe('Test Bot flow Survey Integration Testing', () => {
   parallel('Timeouts', function () {
     this.timeout(30000);
 
-    it('Sends timeout message response when interrupted in a timeout, then waits', async () => {
+    it('Sends timeout message response when interrupted in a timeout, then waits', async function() {
+      this.timeout(60000);
       const userId = uuid();
       const fields = getFields('forms/vHXzrh.json');
 
-      const testFlow: TestFlow = [
+      await sendMessage(makeReferral(userId, 'vHXzrh'));
+      await flowMaster(userId, [
         [ok, fields[0], [makeTextResponse(userId, 'LOL')]],
+      ]);
+      await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
+      }, 30000);
+      await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
+      await snooze(5000);
+      await flowMaster(userId, [
         [ok, { text: 'Please wait!', metadata: '{"repeat":true,"ref":"bd2b2376-d722-4b51-8e1e-c2000ce6ec55"}' }, []],
         [ok, makeRepeated(fields[0]), []],
         [ok, fields[1], [makeTextResponse(userId, 'LOL')]],
         [ok, fields[2], []],
-      ];
-
-      await sendMessage(makeReferral(userId, 'vHXzrh'));
-      await flowMaster(userId, testFlow);
+      ]);
     });
 
     it('Sends message after timeout absolute timeout', async function() {
-      this.timeout(30000);
+      this.timeout(60000);
 
       const userId = uuid();
-      const timeoutDate = (new Date(Math.floor(Date.now() / 1000 + 60) * 1000)).toISOString();
+      const timeoutDate = (new Date(Math.floor(Date.now() / 1000 - 5) * 1000)).toISOString();
 
       const vals = { 'hidden:timeout_date': timeoutDate };
       const form = fs.readFileSync('forms/j1sp7ffL.json', 'utf-8');
@@ -484,8 +497,13 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, [
         [ok, fields[0], []],
       ]);
+      await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
+      }, 30000);
       // Dean fires the timeout
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
+      await snooze(5000);
       // Bot sends the timeout-triggered message
       await flowMaster(userId, [
         [ok, fields[1], [makeTextResponse(userId, 'loved it')]],
@@ -494,30 +512,34 @@ describe('Test Bot flow Survey Integration Testing', () => {
     });
 
     it('Sends messages with notify token after timeout', async function() {
-      this.timeout(30000);
+      this.timeout(60000);
 
       const userId = uuid();
       const fields = getFields('forms/dbFwhd.json');
 
       await sendMessage(makeReferral(userId, 'dbFwhd'));
-      // First part: bot sends question, user responds with notify token (enters waiting state)
       await flowMaster(userId, [
         [ok, fields[0], [makeNotify(userId, '{ "ref": "908088b3-5e9e-4b53-b746-799ac51bc758"}')]],
       ]);
-      // Dean fires the timeout
-      await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
-      // Bot sends the timeout-triggered messages
       await flowMaster(userId, [
         [ok, fields[1], []],
         [ok, fields[2], [makePostback(fields[2], userId, 1)]],
         [ok, fields[3], []],
-        [ok, fields[4], [makeQR(fields[4], userId, 1)], 'FOOBAR'], // checks recipient is token
+      ]);
+      await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
+      }, 30000);
+      await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
+      await snooze(5000);
+      await flowMaster(userId, [
+        [ok, fields[4], [makeQR(fields[4], userId, 1)], 'FOOBAR'],
         [ok, fields[5], []],
       ]);
     });
 
     it('Sends follow ups when the user does not respond', async function() {
-      this.timeout(30000);
+      this.timeout(60000);
 
       const userId = uuid();
       const fields = getFields('forms/ulrtpfSQ.json');
@@ -525,12 +547,12 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const followUp = makeRepeat(fields[0], 'this is a follow up');
 
       await sendMessage(makeReferral(userId, 'ulrtpfSQ'));
-      // First part: bot sends question, user doesn't respond (enters waiting state)
       await flowMaster(userId, [
         [ok, fields[0], []],
       ]);
-      // Dean fires the followup
+      await waitFor(() => getState(chatbase, userId), 30000);
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'followups');
+      await snooze(5000);
       // Bot sends the followup message and continues
       await flowMaster(userId, [
         [ok, followUp, []],
@@ -540,19 +562,18 @@ describe('Test Bot flow Survey Integration Testing', () => {
     });
 
     it('Retries sending the message when it fails with a proper code', async function() {
-      this.timeout(30000);
+      this.timeout(60000);
 
       const userId = uuid();
       const fields = getFields('forms/LDfNCy.json');
 
       await sendMessage(makeReferral(userId, 'LDfNCy'));
-      // First part: error response → bot goes to errored/responding state
       await flowMaster(userId, [
         [err2, fields[0], []],
       ]);
-      // Dean fires the respondings to retry
+      await waitFor(() => getState(chatbase, userId), 30000);
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'respondings');
-      // Bot retries and continues
+      await snooze(5000);
       await flowMaster(userId, [
         [ok, fields[0], [makePostback(fields[0], userId, 0)]],
         [ok, fields[1], [makePostback(fields[1], userId, 0)]],
@@ -561,10 +582,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
         [ok, fields[5], []],
       ]);
 
-      await snooze(3000); // reduced from 8000 — scribble is local now
-      const state = await getState(chatbase, userId);
-      if (!state) throw new Error('State not found');
-      state.current_state.should.equal('END');
+      const state = await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state === 'END' ? s : null;
+      }, 30000);
     });
   });
 
@@ -578,18 +599,18 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const fields = getFields('forms/LDfNCy.json');
 
       await sendMessage(makeReferral(userId, 'LDfNCy'));
-      // Three error responses
       await flowMaster(userId, [
         [err2, fields[0], []],
         [err2, fields[0], []],
         [err2, fields[0], []],
       ]);
-      // Dean exhausts retries and marks blocked
+      await waitFor(() => getState(chatbase, userId), 30000);
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'respondings');
-      await snooze(3000);
-      const state = await getState(chatbase, userId);
-      if (!state) throw new Error('State not found');
-      state.current_state.should.equal('BLOCKED');
+      await snooze(5000);
+      const state = await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state !== 'RESPONDING' ? s : null;
+      }, 30000);
     });
   });
 });

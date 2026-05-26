@@ -36,12 +36,16 @@ export interface Stack {
   network: StartedNetwork;
   cockroach: StartedTestContainer;
   redpanda: StartedTestContainer;
+  redis: StartedTestContainer;
   scribbleStates: StartedTestContainer;
   scribbleResponses: StartedTestContainer;
+  formcentral: StartedTestContainer;
+  dinersclub: StartedTestContainer;
   botserver: StartedTestContainer;
   replybot: StartedTestContainer;
   facebot: StartedTestContainer;
   facebotUrl: string;
+  botserverUrl: string;
   chatbaseConnString: string;
   deanImage: string;
   deanEnv: Record<string, string>;
@@ -86,19 +90,25 @@ export function loadTestEnv(): Record<string, string> {
 export async function startStack(): Promise<Stack> {
   // Resolve repo root: __dirname is .../facebot/testrunner/dist at runtime
   const repoRoot = path.resolve(__dirname, '../../../');
+  const t0 = Date.now();
 
   // Create network
+  console.time('[setup] network');
   const network = await new Network().start();
+  console.timeEnd('[setup] network');
 
   // Load env vars from test env and YAMLs
   const testEnv = loadTestEnv();
 
   // Build all images in parallel with explicit names
   const botserverImageName = 'botserver:test';
+  console.time('[setup] image builds');
   const replybotImageName = 'replybot:test';
   const scribbleImageName = 'scribble:test';
   const faceBotImageName = 'facebot:test';
   const deanImageName = 'dean:test';
+  const formcentralImageName = 'formcentral:test';
+  const dinersclubImageName = 'dinersclub:test';
 
   await Promise.all([
     GenericContainer.fromDockerfile(path.join(repoRoot, 'botserver')).build(botserverImageName),
@@ -106,9 +116,13 @@ export async function startStack(): Promise<Stack> {
     GenericContainer.fromDockerfile(path.join(repoRoot, 'scribble')).build(scribbleImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'facebot/receiver')).build(faceBotImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'dean')).build(deanImageName),
+    GenericContainer.fromDockerfile(path.join(repoRoot, 'formcentral')).build(formcentralImageName),
+    GenericContainer.fromDockerfile(path.join(repoRoot, 'dinersclub')).build(dinersclubImageName),
   ]);
+  console.timeEnd('[setup] image builds');
 
   // Start cockroach
+  console.time('[setup] cockroach + migrations');
   const cockroach = await new GenericContainer('cockroachdb/cockroach:v24.1.0')
     .withNetwork(network)
     .withNetworkAliases('cockroach')
@@ -117,24 +131,46 @@ export async function startStack(): Promise<Stack> {
     .withWaitStrategy(Wait.forLogMessage('initialized new cluster'))
     .start();
 
-  // Load schema and execute it in cockroach
-  const schemaPath = path.join(repoRoot, 'facebot/testrunner/schema.sql');
-  const schema = fs.readFileSync(schemaPath, 'utf8');
-  try {
-    await cockroach.exec([
+  // Load production migration files and execute them in cockroach
+  const migrationsDir = path.join(repoRoot, 'devops/migrations');
+  const migrationFiles = fs.readdirSync(migrationsDir)
+    .filter(f => f.endsWith('.sql'))
+    .sort();
+
+  for (const file of migrationFiles) {
+    const migrationPath = path.join(migrationsDir, file);
+    const migration = fs.readFileSync(migrationPath, 'utf8');
+    const result = await cockroach.exec([
       './cockroach',
       'sql',
       '--insecure',
       '--host=localhost:26257',
+      '--database=chatroach',
       '-e',
-      schema,
+      migration,
     ]);
-  } catch (e) {
-    console.error('Failed to initialize schema in cockroach:', e);
-    throw e;
+    if (result.exitCode !== 0) {
+      throw new Error(`Migration ${file} failed (exit ${result.exitCode}):\n${result.output}`);
+    }
   }
 
+  // Test-specific schema adjustments: surveys table needs UNIQUE(userid, shortcode) for seed upserts
+  const testSchemaResult = await cockroach.exec([
+    './cockroach',
+    'sql',
+    '--insecure',
+    '--host=localhost:26257',
+    '--database=chatroach',
+    '-e',
+    'ALTER TABLE surveys ADD CONSTRAINT IF NOT EXISTS unique_userid_shortcode UNIQUE(userid, shortcode);',
+  ]);
+  if (testSchemaResult.exitCode !== 0) {
+    console.log('Note: adding UNIQUE constraint (may already exist):', testSchemaResult.output);
+  }
+  console.timeEnd('[setup] cockroach + migrations');
+
   // Start redpanda
+  console.time('[setup] redpanda + topics');
   const redpanda = await new GenericContainer('redpandadata/redpanda:v23.3.18')
     .withNetwork(network)
     .withNetworkAliases('redpanda')
@@ -175,8 +211,10 @@ export async function startStack(): Promise<Stack> {
     // Topics might already exist, continue
     console.log('Kafka topics creation (may have already existed):', e);
   }
+  console.timeEnd('[setup] redpanda + topics');
 
   // Load scribble env from YAML and apply overrides
+  console.time('[setup] scribble + redis + formcentral');
   const scribbleStatesEnv = loadKubeEnv(
     path.join(repoRoot, 'scribble/kube-dev/states.yaml')
   );
@@ -189,28 +227,91 @@ export async function startStack(): Promise<Stack> {
   scribbleResponsesEnv.CHATBASE_HOST = 'cockroach';
   scribbleResponsesEnv.KAFKA_BROKERS = 'redpanda:9092';
 
-  // Start scribble-states and scribble-responses in parallel (after cockroach ready)
-  // Scribble is a pure Kafka consumer with no listening ports — no wait strategy needed
   const [scribbleStates, scribbleResponses] = await Promise.all([
     new GenericContainer(scribbleImageName)
       .withNetwork(network)
+      .withNetworkAliases('scribble-states')
       .withEnvironment(scribbleStatesEnv)
+      .withWaitStrategy(Wait.forLogMessage(/Scribble states ready/))
       .start(),
     new GenericContainer(scribbleImageName)
       .withNetwork(network)
+      .withNetworkAliases('scribble-responses')
       .withEnvironment(scribbleResponsesEnv)
+      .withWaitStrategy(Wait.forLogMessage(/Scribble responses ready/))
       .start(),
   ]);
 
+  // Start redis (required by replybot for state locking)
+  const redis = await new GenericContainer('redis:7-alpine')
+    .withNetwork(network)
+    .withNetworkAliases('redis')
+    .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
+    .start();
+
+  // Start formcentral (required by replybot for form lookups)
+  const formcentralEnv: Record<string, string> = {
+    CHATBASE_DATABASE: 'chatroach',
+    CHATBASE_HOST: 'cockroach',
+    CHATBASE_PORT: '26257',
+    CHATBASE_USER: 'chatroach',
+    CHATBASE_MAX_CONNECTIONS: '1',
+    PORT: '80',
+  };
+
+  const formcentral = await new GenericContainer(formcentralImageName)
+    .withNetwork(network)
+    .withNetworkAliases('formcentral')
+    .withExposedPorts(80)
+    .withEnvironment(formcentralEnv)
+    .withWaitStrategy(Wait.forHttp('/health', 80))
+    .start();
+  console.timeEnd('[setup] scribble + redis + formcentral');
+
+  // Start dinersclub (payment processor, consumes vlab-payment topic)
+  const dinersclubEnv: Record<string, string> = {
+    CACHE_TTL: '1m',
+    CACHE_NUM_COUNTERS: '1000',
+    CACHE_MAX_COST: '1000',
+    CACHE_BUFFER_ITEMS: '64',
+    RELOADLY_SANDBOX: 'true',
+    BOTSERVER_URL: 'http://botserver',
+    CHATBASE_DATABASE: 'chatroach',
+    CHATBASE_HOST: 'cockroach',
+    CHATBASE_PORT: '26257',
+    CHATBASE_USER: 'chatroach',
+    CHATBASE_MAX_CONNECTIONS: '1',
+    KAFKA_BROKERS: 'redpanda:9092',
+    KAFKA_POLL_TIMEOUT: '2s',
+    KAFKA_TOPIC: 'vlab-payment',
+    KAFKA_GROUP: 'dinersclub-test',
+    DINERSCLUB_BATCH_SIZE: '4',
+    DINERSCLUB_RETRY_BOTSERVER: '30s',
+    DINERSCLUB_RETRY_PROVIDER: '30s',
+    DINERSCLUB_POOL_SIZE: '1',
+    DINERSCLUB_PROVIDERS: 'fake',
+  };
+
+  const dinersclub = await new GenericContainer(dinersclubImageName)
+    .withNetwork(network)
+    .withNetworkAliases('dinersclub')
+    .withEnvironment(dinersclubEnv)
+    .start();
+
   // Load replybot env from YAML and apply overrides
+  console.time('[setup] replybot + botserver + facebot');
   const replybotEnv = loadKubeEnv(
     path.join(repoRoot, 'replybot/kube-dev/dev.yaml')
   );
   replybotEnv.CHATBASE_HOST = 'cockroach';
   replybotEnv.KAFKA_BROKERS = 'redpanda:9092';
   replybotEnv.BOTSPINE_KAFKA_BROKERS = 'redpanda:9092';
-  replybotEnv.FACEBOOK_GRAPH_URL = 'http://facebot';
+  replybotEnv.FACEBOOK_GRAPH_URL = 'http://facebot:3000';
   replybotEnv.BOTSERVER_URL = 'http://botserver';
+  replybotEnv.FORMCENTRAL_URL = 'http://formcentral';
+  replybotEnv.REDIS_HOST = 'redis';
+  replybotEnv.REDIS_PORT = '6379';
+  replybotEnv.AUTH0_DASHBOARD_SECRET = testEnv.AUTH0_DASHBOARD_SECRET || 'test';
 
   // Ensure NUM_SPINES is set
   if (!replybotEnv.NUM_SPINES) {
@@ -244,6 +345,7 @@ export async function startStack(): Promise<Stack> {
   const botserver = await new GenericContainer(botserverImageName)
     .withNetwork(network)
     .withNetworkAliases('botserver')
+    .withExposedPorts(80)
     .withEnvironment(botserverEnvWithSecrets)
     .withWaitStrategy(Wait.forHttp('/health', 80))
     .start();
@@ -260,6 +362,10 @@ export async function startStack(): Promise<Stack> {
   const facebotPort = facebot.getMappedPort(3000);
   const facebotUrl = `http://localhost:${facebotPort}`;
 
+  // Get botserver mapped port
+  const botserverPort = botserver.getMappedPort(80);
+  const botserverUrl = `http://localhost:${botserverPort}`;
+
   // Get cockroach mapped port for direct connection
   const cockroachPort = cockroach.getMappedPort(26257);
   const chatbaseConnString = `postgresql://chatroach@localhost:${cockroachPort}/chatroach?sslmode=disable`;
@@ -269,17 +375,30 @@ export async function startStack(): Promise<Stack> {
   deanEnv.CHATBASE_HOST = 'cockroach';
   deanEnv.BOTSERVER_URL = 'http://botserver/synthetic';
   deanEnv.KAFKA_BROKERS = 'redpanda:9092';
+  // Override production intervals for testcontainers (on-demand dean)
+  deanEnv.DEAN_RESPONDING_GRACE = '1s';
+  deanEnv.DEAN_RESPONDING_INTERVAL = '1m';
+  deanEnv.DEAN_ERROR_INTERVAL = '1m';
+  deanEnv.DEAN_BLOCKED_INTERVAL = '1m';
+  deanEnv.DEAN_PAYMENT_GRACE = '1s';
+  deanEnv.DEAN_PAYMENT_INTERVAL = '1m';
+  console.timeEnd('[setup] replybot + botserver + facebot');
+  console.log(`[setup] total: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   return {
     network,
     cockroach,
     redpanda,
+    redis,
     scribbleStates,
     scribbleResponses,
+    formcentral,
+    dinersclub,
     botserver,
     replybot,
     facebot,
     facebotUrl,
+    botserverUrl,
     chatbaseConnString,
     deanImage: deanImageName,
     deanEnv,
@@ -293,9 +412,12 @@ export async function stopStack(stack: Stack): Promise<void> {
   await Promise.all([
     stack.facebot.stop(),
     stack.botserver.stop(),
+    stack.formcentral.stop(),
+    stack.dinersclub.stop(),
     stack.replybot.stop(),
     stack.scribbleStates.stop(),
     stack.scribbleResponses.stop(),
+    stack.redis.stop(),
     stack.redpanda.stop(),
     stack.cockroach.stop(),
   ]);

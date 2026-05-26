@@ -1,10 +1,9 @@
-FROM node:10-stretch
+FROM node:18-bullseye
 
 WORKDIR /usr/src/app
 
-RUN npm install node-rdkafka
-COPY package.json /usr/src/app
-RUN npm i
+COPY package.json package-lock.json /usr/src/app/
+RUN npm ci
 
 COPY . /usr/src/app
 

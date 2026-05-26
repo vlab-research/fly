@@ -1,13 +1,13 @@
 import r2 from 'r2';
 import util from 'util';
 import { should } from 'chai';
-import { makeEcho, Field } from '@vlab-research/mox';
+import { makeEcho, Field } from './mox';
 import sendMessage from './sender';
 import { snooze } from './utils';
 
 should();
 
-const facebot = process.env.FACEBOT_URL || 'http://gbv-facebot';
+const facebotUrl = (): string => process.env.FACEBOT_URL || 'http://gbv-facebot';
 
 export interface SentResponse {
   data?: {
@@ -33,7 +33,7 @@ export type TestFlow = TestFlowItem[];
 
 async function receive(id: string): Promise<SentResponse> {
   while (true) {
-    const res = await r2.get(`${facebot}/sent/${id}`).json;
+    const res = await r2.get(`${facebotUrl()}/sent/${id}`).json;
     if (res.data) {
       return res;
     }
@@ -42,7 +42,7 @@ async function receive(id: string): Promise<SentResponse> {
 }
 
 async function send(token: string, json: any): Promise<any> {
-  const res = await r2.post(`${facebot}/respond/${token}`, {json}).response;
+  const res = await r2.post(`${facebotUrl()}/respond/${token}`, {json}).response;
   return res;
 }
 

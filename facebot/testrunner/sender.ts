@@ -1,7 +1,5 @@
 import r2 from 'r2';
 
-const BOTSERVER_URL = process.env.BOTSERVER_URL || 'http://localhost:3000';
-
 interface Message {
   source: 'synthetic' | string;
   [key: string]: any;
@@ -14,6 +12,7 @@ interface Response {
 }
 
 const sendMessage = async function (message: Message): Promise<Response> {
+  const BOTSERVER_URL = process.env.BOTSERVER_URL || 'http://localhost:3000';
   let json: any;
   let url: string;
   const {source} = message;
@@ -37,4 +36,4 @@ const sendMessage = async function (message: Message): Promise<Response> {
   return res;
 };
 
-export default sendMessage; 
+export default sendMessage;

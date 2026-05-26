@@ -1,8 +1,8 @@
-FROM node:10-stretch
+FROM node:18-slim
 
 WORKDIR /usr/src/app
 
-RUN npm install node-rdkafka
+RUN apt-get update && apt-get install -y python3 build-essential && rm -rf /var/lib/apt/lists/*
 COPY package.json /usr/src/app
 RUN npm i
 
