@@ -1,4 +1,3 @@
-const r2 = require('r2')
 const jwt = require('jsonwebtoken')
 const { MachineIOError } = require('../errors')
 
@@ -36,7 +35,7 @@ async function getForm(pageid, shortcode, timestamp) {
   const headers = { Authorization: `${tokenType} ${token}` }
   const url = `${process.env.FORMCENTRAL_URL}/surveys?pageid=${pageid}&shortcode=${shortcode}&timestamp=${timestamp}`
 
-  const res = await r2(url, { headers }).response
+  const res = await fetch(url, { headers })
 
   const f = await res.json()
   if (res.status === 404) {

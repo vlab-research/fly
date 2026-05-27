@@ -1,4 +1,3 @@
-const r2 = require('r2')
 const { MachineIOError } = require('../errors')
 const BASE_URL = process.env.FACEBOOK_GRAPH_URL || "https://graph.facebook.com/v8.0"
 const RETRIES = process.env.FACEBOOK_RETRIES || 5
@@ -46,7 +45,7 @@ async function getUserInfo(id, pageToken) {
   const headers = { Authorization: `Bearer ${pageToken}` }
 
   try {
-    const user = await facebookRequest(() => r2.get(url, { headers }).json)
+    const user = await facebookRequest(() => fetch(url, { headers }).then(r => r.json()))
     return user;
 
   } catch (e) {
@@ -60,7 +59,7 @@ async function getUserInfo(id, pageToken) {
 async function sendMessage(data, pageToken) {
   const headers = { Authorization: `Bearer ${pageToken}` }
   const url = `${BASE_URL}/me/messages`
-  const fn = () => r2.post(url, { headers, json: data }).json
+  const fn = () => fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
   try {
     return await facebookRequest(fn)
   } catch (e) {
@@ -77,7 +76,7 @@ async function passThreadControl(userId, targetAppId, metadata, pageToken) {
     target_app_id: targetAppId,
     metadata: JSON.stringify(metadata || {})
   }
-  const fn = () => r2.post(url, { headers, json: data }).json
+  const fn = () => fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
   return await facebookRequest(fn)
 }
 
