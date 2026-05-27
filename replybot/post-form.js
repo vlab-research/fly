@@ -1,6 +1,5 @@
 require('dotenv').config()
 
-const r2 = require('r2')
 const fs = require('fs')
 const args = process.argv.slice(2)
 
@@ -13,8 +12,8 @@ async function foo() {
 
     console.log(json)
 
-    const headers = { Authorization: `Bearer ${process.env.TYPEFORM_KEY}` }
-    const res = await r2.put(`https://api.typeform.com/forms/${FORM}`, { headers, json }).response
+    const headers = { Authorization: `Bearer ${process.env.TYPEFORM_KEY}`, 'Content-Type': 'application/json' }
+    const res = await fetch(`https://api.typeform.com/forms/${FORM}`, { method: 'PUT', headers, body: JSON.stringify(json) })
     const f = await res.json()
     if (f.code) {
       throw new Error(JSON.stringify(f))

@@ -1,5 +1,4 @@
 require('dotenv').config()
-const r2 = require('r2')
 // const { getForm } = require('./lib/typewheels/typeform')
 const fs = require('fs')
 
@@ -11,7 +10,7 @@ async function getForm(form) {
     throw new TypeError(`Trying to get a form without a value!`)
   }
   const headers = { Authorization: `Bearer ${process.env.TYPEFORM_KEY}` }
-  const res = await r2(`https://api.typeform.com/forms/${form}`, { headers }).response
+  const res = await fetch(`https://api.typeform.com/forms/${form}`, { headers })
   const f = await res.json()
   if (f.code) {
     throw new Error(JSON.stringify(f))

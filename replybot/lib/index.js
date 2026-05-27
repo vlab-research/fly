@@ -1,5 +1,4 @@
 const util = require('util')
-const r2 = require('r2')
 const { Machine } = require('./typewheels/transition')
 const { StateStore } = require('./typewheels/statestore')
 const { BotSpine } = require('@vlab-research/botspine')
@@ -26,8 +25,11 @@ async function publishReport(report) {
   }
 
   // TODO: secure!!
-  const headers = {}
-  return r2.post(`${url}/synthetic`, { headers, json }).response
+  return fetch(`${url}/synthetic`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(json),
+  })
 }
 
 async function produce(topic, message, userid) {
