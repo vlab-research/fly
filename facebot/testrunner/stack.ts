@@ -127,9 +127,35 @@ export async function startStack(): Promise<Stack> {
     .withNetwork(network)
     .withNetworkAliases('cockroach')
     .withExposedPorts(26257)
-    .withCommand(['start-single-node', '--insecure'])
-    .withWaitStrategy(Wait.forLogMessage('initialized new cluster'))
+    .withCommand(['start', '--insecure', '--listen-addr=0.0.0.0:26258', '--sql-addr=0.0.0.0:26257', '--join=localhost:26258'])
+    .withWaitStrategy(Wait.forLogMessage('Node will now attempt to join a running cluster'))
     .start();
+
+  // Initialize the single-node cluster (connects via RPC port 26258)
+  await cockroach.exec([
+    './cockroach',
+    'init',
+    '--insecure',
+    '--host=localhost:26258',
+  ]);
+
+  // Create test database and user (not auto-created)
+  await cockroach.exec([
+    './cockroach',
+    'sql',
+    '--insecure',
+    '--host=localhost:26257',
+    '-e',
+    'CREATE DATABASE IF NOT EXISTS chatroach;',
+  ]);
+  await cockroach.exec([
+    './cockroach',
+    'sql',
+    '--insecure',
+    '--host=localhost:26257',
+    '-e',
+    'CREATE USER IF NOT EXISTS chatroach;',
+  ]);
 
   // Load production migration files and execute them in cockroach
   const migrationsDir = path.join(repoRoot, 'devops/migrations');
@@ -168,6 +194,10 @@ export async function startStack(): Promise<Stack> {
     console.log('Note: adding UNIQUE constraint (may already exist):', testSchemaResult.output);
   }
   console.timeEnd('[setup] cockroach + migrations');
+
+  // Get cockroach mapped port for direct connection (used by testrunner on host)
+  const cockroachPort = cockroach.getMappedPort(26257);
+  const chatbaseConnString = `postgresql://chatroach@localhost:${cockroachPort}/chatroach?sslmode=disable`;
 
   // Start redpanda
   console.time('[setup] redpanda + topics');
@@ -218,13 +248,11 @@ export async function startStack(): Promise<Stack> {
   const scribbleStatesEnv = loadKubeEnv(
     path.join(repoRoot, 'scribble/kube-dev/states.yaml')
   );
-  scribbleStatesEnv.CHATBASE_HOST = 'cockroach';
   scribbleStatesEnv.KAFKA_BROKERS = 'redpanda:9092';
 
   const scribbleResponsesEnv = loadKubeEnv(
     path.join(repoRoot, 'scribble/kube-dev/responses.yaml')
   );
-  scribbleResponsesEnv.CHATBASE_HOST = 'cockroach';
   scribbleResponsesEnv.KAFKA_BROKERS = 'redpanda:9092';
 
   const [scribbleStates, scribbleResponses] = await Promise.all([
@@ -275,7 +303,7 @@ export async function startStack(): Promise<Stack> {
     CACHE_MAX_COST: '1000',
     CACHE_BUFFER_ITEMS: '64',
     RELOADLY_SANDBOX: 'true',
-    BOTSERVER_URL: 'http://botserver',
+    BOTSERVER_URL: 'http://botserver/synthetic',
     CHATBASE_DATABASE: 'chatroach',
     CHATBASE_HOST: 'cockroach',
     CHATBASE_PORT: '26257',
@@ -323,6 +351,10 @@ export async function startStack(): Promise<Stack> {
     replybotEnv.VLAB_CHAT_LOG_TOPIC = 'vlab-chat-log';
   }
 
+  // Disable SSL for pg connections (cockroach runs insecure)
+  replybotEnv.PGSSLMODE = 'disable';
+  replybotEnv.PGCONNECT_TIMEOUT = '5';
+
   // Start replybot
   const replybot = await new GenericContainer(replybotImageName)
     .withNetwork(network)
@@ -366,10 +398,6 @@ export async function startStack(): Promise<Stack> {
   const botserverPort = botserver.getMappedPort(80);
   const botserverUrl = `http://localhost:${botserverPort}`;
 
-  // Get cockroach mapped port for direct connection
-  const cockroachPort = cockroach.getMappedPort(26257);
-  const chatbaseConnString = `postgresql://chatroach@localhost:${cockroachPort}/chatroach?sslmode=disable`;
-
   // Load dean env from YAML
   const deanEnv = loadKubeEnv(path.join(repoRoot, 'dean/kube-dev/dev.yaml'));
   deanEnv.CHATBASE_HOST = 'cockroach';
@@ -382,6 +410,9 @@ export async function startStack(): Promise<Stack> {
   deanEnv.DEAN_BLOCKED_INTERVAL = '1m';
   deanEnv.DEAN_PAYMENT_GRACE = '1s';
   deanEnv.DEAN_PAYMENT_INTERVAL = '1m';
+  // Widen followup window for testcontainers (on-demand dean)
+  deanEnv.DEAN_FOLLOWUP_MIN = '0s';
+  deanEnv.DEAN_FOLLOWUP_MAX = '30s';
   console.timeEnd('[setup] replybot + botserver + facebot');
   console.log(`[setup] total: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 

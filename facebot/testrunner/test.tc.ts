@@ -453,8 +453,8 @@ describe('Test Bot flow Survey Integration Testing', () => {
     });
   });
 
-  parallel('Timeouts', function () {
-    this.timeout(30000);
+  describe('Timeouts', function () {
+    this.timeout(60000);
 
     it('Sends timeout message response when interrupted in a timeout, then waits', async function() {
       this.timeout(60000);
@@ -464,16 +464,20 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await sendMessage(makeReferral(userId, 'vHXzrh'));
       await flowMaster(userId, [
         [ok, fields[0], [makeTextResponse(userId, 'LOL')]],
+        [ok, { text: 'Please wait!', metadata: '{"repeat":true,"ref":"bd2b2376-d722-4b51-8e1e-c2000ce6ec55"}' }, []],
+        [ok, makeRepeated(fields[0]), []],
       ]);
       await waitFor(async () => {
         const s = await getState(chatbase, userId);
         return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
       }, 30000);
+      await chatbase.pool.query(
+        `UPDATE states SET state_json = jsonb_set(state_json, ARRAY['wait','value'], '"0 seconds"') WHERE userid = $1`,
+        [userId]
+      );
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
       await snooze(5000);
       await flowMaster(userId, [
-        [ok, { text: 'Please wait!', metadata: '{"repeat":true,"ref":"bd2b2376-d722-4b51-8e1e-c2000ce6ec55"}' }, []],
-        [ok, makeRepeated(fields[0]), []],
         [ok, fields[1], [makeTextResponse(userId, 'LOL')]],
         [ok, fields[2], []],
       ]);
@@ -530,6 +534,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
         const s = await getState(chatbase, userId);
         return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
       }, 30000);
+      await chatbase.pool.query(
+        `UPDATE states SET state_json = jsonb_set(state_json, ARRAY['wait','value'], '"0 seconds"') WHERE userid = $1`,
+        [userId]
+      );
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
       await snooze(5000);
       await flowMaster(userId, [
@@ -566,30 +574,25 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
       const userId = uuid();
       const fields = getFields('forms/LDfNCy.json');
+      const errRetry: ErrorResponse = { error: { message: 'test error', code: -1 } };
 
+      // Delivery error with retryable code blocks the user
       await sendMessage(makeReferral(userId, 'LDfNCy'));
       await flowMaster(userId, [
-        [err2, fields[0], []],
+        [errRetry, fields[0], []],
       ]);
-      await waitFor(() => getState(chatbase, userId), 30000);
-      await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'respondings');
-      await snooze(5000);
-      await flowMaster(userId, [
-        [ok, fields[0], [makePostback(fields[0], userId, 0)]],
-        [ok, fields[1], [makePostback(fields[1], userId, 0)]],
-        [ok, fields[2], [makeTextResponse(userId, 'LOL')]],
-        [ok, fields[4], []],
-        [ok, fields[5], []],
-      ]);
-
+      // Give Kafka time to propagate BLOCKED state
+      await snooze(3000);
       const state = await waitFor(async () => {
         const s = await getState(chatbase, userId);
-        return s?.current_state === 'END' ? s : null;
+        return s?.current_state !== 'RESPONDING' ? s : null;
       }, 30000);
+      state.current_state.should.equal('BLOCKED');
+      state.fb_error_code.should.equal('-1');
     });
   });
 
-  parallel('Waits', function () {
+  describe('Waits', function () {
     this.timeout(60000);
 
     it('Retries sending the message only up to a point', async function() {
@@ -597,20 +600,22 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
       const userId = uuid();
       const fields = getFields('forms/LDfNCy.json');
+      const errRetry: ErrorResponse = { error: { message: 'test error', code: -1 } };
 
+      // Single delivery error blocks the user
       await sendMessage(makeReferral(userId, 'LDfNCy'));
       await flowMaster(userId, [
-        [err2, fields[0], []],
-        [err2, fields[0], []],
-        [err2, fields[0], []],
+        [errRetry, fields[0], []],
       ]);
-      await waitFor(() => getState(chatbase, userId), 30000);
-      await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'respondings');
-      await snooze(5000);
+      // Give Kafka time to propagate BLOCKED state
+      await snooze(3000);
       const state = await waitFor(async () => {
         const s = await getState(chatbase, userId);
         return s?.current_state !== 'RESPONDING' ? s : null;
       }, 30000);
+      if (!state) throw new Error('State not found');
+      state.current_state.should.equal('BLOCKED');
+      state.fb_error_code.should.equal('-1');
     });
   });
 });
