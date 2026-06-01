@@ -1,0 +1,48 @@
+name: testcontainers-integration
+
+on:
+  pull_request:
+    paths:
+      - 'botserver/**'
+      - 'replybot/**'
+      - 'scribble/**'
+      - 'dean/**'
+      - 'formcentral/**'
+      - 'dinersclub/**'
+      - 'facebot/**'
+      - 'devops/migrations/**'
+      - 'devops/testing/**'
+      - '.github/workflows/testcontainers-integration.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'botserver/**'
+      - 'replybot/**'
+      - 'scribble/**'
+      - 'dean/**'
+      - 'formcentral/**'
+      - 'dinersclub/**'
+      - 'facebot/**'
+      - 'devops/migrations/**'
+      - 'devops/testing/**'
+      - '.github/workflows/testcontainers-integration.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: facebot/testrunner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: facebot/testrunner/.nvmrc
+
+      - run: npm ci
+
+      - run: npm run test:tc
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
