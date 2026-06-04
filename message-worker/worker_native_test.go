@@ -7,6 +7,7 @@ import (
 
 	"github.com/vlab-research/botparty"
 	"github.com/vlab-research/fly/message-worker/types"
+	"go.uber.org/zap"
 )
 
 // mockNativeMessageSender is a mock client for testing native message sending
@@ -66,7 +67,7 @@ func TestWorker_ProcessCommand_Native_Success(t *testing.T) {
 	clients := map[types.PlatformType]MessageSender{
 		types.PlatformMessenger: mockSender,
 	}
-	worker := NewWorker(clients, mockProducer, mockBot.URL())
+	worker := NewWorker(clients, mockProducer, mockBot.URL(), zap.NewNop())
 
 	// Create a native message command
 	nativePayload := json.RawMessage(`{
@@ -124,6 +125,7 @@ func TestWorker_ProcessCommand_Native_NoClient(t *testing.T) {
 		map[types.PlatformType]MessageSender{},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	nativePayload := json.RawMessage(`{"recipient": {"id": "user_123"}, "message": {"text": "test"}}`)
@@ -168,6 +170,7 @@ func TestWorker_ProcessCommand_Native_RetriableError(t *testing.T) {
 		map[types.PlatformType]MessageSender{types.PlatformMessenger: mockSender},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	nativePayload := json.RawMessage(`{"recipient": {"id": "user_123"}, "message": {"text": "test"}}`)
@@ -218,6 +221,7 @@ func TestWorker_ProcessCommand_Native_NonRetriableError(t *testing.T) {
 		map[types.PlatformType]MessageSender{types.PlatformMessenger: mockSender},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	nativePayload := json.RawMessage(`{"recipient": {"id": "user_123"}, "message": {"text": "test"}}`)

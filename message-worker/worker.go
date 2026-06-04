@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vlab-research/botparty"
 	"github.com/vlab-research/fly/message-worker/types"
+	"go.uber.org/zap"
 )
 
 // EventProducer is an interface for emitting events to Kafka
@@ -22,18 +23,19 @@ type Worker struct {
 	clients  map[types.PlatformType]MessageSender
 	producer EventProducer
 	config   RetryConfig
-	bp       *botparty.BotParty // For reporting errors to botserver /synthetic
+	bp       *botparty.BotParty
+	logger   *zap.Logger
 }
 
 // NewWorker creates a new message worker
-func NewWorker(clients map[types.PlatformType]MessageSender, producer EventProducer, botserverURL string) *Worker {
-	// BotParty expects the full URL to POST to, so append /synthetic
+func NewWorker(clients map[types.PlatformType]MessageSender, producer EventProducer, botserverURL string, logger *zap.Logger) *Worker {
 	bp := botparty.NewBotParty(botserverURL + "/synthetic")
 	return &Worker{
 		clients:  clients,
 		producer: producer,
 		config:   DefaultRetryConfig(),
 		bp:       bp,
+		logger:   logger,
 	}
 }
 
@@ -253,6 +255,7 @@ func IsPlatformError(err error) bool {
 type MachineReportError struct {
 	Tag     string `json:"tag"`
 	Message string `json:"message"`
+	Code    int    `json:"code,omitempty"`
 }
 
 // MachineReportValue represents the value field of a machine_report event
@@ -269,19 +272,25 @@ type MachineReportValue struct {
 // This triggers the state machine to transition the user to ERROR or BLOCKED state
 // - "FB" tag: Platform errors (user blocked bot, etc.) → BLOCKED state
 // - "STATE_ACTIONS" tag: Other errors (translation, config, etc.) → ERROR state
+// Returns nil on best-effort basis: if botserver is unreachable, the original send
+// already failed and reporting is auxiliary — we log the failure rather than
+// crash-looping the worker.
 func (w *Worker) reportError(cmd types.SendMessageCommand, err error) error {
-	// Determine the error tag based on error type
-	// FB tag for platform errors → transitions to BLOCKED state
-	// STATE_ACTIONS for other errors → transitions to ERROR state
 	tag := "STATE_ACTIONS"
+	code := 0
 	if IsPlatformError(err) {
 		tag = "FB"
+		var platformErr *PlatformError
+		if errors.As(err, &platformErr) {
+			code = platformErr.StatusCode
+		}
 	}
 
 	reportValue := MachineReportValue{
 		Error: MachineReportError{
 			Tag:     tag,
 			Message: err.Error(),
+			Code:    code,
 		},
 		User:      cmd.UserID,
 		Page:      cmd.PlatformAccountID,
@@ -290,7 +299,10 @@ func (w *Worker) reportError(cmd types.SendMessageCommand, err error) error {
 
 	valueJSON, marshalErr := json.Marshal(reportValue)
 	if marshalErr != nil {
-		return fmt.Errorf("failed to marshal machine_report value: %w", marshalErr)
+		w.logger.Error("failed to marshal machine_report value",
+			zap.String("command_id", cmd.CommandID),
+			zap.Error(marshalErr))
+		return nil
 	}
 
 	rawValue := json.RawMessage(valueJSON)
@@ -298,7 +310,12 @@ func (w *Worker) reportError(cmd types.SendMessageCommand, err error) error {
 
 	sendErr := w.bp.Send(event)
 	if sendErr != nil {
-		return fmt.Errorf("failed to send machine_report to botserver (original error: %v): %w", err, sendErr)
+		w.logger.Error("failed to send machine_report to botserver — best-effort, skipping",
+			zap.String("command_id", cmd.CommandID),
+			zap.String("user_id", cmd.UserID),
+			zap.Error(sendErr),
+			zap.NamedError("original_error", err))
+		return nil
 	}
 
 	return nil

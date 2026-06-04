@@ -6,7 +6,7 @@ metadata:
     {{- include "message-worker.labels" . | nindent 4 }}
   annotations:
     prometheus.io/scrape: "true"
-    prometheus.io/port: "8080"
+    prometheus.io/port: "8081"
     prometheus.io/path: "/metrics"
 spec:
   replicas: {{ .Values.replicaCount }}
@@ -19,7 +19,7 @@ spec:
         {{- include "message-worker.selectorLabels" . | nindent 8 }}
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "8081"
         prometheus.io/path: "/metrics"
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -36,8 +36,20 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: health
-              containerPort: 8080
+              containerPort: 8081
               protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
           envFrom:
             - secretRef:
                 name: "{{ .Values.envFrom }}"

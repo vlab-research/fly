@@ -7,6 +7,7 @@ import (
 
 	"github.com/vlab-research/botparty"
 	"github.com/vlab-research/fly/message-worker/types"
+	"go.uber.org/zap"
 )
 
 // mockHandoffSender is a mock client for testing pass_thread_control
@@ -58,6 +59,7 @@ func TestWorker_ProcessCommand_PassThreadControl_Success(t *testing.T) {
 		map[types.PlatformType]MessageSender{types.PlatformMessenger: mockSender},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	// Create a pass_thread_control command
@@ -118,6 +120,7 @@ func TestWorker_ProcessCommand_PassThreadControl_NoClient(t *testing.T) {
 		map[types.PlatformType]MessageSender{},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	cmd := types.SendMessageCommand{
@@ -161,6 +164,7 @@ func TestWorker_ProcessCommand_PassThreadControl_RetriableError(t *testing.T) {
 		map[types.PlatformType]MessageSender{types.PlatformMessenger: mockSender},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	cmd := types.SendMessageCommand{
@@ -209,6 +213,7 @@ func TestWorker_ProcessCommand_PassThreadControl_NonRetriableError(t *testing.T)
 		map[types.PlatformType]MessageSender{types.PlatformMessenger: mockSender},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	cmd := types.SendMessageCommand{
@@ -265,6 +270,7 @@ func TestWorker_ProcessCommand_PassThreadControl_ValidatesTargetAppID(t *testing
 		map[types.PlatformType]MessageSender{types.PlatformMessenger: &mockHandoffSender{}},
 		mockProducer,
 		mockBot.URL(),
+		zap.NewNop(),
 	)
 
 	// Create a command with missing TargetAppID (should fail validation)
