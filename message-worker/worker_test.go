@@ -10,6 +10,7 @@ import (
 
 	"github.com/vlab-research/botparty"
 	"github.com/vlab-research/fly/message-worker/types"
+	"go.uber.org/zap"
 )
 
 // Mock EventProducer for testing
@@ -112,7 +113,7 @@ func TestWorker_ProcessCommand_Success(t *testing.T) {
 	clients := map[types.PlatformType]MessageSender{
 		types.PlatformMessenger: mockSender,
 	}
-	worker := NewWorker(clients, mockProducer, mockBot.URL())
+	worker := NewWorker(clients, mockProducer, mockBot.URL(), zap.NewNop())
 
 	// Process command
 	err := worker.ProcessCommand(context.Background(), cmd)
@@ -161,7 +162,7 @@ func TestWorker_ProcessCommand_TranslationError(t *testing.T) {
 	clients := map[types.PlatformType]MessageSender{
 		types.PlatformMessenger: mockSender,
 	}
-	worker := NewWorker(clients, mockProducer, mockBot.URL())
+	worker := NewWorker(clients, mockProducer, mockBot.URL(), zap.NewNop())
 
 	// Create command with invalid message (missing text)
 	cmd := types.SendMessageCommand{
@@ -220,6 +221,7 @@ func TestWorker_EmitMessageSent(t *testing.T) {
 
 	worker := &Worker{
 		producer: mockProducer,
+		logger:   zap.NewNop(),
 	}
 
 	text := "Test message"
@@ -276,6 +278,7 @@ func TestWorker_EmitMessageFailed(t *testing.T) {
 
 	worker := &Worker{
 		producer: mockProducer,
+		logger:   zap.NewNop(),
 	}
 
 	text := "Test message"
@@ -337,6 +340,7 @@ func TestWorker_EmitMessageFailed_ProducerError(t *testing.T) {
 
 	worker := &Worker{
 		producer: mockProducer,
+		logger:   zap.NewNop(),
 	}
 
 	text := "Test message"
@@ -374,7 +378,7 @@ func TestWorker_ProcessCommand_NoClientForPlatform(t *testing.T) {
 
 	// Create worker with no clients
 	clients := map[types.PlatformType]MessageSender{}
-	worker := NewWorker(clients, mockProducer, mockBot.URL())
+	worker := NewWorker(clients, mockProducer, mockBot.URL(), zap.NewNop())
 
 	text := "Hello"
 	cmd := types.SendMessageCommand{
@@ -466,7 +470,7 @@ func TestWorker_ReportError_PlatformError(t *testing.T) {
 	mockBot := newMockBotserver()
 	defer mockBot.Close()
 
-	worker := NewWorker(nil, nil, mockBot.URL())
+	worker := NewWorker(nil, nil, mockBot.URL(), zap.NewNop())
 
 	text := "Test message"
 	cmd := types.SendMessageCommand{
@@ -530,7 +534,7 @@ func TestWorker_ReportError_NonPlatformError(t *testing.T) {
 	mockBot := newMockBotserver()
 	defer mockBot.Close()
 
-	worker := NewWorker(nil, nil, mockBot.URL())
+	worker := NewWorker(nil, nil, mockBot.URL(), zap.NewNop())
 
 	text := "Test message"
 	cmd := types.SendMessageCommand{

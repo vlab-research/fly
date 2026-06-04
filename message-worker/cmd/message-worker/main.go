@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,16 +16,34 @@ import (
 	"go.uber.org/zap"
 )
 
+func startHealthServer(port string, logger *zap.Logger) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	go func() {
+		logger.Info("starting health server", zap.String("port", port))
+		if err := http.ListenAndServe(":"+port, mux); err != nil {
+			logger.Error("health server failed", zap.Error(err))
+		}
+	}()
+}
+
 func main() {
-	// Initialize logger
 	logger, err := zap.NewProduction()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer logger.Sync()
 
 	logger.Info("starting message-worker")
+
+	healthPort := os.Getenv("HEALTH_PORT")
+	if healthPort == "" {
+		healthPort = "8081"
+	}
+	startHealthServer(healthPort, logger)
 
 	// Load configuration
 	config, err := messageworker.LoadConfigFromEnv()
@@ -102,7 +120,7 @@ func main() {
 	logger.Info("platform clients initialized", zap.Int("platforms", len(clients)))
 
 	// Create worker with business logic
-	worker := messageworker.NewWorker(clients, eventProducer, config.BotserverURL)
+	worker := messageworker.NewWorker(clients, eventProducer, config.BotserverURL, logger)
 	logger.Info("worker initialized with botserver", zap.String("botserver_url", config.BotserverURL))
 
 	// Create Burrow pool for concurrent processing
@@ -128,16 +146,14 @@ func main() {
 
 	// Define process function that integrates with Worker
 	processFunc := func(ctx context.Context, msg *kafka.Message) error {
-		// Deserialize command
 		var cmd types.SendMessageCommand
 		if err := json.Unmarshal(msg.Value, &cmd); err != nil {
-			logger.Error("failed to unmarshal command",
+			logger.Error("failed to unmarshal command — skipping",
 				zap.Error(err),
 				zap.ByteString("value", msg.Value))
-			return fmt.Errorf("unmarshal error: %w", err)
+			return nil
 		}
 
-		// Process command using worker
 		if err := worker.ProcessCommand(ctx, cmd); err != nil {
 			logger.Error("failed to process command",
 				zap.String("command_id", cmd.CommandID),
