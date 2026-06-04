@@ -65,7 +65,7 @@
       "title": "Ok, we'll ask you more questions in a few days",
       "ref": "b66022cd-f896-4053-8c14-cc225b504bdc",
       "properties": {
-        "description": "type: wait\nwait:\n    notifyPermission: true\n    type: timeout\n    value: 1m",
+        "description": "type: wait\nwait:\n    notifyPermission: true\n    type: timeout\n    value: 1 second",
         "hide_marks": false,
         "button_text": "Continue"
       },

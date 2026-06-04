@@ -471,10 +471,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
         const s = await getState(chatbase, userId);
         return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
       }, 30000);
-      await chatbase.pool.query(
-        `UPDATE states SET state_json = jsonb_set(state_json, ARRAY['wait','value'], '"0 seconds"') WHERE userid = $1`,
-        [userId]
-      );
+      await snooze(2000);
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
       await snooze(5000);
       await flowMaster(userId, [
@@ -534,10 +531,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
         const s = await getState(chatbase, userId);
         return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
       }, 30000);
-      await chatbase.pool.query(
-        `UPDATE states SET state_json = jsonb_set(state_json, ARRAY['wait','value'], '"0 seconds"') WHERE userid = $1`,
-        [userId]
-      );
+      await snooze(2000);
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
       await snooze(5000);
       await flowMaster(userId, [

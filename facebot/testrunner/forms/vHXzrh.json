@@ -44,7 +44,7 @@
       "title": "Hey, I'll write you again in a bit.",
       "ref": "bd2b2376-d722-4b51-8e1e-c2000ce6ec55",
       "properties": {
-        "description": "type: wait\nresponseMessage: Please wait!\nwait:\n    type: timeout\n    value: 1 minute",
+        "description": "type: wait\nresponseMessage: Please wait!\nwait:\n    type: timeout\n    value: 1 second",
         "hide_marks": false,
         "button_text": "Continue"
       },
