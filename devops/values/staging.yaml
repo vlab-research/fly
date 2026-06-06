@@ -1,6 +1,6 @@
 tags:
   kafka: false
-  backup: true
+  backup: false
   cockroach: true
   redis: true
   naughtybot: false
@@ -19,15 +19,16 @@ chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 
-versionDashboard: &vdashboard v0.0.34
-versionBotserver: &vbotserver v0.0.10
-versionReplybot: &vreplybot v0.0.147
-versionLinksniffer: &vlinksniffer v0.0.4
-versionDean: &vdean v0.0.28
-versionScribble: &vscribble v0.0.25
-versionDinersclub: &vdinersclub v0.0.28
-versionFormcentral: &vformcentral v0.0.11
-versionExporter: &vexporter v0.3.2
+versionDashboard: &vdashboard v0.0.63
+versionBotserver: &vbotserver v0.0.12
+versionReplybot: &vreplybot v0.0.196
+versionLinksniffer: &vlinksniffer v0.0.6
+versionDean: &vdean v0.0.41
+versionScribble: &vscribble v0.0.32
+versionDinersclub: &vdinersclub v0.0.40
+versionFormcentral: &vformcentral v0.0.12
+versionExporter: &vexporter v0.6.7
+versionExodus: &vexodus v0.2.1
 
 processingAlerts: []
 laggingAlerts: []
@@ -67,8 +68,9 @@ kafkaTopics:
 
 
 dinersclub:
+  replicaCount: 1
   image:
-    repository: vlabresearch/dinersclub
+    repository: ghcr.io/vlab-research/dinersclub
     tag: *vdinersclub
     pullPolicy: Always
   resources:
@@ -102,7 +104,7 @@ dinersclub:
     - name: KAFKA_BROKERS
       value: *kb
     - name: KAFKA_POLL_TIMEOUT
-      value: "2s"
+      value: "10s"
     - name: KAFKA_TOPIC
       value: *paymenttopic
     - name: KAFKA_GROUP
@@ -121,7 +123,7 @@ dinersclub:
 
 dean:
   image:
-    repository: vlabresearch/dean
+    repository: ghcr.io/vlab-research/dean
     tag: *vdean
     pullPolicy: Always
   env:
@@ -140,15 +142,15 @@ dean:
   - name: DEAN_ERROR_TAGS
     value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
-    value: "24 hours"
+    value: "48 hours"
   - name: DEAN_FB_CODES
-    value: "2022,-1"
+    value: "2022,613,-1,190,80006,551"
   - name: DEAN_BLOCKED_INTERVAL
-    value: "24 hours"
+    value: "48 hours"
   - name: DEAN_RESPONDING_INTERVAL
-    value: "23 hours"
+    value: "48 hours"
   - name: DEAN_RESPONDING_GRACE
-    value: "1 hour"
+    value: "20 minutes"
   - name: DEAN_RETRY_MAX_ATTEMPTS
     value: "30"
   - name: DEAN_PAYMENT_GRACE
@@ -157,31 +159,45 @@ dean:
     value: "14 days"
   - name: DEAN_PAYMENT_MAX_ATTEMPTS
     value: "30"
-  - name: DEAN_TIMEOUT_MAX_PAST
-    value: "48 hours"
   - name: DEAN_TIMEOUT_MAX_ATTEMPTS
     value: "5"
   - name: DEAN_SEND_DELAY
-    value: "1s"
+    value: "3s"
   - name: DEAN_FOLLOWUP_MIN
-    value: "2 minutes"
+    value: "12 hours"
   - name: DEAN_FOLLOWUP_MAX
     value: "24 hours"
   - name: DEAN_TIMEOUT_BLACKLIST
-    value: "bebborsbaseserb"
+    value: "bebborsbaseserb,bebbobg2basebul,nciaim2followup2pay,nciaim2followup1pay,nciaim2baselinepay"
+  - name: DEAN_TIMEOUT_MAX_PAST
+    value: "72 hours"
   - name: DEAN_SPAMMER_EXTERNAL_EVENTS_MAX
     value: "100"
   queries:
     - name: respondings
       queries: "respondings,blocked,errored"
-      schedule: "*/1 * * * *"
+      schedule: "*/30 * * * *"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 10Mi
+    - name: followups
+      queries: "followups"
+      schedule: "0 5-19 * * *"
       resources:
         requests:
           cpu: 10m
           memory: 10Mi
     - name: timeouts
-      queries: "timeouts,followups"
-      schedule: "*/1 * * * *"
+      queries: "timeouts"
+      schedule: "*/10 * * * *"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 10Mi
+    - name: payments
+      queries: "payments"
+      schedule: "0 */6 * * *"
       resources:
         requests:
           cpu: 10m
@@ -217,11 +233,7 @@ scribble:
   - name: KAFKA_BROKERS
     value: *kb
   - name: KAFKA_POLL_TIMEOUT
-    value: "10s"
-  - name: SCRIBBLE_CHUNK_SIZE
-    value: "16"
-  - name: SCRIBBLE_BATCH_SIZE
-    value: "16"
+    value: "2s"
   - name: SCRIBBLE_ERROR_HANDLERS
     value: ""
 
@@ -233,7 +245,12 @@ scribble:
         value: *statetopic
       - name: KAFKA_GROUP
         value: "scribble-states"
-
+      - name: SCRIBBLE_CHUNK_SIZE
+        value: "128"
+      - name: SCRIBBLE_BATCH_SIZE
+        value: "128"
+      - name: SCRIBBLE_STRICT_MODE
+        value: "false"
     - destination: "responses"
       replicaCount: 1
       env:
@@ -241,7 +258,12 @@ scribble:
         value: *responsetopic
       - name: KAFKA_GROUP
         value: "scribble-responses"
-
+      - name: SCRIBBLE_CHUNK_SIZE
+        value: "32"
+      - name: SCRIBBLE_BATCH_SIZE
+        value: "64"
+      - name: SCRIBBLE_STRICT_MODE
+        value: "false"
     - destination: "messages"
       replicaCount: 1
       env:
@@ -249,8 +271,13 @@ scribble:
         value: *topic
       - name: KAFKA_GROUP
         value: "scribble-messages"
-
-    - destination: "chat_log"
+      - name: SCRIBBLE_CHUNK_SIZE
+        value: "32"
+      - name: SCRIBBLE_BATCH_SIZE
+        value: "128"
+      - name: SCRIBBLE_STRICT_MODE
+        value: "true"
+    - destination: "chat-log"
       replicaCount: 1
       env:
       - name: KAFKA_TOPIC
@@ -265,38 +292,10 @@ scribble:
         value: "false"
 
 
-dumper:
-  image:
-    repository: vlabresearch/dumper
-    tag: 0.0.1
-    pullPolicy: Always
-
-  completions: 1
-  parallelism: 1
-  backoffLimit: 3
-
-  schedule: "10 11 * * *"
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-
-  storage:
-    storageClass: standard
-    size: 20Gi
-
-  keySecret: gbv-dumper-keys
-  env:
-  - name: CHATBASE_HOST
-    value: *host
-  - name: DUMPER_LOCATION
-    value: "gs://vlab-research-backups/gbv-india-staging/"
-
-
 replybot:
   replicaCount: 1
   image:
-    repository: vlabresearch/replybot
+    repository: ghcr.io/vlab-research/replybot
     tag: *vreplybot
     pullPolicy: Always
 
@@ -306,6 +305,8 @@ replybot:
       cpu: 10m
       memory: 64Mi
   env:
+  - name: FAKE
+    value: "NOTHING"
   - name: CHATBASE_BACKEND
     value: "@vlab-research/chatbase-postgres"
   - name: CHATBASE_DATABASE
@@ -322,12 +323,14 @@ replybot:
     value: "305"
   - name: REPLYBOT_EVENT_TOPIC
     value: *topic
-  - name: BOTSPINE_KAFKA_BROKERS
-    value: *kb
+  - name: REPLYBOT_RESET_SHORTCODE
+    value: "reset"
   - name: KAFKA_BROKERS
     value: *kb
   - name: BOTSPINE_MESSAGE_TOPIC
     value: *topic
+  - name: BOTSPINE_KAFKA_BROKERS
+    value: *kb
   - name: VLAB_STATE_TOPIC
     value: *statetopic
   - name: VLAB_RESPONSE_TOPIC
@@ -337,9 +340,13 @@ replybot:
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
-    value: "https://graph.facebook.com/v8.0"
+    value: "https://graph.facebook.com/v22.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
+  - name: STATE_STORE_LIMIT
+    value: "30000"
+  - name: NUM_SPINES
+    value: "6"
   - name: REDIS_HOST
     value: "gbv-redis-master"
   - name: REDIS_PORT
@@ -418,12 +425,14 @@ dashboard:
   replicaCount: 1
 
   image:
-    repository: vlabresearch/dashboard
+    repository: ghcr.io/vlab-research/dashboard
     tag: *vdashboard
     pullPolicy: Always
 
   envFrom: *botenvs
   env:
+    - name: FAKE
+      value: 'nope'
     - name: TYPEFORM_URL
       value: 'https://api.typeform.com'
     - name: CUBEJS_API_SECRET
@@ -450,16 +459,18 @@ dashboard:
       value: '26257'
     - name: CUBEJS_DB_PORT
       value: '26257'
-    - name: TYPEFORM_REDIRECT_URL
-      value: 'https://staging--vlab-research.netlify.app/surveys/auth'
     - name: FORMCENTRAL_URL
       value: 'http://gbv-formcentral'
+    - name: TYPEFORM_REDIRECT_URL
+      value: 'https://staging--vlab-research.netlify.app/surveys/auth'
     - name: FACEBOOK_GRAPH_URL
-      value: 'https://graph.facebook.com/v9.0'
+      value: 'https://graph.facebook.com/v22.0'
     - name: KAFKA_BROKERS
       value: *kb
     - name: KAFKA_EXPORTS_TOPIC
       value: *exportertopic
+    - name: EXODUS_API_URL
+      value: "http://gbv-exodus-api"
   resources:
     requests:
       cpu: 10m
@@ -503,6 +514,8 @@ botserver:
     value: *kb
   - name: PORT
     value: "80"
+  - name: DASHBOARD_URL
+    value: "http://gbv-dashboard"
 
   resources:
     requests:
@@ -530,28 +543,58 @@ botserver:
 
 # Configuration for Exporter Worker
 exporter:
+  replicaCount: 1
   image:
-    repository: vlabresearch/exporter
-    tag: *vexporter
+    repository: "ghcr.io/vlab-research/exporter"
     pullPolicy: Always
+    tag: *vexporter
   env:
-    - name: "KAFKA_TOPIC"
-      value: *exportertopic
-    - name: "KAFKA_BROKERS"
-      value: *kb
-    - name: "KAFKA_GROUP_ID"
-      value: "exporter"
     - name: "APP_NAME"
       value: "exporter"
-    - name: "KAFKA_MAX_POLL_INTERVAL"
-      value: "1200000"
   envSecrets:
     - exporter
 
+exodus:
+  image:
+    repository: vlabresearch/exodus
+    tag: *vexodus
+    pullPolicy: Always
+  env:
+  - name: CHATBASE_DATABASE
+    value: "chatroach"
+  - name: CHATBASE_USER
+    value: "chatroach"
+  - name: CHATBASE_PASSWORD
+    value: ""
+  - name: CHATBASE_HOST
+    value: *host
+  - name: CHATBASE_PORT
+    value: "26257"
+  - name: BOTSERVER_URL
+    value: "http://gbv-botserver/synthetic"
+  - name: DRY_RUN
+    value: "false"
+  - name: EXODUS_RATE_LIMIT
+    value: "1s"
+  - name: EXODUS_MAX_BAIL_USERS
+    value: "100000"
+  executor:
+    enabled: true
+    schedule: "* * * * *"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+  api:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
 
 cockroachdb:
   image:
-    tag: v21.2.17
+    tag: v24.1.28
   statefulset:
     replicas: 1
     resources:
@@ -573,6 +616,10 @@ cockroachdb:
 
 redis:
   enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 8.2.1-debian-12-r0
   architecture: replication
   auth:
     enabled: true
@@ -610,6 +657,10 @@ redis:
       prometheus.io/port: "6379"
   metrics:
     enabled: true
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/redis-exporter
+      tag: 1.76.0-debian-12-r0
     serviceMonitor:
       enabled: true
       interval: 30s
