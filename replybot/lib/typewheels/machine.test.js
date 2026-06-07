@@ -2431,6 +2431,55 @@ describe('Thread passback functionality', () => {
     // Should proceed to next question when new_owner_app_id is missing (accept handover)
     actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
+
+  it('should fulfill wait condition when new_owner_app_id is a number matching our string app id', () => {
+    // Regression: real Messenger webhooks deliver new_owner_app_id as a JSON
+    // *number*, while FACEBOOK_APP_ID is a string env var. A strict !== between
+    // them is always true, which previously dropped every handover that included
+    // the field (observed in production: AI-chatbot handovers silently ignored,
+    // surveys never resuming). The comparison must be type-agnostic.
+    const wait = {
+      op: 'or',
+      vars: [
+        { type: 'handover' },
+        { type: 'timeout', value: '60m' }
+      ]
+    }
+    const form = {
+      logic: [],
+      fields: [
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({ wait })
+          }
+        },
+        { type: 'short_text', title: 'bar', ref: 'bar' }
+      ]
+    }
+
+    // new_owner_app_id as a NUMBER (123456789), exactly as JSON.parse yields it
+    // from the webhook; process.env.FACEBOOK_APP_ID is the string '123456789'.
+    const handoverEvent = {
+      source: 'messenger',
+      timestamp: Date.now(),
+      recipient: { id: '1855355231229529' },
+      sender: { id: '1989430067808669' },
+      pass_thread_control: {
+        new_owner_app_id: 123456789,
+        previous_owner_app_id: 987654321,
+        metadata: 'End of AI chatbot session – handing back to Virtual Lab'
+      }
+    }
+
+    const log = [referral, _echo({ ref: 'foo', type: 'wait', wait }), handoverEvent]
+    const actions = getMessage(log, form, user)
+
+    // Should accept the handover and proceed to the next question
+    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+  })
 })
 
 describe('Statement with wait should not gather next responses', () => {

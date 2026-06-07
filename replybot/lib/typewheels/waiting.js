@@ -55,9 +55,12 @@ function _normalizeEvent(event) {
       }
     }
 
-    // Only include target_app_id if new_owner_app_id is present
+    // Only include target_app_id if new_owner_app_id is present.
+    // Coerce to a string: the webhook can send it as a number or a string, and
+    // wait-condition target_app_id values are authored as strings -- normalizing
+    // here keeps the comparison in _matches type-safe regardless of source format.
     if (event.pass_thread_control.new_owner_app_id) {
-      value.target_app_id = event.pass_thread_control.new_owner_app_id
+      value.target_app_id = String(event.pass_thread_control.new_owner_app_id)
     }
 
     return {

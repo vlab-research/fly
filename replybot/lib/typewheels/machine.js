@@ -355,10 +355,17 @@ function exec(state, nxt) {
     }
 
     case 'HANDOVER_EVENT': {
-      // Security check: only process handovers TO our app
-      // Note: new_owner_app_id may be missing in some Messenger API webhook payloads
+      // Security check: only process handovers TO our app.
+      // Be robust to whatever shape the Messenger webhook sends:
+      //   - new_owner_app_id may be missing entirely (some payloads omit it) -> accept
+      //   - it may arrive as a JSON number (619383124328766) or a string ("619...")
+      //     while FACEBOOK_APP_ID (an env var) is always a string -- so compare as
+      //     strings, otherwise a strict !== between a number and a string is always
+      //     true and silently drops every handover that does include the field.
+      //   - if FACEBOOK_APP_ID is unset, don't reject (the check is simply disabled).
       const { new_owner_app_id } = nxt.pass_thread_control
-      if (new_owner_app_id && new_owner_app_id !== process.env.FACEBOOK_APP_ID) {
+      const ourAppId = process.env.FACEBOOK_APP_ID
+      if (new_owner_app_id && ourAppId && String(new_owner_app_id) !== String(ourAppId)) {
         console.log(`Ignoring handover to different app: ${new_owner_app_id}`)
         return _noop()
       }
