@@ -6,28 +6,41 @@ const { DBStream } = require('./pgstream')
 const { TokenStore } = require('../typewheels/tokenstore')
 const { Machine } = require('../typewheels/transition')
 
+// Keyset pagination on (timestamp, hsh) -- avoids re-scanning and
+// re-numbering the user's entire message history on every page (which is
+// what the previous ROW_NUMBER()-based pagination did, making this
+// effectively unusable for users with many thousands of events). hsh is
+// the tiebreaker for messages with identical timestamps; it's already part
+// of the table's primary key and the (userid, timestamp ASC) index covers
+// this query directly.
 async function query(pool, userid, lim) {
-  const query = `WITH r as
-                   (SELECT *, ROW_NUMBER() OVER (ORDER BY timestamp) AS row_number
-                    FROM messages
-                    WHERE userid = $1
-                    ORDER BY timestamp ASC)
-                 SELECT * FROM r
-                 WHERE row_number > $2
-                 ORDER BY row_number
-                 LIMIT 100;`
+  const res = lim
+    ? await pool.query(
+      `SELECT * FROM messages
+       WHERE userid = $1
+       AND (timestamp, hsh) > ($2, $3)
+       ORDER BY timestamp ASC, hsh ASC
+       LIMIT 100;`,
+      [userid, lim.timestamp, lim.hsh]
+    )
+    : await pool.query(
+      `SELECT * FROM messages
+       WHERE userid = $1
+       ORDER BY timestamp ASC, hsh ASC
+       LIMIT 100;`,
+      [userid]
+    )
 
-  const res = await pool.query(query, [userid, lim])
   const final = res.rows.slice(-1)[0]
   if (!final) return [null, null]
-  return [res.rows, final['row_number']]
-} 2
+  return [res.rows, { timestamp: final.timestamp, hsh: final.hsh }]
+}
 
 const userid = process.argv.slice(2)[0]
 if (!userid) throw new Error('GIVE ME USERID!')
 
 const fn = (lim) => query(chatbase.pool, userid, lim)
-const stream = new DBStream(fn, 0)
+const stream = new DBStream(fn, null)
 
 const chatbase = new Chatbase()
 const emptyBase = { get: () => [], pool: chatbase.pool }
