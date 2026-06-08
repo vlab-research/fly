@@ -1,0 +1,102 @@
+{
+  "title": "Fly Smoke Test - Part B",
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/red6P2"
+  },
+  "fields": [
+    {
+      "type": "statement",
+      "ref": "stitch_arrival",
+      "title": "Stitch successful! You have arrived in Part B.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "test_timeout",
+      "title": "Would you like to test the timeout feature?",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_timeout_yes" },
+          { "label": "No", "ref": "choice_timeout_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "statement",
+      "ref": "timeout_wait",
+      "title": "Testing timeout. We will message you again in 1 minute!",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"wait\",\"responseMessage\":\"Please wait! Testing timeout...\",\"wait\":{\"type\":\"timeout\",\"value\":{\"type\":\"relative\",\"timeout\":\"1 minute\"}}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "welcome_back",
+      "title": "Welcome back! The timeout worked correctly.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "short_text",
+      "ref": "feedback",
+      "title": "Did everything work in the smoke test? Any issues?",
+      "validations": { "required": false }
+    }
+  ],
+  "thankyou_screens": [
+    {
+      "ref": "default_tys",
+      "title": "Thanks for testing Fly! If any features did not work, please report them.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "hidden": [
+    "userid",
+    "surveyid",
+    "seed_2"
+  ],
+  "logic": [
+    {
+      "type": "field",
+      "ref": "test_timeout",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "timeout_wait" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_timeout" },
+              { "type": "choice", "value": "choice_timeout_yes" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "feedback" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    }
+  ]
+}

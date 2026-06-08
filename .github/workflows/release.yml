@@ -39,6 +39,7 @@ jobs:
             exodus)         CTX=exodus             ; IMG=exodus           ;;
             testrunner)     CTX=facebot/testrunner ; IMG=testrunner       ;;
             message-worker) CTX=message-worker     ; IMG=message-worker   ;;
+            smoke-echo)     CTX=smoke-echo         ; IMG=smoke-echo       ;;
             *)
               echo "Unknown service '${{ steps.parse.outputs.service }}' — add it to .github/workflows/release.yml" >&2
               exit 1

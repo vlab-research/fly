@@ -1,0 +1,392 @@
+{
+  "title": "Fly Smoke Test - Part A",
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/red6P2"
+  },
+  "fields": [
+    {
+      "type": "statement",
+      "ref": "welcome",
+      "title": "Welcome to the Fly Smoke Test! This survey tests core Fly features: logic jumps, payments, timeouts, stitches, and more.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Start",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://i.imgur.com/ZSHauqq.png\"}}"
+      }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "favorite_color",
+      "title": "What is your favorite color?\n- A. Red\n- B. Blue\n- C. Green",
+      "properties": {
+        "choices": [
+          { "label": "A", "ref": "choice_red" },
+          { "label": "B", "ref": "choice_blue" },
+          { "label": "C", "ref": "choice_green" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "short_text",
+      "ref": "why_red",
+      "title": "Why do you like the color red?",
+      "validations": { "required": false }
+    },
+    {
+      "type": "statement",
+      "ref": "interesting_choice",
+      "title": "Interesting choice!",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "number",
+      "ref": "siblings",
+      "title": "How many siblings do you have?",
+      "validations": { "required": false }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "test_payment",
+      "title": "Would you like to test the payment feature?",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_payment_yes" },
+          { "label": "No", "ref": "choice_payment_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "operator",
+      "title": "Please select your mobile network operator. For testing, select MTN Nigeria.",
+      "properties": {
+        "choices": [
+          { "label": "MTN Nigeria" },
+          { "label": "Airtel" },
+          { "label": "Glo" },
+          { "label": "9mobile" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "phone_number",
+      "ref": "phone",
+      "title": "Enter your phone number. For testing, use +2348061147388 (MTN Nigeria).",
+      "properties": {
+        "default_country_code": "ng"
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "statement",
+      "ref": "payment_wait",
+      "title": "Processing 300 NGN mobile credit payment...",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"wait\",\"wait\":{\"type\":\"external\",\"value\":{\"type\":\"payment:reloadly\",\"id\":\"smokepay1\"}},\"payment\":{\"provider\":\"reloadly\",\"key\":\"vlab\",\"details\":{\"number\":\"{{field:phone}}\",\"amount\":300,\"country\":\"NG\",\"operator\":\"{{field:operator}}\",\"tolerance\":0,\"id\":\"smokepay1\"}}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "payment_success",
+      "title": "Payment succeeded! 300 NGN mobile credit has been sent to your number.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "payment_failure",
+      "title": "Payment failed. Error: {{hidden:e_payment_reloadly_error_message}}",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "try_again",
+      "title": "Would you like to try again with a different number?",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_yes" },
+          { "label": "No", "ref": "choice_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "test_handoff",
+      "title": "Would you like to test the thread control handoff feature?",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_handoff_yes" },
+          { "label": "No", "ref": "choice_handoff_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "statement",
+      "ref": "handoff_statement",
+      "title": "Now testing thread control handoff. The Smoke Echo app is about to take over this conversation — say something back to it, and it'll hand you right back to me.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"wait\",\"wait\":{\"type\":\"handover\"},\"handoff\":{\"target_app_id\":\"976665718578167\",\"metadata\":{\"check\":\"smoke_test\"}}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "handoff_result",
+      "title": "Handoff complete! The echo app heard you say \"{{hidden:e_handover_metadata_echo_text}}\" (status: {{hidden:e_handover_metadata_smoke_echo}}) and handed control back to me.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "stitch_statement",
+      "title": "Now testing stitch to Part B...",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"stitch\",\"stitch\":{\"form\":\"flysmokeb\"}}"
+      }
+    }
+  ],
+  "thankyou_screens": [
+    {
+      "ref": "default_tys",
+      "title": "Thanks for completing the Fly Smoke Test!",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "hidden": [
+    "userid",
+    "surveyid",
+    "seed_2",
+    "e_payment_reloadly_success",
+    "e_payment_reloadly_error_message",
+    "e_handover_metadata_smoke_echo",
+    "e_handover_metadata_echo_text"
+  ],
+  "logic": [
+    {
+      "type": "field",
+      "ref": "favorite_color",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "why_red" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "favorite_color" },
+              { "type": "choice", "value": "choice_red" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "interesting_choice" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "why_red",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "siblings" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "interesting_choice",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "siblings" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "test_payment",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "operator" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_payment" },
+              { "type": "choice", "value": "choice_payment_yes" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "test_handoff" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "payment_wait",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "payment_success" }
+          },
+          "condition": {
+            "op": "equal",
+            "vars": [
+              { "type": "hidden", "value": "e_payment_reloadly_success" },
+              { "type": "constant", "value": "true" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "payment_failure" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "payment_success",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "test_handoff" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "try_again",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "operator" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "try_again" },
+              { "type": "choice", "value": "choice_yes" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "test_handoff" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "test_handoff",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "handoff_statement" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_handoff" },
+              { "type": "choice", "value": "choice_handoff_yes" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "stitch_statement" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smoke-echo
+  labels:
+    app: smoke-echo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smoke-echo
+  template:
+    metadata:
+      labels:
+        app: smoke-echo
+    spec:
+      containers:
+      - name: smoke-echo
+        image: ghcr.io/vlab-research/smoke-echo:v0.1.3
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: "5m"
+            memory: "48Mi"
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+        envFrom:
+        - secretRef:
+            name: smoke-echo-env
+        env:
+        - name: PORT
+          value: "80"
+        - name: FACEBOOK_GRAPH_URL
+          value: "https://graph.facebook.com/v22.0"
