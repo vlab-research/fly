@@ -289,43 +289,8 @@ function getVar(ctx, qa, ref, v, vars) {
 }
 
 
-// Extended addCustomType with handoff support
 function addCustomType(field) {
-  const result = baseAddCustomType(field)
-  
-  // Check if this is a handoff question
-  if (result.properties && result.properties.description) {
-    try {
-      const config = yaml.load(result.properties.description)
-      if (config && config.type === 'handoff') {
-        // Generate wait condition with handover event type
-        const wait = config.wait || { 
-          op: 'or',
-          vars: [
-            { type: 'handover', value: { target_app_id: config.target_app_id } },
-            { type: 'timeout', value: `${config.timeout_minutes || 60}m` }
-          ]
-        }
-        
-        return {
-          ...result,
-          handoff: {
-            target_app_id: config.target_app_id,
-            wait: wait,
-            metadata: {
-              survey_id: config.survey_id,
-              question_ref: result.ref,
-              ...config.metadata
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Not YAML or not handoff type, continue with base result
-    }
-  }
-  
-  return result
+  return baseAddCustomType(field)
 }
 
 module.exports = {

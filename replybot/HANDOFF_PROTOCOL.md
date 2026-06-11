@@ -1,101 +1,73 @@
-# Facebook Messenger Handoff Protocol Feature
+# Facebook Messenger Handoff Protocol
 
 ## Overview
 
-The handoff protocol feature allows surveys to temporarily hand off conversation control to external Facebook Messenger applications, then seamlessly resume the survey when control is returned. This enables integration with specialized tools like educational assessments, literacy tests, accessibility evaluations, or any custom chatbot functionality.
+The handoff protocol allows surveys to temporarily hand off conversation control to external Facebook Messenger applications, then resume the survey when control is returned. The `handoff` is a first-class field type: the author declares it with `type: handoff` and a `handoff:` block, and the runtime synthesizes the wait and thread-control handoff automatically.
 
-## Key Concepts
+## Authoring Format
 
-### What is a Handoff?
-
-A handoff occurs when a survey:
-1. Reaches a special "handoff" question
-2. Transfers conversation control to an external Facebook app
-3. Waits for the external app to complete its interaction
-4. Receives control back (either automatically or via timeout)
-5. Continues the survey from where it left off
-
-### Why Use Handoffs?
-
-Handoffs are useful when you need to:
-- Conduct specialized assessments (reading level, comprehension tests)
-- Use existing chatbot tools without rebuilding them
-- Integrate with external services that have their own conversation flows
-- Collect data through interactive modules that exist in other systems
-- Provide specialized support or interventions through partner applications
-
-## How to Use Handoffs
-
-### Basic Handoff Question
-
-Add a handoff question to your survey by creating a statement question with a special description:
+Declare a handoff field in the Typeform description YAML:
 
 ```yaml
 type: handoff
-target_app_id: 123456789
-timeout_minutes: 30
+handoff:
+  target_app_id: 619383124328766
+  mode: wait
+  metadata: { return_app_id: 699455733740842, assessment_type: literacy }
 ```
 
-**Parameters:**
-- `target_app_id`: The Facebook app ID of the external application (required)
-- `timeout_minutes`: How long to wait before taking control back (default: 60)
+**Fields:**
 
-**Example in Typeform:**
-Create a statement question with the description field containing the above YAML, and the survey will hand off to the specified app when this question is reached.
+| Field | Required | Description |
+|---|---|---|
+| `type` | yes | Must be `handoff` |
+| `handoff.target_app_id` | yes | Facebook app ID of the external application |
+| `handoff.mode` | yes | Only `wait` is implemented |
+| `handoff.metadata` | no | Key-value pairs sent to the external app when it gains thread control |
 
-### Advanced Handoff with Custom Wait Conditions
+### Parsing
 
-For more control over when the survey resumes, you can specify complex wait conditions:
+`baseAddCustomType` parses the YAML into `md = { type: 'handoff', handoff: { target_app_id, mode, metadata } }` and sets `field.type = 'handoff'`. The `translateHandoff` translator renders the field title as text, producing metadata `{ type: 'handoff', handoff: { target_app_id, mode, metadata }, ref }`.
 
-```json
-{
-  "type": "handoff",
-  "target_app_id": "987654321",
-  "wait": {
-    "op": "or",
-    "vars": [
-      {"type": "external", "value": {"type": "handoff_return", "target_app_id": "987654321"}},
-      {"type": "timeout", "value": "45m"}
-    ]
-  },
-  "metadata": {
-    "survey_context": "literacy_assessment",
-    "participant_id": "{{hidden:id}}"
-  }
-}
-```
+## Runtime Flow
 
-**Wait Condition Options:**
-- `handoff_return`: Resume when external app explicitly returns control
-- `timeout`: Resume after specified duration (e.g., "30m", "2h", "1d")
-- `op: "or"`: Resume when ANY condition is met
-- `op: "and"`: Resume when ALL conditions are met
+The critical design decision: **the handoff (passing thread control) fires after the echo arms the wait, not on send.** This avoids the stuck-handoff bug where handing off on send would suppress the echo that arms the wait.
 
-### Passing Metadata to External Apps
+### Step-by-step
 
-You can include metadata that will be sent to the external app:
+1. **User answers the question before the handoff field.** `exec()` returns `RESPOND`. `act()` sends the handoff message. No handoff side-effect occurs on send.
+2. **The echo of the handoff message hits the ECHO handler.** The handler detects `md.type === 'handoff'` and returns:
+   - `action: HANDOFF`
+   - Synthesized `wait: { type: 'handover' }`
+   - `handoff: md.handoff`
+3. **`apply()` transitions state** to `WAIT_EXTERNAL_EVENT` with the synthesized wait.
+4. **`act()` executes the handoff.** It returns `{ messages: [], handoff: _wrapSideEffect(ctx, output.handoff) }`. `transition.js` calls `passThreadControl`, handing thread control to the external app.
+5. **External app completes its interaction** and calls Facebook's `pass_thread_control` API to return control.
+6. **Botserver receives the handover webhook** and forwards it as a `messaging_handovers` event to Kafka.
+7. **Replybot processes the handover event** via `_handleExternalEvent`. The `WAIT_EXTERNAL_EVENT` state's synthesized wait is fulfilled. State transitions to `RESPOND` and the survey resumes from the next question.
 
-```json
-{
-  "type": "handoff",
-  "target_app_id": "555666777",
-  "metadata": {
-    "participant_age": "{{hidden:age}}",
-    "survey_language": "{{hidden:language}}",
-    "assessment_type": "reading_comprehension"
-  }
-}
-```
+### Why the Echo Must Come First
 
-The external app receives this metadata when it gains thread control.
+If `passThreadControl` fired on send (before the echo), Facebook would route the echo to the external app instead of back to replybot. The echo would never reach the ECHO handler, the wait would never be armed, and the survey would be stuck in a state with no pending wait. Firing the handoff after the echo ensures the wait is armed before control leaves replybot.
+
+## Not Yet Implemented
+
+The following are aspirational and not part of the current implementation:
+
+- **`mode: nowait`** -- hand off and end the survey (no wait, no handback).
+- **`mode: reclaim`** -- hand off, wait (possibly with timeout), then `take_thread_control` to forcibly reclaim the thread and resume.
+- **`take_thread_control`** -- there is no automatic reclamation of thread control.
+- **Timeout backstops** -- there is no `timeout_minutes` field or automatic timeout. If the external app never returns control, the survey stays in `WAIT_EXTERNAL_EVENT` indefinitely.
+
+Do not reference `timeout_minutes`, `take_thread_control`, or custom wait conditions in handoff YAML. The wait is always synthesized as `{ type: 'handover' }` at runtime.
 
 ## Receiving Data from External Apps
 
-When external apps return control, they can include metadata that becomes available as hidden fields in your survey.
+When external apps return control, they can include metadata that is automatically flattened and stored with the `e_handover_` prefix.
 
 ### How It Works
 
-External apps call Facebook's `pass_thread_control` API with metadata:
+External app calls Facebook's `pass_thread_control` API with metadata:
 
 ```json
 {
@@ -108,7 +80,7 @@ External apps call Facebook's `pass_thread_control` API with metadata:
 }
 ```
 
-This metadata is automatically flattened and stored with prefix `e_handover_`:
+Flattened metadata in state:
 
 ```javascript
 e_handover_completion_status: "success"
@@ -118,148 +90,29 @@ e_handover_recommendations_0: "literacy_support"
 e_handover_recommendations_1: "visual_aids"
 ```
 
-### Using Returned Data in Surveys
+### Flattening Rules
 
-Access the flattened metadata in subsequent questions:
+- Nested objects: `{user: {age: 25}}` becomes `e_handover_user_age: 25`
+- Arrays: `{tags: ["a", "b"]}` becomes `e_handover_tags_0: "a"`, `e_handover_tags_1: "b"`
+- All data types preserved: strings, numbers, booleans, null
 
-**In question text:**
+### Using Returned Data
+
+Access flattened metadata in subsequent questions:
+
 ```
 Based on your reading level of grade {{hidden:e_handover_assessment_results_reading_level}},
 we have prepared appropriate materials for you.
 ```
 
-**In survey logic:**
-```javascript
-// Branch based on comprehension score
-if ({{hidden:e_handover_assessment_results_comprehension_score}} > 80) {
-  // Show advanced content
-}
-```
-
-**In logic jumps:**
-Use the hidden fields in Typeform logic to determine which questions to show based on assessment results.
-
-## Use Cases
-
-### 1. Literacy Assessment Integration
-
-Hand off to an external literacy testing app:
-
-```yaml
-type: handoff
-target_app_id: 111222333
-timeout_minutes: 20
-metadata:
-  assessment_type: literacy
-  grade_level: adult
-```
-
-The literacy app conducts an interactive reading test, then returns:
-- Reading level assessment
-- Comprehension scores
-- Recommendations for content difficulty
-
-Survey continues with appropriate question complexity based on results.
-
-### 2. Multilingual Support Assessment
-
-Hand off to language proficiency evaluation:
-
-```yaml
-type: handoff
-target_app_id: 444555666
-timeout_minutes: 15
-metadata:
-  languages_offered: ["english", "spanish", "portuguese"]
-```
-
-Language app assesses participant's preferred language and proficiency, returns:
-- Preferred language
-- Proficiency level
-- Need for translation support
-
-Survey continues in appropriate language with suitable complexity.
-
-### 3. Accessibility Needs Evaluation
-
-Hand off to accessibility assessment tool:
-
-```yaml
-type: handoff
-target_app_id: 777888999
-timeout_minutes: 10
-metadata:
-  survey_context: accessibility_check
-```
-
-Accessibility app determines participant needs, returns:
-- Vision support requirements
-- Audio support needs
-- Reading assistance preferences
-
-Survey adapts format based on identified needs.
-
-### 4. Interactive Educational Module
-
-Hand off to external educational content:
-
-```yaml
-type: handoff
-target_app_id: 123123123
-timeout_minutes: 45
-metadata:
-  module_type: health_education
-  topic: vaccination_info
-```
-
-Educational module provides interactive learning experience, returns:
-- Completion status
-- Quiz scores
-- Topics needing reinforcement
-
-Survey asks follow-up questions based on learning outcomes.
-
-## Technical Details
-
-### State Management
-
-During handoff, the survey user is in `WAIT_EXTERNAL_EVENT` state. All survey state is preserved, including:
-- Current form and question position
-- All collected responses (qa array)
-- User metadata
-- Survey metadata
-
-When control returns, the survey resumes from the next question after the handoff.
-
-### Timeout Behavior
-
-If the external app never returns control:
-1. Timeout event is generated after configured duration
-2. Replybot automatically calls `take_thread_control` to reclaim conversation
-3. Survey continues normally
-
-This ensures surveys never get permanently stuck.
-
-### Security
-
-Handoff return events are validated:
-- Only events from the expected `target_app_id` are processed
-- Events from unexpected apps are ignored
-- Control must be explicitly passed to our app ID
-
-### Metadata Flattening
-
-Complex nested metadata is automatically flattened:
-- Nested objects: `{user: {age: 25}}` → `e_handover_user_age: 25`
-- Arrays: `{tags: ["a", "b"]}` → `e_handover_tags_0: "a"`, `e_handover_tags_1: "b"`
-- All data types preserved: strings, numbers, booleans, null
+In logic jumps, use the hidden fields to branch on assessment results.
 
 ## External App Requirements
 
-For an app to work with handoff protocol, it needs to:
+For an app to work with the handoff protocol, it needs to:
 
-1. **Be configured as Secondary Receiver** in Facebook Page settings
-2. **Receive thread control** when survey hands off
+1. **Be configured as a Secondary Receiver** in Facebook Page settings
+2. **Receive thread control** when the survey hands off
 3. **Return control** by calling Facebook's `pass_thread_control` API:
    ```javascript
    POST https://graph.facebook.com/v18.0/me/pass_thread_control
@@ -270,132 +123,87 @@ For an app to work with handoff protocol, it needs to:
    }
    ```
 
-That's it! No special API integration or webhooks required on the external app side.
+No special API integration or webhooks are required on the external app side beyond standard Facebook Handover Protocol support.
 
 ## Configuration
 
 ### Facebook App Setup
 
-1. **Set replybot app as Primary Receiver:**
-   - Go to Page Settings → Messenger Platform
-   - Set your replybot app as Primary Receiver
-
-2. **Add webhook subscription:**
-   - In Facebook App dashboard, add `messaging_handovers` to webhook subscriptions
-   - Botserver already handles these events
-
-3. **Configure external apps as Secondary Receivers:**
-   - External apps must be added to the page
-   - They will automatically be Secondary Receivers
+1. Set the replybot app as **Primary Receiver** in Page Settings > Messenger Platform
+2. Add `messaging_handovers` to webhook subscriptions in the Facebook App dashboard
+3. Configure external apps as **Secondary Receivers** on the page
 
 ### Environment Variables
 
-Required environment variable:
 ```bash
 FACEBOOK_APP_ID=your_replybot_app_id
 ```
 
-This is used to validate that control is returned to the correct app.
+Used to validate that control is returned to the correct app.
+
+## Use Cases
+
+### Literacy Assessment Integration
+
+```yaml
+type: handoff
+handoff:
+  target_app_id: 111222333
+  mode: wait
+  metadata: { assessment_type: literacy, grade_level: adult }
+```
+
+The literacy app conducts an interactive reading test, then returns reading level, comprehension scores, and recommendations. The survey continues with appropriate question complexity.
+
+### Multilingual Support Assessment
+
+```yaml
+type: handoff
+handoff:
+  target_app_id: 444555666
+  mode: wait
+  metadata: { languages_offered: ["english", "spanish", "portuguese"] }
+```
+
+### Accessibility Needs Evaluation
+
+```yaml
+type: handoff
+handoff:
+  target_app_id: 777888999
+  mode: wait
+  metadata: { survey_context: accessibility_check }
+```
 
 ## Troubleshooting
 
-### Survey doesn't resume after handoff
+### Survey does not resume after handoff
 
-**Check:**
 - Is `target_app_id` correct?
-- Is external app returning control to correct app ID?
-- Is timeout sufficient for external app to complete?
+- Is the external app returning control to the correct app ID?
 - Check botserver logs for handover webhook events
+- Check replybot logs for the ECHO handler producing `action: HANDOFF`
 
 ### Metadata not appearing in survey
 
-**Check:**
-- Is metadata properly JSON-formatted when external app calls `pass_thread_control`?
-- Are you using correct field names with `e_handover_` prefix?
-- Check replybot logs to see if external event was processed
+- Is metadata properly JSON-formatted when the external app calls `pass_thread_control`?
+- Are you using the correct field names with the `e_handover_` prefix?
+- Check replybot logs to confirm the external event was processed
 
 ### External app never gets control
 
-**Check:**
-- Is external app configured as Secondary Receiver on the page?
+- Is the external app configured as a Secondary Receiver on the page?
 - Is `target_app_id` the correct Facebook app ID?
 - Check replybot logs for `passThreadControl` API call results
+- Confirm the ECHO handler fired and `action: HANDOFF` was produced (the handoff only fires after the echo)
 
-## Examples
+### Stuck in WAIT_EXTERNAL_EVENT indefinitely
 
-### Complete Example: Reading Assessment Flow
-
-**Survey Structure:**
-1. Welcome questions (demographics)
-2. Handoff to literacy assessment app
-3. Resume with personalized content based on results
-4. Main survey questions at appropriate reading level
-5. Thank you message
-
-**Handoff Question:**
-```json
-{
-  "type": "handoff",
-  "target_app_id": "999888777",
-  "timeout_minutes": 20,
-  "wait": {
-    "op": "or",
-    "vars": [
-      {"type": "external", "value": {"type": "handoff_return", "target_app_id": "999888777"}},
-      {"type": "timeout", "value": "20m"}
-    ]
-  },
-  "metadata": {
-    "participant_id": "{{hidden:id}}",
-    "age_group": "{{hidden:age_group}}",
-    "assessment_type": "reading_comprehension"
-  }
-}
-```
-
-**Next Question (after handoff):**
-```
-Title: "Thank you for completing the assessment!"
-Text: "Based on your reading level of grade {{hidden:e_handover_assessment_results_reading_level}},
-we've prepared questions that match your comprehension level."
-```
-
-**Logic Jump:**
-- If `{{hidden:e_handover_assessment_results_reading_level}} < 6`: Jump to simplified questions
-- If `{{hidden:e_handover_assessment_results_reading_level}} >= 6`: Continue to standard questions
-
-**Result:** Survey adapts to participant's demonstrated literacy level, improving response quality and completion rates.
-
-## Best Practices
-
-1. **Always set reasonable timeouts** - External apps may fail, ensure survey can continue
-2. **Provide clear transition messages** - Tell users what's happening during handoff
-3. **Test with real users** - Handoff introduces external dependencies, test thoroughly
-4. **Use metadata for personalization** - Leverage returned data to improve survey experience
-5. **Have fallback logic** - Design surveys to work even if handoff fails or times out
-6. **Keep external apps focused** - Short, single-purpose interactions work best
-7. **Document metadata contracts** - Clearly specify what data external apps should return
-
-## Future Enhancements
-
-Potential future additions to the handoff protocol:
-
-- **User message detection**: Resume when user sends any message during handoff
-- **Multi-step handoffs**: Chain multiple external apps in sequence
-- **Conditional handoffs**: Only hand off based on previous answers
-- **Handoff analytics**: Track success rates, completion times, metadata patterns
+- There is no timeout backstop. If the external app never returns control, the survey will not resume.
+- Verify the external app is functioning and will return control.
+- Consider whether a `mode: reclaim` feature is needed for your use case (not yet implemented).
 
 ## Related Documentation
 
-- **Implementation Specification**: See `HANDOFF_PROTOCOL_IMPLEMENTATION.md` for technical implementation details
-- **Wait Logic**: See `lib/typewheels/waiting.js` for wait condition syntax
-- **External Events**: See machine tests for external event processing examples
+- **Implementation Specification**: `HANDOFF_PROTOCOL_IMPLEMENTATION.md`
 - **Facebook Handover Protocol**: https://developers.facebook.com/docs/messenger-platform/reference/handover-protocol/
-
-## Support
-
-For issues or questions about handoff protocol:
-- Check botserver and replybot logs for debugging information
-- Verify Facebook app configuration and permissions
-- Review external app's `pass_thread_control` implementation
-- Test with simple timeout-only handoff first to isolate issues

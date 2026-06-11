@@ -2156,7 +2156,11 @@ describe('Machine', () => {
 describe('Handoff functionality', () => {
   let user = { id: '1989430067808669' }
 
-  it('should extract handoff from message metadata and create handoff action', () => {
+  before(() => {
+    process.env.FACEBOOK_APP_ID = '123456789'
+  })
+
+  it('should send handoff message without handoff action when answering question before handoff field', () => {
     const form = {
       logic: [],
       fields: [
@@ -2167,8 +2171,10 @@ describe('Handoff functionality', () => {
           ref: 'foo',
           properties: {
             description: JSON.stringify({
+              type: 'handoff',
               handoff: {
                 target_app_id: '123456789',
+                mode: 'wait',
                 metadata: { reason: 'customer_support' }
               }
             })
@@ -2182,18 +2188,53 @@ describe('Handoff functionality', () => {
 
     actions.messages.length.should.equal(1)
     const md = JSON.parse(actions.messages[0].message.metadata)
-    md.handoff.should.deep.equal({ target_app_id: '123456789', metadata: { reason: 'customer_support' } })
+    md.type.should.equal('handoff')
+    md.handoff.should.deep.equal({ target_app_id: '123456789', mode: 'wait', metadata: { reason: 'customer_support' } })
+    should.not.exist(actions.handoff)
+  })
 
-    // The handoff should be extracted
+  it('should fire handoff action when echo of handoff message arrives', () => {
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'bar', ref: 'bar' },
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({
+              type: 'handoff',
+              handoff: {
+                target_app_id: '123456789',
+                mode: 'wait',
+                metadata: { reason: 'customer_support' }
+              }
+            })
+          }
+        },
+        { type: 'short_text', title: 'after', ref: 'after' }
+      ]
+    }
+
+    const log = [
+      referral,
+      _echo('bar'),
+      text,
+      _echo({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait', metadata: { reason: 'customer_support' } } })
+    ]
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    should.not.exist(actions.messages[0])
     actions.handoff.should.exist
     actions.handoff.target_app_id.should.equal('123456789')
     actions.handoff.metadata.should.deep.equal({ reason: 'customer_support' })
     actions.handoff.userid.should.equal('1989430067808669')
     actions.handoff.pageid.should.equal('1855355231229529')
-    actions.handoff.timestamp.should.equal(text.timestamp)
+    actions.handoff.timestamp.should.equal(echo.timestamp)
   })
 
-  it('should handle handoff with minimal metadata', () => {
+  it('should fire handoff action with minimal metadata', () => {
     const form = {
       logic: [],
       fields: [
@@ -2203,37 +2244,83 @@ describe('Handoff functionality', () => {
           ref: 'foo',
           properties: {
             description: JSON.stringify({
-              handoff: {
-                target_app_id: '987654321'
-              }
+              type: 'handoff',
+              handoff: { target_app_id: '987654321' }
             })
           }
         }
       ]
     }
 
-    const log = [referral, _echo('foo'), text]
+    const log = [referral, _echo({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '987654321' } })]
     const actions = getMessage(log, form, user, { id: '1855355231229529' })
 
     actions.handoff.should.exist
     actions.handoff.target_app_id.should.equal('987654321')
     actions.handoff.userid.should.equal('1989430067808669')
-    actions.handoff.pageid.should.equal('1855355231229529')
-    actions.handoff.timestamp.should.equal(text.timestamp)
   })
 
-  it('should not create handoff when no handoff metadata exists', () => {
+  it('should throw for unsupported handoff mode', () => {
     const form = {
       logic: [],
       fields: [
-        { type: 'statement', title: 'foo', ref: 'foo' }
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({
+              type: 'handoff',
+              handoff: { target_app_id: '123456789', mode: 'nowait' }
+            })
+          }
+        }
       ]
     }
 
-    const log = [referral, _echo('foo')]
+    const log = [referral, _echo({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '123456789', mode: 'nowait' } })]
+    ;(() => getMessage(log, form, user, { id: '1855355231229529' })).should.throw(/handoff mode 'nowait' is not supported yet/)
+  })
+
+  it('should resume survey after handover event', () => {
+    const form = {
+      logic: [],
+      fields: [
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({
+              type: 'handoff',
+              handoff: { target_app_id: '976665718578167', mode: 'wait' }
+            })
+          }
+        },
+        { type: 'short_text', title: 'after', ref: 'after' }
+      ]
+    }
+
+    const handoverEvent = {
+      source: 'messenger',
+      timestamp: Date.now(),
+      recipient: { id: '1855355231229529' },
+      sender: { id: '1989430067808669' },
+      pass_thread_control: {
+        new_owner_app_id: '123456789',
+        previous_owner_app_id: '976665718578167',
+        metadata: 'End of handoff'
+      }
+    }
+
+    const log = [
+      referral,
+      _echo({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '976665718578167', mode: 'wait' } }),
+      handoverEvent
+    ]
     const actions = getMessage(log, form, user, { id: '1855355231229529' })
 
-    should.not.exist(actions.handoff)
+    actions.messages[0].message.should.deep.equal({ text: 'after', metadata: '{"ref":"after","type":"short_text"}' })
   })
 })
 
@@ -2480,6 +2567,8 @@ describe('Thread passback functionality', () => {
     // Should accept the handover and proceed to the next question
     actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
   })
+
+
 })
 
 describe('Statement with wait should not gather next responses', () => {
@@ -2515,13 +2604,7 @@ describe('Statement with wait should not gather next responses', () => {
     md.wait.should.deep.equal(wait)
   })
 
-  it('should NOT gather next question when statement has both handoff AND wait', () => {
-    const wait = { type: 'handover', value: { target_app_id: '123456789' } }
-    const handoff = {
-      target_app_id: '123456789',
-      metadata: { reason: 'customer_support' }
-    }
-
+  it('should NOT gather next question when handoff field is reached', () => {
     const form = {
       logic: [],
       fields: [
@@ -2529,9 +2612,12 @@ describe('Statement with wait should not gather next responses', () => {
         {
           type: 'statement',
           title: 'Passing you to support...',
-          ref: 'handoff_wait_statement',
+          ref: 'handoff_field',
           properties: {
-            description: JSON.stringify({ handoff, wait })
+            description: JSON.stringify({
+              type: 'handoff',
+              handoff: { target_app_id: '123456789', mode: 'wait' }
+            })
           }
         },
         { type: 'short_text', title: 'Welcome back!', ref: 'after_handoff' }
@@ -2541,15 +2627,10 @@ describe('Statement with wait should not gather next responses', () => {
     const log = [referral, _echo('first'), text]
     const actions = getMessage(log, form, user, { id: '1855355231229529' })
 
-    // Should only send ONE message (the statement with handoff), not the next question
     actions.messages.length.should.equal(1)
     const md = JSON.parse(actions.messages[0].message.metadata)
-    md.ref.should.equal('handoff_wait_statement')
-    md.handoff.should.deep.equal(handoff)
-    md.wait.should.deep.equal(wait)
-
-    // Handoff action should be created
-    actions.handoff.should.exist
-    actions.handoff.target_app_id.should.equal('123456789')
+    md.type.should.equal('handoff')
+    md.handoff.should.deep.equal({ target_app_id: '123456789', mode: 'wait' })
+    should.not.exist(actions.handoff)
   })
 })

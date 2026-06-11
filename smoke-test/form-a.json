@@ -152,7 +152,7 @@
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"wait\",\"wait\":{\"type\":\"handover\"},\"handoff\":{\"target_app_id\":\"976665718578167\",\"metadata\":{\"check\":\"smoke_test\"}}}"
+        "description": "{\"type\":\"handoff\",\"handoff\":{\"target_app_id\":\"976665718578167\",\"mode\":\"wait\",\"metadata\":{\"check\":\"smoke_test\"}}}"
       }
     },
     {

@@ -242,6 +242,25 @@ describe('addCustomType', () => {
 })
 
 
+describe('translateField', () => {
+  it('translates a handoff field as text with handoff metadata', () => {
+    const field = {
+      type: 'statement',
+      ref: 'my_handoff',
+      title: 'Handing off to support...',
+      properties: {
+        description: '{"type":"handoff","handoff":{"target_app_id":"123456789","mode":"wait","metadata":{"check":"test"}}}'
+      }
+    }
+    const ctx = { log: [], user: {} }
+    const out = f.translateField(ctx, [], field)
+    out.message.text.should.equal('Handing off to support...')
+    const md = JSON.parse(out.message.metadata)
+    md.should.deep.equal({ type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait', metadata: { check: 'test' } }, ref: 'my_handoff' })
+  })
+})
+
+
 describe('jump', () => {
   it('makes jump when required and not when not', () => {
 
