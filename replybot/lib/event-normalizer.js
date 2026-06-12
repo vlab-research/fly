@@ -162,12 +162,13 @@ function categorizeMessengerEvent(data) {
   }
 
   if (data.pass_thread_control) {
+    const newOwnerAppId = data.pass_thread_control.new_owner_app_id
     return {
       event_type: 'handover',
       payload: {
         type: 'handover',
         previous_owner_app_id: data.pass_thread_control.previous_owner_app_id,
-        new_owner_app_id: data.pass_thread_control.new_owner_app_id,
+        new_owner_app_id: newOwnerAppId != null ? String(newOwnerAppId) : undefined,
         metadata: data.pass_thread_control.metadata
       }
     }
@@ -220,7 +221,7 @@ function parseSyntheticEvent(data, timestamp) {
     timestamp,
     source: { type: 'synthetic' },
     event_type: unifiedType,
-    payload: { event: { type: eventType, value: event.value !== undefined ? event.value : null } },
+    payload: event.value !== undefined ? event.value : null,
     raw: data
   }
 }

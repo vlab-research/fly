@@ -277,6 +277,7 @@ function translateTypeformField(field) {
     case 'thankyou_screen':
     case 'wait':
     case 'stitch':
+    case 'handoff':
       return translateStatement(field)
 
     case 'share':

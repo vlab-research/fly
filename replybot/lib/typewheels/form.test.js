@@ -294,9 +294,8 @@ describe('translateField', () => {
     }
     const ctx = { log: [], user: {} }
     const out = f.translateField(ctx, [], field)
-    out.message.text.should.equal('Handing off to support...')
-    const md = JSON.parse(out.message.metadata)
-    md.should.deep.equal({ type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait', metadata: { check: 'test' } }, ref: 'my_handoff' })
+    out.text.should.equal('Handing off to support...')
+    out.metadata.should.deep.equal({ type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait', metadata: { check: 'test' } }, ref: 'my_handoff' })
   })
 })
 

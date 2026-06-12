@@ -92,7 +92,7 @@ describe('Machine integrated', () => {
     report.commands.should.be.an('array')
     report.commands.length.should.be.greaterThan(0)
     report.commands[0].should.have.property('message')
-    report.commands[0].message.should.have.property('type', 'text')
+    report.commands[0].message.should.have.property('text')
     report.commands[0].message.text.should.equal('foo')
     report.publish.should.be.true
   })

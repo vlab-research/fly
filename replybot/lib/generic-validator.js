@@ -128,12 +128,31 @@ function validateNumber(field, messages) {
   }
 }
 
+function normalizeUnicodeNumerals(str) {
+  return str.replace(/\p{Nd}/gu, ch => {
+    const cp = ch.codePointAt(0)
+    const zeros = [
+      0x30, 0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6,
+      0xB66, 0xBE6, 0xC66, 0xCE6, 0xD66, 0xDE6, 0xE50, 0xED0,
+      0x10D0, 0x110F0, 0x11136, 0x111D0, 0x112F0, 0x114D0,
+      0x11650, 0x11730, 0x118E0, 0x11950, 0x11C50, 0x11D50,
+      0x11DA0, 0x16A50, 0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC,
+      0x1D7F6, 0x1E140, 0x1E2F0, 0x1E4F0, 0x1E950, 0x1FBF0,
+      0xFF10, 0x104A0, 0x10D30, 0x1810, 0x1946, 0x19D0,
+    ]
+    for (const z of zeros) {
+      if (cp >= z && cp <= z + 9) return String(cp - z)
+    }
+    return ch
+  })
+}
+
 function _parseNumber(str, locale) {
   if (typeof str === 'number') return str
   if (typeof str === 'boolean') return null
   if (typeof str !== 'string') return null
 
-  let value = str.trim()
+  let value = normalizeUnicodeNumerals(str.trim())
 
   try {
     const parts = new Intl.NumberFormat(locale).formatToParts(1234.5)
@@ -235,4 +254,8 @@ function validator(field, messages) {
   return fn(field, m)
 }
 
-module.exports = { validator, defaultMessage, followUpMessage, offMessage }
+function parseNumber(str, locale = 'en-US') {
+  return _parseNumber(str, locale)
+}
+
+module.exports = { validator, defaultMessage, followUpMessage, offMessage, parseNumber }
