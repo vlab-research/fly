@@ -242,6 +242,43 @@ describe('addCustomType', () => {
 })
 
 
+describe('interpolation transforms', () => {
+  it('applies e164 transform to normalize phone with trailing text', () => {
+    const ctx = { log: [], user: {} }
+    const qa = [['phone', '+254712345678 use this']]
+    const i = f.interpolateField(ctx, qa, { title: 'Phone: {{field:phone|e164}}' })
+    i.title.should.equal('Phone: +254712345678')
+  })
+
+  it('e164 transform is idempotent for clean phone numbers', () => {
+    const ctx = { log: [], user: {} }
+    const qa = [['phone', '+254712345678']]
+    const i = f.interpolateField(ctx, qa, { title: 'Phone: {{field:phone|e164}}' })
+    i.title.should.equal('Phone: +254712345678')
+  })
+
+  it('preserves raw value without transform (backward compat)', () => {
+    const ctx = { log: [], user: {} }
+    const qa = [['phone', '+254712345678 use this']]
+    const i = f.interpolateField(ctx, qa, { title: 'Phone: {{field:phone}}' })
+    i.title.should.equal('Phone: +254712345678 use this')
+  })
+
+  it('throws TypeError for unknown transform', () => {
+    const ctx = { log: [], user: {} }
+    const qa = [['foo', 'bar']]
+    const fn = f.interpolateField.bind(null, ctx, qa, { title: '{{field:foo|bogus}}' })
+    fn.should.throw(TypeError)
+  })
+
+  it('applies chained transforms left to right', () => {
+    const ctx = { log: [], user: {} }
+    const qa = [['phone', '+254712345678 use this']]
+    const i = f.interpolateField(ctx, qa, { title: 'Phone: {{field:phone|e164}}' })
+    i.title.should.equal('Phone: +254712345678')
+  })
+})
+
 describe('translateField', () => {
   it('translates a handoff field as text with handoff metadata', () => {
     const field = {

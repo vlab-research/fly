@@ -2,7 +2,7 @@ const mustache = require('mustache')
 const util = require('util')
 const _ = require('lodash')
 const { hash } = require('./utils')
-const { translator, addCustomType: baseAddCustomType, parseNumber } = require('@vlab-research/translate-typeform')
+const { translator, addCustomType: baseAddCustomType, parseNumber, normalizePhone } = require('@vlab-research/translate-typeform')
 const yaml = require('js-yaml')
 
 class FieldError extends Error { }
@@ -58,8 +58,22 @@ function getFromMetadata(ctx, key) {
   return meta[key]
 }
 
+const transforms = {
+  e164: v => normalizePhone(v, '', false) || v,
+}
+
+function _applyTransform(name, value) {
+  const fn = transforms[name]
+  if (!fn) throw new TypeError(`Unknown interpolation transform: ${name}`)
+  return fn(value)
+}
+
 function getDynamicValue(ctx, qa, v) {
-  const [loc, key] = v.split(':')
+  const parts = v.split('|')
+  const ref = parts[0].trim()
+  const transformNames = parts.slice(1).map(s => s.trim()).filter(s => s)
+
+  const [loc, key] = ref.split(':')
   const val = loc === 'hidden' ?
     getFromMetadata(ctx, key) :
     getFieldValue(qa, key)
@@ -68,7 +82,7 @@ function getDynamicValue(ctx, qa, v) {
     throw new TypeError(`Trying to interpolate a non-existent value: ${v}`)
   }
 
-  return val
+  return transformNames.reduce((acc, name) => _applyTransform(name, acc), val)
 }
 
 function _zip(a, b) {

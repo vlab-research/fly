@@ -586,6 +586,32 @@ describe('Test Bot flow Survey Integration Testing', () => {
     });
   });
 
+  describe('Phone normalization via e164 transform', function () {
+    this.timeout(60000);
+
+    it('Normalizes messy phone input and sends clean E.164 to payment provider', async () => {
+      const userId = uuid();
+      const fields = getFields('forms/phoneE164.json');
+
+      const testFlow: TestFlow = [
+        [ok, fields[0], [makeTextResponse(userId, '+918888000000 use this')]],
+        [ok, fields[1], []],
+        [ok, fields[2], []],
+      ];
+
+      await sendMessage(makeReferral(userId, 'phoneE164'));
+      await flowMaster(userId, testFlow);
+
+      const state = await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state === 'END' ? s : null;
+      }, 30000);
+
+      state.state_json.md.e_payment_fake_phone.should.equal('+918888000000');
+      state.state_json.md.e_payment_fake_success.should.equal(true);
+    });
+  });
+
   describe('Waits', function () {
     this.timeout(60000);
 

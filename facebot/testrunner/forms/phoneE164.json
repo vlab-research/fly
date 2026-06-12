@@ -1,0 +1,111 @@
+{
+  "id": "phoneE164",
+  "type": "quiz",
+  "title": "phone e164 normalization test",
+  "settings": {
+    "language": "en",
+    "is_public": true,
+    "is_trial": false,
+    "progress_bar": "percentage",
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "meta": {
+      "allow_indexing": false
+    }
+  },
+  "thankyou_screens": [
+    {
+      "id": "DefaultTyScreen",
+      "ref": "default_tys",
+      "title": "Thank you!",
+      "type": "thankyou_screen",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "phoneField1",
+      "title": "What's your number?",
+      "ref": "ref_num",
+      "properties": {
+        "default_country_code": "IN"
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "phone_number"
+    },
+    {
+      "id": "paymentField1",
+      "title": "Sending payment!",
+      "ref": "payment_wait",
+      "properties": {
+        "description": "{\n    \"type\": \"wait\",\n    \"wait\": {\n        \"type\": \"external\",\n        \"value\": {\n            \"type\": \"payment:fake\",\n            \"id\": \"e164test\"\n        }\n    },\n    \"payment\": {\n        \"provider\": \"fake\",\n        \"details\": {\n            \"phone\": \"{{field:ref_num|e164}}\",\n            \"result\": {\n                \"type\": \"payment:fake\",\n                \"id\": \"e164test\",\n                \"phone\": \"{{field:ref_num|e164}}\",\n                \"success\": true\n            }\n        }\n    }\n}",
+        "button_text": "Continue",
+        "hide_marks": false
+      },
+      "type": "statement"
+    },
+    {
+      "id": "DefaultTyScreen",
+      "ref": "default_tys",
+      "title": "Thank you!",
+      "type": "thankyou_screen",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "hidden": [
+    "e_payment_fake_success",
+    "e_payment_fake_phone"
+  ],
+  "logic": [
+    {
+      "type": "field",
+      "ref": "payment_wait",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "thankyou",
+              "value": "default_tys"
+            }
+          },
+          "condition": {
+            "op": "equal",
+            "vars": [
+              {
+                "type": "hidden",
+                "value": "e_payment_fake_success"
+              },
+              {
+                "type": "constant",
+                "value": "true"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "ref_num"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    }
+  ],
+  "custom_messages": {}
+}

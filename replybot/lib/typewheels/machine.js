@@ -1,7 +1,7 @@
 const util = require('util')
 const _ = require('lodash')
 const { getForm, getMetadata } = require('./utils')
-const { validator, defaultMessage, followUpMessage, offMessage, normalizePhone } = require('@vlab-research/translate-typeform')
+const { validator, defaultMessage, followUpMessage, offMessage } = require('@vlab-research/translate-typeform')
 const { translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const { waitConditionFulfilled } = require('./waiting')
 
@@ -671,32 +671,6 @@ function apply(state, output) {
   }
 }
 
-function _normalizePhoneOutput(ctx, output) {
-  if (!output.question || typeof output.response !== 'string') return output
-
-  let field
-  try {
-    field = addCustomType(getField(ctx, output.question))
-  } catch (_) {
-    return output
-  }
-
-  const md = field.md || {}
-  const isPhoneField = field.type === 'phone_number' ||
-    (md.validate && md.validate.country)
-  if (!isPhoneField) return output
-
-  const country = (md.validate && md.validate.country) || ''
-  const mobile = md.validate && md.validate.mobile
-  const normalized = normalizePhone(output.response, country, mobile)
-
-  if (normalized === null) {
-    return { ...output, validation: { valid: false, message: 'Sorry, please enter a valid phone number.' } }
-  }
-
-  return { ...output, response: normalized, responseValue: normalized }
-}
-
 // change what is returned
 // actions can be: responses, payments, reports...?
 function act(ctx, state, output) {
@@ -704,11 +678,10 @@ function act(ctx, state, output) {
 
     case 'RESPOND': {
       const ctxWithMd = { ...ctx, md: { ...state.md, ...output.md } }
-      const normalizedOutput = _normalizePhoneOutput(ctxWithMd, output)
-      const qa = apply(state, normalizedOutput).qa
-      const messages = respond(ctxWithMd, qa, normalizedOutput)
+      const qa = apply(state, output).qa
+      const messages = respond(ctxWithMd, qa, output)
       const payment = messages.map(m => getPaymentFromMessage(ctx, m)).find(p => p)
-      
+
       return { messages, payment }
     }
 
