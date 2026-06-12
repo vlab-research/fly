@@ -78,13 +78,16 @@ describe('getFromMetadata', () => {
   it('works with unicode url values', () => {
     const name = '小飼弾'
     const uni = encodeURIComponent(name)
-    const ref2 = { ...referral, referral: { ...referral.referral, ref: `form.BAR.foo.${uni}` } }
+        const ref2 = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: `form.BAR.foo.${uni}` } } }
     const md = getMetadata(ref2)
 
     const ctx = { md, user: { name: 'Foo Bazzle' } }
     f.getFromMetadata(ctx, 'foo').should.equal(name)
   })
 })
+
+
+
 
 describe('_splitUrls', () => {
   it('groups by url', () => {
@@ -140,7 +143,7 @@ describe('interpolateField', () => {
   it('works with hidden fields from referral', () => {
     const name = '小飼弾'
     const uni = encodeURIComponent(name)
-    const ref2 = { ...referral, referral: { ...referral.referral, ref: `form.BAR.foo.${uni}` } }
+    const ref2 = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: `form.BAR.foo.${uni}` } } }
     const md = getMetadata(ref2)
     const ctx = { md, user: { name: 'Foo Bazzle' } }
     const i = f.interpolateField(ctx, [], { title: 'hello {{hidden:foo}}' })
@@ -313,7 +316,7 @@ describe('jump', () => {
   })
 
   it('makes jump with a correct number answer in a string', () => {
-    const echo2 = { ...echo, message: { ...echo.message, metadata: { ref: "c3432d3d-f786-4a38-8ac7-b50c1dfdb1ba" } } }
+    const echo2 = { ...echo, payload: { ...echo.payload, metadata: { ref: "c3432d3d-f786-4a38-8ac7-b50c1dfdb1ba" } } }
 
     const qa = [['c3432d3d-f786-4a38-8ac7-b50c1dfdb1ba', '7.2']]
     const qa2 = [['c3432d3d-f786-4a38-8ac7-b50c1dfdb1ba', '7.5']]

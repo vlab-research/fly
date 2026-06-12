@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
@@ -144,30 +143,16 @@ func main() {
 		cancel()
 	}()
 
-	// Define process function that integrates with Worker
 	processFunc := func(ctx context.Context, msg *kafka.Message) error {
-		var cmd types.SendMessageCommand
-		if err := json.Unmarshal(msg.Value, &cmd); err != nil {
-			logger.Error("failed to unmarshal command — skipping",
+		if err := worker.ProcessCommand(ctx, msg.Value); err != nil {
+			logger.Error("failed to process command",
 				zap.Error(err),
 				zap.ByteString("value", msg.Value))
-			return nil
-		}
-
-		if err := worker.ProcessCommand(ctx, cmd); err != nil {
-			logger.Error("failed to process command",
-				zap.String("command_id", cmd.CommandID),
-				zap.String("platform", string(cmd.Platform)),
-				zap.String("platform_account_id", cmd.PlatformAccountID),
-				zap.String("user_id", cmd.UserID),
-				zap.Error(err))
 			return err
 		}
 
 		logger.Info("command processed successfully",
-			zap.String("command_id", cmd.CommandID),
-			zap.String("platform", string(cmd.Platform)),
-			zap.String("user_id", cmd.UserID))
+			zap.ByteString("value", msg.Value))
 
 		return nil
 	}

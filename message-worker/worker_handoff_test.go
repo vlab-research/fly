@@ -10,21 +10,20 @@ import (
 	"go.uber.org/zap"
 )
 
-// mockHandoffSender is a mock client for testing pass_thread_control
 type mockHandoffSender struct {
-	err              error
-	calls            int
-	userIDs          []string
-	targetAppIDs     []string
-	metadatas        []string
+	err          error
+	calls        int
+	userIDs      []string
+	targetAppIDs []string
+	metadatas    []string
 }
 
-func (m *mockHandoffSender) SendMessage(ctx context.Context, platformAccountID, userID string, message interface{}) (*SendMessageResponse, error) {
-	return nil, nil
-}
-
-func (m *mockHandoffSender) SendNativeMessage(ctx context.Context, userID, platformAccountID string, payload json.RawMessage) (string, error) {
-	return "", nil
+func (m *mockHandoffSender) SendMessage(ctx context.Context, platformAccountID, userID string, message interface{}, platformContext json.RawMessage) (*SendMessageResponse, error) {
+	m.calls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &SendMessageResponse{MessageID: "msg_handoff_sender", Success: true}, nil
 }
 
 func (m *mockHandoffSender) PassThreadControl(ctx context.Context, userID, platformAccountID, targetAppID, metadata string) error {
@@ -35,7 +34,6 @@ func (m *mockHandoffSender) PassThreadControl(ctx context.Context, userID, platf
 	return m.err
 }
 
-// handoffMockEventProducer for testing with correct signature
 type handoffMockEventProducer struct {
 	events []types.UniversalEvent
 	err    error
@@ -49,7 +47,7 @@ func (m *handoffMockEventProducer) PublishEvent(ctx context.Context, event types
 	return nil
 }
 
-func TestWorker_ProcessCommand_PassThreadControl_Success(t *testing.T) {
+func TestWorker_ProcessCommand_Handoff_Success(t *testing.T) {
 	mockProducer := &handoffMockEventProducer{}
 	mockSender := &mockHandoffSender{}
 	mockBot := newMockBotserver()
@@ -62,30 +60,28 @@ func TestWorker_ProcessCommand_PassThreadControl_Success(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Create a pass_thread_control command
-	cmd := types.SendMessageCommand{
+	cmd := types.HandoffCommand{
+		Type:              "handoff",
 		CommandID:         "cmd_handoff_123",
+		IssuedAt:          1234567890000,
+		ConversationID:    "conv_456",
 		UserID:            "user_456",
-		PlatformAccountID: "page_789",
 		Platform:          types.PlatformMessenger,
-		Message: types.MessageContent{
-			Type:            types.MessageTypePassThreadControl,
-			TargetAppID:     "263902037430900",
-			HandoffMetadata: `{"source":"replybot","reason":"live_agent_request"}`,
-		},
+		PlatformAccountID: "page_789",
+		TargetAppID:       "263902037430900",
+		Metadata:          json.RawMessage(`{"source":"replybot","reason":"live_agent_request"}`),
 	}
 
-	err := worker.ProcessCommand(context.Background(), cmd)
+	cmdJSON, _ := json.Marshal(cmd)
+	err := worker.ProcessCommand(context.Background(), cmdJSON)
 	if err != nil {
 		t.Fatalf("ProcessCommand failed: %v", err)
 	}
 
-	// Verify PassThreadControl was called
 	if mockSender.calls != 1 {
 		t.Errorf("Expected 1 call to PassThreadControl, got %d", mockSender.calls)
 	}
 
-	// Verify the correct parameters were passed
 	if len(mockSender.userIDs) != 1 || mockSender.userIDs[0] != "user_456" {
 		t.Errorf("Expected userID user_456, got %v", mockSender.userIDs)
 	}
@@ -96,11 +92,9 @@ func TestWorker_ProcessCommand_PassThreadControl_Success(t *testing.T) {
 		t.Errorf("Expected metadata %s, got %s", `{"source":"replybot","reason":"live_agent_request"}`, mockSender.metadatas[0])
 	}
 
-	// Verify message_sent event was emitted (for handoff, message_id will be empty)
 	if len(mockProducer.events) != 1 {
 		t.Errorf("Expected 1 event, got %d", len(mockProducer.events))
 	} else {
-		// Check that the event has empty message_id
 		var payload types.MessageSentPayload
 		if err := json.Unmarshal(mockProducer.events[0].Payload, &payload); err == nil {
 			if payload.PlatformMessageID != nil && *payload.PlatformMessageID != "" {
@@ -110,12 +104,11 @@ func TestWorker_ProcessCommand_PassThreadControl_Success(t *testing.T) {
 	}
 }
 
-func TestWorker_ProcessCommand_PassThreadControl_NoClient(t *testing.T) {
+func TestWorker_ProcessCommand_Handoff_NoClient(t *testing.T) {
 	mockProducer := &handoffMockEventProducer{}
 	mockBot := newMockBotserver()
 	defer mockBot.Close()
 
-	// No client configured for Messenger
 	worker := NewWorker(
 		map[types.PlatformType]MessageSender{},
 		mockProducer,
@@ -123,35 +116,32 @@ func TestWorker_ProcessCommand_PassThreadControl_NoClient(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	cmd := types.SendMessageCommand{
+	cmd := types.HandoffCommand{
+		Type:              "handoff",
 		CommandID:         "cmd_handoff_456",
 		UserID:            "user_456",
-		PlatformAccountID: "page_789",
 		Platform:          types.PlatformMessenger,
-		Message: types.MessageContent{
-			Type:            types.MessageTypePassThreadControl,
-			TargetAppID:     "263902037430900",
-			HandoffMetadata: `{"reason":"test"}`,
-		},
+		PlatformAccountID: "page_789",
+		TargetAppID:       "263902037430900",
+		Metadata:          json.RawMessage(`{"reason":"test"}`),
 	}
 
-	err := worker.ProcessCommand(context.Background(), cmd)
+	cmdJSON, _ := json.Marshal(cmd)
+	err := worker.ProcessCommand(context.Background(), cmdJSON)
 	if err != nil {
 		t.Fatalf("ProcessCommand failed: %v", err)
 	}
 
-	// Verify that an error was reported to botserver
 	if len(mockBot.requests) != 1 {
 		t.Errorf("Expected 1 botserver request, got %d", len(mockBot.requests))
 	}
 }
 
-func TestWorker_ProcessCommand_PassThreadControl_RetriableError(t *testing.T) {
+func TestWorker_ProcessCommand_Handoff_RetriableError(t *testing.T) {
 	mockProducer := &handoffMockEventProducer{}
 	mockBot := newMockBotserver()
 	defer mockBot.Close()
 
-	// Mock sender that returns a retriable error
 	mockSender := &mockHandoffSender{
 		err: &PlatformError{
 			StatusCode: 429,
@@ -167,40 +157,36 @@ func TestWorker_ProcessCommand_PassThreadControl_RetriableError(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	cmd := types.SendMessageCommand{
+	cmd := types.HandoffCommand{
+		Type:              "handoff",
 		CommandID:         "cmd_handoff_789",
 		UserID:            "user_456",
-		PlatformAccountID: "page_789",
 		Platform:          types.PlatformMessenger,
-		Message: types.MessageContent{
-			Type:            types.MessageTypePassThreadControl,
-			TargetAppID:     "263902037430900",
-			HandoffMetadata: `{"reason":"test"}`,
-		},
+		PlatformAccountID: "page_789",
+		TargetAppID:       "263902037430900",
+		Metadata:          json.RawMessage(`{"reason":"test"}`),
 	}
 
-	err := worker.ProcessCommand(context.Background(), cmd)
+	cmdJSON, _ := json.Marshal(cmd)
+	err := worker.ProcessCommand(context.Background(), cmdJSON)
 	if err != nil {
 		t.Fatalf("ProcessCommand failed: %v", err)
 	}
 
-	// Verify that the error was retried
 	if mockSender.calls < 3 {
 		t.Errorf("Expected at least 3 retry attempts, got %d", mockSender.calls)
 	}
 
-	// Verify that an error was reported to botserver
 	if len(mockBot.requests) != 1 {
 		t.Errorf("Expected 1 botserver request, got %d", len(mockBot.requests))
 	}
 }
 
-func TestWorker_ProcessCommand_PassThreadControl_NonRetriableError(t *testing.T) {
+func TestWorker_ProcessCommand_Handoff_NonRetriableError(t *testing.T) {
 	mockProducer := &handoffMockEventProducer{}
 	mockBot := newMockBotserver()
 	defer mockBot.Close()
 
-	// Mock sender that returns a non-retriable error
 	mockSender := &mockHandoffSender{
 		err: &PlatformError{
 			StatusCode: 401,
@@ -216,34 +202,30 @@ func TestWorker_ProcessCommand_PassThreadControl_NonRetriableError(t *testing.T)
 		zap.NewNop(),
 	)
 
-	cmd := types.SendMessageCommand{
+	cmd := types.HandoffCommand{
+		Type:              "handoff",
 		CommandID:         "cmd_handoff_999",
 		UserID:            "user_456",
-		PlatformAccountID: "page_789",
 		Platform:          types.PlatformMessenger,
-		Message: types.MessageContent{
-			Type:            types.MessageTypePassThreadControl,
-			TargetAppID:     "263902037430900",
-			HandoffMetadata: `{"reason":"test"}`,
-		},
+		PlatformAccountID: "page_789",
+		TargetAppID:       "263902037430900",
+		Metadata:          json.RawMessage(`{"reason":"test"}`),
 	}
 
-	err := worker.ProcessCommand(context.Background(), cmd)
+	cmdJSON, _ := json.Marshal(cmd)
+	err := worker.ProcessCommand(context.Background(), cmdJSON)
 	if err != nil {
 		t.Fatalf("ProcessCommand failed: %v", err)
 	}
 
-	// For non-retriable errors, should only try once
 	if mockSender.calls != 1 {
 		t.Errorf("Expected 1 call (no retries for non-retriable error), got %d", mockSender.calls)
 	}
 
-	// Verify that an error was reported to botserver
 	if len(mockBot.requests) != 1 {
 		t.Errorf("Expected 1 botserver request, got %d", len(mockBot.requests))
 	}
 
-	// Verify the error report contains the FB tag for platform errors
 	var event botparty.ExternalEvent
 	if err := json.Unmarshal(mockBot.requests[0], &event); err == nil {
 		var value struct {
@@ -261,7 +243,48 @@ func TestWorker_ProcessCommand_PassThreadControl_NonRetriableError(t *testing.T)
 	}
 }
 
-func TestWorker_ProcessCommand_PassThreadControl_ValidatesTargetAppID(t *testing.T) {
+func TestWorker_ProcessCommand_LegacyPassThreadControl(t *testing.T) {
+	mockProducer := &handoffMockEventProducer{}
+	mockSender := &mockHandoffSender{}
+	mockBot := newMockBotserver()
+	defer mockBot.Close()
+
+	worker := NewWorker(
+		map[types.PlatformType]MessageSender{types.PlatformMessenger: mockSender},
+		mockProducer,
+		mockBot.URL(),
+		zap.NewNop(),
+	)
+
+	legacyJSON := json.RawMessage(`{
+		"command_id": "cmd_legacy_handoff",
+		"issued_at": 1234567890000,
+		"conversation_id": "conv_legacy",
+		"user_id": "user_456",
+		"platform": "messenger",
+		"platform_account_id": "page_789",
+		"message": {
+			"type": "pass_thread_control",
+			"target_app_id": "263902037430900",
+			"handoff_metadata": "{\"source\":\"replybot\",\"reason\":\"live_agent_request\"}"
+		}
+	}`)
+
+	err := worker.ProcessCommand(context.Background(), legacyJSON)
+	if err != nil {
+		t.Fatalf("ProcessCommand failed: %v", err)
+	}
+
+	if mockSender.calls != 1 {
+		t.Errorf("Expected 1 call to PassThreadControl, got %d", mockSender.calls)
+	}
+
+	if len(mockSender.targetAppIDs) != 1 || mockSender.targetAppIDs[0] != "263902037430900" {
+		t.Errorf("Expected targetAppID 263902037430900, got %v", mockSender.targetAppIDs)
+	}
+}
+
+func TestWorker_ProcessCommand_LegacyNative_ReturnsError(t *testing.T) {
 	mockProducer := &handoffMockEventProducer{}
 	mockBot := newMockBotserver()
 	defer mockBot.Close()
@@ -273,25 +296,70 @@ func TestWorker_ProcessCommand_PassThreadControl_ValidatesTargetAppID(t *testing
 		zap.NewNop(),
 	)
 
-	// Create a command with missing TargetAppID (should fail validation)
-	cmd := types.SendMessageCommand{
-		CommandID:         "cmd_handoff_invalid",
-		UserID:            "user_456",
-		PlatformAccountID: "page_789",
-		Platform:          types.PlatformMessenger,
-		Message: types.MessageContent{
-			Type:            types.MessageTypePassThreadControl,
-			TargetAppID:     "", // Missing required field
-			HandoffMetadata: `{"reason":"test"}`,
-		},
-	}
+	legacyJSON := json.RawMessage(`{
+		"command_id": "cmd_legacy_native",
+		"user_id": "user_456",
+		"platform": "messenger",
+		"platform_account_id": "page_789",
+		"message": {
+			"type": "native",
+			"native_payload": {"recipient": {"id": "user_123"}, "message": {"text": "test"}}
+		}
+	}`)
 
-	// Note: Validation is typically done at the consumer level before calling ProcessCommand.
-	// This test documents the expected behavior if validation fails.
-	// In practice, invalid commands would be rejected before reaching here.
-	// For now, we test that the command would error during processing.
-	err := worker.ProcessCommand(context.Background(), cmd)
-	// We expect this to either fail during processing or be caught earlier
-	// The important thing is that it doesn't panic
-	_ = err
+	err := worker.ProcessCommand(context.Background(), legacyJSON)
+	if err == nil {
+		t.Fatal("Expected error for legacy native message, got nil")
+	}
+}
+
+func TestWorker_ProcessCommand_LegacyDefault_SendsMessage(t *testing.T) {
+	mockProducer := &handoffMockEventProducer{}
+	mockSender := &mockHandoffSender{}
+	mockBot := newMockBotserver()
+	defer mockBot.Close()
+
+	worker := NewWorker(
+		map[types.PlatformType]MessageSender{types.PlatformMessenger: mockSender},
+		mockProducer,
+		mockBot.URL(),
+		zap.NewNop(),
+	)
+
+	legacyJSON := json.RawMessage(`{
+		"command_id": "cmd_legacy_text",
+		"conversation_id": "conv_456",
+		"user_id": "user_789",
+		"platform": "messenger",
+		"platform_account_id": "page_123",
+		"message": {
+			"type": "text",
+			"text": "Hello from legacy format"
+		}
+	}`)
+
+	err := worker.ProcessCommand(context.Background(), legacyJSON)
+	if err != nil {
+		t.Fatalf("ProcessCommand failed: %v", err)
+	}
+}
+
+func TestWorker_ProcessCommand_UnknownCommandType(t *testing.T) {
+	mockProducer := &handoffMockEventProducer{}
+	mockBot := newMockBotserver()
+	defer mockBot.Close()
+
+	worker := NewWorker(
+		map[types.PlatformType]MessageSender{},
+		mockProducer,
+		mockBot.URL(),
+		zap.NewNop(),
+	)
+
+	cmdJSON := json.RawMessage(`{"type": "unknown_command", "command_id": "cmd_x"}`)
+
+	err := worker.ProcessCommand(context.Background(), cmdJSON)
+	if err == nil {
+		t.Fatal("Expected error for unknown command type, got nil")
+	}
 }

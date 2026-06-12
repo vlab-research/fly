@@ -7,14 +7,11 @@ import (
 	"github.com/vlab-research/fly/message-worker/types"
 )
 
-// TranslateToMessenger translates a platform-agnostic message to Messenger format
 func TranslateToMessenger(cmd types.SendMessageCommand) (types.MessengerMessage, error) {
-	// Validate message content
 	if err := cmd.Message.Validate(); err != nil {
 		return types.MessengerMessage{}, err
 	}
 
-	// Extract metadata string for Messenger (JSON encoded)
 	metadata := getMetadataString(cmd.Message.Metadata)
 
 	switch cmd.Message.Type {
@@ -29,24 +26,22 @@ func TranslateToMessenger(cmd types.SendMessageCommand) (types.MessengerMessage,
 	}
 }
 
-// getMetadataString converts metadata map to JSON string for Messenger
-func getMetadataString(metadata map[string]interface{}) string {
-	if metadata == nil || len(metadata) == 0 {
+func getMetadataString(metadata json.RawMessage) string {
+	if len(metadata) == 0 {
 		return ""
 	}
-	data, err := json.Marshal(metadata)
-	if err != nil {
-		return ""
-	}
-	return string(data)
+	return string(metadata)
 }
 
-// getRefFromMetadata extracts the ref from metadata
-func getRefFromMetadata(metadata map[string]interface{}) string {
-	if metadata == nil {
+func getRefFromMetadata(metadata json.RawMessage) string {
+	if len(metadata) == 0 {
 		return ""
 	}
-	if ref, ok := metadata["ref"]; ok {
+	var m map[string]interface{}
+	if err := json.Unmarshal(metadata, &m); err != nil {
+		return ""
+	}
+	if ref, ok := m["ref"]; ok {
 		if refStr, ok := ref.(string); ok {
 			return refStr
 		}
@@ -60,19 +55,16 @@ func translateMessengerText(msg types.MessageContent, metadata string) (types.Me
 		Metadata: metadata,
 	}
 
-	// Check metadata for special field types that need quick_replies
-	// (phone_number, email) - these use Messenger's built-in quick reply types
-	if msg.Metadata != nil {
-		if fieldType, ok := msg.Metadata["type"].(string); ok {
-			switch fieldType {
-			case "phone_number":
-				result.QuickReplies = []types.QuickReply{
-					{ContentType: "user_phone_number"},
-				}
-			case "email":
-				result.QuickReplies = []types.QuickReply{
-					{ContentType: "user_email"},
-				}
+	if len(msg.Metadata) > 0 {
+		fieldType := msg.GetTypeFromMetadata()
+		switch fieldType {
+		case "phone_number":
+			result.QuickReplies = []types.QuickReply{
+				{ContentType: "user_phone_number"},
+			}
+		case "email":
+			result.QuickReplies = []types.QuickReply{
+				{ContentType: "user_email"},
 			}
 		}
 	}
@@ -81,7 +73,6 @@ func translateMessengerText(msg types.MessageContent, metadata string) (types.Me
 }
 
 func translateMessengerQuestion(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
-	// Messenger supports up to 13 quick replies
 	const maxQuickReplies = 13
 
 	if len(msg.Options) > maxQuickReplies {
@@ -93,7 +84,6 @@ func translateMessengerQuestion(msg types.MessageContent, metadata string) (type
 
 	quickReplies := make([]types.QuickReply, len(msg.Options))
 	for i, opt := range msg.Options {
-		// Embed ref and value in payload as JSON (like old replybot)
 		payload := buildQuickReplyPayload(opt.Value, ref)
 
 		quickReplies[i] = types.QuickReply{
@@ -110,27 +100,18 @@ func translateMessengerQuestion(msg types.MessageContent, metadata string) (type
 	}, nil
 }
 
-// buildQuickReplyPayload creates a JSON payload with value and ref
-// This matches the old replybot format: {"value":"...", "ref":"..."}
-// Value can be string, boolean, or number depending on field type
-func buildQuickReplyPayload(value interface{}, ref string) string {
+func buildQuickReplyPayload(value json.RawMessage, ref string) string {
 	if ref == "" {
-		// If no ref, just use the raw value (simple case)
-		data, err := json.Marshal(value)
-		if err != nil {
-			return ""
-		}
-		// Return the JSON-encoded value without quotes for strings
-		// to maintain backwards compatibility
-		if s, ok := value.(string); ok {
+		var s string
+		if err := json.Unmarshal(value, &s); err == nil {
 			return s
 		}
-		return string(data)
+		return string(value)
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]json.RawMessage{
 		"value": value,
-		"ref":   ref,
+		"ref":   json.RawMessage(`"` + ref + `"`),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -140,7 +121,6 @@ func buildQuickReplyPayload(value interface{}, ref string) string {
 }
 
 func translateMessengerMedia(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
-	// Map media type to Messenger attachment type
 	var attachmentType string
 	switch *msg.MediaType {
 	case types.MediaTypeImage:

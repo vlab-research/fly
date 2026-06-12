@@ -1,5 +1,7 @@
 # Chat Message Logging
 
+> **DEPRECATED**: This document describes the chat log capture pipeline which is being removed as part of the Platform Abstraction refactor. The `VLAB_CHAT_LOG_TOPIC` environment variable and chat-log topic forcing have been removed. The remaining infrastructure (Kafka topic, scribble sink) may still exist but the replybot producer side is no longer active.
+
 ## Overview
 
 The chat log feature provides conversation replay for debugging and transparency. It has two parts:

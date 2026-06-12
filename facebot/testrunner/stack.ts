@@ -346,11 +346,6 @@ export async function startStack(): Promise<Stack> {
     replybotEnv.NUM_SPINES = '6';
   }
 
-  // Ensure VLAB_CHAT_LOG_TOPIC is set
-  if (!replybotEnv.VLAB_CHAT_LOG_TOPIC) {
-    replybotEnv.VLAB_CHAT_LOG_TOPIC = 'vlab-chat-log';
-  }
-
   // Disable SSL for pg connections (cockroach runs insecure)
   replybotEnv.PGSSLMODE = 'disable';
   replybotEnv.PGCONNECT_TIMEOUT = '5';

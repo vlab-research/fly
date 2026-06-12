@@ -6,7 +6,6 @@ const { Readable, Transform, Writable, pipeline } = require('stream')
 describe('SpineSupervisor', () => {
   let mockSpine
   let mockStateStore
-  let mockTokenStore
   let mockMachine
   let mockProcessor
   let mockChatbase
@@ -39,7 +38,6 @@ describe('SpineSupervisor', () => {
 
     // Mock stores and machine
     mockStateStore = { getState: sinon.stub(), updateState: sinon.stub() }
-    mockTokenStore = { pool: {} }
     mockMachine = { run: sinon.stub() }
 
     // Mock processor function

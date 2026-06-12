@@ -1,7 +1,6 @@
 const { getField, FieldError } = require('../typewheels/form')
 const { StateStore } = require('../typewheels/statestore')
 const { Machine } = require('../typewheels/transition')
-const { TokenStore } = require('../typewheels/tokenstore')
 const util = require('util')
 
 function responseVals(newState, update, form, surveyid, pageid, user, timestamp) {
@@ -37,8 +36,7 @@ class Responser {
   constructor(chatbase) {
     this.chatbase = chatbase
     this.stateStore = new StateStore(chatbase)
-    this.tokenStore = new TokenStore(chatbase.pool)
-    this.machine = new Machine('600s', this.tokenStore)
+    this.machine = new Machine('600s')
   }
 
   async updateStore(userId, e) {

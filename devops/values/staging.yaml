@@ -367,9 +367,6 @@ replybot:
         key: redis-password
   - name: REDIS_DB
     value: "0"
-  - name: VLAB_CHAT_LOG_TOPIC
-    value: *chatlogtopic
-
 formcentral:
   replicaCount: 1
   image:

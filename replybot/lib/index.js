@@ -1,18 +1,12 @@
 const util = require('util')
-const { Machine } = require('./typewheels/transition')
-const { StateStore } = require('./typewheels/statestore')
+
 const { BotSpine } = require('@vlab-research/botspine')
-const { pipeline } = require('stream')
-const { TokenStore } = require('./typewheels/tokenstore')
+
 const { producer, producerReady } = require('./producer')
 const { SpineSupervisor } = require('./spine-supervisor/spine-supervisor')
-const { publishChatLog } = require('./chat-log/publisher')
-
-const VLAB_CHAT_LOG_TOPIC = process.env.VLAB_CHAT_LOG_TOPIC
 const KAFKA_COMMANDS_TOPIC = process.env.KAFKA_COMMANDS_TOPIC || 'commands'
 
-const REPLYBOT_STATESTORE_TTL = process.env.REPLYBOT_STATESTORE_TTL || '24h'
-const REPLYBOT_MACHINE_TTL = process.env.REPLYBOT_MACHINE_TTL || '60m'
+
 
 // TODO: Add /ready endpoint that has await producerReady
 // and /health endpoint that checks kafka connection somehow!
@@ -89,9 +83,7 @@ function processor(machine, stateStore) {
       if (report.commands && report.commands.length > 0) {
         await publishCommands(report.commands)
       }
-      if (VLAB_CHAT_LOG_TOPIC) {
-        await publishChatLog(produce, VLAB_CHAT_LOG_TOPIC, event, state)
-      }
+
     }
     catch (e) {
       console.error('Error from ReplyBot: \n',

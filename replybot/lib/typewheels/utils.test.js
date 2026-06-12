@@ -20,7 +20,7 @@ describe('getForm', () => {
   })
 
   it('gets the fallback form when referral has no form', () => {
-    u.getForm({ ...referral, referral: { ref: 'blah' } }).should.equal('fallback')
+    u.getForm({ ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'blah' } } }).should.equal('fallback')
   })
 })
 
@@ -58,12 +58,12 @@ describe('getMetadata', () => {
       )
   })
 
-  it('falls back to fallback infor when there is no referral event', () => {
+  it('falls back to fallback info when there is no referral event', () => {
     u.getMetadata(echo)
       .should.deep.equal(
         {
           form: 'fallback',
-          seed: 3282470650,
+          seed: 2378635558,
           startTime: echo.timestamp,
           pageid: '1051551461692797'
         }
