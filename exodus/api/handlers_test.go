@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,12 +19,15 @@ import (
 
 // mockDB implements the database interface for testing
 type mockDB struct {
-	bails      []*db.Bail
-	events     []*db.BailEvent
-	queryFunc  func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
-	createFunc func(ctx context.Context, bail *db.Bail) error
-	updateFunc func(ctx context.Context, bail *db.Bail) error
-	deleteFunc func(ctx context.Context, id uuid.UUID) error
+	bails                  []*db.Bail
+	events                 []*db.BailEvent
+	queryFunc              func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
+	createFunc             func(ctx context.Context, bail *db.Bail) error
+	updateFunc             func(ctx context.Context, bail *db.Bail) error
+	deleteFunc             func(ctx context.Context, id uuid.UUID) error
+	latestEventsFunc       func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
+	latestEventsCallCount  int
+	latestEventsLastCalled []uuid.UUID
 }
 
 func (m *mockDB) GetBailsByUser(ctx context.Context, userID uuid.UUID) ([]*db.Bail, error) {
@@ -91,6 +95,32 @@ func (m *mockDB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*db
 		}
 	}
 	return result, nil
+}
+
+func (m *mockDB) GetLatestEventsByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error) {
+	m.latestEventsCallCount++
+	m.latestEventsLastCalled = append([]uuid.UUID(nil), bailIDs...)
+	if m.latestEventsFunc != nil {
+		return m.latestEventsFunc(ctx, bailIDs)
+	}
+	latest := make(map[uuid.UUID]*db.BailEvent, len(bailIDs))
+	wanted := make(map[uuid.UUID]struct{}, len(bailIDs))
+	for _, id := range bailIDs {
+		wanted[id] = struct{}{}
+	}
+	for _, event := range m.events {
+		if event.BailID == nil {
+			continue
+		}
+		if _, ok := wanted[*event.BailID]; !ok {
+			continue
+		}
+		existing, ok := latest[*event.BailID]
+		if !ok || event.Timestamp.After(existing.Timestamp) {
+			latest[*event.BailID] = event
+		}
+	}
+	return latest, nil
 }
 
 func (m *mockDB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*db.BailEvent, error) {
@@ -235,6 +265,125 @@ func TestListBails(t *testing.T) {
 
 	if response.Bails[0].LastEvent == nil {
 		t.Error("Expected last event to be present")
+	}
+}
+
+func TestListBails_AggregatesLatestEventsInOneCall(t *testing.T) {
+	userID := uuid.New()
+	bailA := uuid.New()
+	bailB := uuid.New()
+	bailC := uuid.New()
+
+	def := testBailDefinition()
+	def.Conditions = simpleFormCondition("test-form")
+	defJSON, _ := json.Marshal(def)
+
+	bailAID := bailA
+	bailBID := bailB
+	bailCID := bailC
+
+	now := time.Now()
+	bails := []*db.Bail{
+		{ID: bailAID, UserID: userID, Name: "A", Definition: defJSON, DestinationForm: "exit-form", CreatedAt: now, UpdatedAt: now},
+		{ID: bailBID, UserID: userID, Name: "B", Definition: defJSON, DestinationForm: "exit-form", CreatedAt: now, UpdatedAt: now},
+		{ID: bailCID, UserID: userID, Name: "C", Definition: defJSON, DestinationForm: "exit-form", CreatedAt: now, UpdatedAt: now},
+	}
+
+	eventAOld := uuid.New()
+	eventANew := uuid.New()
+	eventBOld := uuid.New()
+	eventBNew := uuid.New()
+
+	events := []*db.BailEvent{
+		// Bail A: older then newer.
+		{ID: eventAOld, BailID: &bailAID, UserID: userID, BailName: "A", EventType: "execution", Timestamp: now.Add(-2 * time.Hour), UsersMatched: 1, UsersBailed: 1, DefinitionSnapshot: defJSON},
+		{ID: eventANew, BailID: &bailAID, UserID: userID, BailName: "A", EventType: "execution", Timestamp: now.Add(-1 * time.Hour), UsersMatched: 2, UsersBailed: 2, DefinitionSnapshot: defJSON},
+		// Bail B: newer then older (latest must be picked regardless of insert order).
+		{ID: eventBNew, BailID: &bailBID, UserID: userID, BailName: "B", EventType: "execution", Timestamp: now, UsersMatched: 9, UsersBailed: 9, DefinitionSnapshot: defJSON},
+		{ID: eventBOld, BailID: &bailBID, UserID: userID, BailName: "B", EventType: "execution", Timestamp: now.Add(-3 * time.Hour), UsersMatched: 3, UsersBailed: 3, DefinitionSnapshot: defJSON},
+		// Bail C: no events -- should still appear with LastEvent == nil.
+	}
+
+	// Force the new code path by sabotaging the per-bail helper. If ListBails ever
+	// regresses to GetEventsByBailID-per-bail, this test will fail unchanged.
+	mock := &mockDB{
+		bails:  bails,
+		events: events,
+		latestEventsFunc: func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error) {
+			if len(ids) == 1 {
+				return nil, fmt.Errorf("GetLatestEventsByBailIDs called per-bail (only %d id)", len(ids))
+			}
+			return nil, nil
+		},
+	}
+	server := New(mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/users/"+userID.String()+"/bails", nil)
+	rec := httptest.NewRecorder()
+	c := server.echo.NewContext(req, rec)
+	c.SetPath("/users/:userId/bails")
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
+
+	if err := server.ListBails(c); err != nil {
+		t.Fatalf("ListBails failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+
+	if mock.latestEventsCallCount != 1 {
+		t.Errorf("Expected exactly 1 call to GetLatestEventsByBailIDs, got %d", mock.latestEventsCallCount)
+	}
+
+	expectedIDs := map[uuid.UUID]bool{bailA: false, bailB: false, bailC: false}
+	for _, id := range mock.latestEventsLastCalled {
+		if _, ok := expectedIDs[id]; !ok {
+			t.Errorf("Unexpected bail id passed to GetLatestEventsByBailIDs: %s", id)
+		}
+		expectedIDs[id] = true
+	}
+	for id, seen := range expectedIDs {
+		if !seen {
+			t.Errorf("Expected bail id %s to be passed to GetLatestEventsByBailIDs", id)
+		}
+	}
+
+	// Now drop the sabotage and assert the response shape picks "newest per bail"
+	// and leaves bail C with a nil LastEvent.
+	mock.latestEventsFunc = nil
+	req2 := httptest.NewRequest(http.MethodGet, "/users/"+userID.String()+"/bails", nil)
+	rec2 := httptest.NewRecorder()
+	c2 := server.echo.NewContext(req2, rec2)
+	c2.SetPath("/users/:userId/bails")
+	c2.SetParamNames("userId")
+	c2.SetParamValues(userID.String())
+	if err := server.ListBails(c2); err != nil {
+		t.Fatalf("ListBails second call failed: %v", err)
+	}
+	var resp BailsListResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+	if len(resp.Bails) != 3 {
+		t.Fatalf("Expected 3 bail responses, got %d", len(resp.Bails))
+	}
+	for _, br := range resp.Bails {
+		switch br.Bail.ID {
+		case bailA:
+			if br.LastEvent == nil || br.LastEvent.ID != eventANew {
+				t.Errorf("Bail A: expected most recent event %s, got %v", eventANew, br.LastEvent)
+			}
+		case bailB:
+			if br.LastEvent == nil || br.LastEvent.ID != eventBNew {
+				t.Errorf("Bail B: expected most recent event %s, got %v", eventBNew, br.LastEvent)
+			}
+		case bailC:
+			if br.LastEvent != nil {
+				t.Errorf("Bail C: expected nil LastEvent, got %v", br.LastEvent)
+			}
+		}
 	}
 }
 

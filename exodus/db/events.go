@@ -77,6 +77,48 @@ func (d *DB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*BailEv
 	return scanEvents(rows)
 }
 
+// GetLatestEventsByBailIDs returns the most recent event for each of the given bail
+// IDs, looked up in a single round-trip. The result map is keyed by bail_id; bails
+// with no recorded events are absent from the map (and not an error).
+//
+// This is intended for the bail list endpoint, which needs only the "last event"
+// metadata for every bail behind it -- using GetEventsByBailID in a loop reads the
+// entire event history per bail and does not scale linearly.
+func (d *DB) GetLatestEventsByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*BailEvent, error) {
+	latest := make(map[uuid.UUID]*BailEvent, len(bailIDs))
+	if len(bailIDs) == 0 {
+		return latest, nil
+	}
+
+	query := `
+		SELECT DISTINCT ON (bail_id)
+		       id, bail_id, user_id, bail_name, event_type, timestamp,
+		       users_matched, users_bailed, definition_snapshot, error, execution_results
+		FROM chatroach.bail_events
+		WHERE bail_id = ANY($1::uuid[])
+		ORDER BY bail_id, timestamp DESC
+	`
+
+	rows, err := d.pool.Query(ctx, query, bailIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query latest events for bails: %w", err)
+	}
+	defer rows.Close()
+
+	events, err := scanEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, event := range events {
+		if event.BailID != nil {
+			latest[*event.BailID] = event
+		}
+	}
+
+	return latest, nil
+}
+
 // GetEventsByUser retrieves recent events for a specific user with an optional limit
 // Events are ordered by timestamp descending (most recent first)
 func (d *DB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*BailEvent, error) {
