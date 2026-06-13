@@ -39,20 +39,29 @@ func (s *Server) ListBails(c echo.Context) error {
 	}
 
 	bailResponses := make([]*BailResponse, len(dbBails))
+	if len(dbBails) == 0 {
+		return c.JSON(http.StatusOK, BailsListResponse{Bails: bailResponses})
+	}
+
+	bailIDs := make([]uuid.UUID, len(dbBails))
+	for i, dbBail := range dbBails {
+		bailIDs[i] = dbBail.ID
+	}
+
+	latestByID, err := s.db.GetLatestEventsByBailIDs(ctx, bailIDs)
+	if err != nil {
+		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
+	}
+
 	for i, dbBail := range dbBails {
 		typeBail, err := dbBailToTypesBail(dbBail)
 		if err != nil {
 			return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert bail: %v", err))
 		}
 
-		events, err := s.db.GetEventsByBailID(ctx, dbBail.ID)
-		if err != nil {
-			return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
-		}
-
 		var lastEvent *types.BailEvent
-		if len(events) > 0 {
-			lastEvent, err = dbEventToTypesEvent(events[0])
+		if dbEvent, ok := latestByID[dbBail.ID]; ok {
+			lastEvent, err = dbEventToTypesEvent(dbEvent)
 			if err != nil {
 				return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert event: %v", err))
 			}

@@ -506,6 +506,13 @@ GET /users/:userId/bails
 Authorization: Bearer {token}
 ```
 
+> **Performance note.** Each row in this response is enriched with a `last_event`
+> for the "Last Execution" column. The list endpoint resolves all latest events
+> in **one** batched query (`SELECT DISTINCT ON (bail_id) ... WHERE bail_id = ANY($1::uuid[]) ORDER BY bail_id, timestamp DESC` against `idx_bail_events_bail`)
+> rather than fetching the entire event history per bail. This keeps the request
+> O(N distinct bails owned by the user) instead of O(N bails × events_per_bail),
+> which previously overwhelmed the 10s API timeout under accumulated history.
+
 **Response** (200 OK):
 ```json
 {

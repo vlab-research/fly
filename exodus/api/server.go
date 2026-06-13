@@ -18,6 +18,7 @@ type DBInterface interface {
 	UpdateBail(ctx context.Context, bail *db.Bail) error
 	DeleteBail(ctx context.Context, id uuid.UUID) error
 	GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*db.BailEvent, error)
+	GetLatestEventsByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
 	GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*db.BailEvent, error)
 	Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
 	Close()

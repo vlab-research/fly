@@ -459,3 +459,147 @@ func TestGetLastSuccessfulExecution(t *testing.T) {
 		t.Error("Last execution should be after first execution")
 	}
 }
+
+func TestGetLatestEventsByBailIDs(t *testing.T) {
+	pool := TestPool()
+	defer pool.Close()
+	Before(pool)
+
+	userID := SetupTestUser(t, pool)
+	db := &DB{pool: pool}
+
+	def := CreateTestBailDefinition()
+
+	// Three bails: two with events, one without.
+	bailWithEvents := &Bail{
+		UserID:          userID,
+		Name:            "bail-with-events",
+		Definition:      def,
+		DestinationForm: "exit-form",
+	}
+	if err := db.CreateBail(context.Background(), bailWithEvents); err != nil {
+		t.Fatalf("CreateBail failed: %v", err)
+	}
+
+	bailWithoutEvents := &Bail{
+		UserID:          userID,
+		Name:            "bail-without-events",
+		Definition:      def,
+		DestinationForm: "exit-form",
+	}
+	if err := db.CreateBail(context.Background(), bailWithoutEvents); err != nil {
+		t.Fatalf("CreateBail failed: %v", err)
+	}
+
+	bailOther := &Bail{
+		UserID:          userID,
+		Name:            "bail-other",
+		Definition:      def,
+		DestinationForm: "exit-form",
+	}
+	if err := db.CreateBail(context.Background(), bailOther); err != nil {
+		t.Fatalf("CreateBail failed: %v", err)
+	}
+
+	// Three events for bailWithEvents; we want the most recent one returned.
+	older := &BailEvent{
+		BailID:             &bailWithEvents.ID,
+		UserID:             userID,
+		BailName:           bailWithEvents.Name,
+		EventType:          "execution",
+		UsersMatched:       5,
+		UsersBailed:        5,
+		DefinitionSnapshot: def,
+	}
+	if err := db.RecordEvent(context.Background(), older); err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	middle := &BailEvent{
+		BailID:             &bailWithEvents.ID,
+		UserID:             userID,
+		BailName:           bailWithEvents.Name,
+		EventType:          "execution",
+		UsersMatched:       7,
+		UsersBailed:        7,
+		DefinitionSnapshot: def,
+	}
+	if err := db.RecordEvent(context.Background(), middle); err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	newest := &BailEvent{
+		BailID:             &bailWithEvents.ID,
+		UserID:             userID,
+		BailName:           bailWithEvents.Name,
+		EventType:          "execution",
+		UsersMatched:       9,
+		UsersBailed:        9,
+		DefinitionSnapshot: def,
+	}
+	if err := db.RecordEvent(context.Background(), newest); err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+
+	// And include an event for bailOther, but query only bailWithEvents to verify filtering.
+	otherEvent := &BailEvent{
+		BailID:             &bailOther.ID,
+		UserID:             userID,
+		BailName:           bailOther.Name,
+		EventType:          "execution",
+		UsersMatched:       1,
+		UsersBailed:        1,
+		DefinitionSnapshot: def,
+	}
+	if err := db.RecordEvent(context.Background(), otherEvent); err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+
+	// Empty input -> empty map, no error.
+	empty, err := db.GetLatestEventsByBailIDs(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetLatestEventsByBailIDs(nil) failed: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("Expected empty map for nil input, got %d entries", len(empty))
+	}
+
+	// Query just the bail with events -> one entry pointing at the newest event.
+	got := map[uuid.UUID]*BailEvent{}
+	got, err = db.GetLatestEventsByBailIDs(context.Background(), []uuid.UUID{bailWithEvents.ID})
+	if err != nil {
+		t.Fatalf("GetLatestEventsByBailIDs single bail failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Expected 1 entry, got %d", len(got))
+	}
+	latest, ok := got[bailWithEvents.ID]
+	if !ok {
+		t.Fatalf("Expected entry for bail %s", bailWithEvents.ID)
+	}
+	if latest.ID != newest.ID {
+		t.Errorf("Expected most recent event %s, got %s", newest.ID, latest.ID)
+	}
+
+	// Query all three bails: bailWithEvents has an entry, bailWithoutEvents does not,
+	// bailOther is included even though we excluded it above.
+	all, err := db.GetLatestEventsByBailIDs(context.Background(), []uuid.UUID{
+		bailWithEvents.ID,
+		bailWithoutEvents.ID,
+		bailOther.ID,
+	})
+	if err != nil {
+		t.Fatalf("GetLatestEventsByBailIDs multiple bails failed: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("Expected 2 entries (one per bail with events), got %d", len(all))
+	}
+	if _, ok := all[bailWithoutEvents.ID]; ok {
+		t.Error("Expected no entry for bail without events")
+	}
+	if entry, ok := all[bailOther.ID]; !ok {
+		t.Error("Expected entry for bailOther")
+	} else if entry.ID != otherEvent.ID {
+		t.Errorf("Expected otherEvent %s, got %s", otherEvent.ID, entry.ID)
+	}
+}
