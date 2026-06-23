@@ -1,0 +1,971 @@
+{
+  "id": "hqT8V0tx",
+  "type": "quiz",
+  "title": "Routine Immunization - Endline",
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/yPd8ZS"
+  },
+  "theme": {
+    "href": "https://api.typeform.com/themes/qHWOQ7"
+  },
+  "settings": {
+    "language": "en",
+    "progress_bar": "proportion",
+    "meta": {
+      "allow_indexing": false
+    },
+    "hide_navigation": false,
+    "is_public": true,
+    "is_trial": false,
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "are_uploads_public": false,
+    "show_time_to_complete": true,
+    "pro_subdomain_enabled": false,
+    "capabilities": {
+      "e2e_encryption": {
+        "enabled": false,
+        "modifiable": false
+      }
+    }
+  },
+  "thankyou_screens": [
+    {
+      "id": "25YK3QaTjhuf",
+      "ref": "aabded3e-bb9f-43a7-8b57-de62e5f24f72",
+      "title": "Great! That's all of our questions!",
+      "properties": {
+        "show_button": true,
+        "share_icons": true,
+        "button_mode": "default_redirect",
+        "button_text": "Create a typeform"
+      }
+    },
+    {
+      "id": "DefaultTyScreen",
+      "ref": "default_tys",
+      "title": "Thanks for completing this typeform\nNow *create your own* — it's free, easy, & beautiful",
+      "properties": {
+        "show_button": true,
+        "share_icons": false,
+        "button_mode": "default_redirect",
+        "button_text": "Create a *typeform*"
+      },
+      "attachment": {
+        "type": "image",
+        "href": "https://images.typeform.com/images/2dpnUBBkz2VN"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "glf5ozEDI5Mh",
+      "title": "Please tell us how strongly do you agree or disagree with each of the following statements.",
+      "ref": "statement_agree",
+      "properties": {
+        "button_text": "Continue",
+        "hide_marks": false
+      },
+      "type": "statement"
+    },
+    {
+      "id": "GOzrkyEjzTSj",
+      "title": "Vaccines are important for children to have\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "vaccines_children",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "Hk5dpeyOakJA",
+            "ref": "01FN2QXBSBD359PCG70FH4K5GQ",
+            "label": "A"
+          },
+          {
+            "id": "nreolwKcitVr",
+            "ref": "01FN2QXBSBH2ZXA7Z5H19KHPPB",
+            "label": "B"
+          },
+          {
+            "id": "RJixxS56rrNT",
+            "ref": "01FN2QXBSBSX1DHB1VHYR4K7HH",
+            "label": "C"
+          },
+          {
+            "id": "SLsahILqAECG",
+            "ref": "01FN2QXBSBBKMMSS0HRQW8HA0S",
+            "label": "D"
+          },
+          {
+            "id": "ps4P57ubypwn",
+            "ref": "01FN2QXBSBV36XN6DET8D5FDAF",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "XZ9c8i3XKAvq",
+      "title": "Overall, I think vaccines are safe\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "vaccines_safe",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "dOujjnPgXMWV",
+            "ref": "01FN2QXBSBKTW5W59ZK9RTN2D8",
+            "label": "A"
+          },
+          {
+            "id": "1MIthDkThIw8",
+            "ref": "01FN2QXBSBWQYD265HREEXXRVM",
+            "label": "B"
+          },
+          {
+            "id": "OYAgryhid3rT",
+            "ref": "01FN2QXBSBCMK9S90ZX03TP9FZ",
+            "label": "C"
+          },
+          {
+            "id": "FxmOdGdTB54J",
+            "ref": "01FN2QXBSBA8DFV5YWX3MGVDHV",
+            "label": "D"
+          },
+          {
+            "id": "KtaIeNZ57iYm",
+            "ref": "01FN2QXBSBFJEF9RERQ5AAHCW4",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "8Idnl5ERyDEl",
+      "title": "Overall, I think vaccines are effective\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "vaccines_effective",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "WRDpYC0hzFSo",
+            "ref": "01FN2QXBSB9MA8J0P762NKVAW9",
+            "label": "A"
+          },
+          {
+            "id": "HG1bnf9yURZW",
+            "ref": "01FN2QXBSC544CY8P90T5FGAK1",
+            "label": "B"
+          },
+          {
+            "id": "m1ePcgGpGxnD",
+            "ref": "01FN2QXBSC3YHXE02EBS8M0T3T",
+            "label": "C"
+          },
+          {
+            "id": "R1cU61EjNx2P",
+            "ref": "01FN2QXBSC9BKNZ1S1MSPMP4RC",
+            "label": "D"
+          },
+          {
+            "id": "Wv7JbsBE7C8H",
+            "ref": "01FN2QXBSC0THEJE0ZMQPYKTNJ",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "JQNQcbfBpcTL",
+      "title": "Vaccines are compatible with my religious beliefs\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "vaccines_religion",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "7nrNJAYuhYpm",
+            "ref": "01FN2QXBSCAGWNHNJ03QRW6R5B",
+            "label": "A"
+          },
+          {
+            "id": "mrEHL0aJH08J",
+            "ref": "01FN2QXBSC5R60C95GZAPAE9GB",
+            "label": "B"
+          },
+          {
+            "id": "4sU8vueeRiGx",
+            "ref": "01FN2QXBSCF474TTQNDJEPJ44G",
+            "label": "C"
+          },
+          {
+            "id": "54VOKW8wjWpB",
+            "ref": "01FN2QXBSCN8HWJV20M1D6J3TA",
+            "label": "D"
+          },
+          {
+            "id": "K4ECuAHzJmSV",
+            "ref": "01FN2QXBSCJK2WJYBS8MQJTZA0",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "rZ2xAh7XE30n",
+      "title": "When is the next time your child (or your youngest child) is due a vaccination?\n\n- A. In the next 3 months\n- B. In 3 – 6 months time\n- C. In 6 – 9 months time\n- D. In 9 – 12 months time\n- E. In greater than 12 months time\n- F. Do not know",
+      "ref": "next_vaccine_due",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "gU9s9jL3alTK",
+            "ref": "01FN2QXBSCTZC0KPK55WTY707T",
+            "label": "A"
+          },
+          {
+            "id": "KC9cPkSDanC5",
+            "ref": "01FN2QXBSCSTATNK08TQKPCQZA",
+            "label": "B"
+          },
+          {
+            "id": "TFZ4wLqFSs6e",
+            "ref": "01FN2QXBSC9RATA88DY11P4GNX",
+            "label": "C"
+          },
+          {
+            "id": "Ombiubg0QT67",
+            "ref": "01FN2QXBSC04ZYV9C74P3SG417",
+            "label": "D"
+          },
+          {
+            "id": "Zw3oynegnRLf",
+            "ref": "01FN2QXBSCVKGDFQEBTFDXV7FV",
+            "label": "E"
+          },
+          {
+            "id": "1g9jHcsYzX7q",
+            "ref": "01FN2QXBSC10BXCWSZ57G0FK3E",
+            "label": "F"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "y6KN9cPBJGCU",
+      "title": "Do you have an appointment booked for your child’s next vaccination?",
+      "ref": "appointment_booked",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "G3Yio9DS0GUj",
+            "ref": "01FN2QXBSCASW7V1FPKEP0SKW3",
+            "label": "Yes"
+          },
+          {
+            "id": "n6naUDyk0KG0",
+            "ref": "01FN2QXBSC8PBCAW0HP24YSZJS",
+            "label": "No"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "90MtkdXZrQ2C",
+      "title": "Do you intend to get your child vaccinated when their next vaccination is due?\n\n- A. Yes, definitely\n- B. Yes, possibly\n- C. No, unlikely\n- D. No, definitely not",
+      "ref": "vaccination_intention",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "DKObySAG6G8F",
+            "ref": "01FN2QXBSC6VNWAYKPPHER1H84",
+            "label": "A"
+          },
+          {
+            "id": "VP4BYvbsXqxS",
+            "ref": "01FN2QXBSCPJRT4C8DKHG7BCZY",
+            "label": "B"
+          },
+          {
+            "id": "T3DnGYwcIrLW",
+            "ref": "01FN2QXBSCBD63FJKQZ5KPAG80",
+            "label": "C"
+          },
+          {
+            "id": "1boG4F3qvUg1",
+            "ref": "01FN2QXBSCTP0K6E7HCV6WZNDH",
+            "label": "D"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "PdpXfxc6G2zT",
+      "title": "Please select your level of agreement with the following statements",
+      "ref": "statement_agree_2",
+      "properties": {
+        "button_text": "Continue",
+        "hide_marks": false
+      },
+      "type": "statement"
+    },
+    {
+      "id": "lfPt8UzisAQy",
+      "title": "I feel it is important to vaccinate my child(ren) on time for their routine vaccinations.\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "important_ontime_children",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "PD7MGnDyxvGf",
+            "ref": "01FN2QXBSCEBRH656QZETWDZPT",
+            "label": "A"
+          },
+          {
+            "id": "CWJEW6tqYKFZ",
+            "ref": "01FN2QXBSCHBJVMP33WC8Y4NXZ",
+            "label": "B"
+          },
+          {
+            "id": "n3v8M8euDRZN",
+            "ref": "01FN2QXBSCG9J8WKP0906FB65X",
+            "label": "C"
+          },
+          {
+            "id": "UPqrfRblbC5f",
+            "ref": "01FN2QXBSCGF8WDX388ZJM8M1P",
+            "label": "D"
+          },
+          {
+            "id": "UJwvCtQZKJqY",
+            "ref": "01FN2QXBSCDKRBW12TDMD5CF9Z",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "IZdOgF2Wk0lG",
+      "title": "I feel it is safe to go to the general practice to vaccinate my child(ren) on time for their routine vaccinations.\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "safe_general_practice",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "XfoIZTu9AJhL",
+            "ref": "01FN2QXBSCJK84E17AW1QRWNW4",
+            "label": "A"
+          },
+          {
+            "id": "OcJJ6vnjGPzD",
+            "ref": "01FN2QXBSCQ9H960N6SQX51RHC",
+            "label": "B"
+          },
+          {
+            "id": "fVdgDBAgxgYN",
+            "ref": "01FN2QXBSC7AMESH0ATV44WXTJ",
+            "label": "C"
+          },
+          {
+            "id": "PXAsLaj2XFOY",
+            "ref": "01FN2QXBSC63SE18HGCN7NT6BX",
+            "label": "D"
+          },
+          {
+            "id": "C4nbXoEaYMUD",
+            "ref": "01FN2QXBSCEZ9RAHHJVA09N5CK",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "18kYWGRABRTR",
+      "title": "Most people who are important to me (e.g. friends, family, community etc) think that I should take my child(ren) to my local GP practice for their routine vaccinations during the coronavirus pandemic\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "friends_family_important",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "X6UAiDDdYYNR",
+            "ref": "01FN2QXBSCVSXN3NQ4EJBKG6W8",
+            "label": "A"
+          },
+          {
+            "id": "L8f1qtmjzZl4",
+            "ref": "01FN2QXBSC3F37DH3TNTGRBXK0",
+            "label": "B"
+          },
+          {
+            "id": "J0EDqCd0P5WB",
+            "ref": "01FN2QXBSC78EX8QQPB6MFYKZ8",
+            "label": "C"
+          },
+          {
+            "id": "XQLZ5ip3PwGU",
+            "ref": "01FN2QXBSC654WS9PGQYPERQAC",
+            "label": "D"
+          },
+          {
+            "id": "tpNRTTlIInDA",
+            "ref": "01FN2QXBSCME4ET6A3GP6A86A5",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "xJsAkgbrvho2",
+      "title": "I feel that the current constraints due to the coronavirus pandemic would make it difficult for me to make a vaccination appointment at my general practice\n\n- A. Strongly agree\n- B. Tend to agree\n- C. Neither agree nor disagree\n- D. Tend to disagree\n- E. Strongly disagree",
+      "ref": "covid_difficult",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "13tzcaa99TVR",
+            "ref": "01FN2QXBSCNR10W232PPE97FQ8",
+            "label": "A"
+          },
+          {
+            "id": "3dELPBle1wMZ",
+            "ref": "01FN2QXBSCJERFZK3BTDD3W1GB",
+            "label": "B"
+          },
+          {
+            "id": "SrzcYPyosatj",
+            "ref": "01FN2QXBSCC7CE1GN7RJF1ME1N",
+            "label": "C"
+          },
+          {
+            "id": "s7JPv0T87BO7",
+            "ref": "01FN2QXBSCAYJKTB5QMYPV9872",
+            "label": "D"
+          },
+          {
+            "id": "ppZpV3VYqwa2",
+            "ref": "01FN2QXBSCAC808NQR6HKRWWGE",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "zozuRknmpqlo",
+      "title": "What immunisations do you know of that are currently available for children?",
+      "ref": "known_immunizations",
+      "properties": {},
+      "validations": {
+        "required": false
+      },
+      "type": "short_text"
+    },
+    {
+      "id": "0K8gcSJFmobS",
+      "title": "Have you ever refused or delayed any immunisations your [child has / children have] been offered from age 0-4 years?\n\n- A. Had all immunisations done at the time they were due \n- B. Not had when due and then gone on to have the immunisation later\n- C. Not had when due. Intend to have the immunisation later, but not done yet\n- D. Not had when due and not sure whether or not to have immunisation\n- E. Not had when due and no plans to have the immunisation\n- F. Refused",
+      "ref": "delayed_immunization",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "YfxmMH88dpA6",
+            "ref": "01FN2QXBSD8MJY357YJR66S8P4",
+            "label": "A"
+          },
+          {
+            "id": "eQuKqySqAgF5",
+            "ref": "01FN2QXBSDCGMC4DD4PV61MJHP",
+            "label": "B"
+          },
+          {
+            "id": "3CkmUuQZ8wSs",
+            "ref": "01FN2QXBSDSD0EQETTBM5S69H7",
+            "label": "C"
+          },
+          {
+            "id": "1FQqZKThTeiS",
+            "ref": "01FN2QXBSDJM6JK51WFSN4PXJQ",
+            "label": "D"
+          },
+          {
+            "id": "c5rCwNeZSHE7",
+            "ref": "01FN2QXBSDHQSJH2HYMMR7BH85",
+            "label": "E"
+          },
+          {
+            "id": "XNgk92ly431U",
+            "ref": "01FN2QXBSD2G9018GDDP37WSND",
+            "label": "F"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "AciLLc1ik99x",
+      "title": "Have you seen or heard or read any adverts, information or publicity for childhood immunisation recently?\n",
+      "ref": "seen_adverts",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "K60xrsgxTMq3",
+            "ref": "01FN2QXBSDM9YZ21DCAB4079FT",
+            "label": "Yes"
+          },
+          {
+            "id": "7LYBfp6pkydU",
+            "ref": "01FN2QXBSDJZ1MFABGMABXKYY1",
+            "label": "No"
+          },
+          {
+            "id": "AvMdEjiEOKWq",
+            "ref": "01FN2QXBSDK2298Y7QJF6NZND4",
+            "label": "Don't Know"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "SVk9CyTScp9P",
+      "title": "Which best describes the information you have found online about vaccines?\n\n-A. Mainly pro-vaccination\n-B. Mainly neutral\n-C. Mainly anti-vaccination",
+      "ref": "online_info_skew",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "tl4PvhC4w5B9",
+            "ref": "01FN2QXBSDNTWR9KGG5QFFWGFD",
+            "label": "A"
+          },
+          {
+            "id": "VUSWzgaXywM2",
+            "ref": "01FN2QXBSDDEA23TF35J5GPAAQ",
+            "label": "B"
+          },
+          {
+            "id": "l0dEcXeuAfsI",
+            "ref": "01FN2QXBSDMNYZ2RXV9JZF2WJM",
+            "label": "C"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "uU5qp8FiU5PX",
+      "title": "Did you see or hear any information which might have persuaded you not to immunise yourself/your child/children?\n",
+      "ref": "info_persuaded_against",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "lh2Owz5hyChH",
+            "ref": "01FN2QXBSD5CPWNKJJE64SF6EC",
+            "label": "Yes"
+          },
+          {
+            "id": "sbrw3cOBuF3U",
+            "ref": "01FN2QXBSDWA0JM33QVZVWBVM8",
+            "label": "No"
+          },
+          {
+            "id": "W2Yl7PzIltA9",
+            "ref": "01FN2QXBSD1N8E0MKXXS57VE8H",
+            "label": "Don't Know"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "P3pYAnbov3bY",
+      "title": "What was the information you saw or heard that might have persuaded you not to immunise yourself/your child/children?",
+      "ref": "info_persuaded_against_details",
+      "properties": {
+        "description": "If yes"
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "short_text"
+    },
+    {
+      "id": "SnJRrei75WYe",
+      "title": "Did you see or hear any information which might have persuaded you to go ahead and immunise yourself/your child/children?",
+      "ref": "info_persuaded_pro",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "CgBoWcFEwqm0",
+            "ref": "01FN2QXBSDRND8S41N0MNABNTJ",
+            "label": "Yes"
+          },
+          {
+            "id": "gNIfeIa2ILza",
+            "ref": "01FN2QXBSDPYXB1BACDT7V44EG",
+            "label": "No"
+          },
+          {
+            "id": "WPy14qa04RJh",
+            "ref": "01FN2QXBSDHV7NKNY9E9RR3KY6",
+            "label": "Don't Know"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "naIl7JGGB1u3",
+      "title": "Did you see or hear any information which might have persuaded you to delay vaccination, as you were unsure what to do?",
+      "ref": "info_persuaded_delay",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "ZFHS2FXwQgRs",
+            "ref": "01FN2QXBSD7NQB0Q4W84TQ6WFT",
+            "label": "Yes"
+          },
+          {
+            "id": "wOpko0W9S60R",
+            "ref": "01FN2QXBSDYTQPVGK07RK4AZZE",
+            "label": "No"
+          },
+          {
+            "id": "HgDsCMkZjkJq",
+            "ref": "01FN2QXBSDXMRE9W42KNPD8D1K",
+            "label": "Don't Know"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "TLP4lQm78sfV",
+      "title": "When making decisions about vaccination, where do you get your information?\n\n- A. Healthcare provider (e.g. doctor/GP, nurse, midwife, pharmacist)\n- B. Public health official\n- C. Family\n- D. Friends\n- E. Religious leaders\n- F. Political leaders\n- G. News media (television, radio, newspapers)\n- H. Internet \n- I. Social media (e.g. WhatsApp, Facebook)\n- J. Other\n- K. Don’t know",
+      "ref": "information_source",
+      "properties": {
+        "description": "ROTATE CODES 1-11. What to do about multiple selection?",
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "l8Oh9rRfpTLp",
+            "ref": "01FN2QXBSDATC1KS5AT3BMC8VX",
+            "label": "A"
+          },
+          {
+            "id": "xFyEGjgyQZCU",
+            "ref": "01FN2QXBSDKR34FRB4DRGESG7V",
+            "label": "B"
+          },
+          {
+            "id": "TiRUWEEvnbhg",
+            "ref": "01FN2QXBSDVBZ32T1P257ZK8TQ",
+            "label": "C"
+          },
+          {
+            "id": "3xM2sOrMpdG5",
+            "ref": "01FN2QXBSDYA25FSX80ZREJV04",
+            "label": "D"
+          },
+          {
+            "id": "K75wg2XE60Qq",
+            "ref": "01FN2QXBSDP560X8SB9V7CB6Q3",
+            "label": "E"
+          },
+          {
+            "id": "KSTSdSysRA71",
+            "ref": "01FN2QXBSD6P7H6HPSKH8GFVVT",
+            "label": "F"
+          },
+          {
+            "id": "wCTV514DwYB2",
+            "ref": "01FN2QXBSDVD6DNWFCA59JTGCN",
+            "label": "G"
+          },
+          {
+            "id": "XH27rUrTFQ7v",
+            "ref": "01FN2QXBSDQC8JWM5NJ3T3CMTN",
+            "label": "H"
+          },
+          {
+            "id": "jsxW51Rgd76v",
+            "ref": "01FN2QXBSD3W6SKAN6XM6MQ7PG",
+            "label": "I"
+          },
+          {
+            "id": "sxM5xgdu25Tj",
+            "ref": "01FN2QXBSDXT7A2G7FS7AH9H43",
+            "label": "J"
+          },
+          {
+            "id": "TogPfXNpKr4s",
+            "ref": "01FN2QXBSD6VEJF8GWKW33RVB9",
+            "label": "K"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "1Wg0QWDeAhzo",
+      "title": "Please specify",
+      "ref": "specify_other_source",
+      "properties": {
+        "description": "If other"
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "short_text"
+    }
+  ],
+  "logic": [
+    {
+      "type": "field",
+      "ref": "appointment_booked",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "vaccination_intention"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "appointment_booked"
+              },
+              {
+                "type": "choice",
+                "value": "01FN2QXBSC8PBCAW0HP24YSZJS"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "statement_agree_2"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "information_source",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "specify_other_source"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "information_source"
+              },
+              {
+                "type": "choice",
+                "value": "01FN2QXBSDXT7A2G7FS7AH9H43"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "thankyou",
+              "value": "default_tys"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "info_persuaded_against",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "info_persuaded_against_details"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "info_persuaded_against"
+              },
+              {
+                "type": "choice",
+                "value": "01FN2QXBSD5CPWNKJJE64SF6EC"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "info_persuaded_pro"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    }
+  ],
+  "_links": {
+    "display": "https://nandanrao.typeform.com/to/hqT8V0tx"
+  }
+}
