@@ -22,14 +22,14 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 
 versionDashboard: &vdashboard v0.0.63
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.191
+versionReplybot: &vreplybot v0.0.201
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.38
+versionDinersclub: &vdinersclub v0.0.40
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.7
-versionExodus: &vexodus v0.2.1
+versionExodus: &vexodus v0.2.2
 versionMessageWorker: &vmessageworker v0.1.0
 
 processingAlerts:
@@ -109,7 +109,7 @@ kafkaTopics:
 dinersclub:
   replicaCount: 1
   image:
-    repository: vlabresearch/dinersclub
+    repository: ghcr.io/vlab-research/dinersclub
     tag: *vdinersclub
     pullPolicy: IfNotPresent
   resources:
@@ -184,13 +184,13 @@ dean:
   - name: DEAN_FB_CODES
     value: "2022,613,-1,190,80006,551"
   - name: DEAN_BLOCKED_INTERVAL
-    value: "48 hours"
+    value: "120 hours"
   - name: DEAN_RESPONDING_INTERVAL
     value: "48 hours"
   - name: DEAN_RESPONDING_GRACE
     value: "20 minutes"
   - name: DEAN_RETRY_MAX_ATTEMPTS
-    value: "30"
+    value: "60"
   - name: DEAN_PAYMENT_GRACE
     value: "2 hours"
   - name: DEAN_PAYMENT_INTERVAL
@@ -628,7 +628,7 @@ exporter:
 
 exodus:
   image:
-    repository: vlabresearch/exodus
+    repository: ghcr.io/vlab-research/exodus
     tag: *vexodus
     pullPolicy: IfNotPresent
   env:
