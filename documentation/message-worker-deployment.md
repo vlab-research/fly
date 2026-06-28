@@ -214,3 +214,9 @@ Graceful shutdown: preStop hook sleeps 15s to allow Kafka offset commits before 
 7. **Replybot needs a new image:** The replybot code changes (deleting `sendMessage`, adding `publishCommands`) are on this feature branch. A new replybot image must be built and deployed simultaneously with message-worker.
 
 8. **Prometheus annotations:** The deployment template has Prometheus scrape annotations on port 8081 (health port), not 8080 as originally documented. The `/metrics` path is referenced but the Go service doesn't currently expose Prometheus metrics — this is a placeholder for future instrumentation.
+
+9. **Helm values key must match chart name:** The chart is named `message-worker` (hyphenated), so the values key in production.yaml/staging.yaml must be `message-worker:` — not `messageWorker:` (camelCase). Using the wrong key causes Helm to silently ignore all overrides and fall back to chart defaults. This was a deployment blocker: the chart defaulted to a Docker Hub image from an older build (rust branch) that had different config validation, and none of the env vars (DATABASE_URL, KAFKA_COMMAND_TOPIC, etc.) were applied.
+
+10. **Production.yaml had uncommitted changes on main:** The main worktree had uncommitted version bumps (replybot v0.0.200, dinersclub v0.0.40, exodus v0.2.2, dean config tweaks) that were already live in production but never committed to git. These had to be merged into the feature branch's production.yaml to avoid regressing those services during the message-worker deploy.
+
+11. **MESSENGER_URL env var required:** The Docker image built by CI contains a config validation from the rust branch that requires at least one of `MESSENGER_URL`, `WHATSAPP_URL`, or `INSTAGRAM_URL` to be set. Even though our branch's config.go doesn't have this validation, the packaged Helm chart was built from the rust branch. Adding `MESSENGER_URL=https://graph.facebook.com/v22.0` to the env config satisfies this validation.
