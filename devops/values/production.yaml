@@ -30,7 +30,7 @@ versionDinersclub: &vdinersclub v0.0.40
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.7
 versionExodus: &vexodus v0.2.2
-versionMessageWorker: &vmessageworker v0.1.0
+versionMessageWorker: &vmessageworker v0.1.1
 
 processingAlerts:
   - consumergroup: replybot
