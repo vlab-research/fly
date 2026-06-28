@@ -3,7 +3,7 @@ const { getForm } = require('./ourform')
 const { getUserInfo } = require('../messenger')
 const { responseVals } = require('../responses/responser')
 const { parseEvent, getPageFromEvent } = require('@vlab-research/utils')
-const { iowrap } = require('../errors')
+const { MachineIOError, iowrap } = require('../errors')
 const _ = require('lodash')
 const util = require('util')
 const Cacheman = require('cacheman')
@@ -172,6 +172,16 @@ class Machine {
       }
 
     } catch (e) {
+      if (e instanceof MachineIOError) {
+        return {
+          publish: true,
+          timestamp,
+          user,
+          page,
+          newState,
+          error: { ...e.details, tag: e.tag, message: e.message, stack: e.stack }
+        }
+      }
       return {
         publish: true,
         timestamp,

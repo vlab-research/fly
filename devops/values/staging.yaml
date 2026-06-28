@@ -631,9 +631,9 @@ messageWorker:
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
-    value: "https://graph.facebook.com/v18.0"
+    value: "https://graph.facebook.com/v22.0"
   - name: NUM_WORKERS
-    value: "100"
+    value: "1"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"
   - name: INITIAL_BACKOFF_MS

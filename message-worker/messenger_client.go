@@ -184,13 +184,9 @@ func isRetriableHTTPStatus(statusCode int) bool {
 // Based on Facebook documentation and old replybot behavior
 func isRetriableFacebookError(code int) bool {
 	switch code {
-	case 1200: // Temporary send message failure
+	case 1200:
 		return true
-	case 551: // User not available
-		return true
-	case 2: // API temporary issue
-		return true
-	case -1: // Internal error
+	case 551:
 		return true
 	default:
 		return false

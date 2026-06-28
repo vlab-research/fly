@@ -3,6 +3,7 @@ const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
+const { MachineIOError } = require('../errors')
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
 // const BASE_URL = "https://graph.facebook.com"
@@ -48,6 +49,21 @@ describe('machine.run', () => {
     report.timestamp.should.equal(timestamp)
     report.error.message.should.equal('foo')
     report.error.tag.should.equal('STATE_ACTIONS')
+    report.publish.should.be.true
+  })
+
+  it('returns specific tag error if actionsResponses throws MachineIOError', async () => {
+
+    const m = new Machine()
+    m.transition = () => ({ newState: {}, output: {} })
+    m.actionsResponses = () => Promise.reject(new MachineIOError('BAZ', 'foo', { code: 'FB' }))
+    const timestamp = Date.now()
+    const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
+    report.user.should.equal('bar')
+    report.timestamp.should.equal(timestamp)
+    report.error.message.should.equal('foo')
+    report.error.tag.should.equal('BAZ')
+    report.error.code.should.equal('FB')
     report.publish.should.be.true
   })
 

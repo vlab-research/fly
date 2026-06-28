@@ -77,8 +77,12 @@ function processor(machine, stateStore) {
         await publishReport(report)
       }
       if (report.newState) {
-        await publishState(report.user, report.page, report.timestamp, report.newState)
-        await stateStore.updateState(userId, report.newState)
+        if (report.commands && report.commands.length > 0 && report.newState.state === 'RESPONDING') {
+          await stateStore.updateState(userId, report.newState)
+        } else {
+          await publishState(report.user, report.page, report.timestamp, report.newState)
+          await stateStore.updateState(userId, report.newState)
+        }
       }
       if (report.responses) {
         await publishResponses(report.responses)
