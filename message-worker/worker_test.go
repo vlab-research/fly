@@ -126,30 +126,9 @@ func TestWorker_ProcessCommand_Success(t *testing.T) {
 		t.Errorf("Expected 1 call to SendMessage, got %d", mockSender.calls)
 	}
 
-	// Verify event was published
-	if len(mockProducer.events) != 1 {
-		t.Fatalf("Expected 1 event, got %d", len(mockProducer.events))
-	}
-
-	event := mockProducer.events[0]
-	if event.EventType != "message_sent" {
-		t.Errorf("Expected event type 'message_sent', got '%s'", event.EventType)
-	}
-	if event.ConversationID != cmd.ConversationID {
-		t.Errorf("Expected conversation_id '%s', got '%s'", cmd.ConversationID, event.ConversationID)
-	}
-
-	// Parse payload
-	var payload types.MessageSentPayload
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		t.Fatalf("Failed to unmarshal payload: %v", err)
-	}
-
-	if payload.CommandID != cmd.CommandID {
-		t.Errorf("Expected command_id '%s', got '%s'", cmd.CommandID, payload.CommandID)
-	}
-	if payload.PlatformMessageID == nil || *payload.PlatformMessageID != "msg_123" {
-		t.Errorf("Expected platform_message_id 'msg_123', got %v", payload.PlatformMessageID)
+	// Event emission is temporarily disabled
+	if len(mockProducer.events) != 0 {
+		t.Fatalf("Expected 0 events, got %d", len(mockProducer.events))
 	}
 }
 

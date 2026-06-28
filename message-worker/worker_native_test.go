@@ -109,9 +109,9 @@ func TestWorker_ProcessCommand_Native_Success(t *testing.T) {
 		t.Errorf("Payload mismatch. Expected %s, got %s", string(nativePayload), string(mockSender.payloads[0]))
 	}
 
-	// Verify message_sent event was emitted
-	if len(mockProducer.events) != 1 {
-		t.Errorf("Expected 1 event, got %d", len(mockProducer.events))
+	// Event emission is temporarily disabled
+	if len(mockProducer.events) != 0 {
+		t.Errorf("Expected 0 events, got %d", len(mockProducer.events))
 	}
 }
 

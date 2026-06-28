@@ -96,17 +96,9 @@ func TestWorker_ProcessCommand_PassThreadControl_Success(t *testing.T) {
 		t.Errorf("Expected metadata %s, got %s", `{"source":"replybot","reason":"live_agent_request"}`, mockSender.metadatas[0])
 	}
 
-	// Verify message_sent event was emitted (for handoff, message_id will be empty)
-	if len(mockProducer.events) != 1 {
-		t.Errorf("Expected 1 event, got %d", len(mockProducer.events))
-	} else {
-		// Check that the event has empty message_id
-		var payload types.MessageSentPayload
-		if err := json.Unmarshal(mockProducer.events[0].Payload, &payload); err == nil {
-			if payload.PlatformMessageID != nil && *payload.PlatformMessageID != "" {
-				t.Errorf("Expected empty message_id for handoff, got %s", *payload.PlatformMessageID)
-			}
-		}
+	// Event emission is temporarily disabled
+	if len(mockProducer.events) != 0 {
+		t.Errorf("Expected 0 events, got %d", len(mockProducer.events))
 	}
 }
 

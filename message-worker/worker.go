@@ -88,10 +88,8 @@ func (w *Worker) processTranslatedMessage(ctx context.Context, cmd types.SendMes
 	}
 
 	// Send message with retry logic
-	var resp *SendMessageResponse
 	_, sendErr := RetryWithBackoff(ctx, w.config, func() error {
-		var retryErr error
-		resp, retryErr = client.SendMessage(ctx, cmd.PlatformAccountID, cmd.UserID, platformMsg)
+		_, retryErr := client.SendMessage(ctx, cmd.PlatformAccountID, cmd.UserID, platformMsg)
 		return retryErr
 	})
 
@@ -102,7 +100,8 @@ func (w *Worker) processTranslatedMessage(ctx context.Context, cmd types.SendMes
 	}
 
 	// Success
-	return w.emitMessageSent(ctx, cmd, resp.MessageID, 1)
+	// return w.emitMessageSent(ctx, cmd, resp.MessageID, 1)
+	return nil
 }
 
 // processNativeMessage sends a pre-formatted native payload without translation
@@ -116,10 +115,8 @@ func (w *Worker) processNativeMessage(ctx context.Context, cmd types.SendMessage
 	}
 
 	// Send native message with retry logic
-	var messageID string
 	_, sendErr := RetryWithBackoff(ctx, w.config, func() error {
-		var retryErr error
-		messageID, retryErr = client.SendNativeMessage(ctx, cmd.UserID, cmd.PlatformAccountID, cmd.Message.NativePayload)
+		_, retryErr := client.SendNativeMessage(ctx, cmd.UserID, cmd.PlatformAccountID, cmd.Message.NativePayload)
 		return retryErr
 	})
 
@@ -129,7 +126,8 @@ func (w *Worker) processNativeMessage(ctx context.Context, cmd types.SendMessage
 	}
 
 	// Success
-	return w.emitMessageSent(ctx, cmd, messageID, 1)
+	// return w.emitMessageSent(ctx, cmd, messageID, 1)
+	return nil
 }
 
 // processPassThreadControl sends a pass_thread_control command
@@ -153,7 +151,8 @@ func (w *Worker) processPassThreadControl(ctx context.Context, cmd types.SendMes
 	}
 
 	// Success - for pass_thread_control, we emit with empty message_id since there's no message to track
-	return w.emitMessageSent(ctx, cmd, "", 1)
+	// return w.emitMessageSent(ctx, cmd, "", 1)
+	return nil
 }
 
 // emitMessageSent emits a message_sent event
