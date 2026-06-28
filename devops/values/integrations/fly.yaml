@@ -1,7 +1,7 @@
 tags:
   kafka: true
   cockroach: true
-  redis: true
+  redis: false
   payments: true
   backup: false
   naughtybot: false
@@ -11,12 +11,19 @@ tags:
 
 processingAlerts: []
 laggingAlerts: []
-kafkaTopics: []
 
 chatTopic: &topic chat-events
 stateTopic: &statetopic vlab-state
 responseTopic: &responsetopic vlab-response
 paymentTopic: &paymenttopic vlab-payment
+commandsTopic: &commandstopic vlab-commands
+
+kafkaTopics:
+  - name: *commandstopic
+    partitions: 2
+    replicationFactor: 1
+    config:
+      "retention.ms": "604800000"
 kafkabrokers: &kb kafka:9092
 botEnvs: &botenvs bot-envs
 chatbaseHost: &host db-cockroachdb-public
@@ -25,6 +32,7 @@ exporterTopic: &exportertopic "vlab-exports"
 versionDashboard: &vdashboard v0.0.38
 versionBotserver: &vbotserver v0.0.11
 versionReplybot: &vreplybot v0.0.168
+versionMessageWorker: &vmessageworker 0.1.0
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.37
 versionScribble: &vscribble v0.0.27
@@ -235,6 +243,8 @@ replybot:
     value: *responsetopic
   - name: VLAB_PAYMENT_TOPIC
     value: *paymenttopic
+  - name: KAFKA_COMMANDS_TOPIC
+    value: *commandstopic
   - name: BOTSERVER_URL
     value: "http://fly-botserver"
   - name: FORMCENTRAL_URL
@@ -458,6 +468,10 @@ kafka:
   # disable kafka as we run it as a service
   enabled: false
 
+
+message-worker:
+  enabled: false
+  envFrom: bot-envs
 
 # Redis is deployed via dev/redis-dev.yaml using official redis:7-alpine.
 # The bitnami chart dependency is disabled to avoid the Bitnami image subscription requirement.

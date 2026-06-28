@@ -1,0 +1,28 @@
+# Compiled binaries
+message-worker
+*.exe
+*.test
+
+# Go build cache
+.cache/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docs
+*.md
+!README.md
+
+# Environment
+.env
+.env.*
+
+# Test files
+*_test.go

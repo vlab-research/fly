@@ -24,7 +24,7 @@ spec:
             memory: "100Mi"
         envFrom:
         - secretRef:
-            name: gbv-bot-envs
+            name: bot-envs
         env:
         - name: CHATBASE_BACKEND
           value: "@vlab-research/chatbase-postgres"
@@ -35,7 +35,7 @@ spec:
         - name: CHATBASE_PASSWORD
           value: ""
         - name: CHATBASE_HOST
-          value: "gbv-cockroachdb-public.default"
+          value: "db-cockroachdb-public"
         - name: CHATBASE_PORT
           value: "26257"
         - name: FALLBACK_FORM
@@ -45,9 +45,9 @@ spec:
         - name: FACEBOOK_GRAPH_URL
           value: "http://gbv-facebot"
         - name: BOTSPINE_KAFKA_BROKERS
-          value: "gbv-kafka:9092"
+          value: "kafka:9092"
         - name: KAFKA_BROKERS
-          value: "gbv-kafka:9092"
+          value: "kafka:9092"
         - name: BOTSPINE_MESSAGE_TOPIC
           value: "chat-events"
         - name: VLAB_STATE_TOPIC
@@ -56,7 +56,17 @@ spec:
           value: "vlab-response"
         - name: VLAB_PAYMENT_TOPIC
           value: "vlab-payment"
-        - name: DASHBOARD_API
-          value: "http://gbv-dashboard/api/v1"
+        - name: KAFKA_COMMANDS_TOPIC
+          value: "commands"
         - name: BOTSERVER_URL
-          value: "http://gbv-botserver"
+          value: "http://fly-botserver"
+        - name: FORMCENTRAL_URL
+          value: "http://fly-formcentral"
+        - name: NUM_SPINES
+          value: "6"
+        - name: REDIS_HOST
+          value: "redis-redis-ha-haproxy"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_DB
+          value: "0"

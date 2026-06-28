@@ -43,6 +43,7 @@ export interface Stack {
   dinersclub: StartedTestContainer;
   botserver: StartedTestContainer;
   replybot: StartedTestContainer;
+  messageWorker: StartedTestContainer;
   facebot: StartedTestContainer;
   facebotUrl: string;
   botserverUrl: string;
@@ -109,6 +110,7 @@ export async function startStack(): Promise<Stack> {
   const deanImageName = 'dean:test';
   const formcentralImageName = 'formcentral:test';
   const dinersclubImageName = 'dinersclub:test';
+  const messageWorkerImageName = 'message-worker:test';
 
   await Promise.all([
     GenericContainer.fromDockerfile(path.join(repoRoot, 'botserver')).build(botserverImageName),
@@ -118,6 +120,7 @@ export async function startStack(): Promise<Stack> {
     GenericContainer.fromDockerfile(path.join(repoRoot, 'dean')).build(deanImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'formcentral')).build(formcentralImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'dinersclub')).build(dinersclubImageName),
+    GenericContainer.fromDockerfile(path.join(repoRoot, 'message-worker')).build(messageWorkerImageName),
   ]);
   console.timeEnd('[setup] image builds');
 
@@ -236,6 +239,7 @@ export async function startStack(): Promise<Stack> {
       'vlab-payment',
       'chat-events',
       'vlab-chat-log',
+      'commands',
     ]);
   } catch (e) {
     // Topics might already exist, continue
@@ -363,6 +367,27 @@ export async function startStack(): Promise<Stack> {
     .withWaitStrategy(Wait.forLogMessage('producer ready'))
     .start();
 
+  // Start message-worker (consumes commands topic, sends to facebot)
+  const messageWorkerEnv: Record<string, string> = {
+    KAFKA_BROKERS: 'redpanda:9092',
+    KAFKA_COMMAND_TOPIC: 'commands',
+    KAFKA_EVENT_TOPIC: 'chat-events',
+    KAFKA_GROUP_ID: 'message-worker-test',
+    KAFKA_AUTO_OFFSET_RESET: 'earliest',
+    DATABASE_URL: `postgresql://chatroach@cockroach:26257/chatroach?sslmode=disable`,
+    BOTSERVER_URL: 'http://botserver',
+    FACEBOOK_GRAPH_URL: 'http://facebot:3000',
+    NUM_WORKERS: '1',
+    TOKEN_CACHE_TTL: '300',
+  };
+
+  const messageWorker = await new GenericContainer(messageWorkerImageName)
+    .withNetwork(network)
+    .withNetworkAliases('message-worker')
+    .withEnvironment(messageWorkerEnv)
+    .withWaitStrategy(Wait.forLogMessage('starting message processing'))
+    .start();
+
   // Load botserver env from YAML and apply overrides
   const botserverEnv = loadKubeEnv(
     path.join(repoRoot, 'botserver/kube/deployment.yaml')
@@ -427,6 +452,7 @@ export async function startStack(): Promise<Stack> {
     dinersclub,
     botserver,
     replybot,
+    messageWorker,
     facebot,
     facebotUrl,
     botserverUrl,
@@ -445,6 +471,7 @@ export async function stopStack(stack: Stack): Promise<void> {
     stack.botserver.stop(),
     stack.formcentral.stop(),
     stack.dinersclub.stop(),
+    stack.messageWorker.stop(),
     stack.replybot.stop(),
     stack.scribbleStates.stop(),
     stack.scribbleResponses.stop(),

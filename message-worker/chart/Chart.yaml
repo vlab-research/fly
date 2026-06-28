@@ -1,0 +1,11 @@
+apiVersion: v2
+name: message-worker
+description: Go-based message translation worker for vlab chatbot system
+type: application
+version: 0.1.1
+appVersion: "0.1.0"
+keywords:
+  - chatbot
+  - state-machine
+  - kafka
+  - rust

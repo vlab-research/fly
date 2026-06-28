@@ -3,8 +3,8 @@ const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 const { MachineIOError } = require('../errors')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
 // const BASE_URL = "https://graph.facebook.com"
 
@@ -28,8 +28,7 @@ describe('machine.run', () => {
 
     const m = new Machine()
     m.transition = () => ({ newState: {}, output: {} })
-    m.actionsResponses = () => ({})
-    m.act = () => Promise.reject(new Error('foo'))
+    m.actionsResponses = () => { throw new Error('foo') }
     const timestamp = Date.now()
     const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
     report.user.should.equal('bar')
@@ -39,31 +38,25 @@ describe('machine.run', () => {
     report.publish.should.be.true
   })
 
-  it('returns specific tag error if run throws MachineIOError', async () => {
+  it('returns STATE_ACTIONS error if actionsResponses throws an error', async () => {
 
     const m = new Machine()
-
     m.transition = () => ({ newState: {}, output: {} })
-    m.actionsResponses = () => ({})
-    m.act = () => Promise.reject(new MachineIOError('BAZ', 'foo', { code: 'FB' }))
+    m.actionsResponses = () => Promise.reject(new Error('foo'))
     const timestamp = Date.now()
     const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
     report.user.should.equal('bar')
     report.timestamp.should.equal(timestamp)
     report.error.message.should.equal('foo')
-    report.error.tag.should.equal('BAZ')
-    report.error.code.should.equal('FB')
+    report.error.tag.should.equal('STATE_ACTIONS')
     report.publish.should.be.true
   })
-
-
 
   it('returns specific tag error if actionsResponses throws MachineIOError', async () => {
 
     const m = new Machine()
     m.transition = () => ({ newState: {}, output: {} })
     m.actionsResponses = () => Promise.reject(new MachineIOError('BAZ', 'foo', { code: 'FB' }))
-    m.act = () => ({})
     const timestamp = Date.now()
     const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
     report.user.should.equal('bar')
@@ -75,18 +68,20 @@ describe('machine.run', () => {
   })
 
 
-  it('returns a report with actions if all goes well', async () => {
+  it('returns a report with commands if all goes well', async () => {
     const m = new Machine()
     m.transition = () => ({ newState: {}, output: {} })
     m.actionsResponses = () => ({ actions: [{ foo: 'qux' }] })
-    m.act = () => ({})
 
     const timestamp = Date.now()
     const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
     report.user.should.equal('bar')
     report.timestamp.should.equal(timestamp)
     should.not.exist(report.error)
-    report.actions[0].should.eql({ foo: 'qux' })
+    report.commands.should.be.an('array')
+    report.commands[0].should.have.property('command_id')
+    report.commands[0].should.have.property('message')
+    report.commands[0].message.should.have.property('type', 'native')
     report.publish.should.be.true
   })
 
@@ -95,7 +90,7 @@ describe('machine.run', () => {
 
 describe('Machine integrated', () => {
 
-  it('returns a report with actions when given send actions', async () => {
+  it('returns a report with commands when given send actions', async () => {
     const m = new Machine()
     m.getPageToken = () => Promise.resolve('footoken')
 
@@ -107,13 +102,17 @@ describe('Machine integrated', () => {
     }, 'foo'])
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-    m.sendMessage = () => Promise.resolve({})
 
     const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', referral)
     report.user.should.equal('bar')
     should.not.exist(report.error)
     report.timestamp.should.equal(referral.timestamp)
-    report.actions[0].should.eql({
+    report.commands.should.be.an('array')
+    report.commands.length.should.be.greaterThan(0)
+    report.commands[0].should.have.property('message')
+    report.commands[0].message.should.have.property('type', 'native')
+    report.commands[0].message.should.have.property('native_payload')
+    report.commands[0].message.native_payload.should.eql({
       message: { 'metadata': '{"ref":"foo","type":"short_text"}', text: 'foo' },
       recipient: { id: 'bar' }
     })
@@ -138,14 +137,13 @@ describe('Machine integrated', () => {
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
 
-    m.sendMessage = () => Promise.resolve({})
     const report = await m.run({ state: 'QOUT', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
     report.user.should.equal('bar')
 
     should.not.exist(report.error)
     report.timestamp.should.equal(event.timestamp)
-    report.actions[0].message.text.should.eql('bar')
+    report.commands[0].message.native_payload.message.text.should.eql('bar')
     report.publish.should.be.true
 
     report.payment.should.eql({
@@ -178,16 +176,13 @@ describe('Machine integrated', () => {
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
 
 
-    // check what's called, to see all actions returned...
-    m.sendMessage = () => Promise.resolve({})
-
     const report = await m.run({ state: 'RESPONDING', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
     report.user.should.equal('bar')
 
     should.not.exist(report.error)
     report.timestamp.should.equal(event.timestamp)
-    report.actions.should.eql([])
+    report.commands.should.eql([])
     report.publish.should.be.true
     should.not.exist(report.payment)
   })
@@ -201,7 +196,6 @@ describe('Machine integrated', () => {
     m.getForm = () => Promise.reject(new Error('Ah'))
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-    m.sendMessage = () => Promise.resolve({})
 
     const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', referral)
     report.user.should.equal('bar')
@@ -220,7 +214,6 @@ describe('Machine integrated', () => {
     }, 'foo'])
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-    m.sendMessage = () => Promise.resolve({})
 
     const state = { state: 'RESPONDING', qa: [], forms: ['foo'] }
 
@@ -231,7 +224,7 @@ describe('Machine integrated', () => {
     report.timestamp.should.equal(text.timestamp)
     report.publish.should.be.false
     report.newState.should.eql(state)
-    should.not.exist(report.actions)
+    should.not.exist(report.commands)
   })
 
 
@@ -249,7 +242,7 @@ describe('Machine integrated', () => {
     report.publish.should.be.true
 
     report.newState.state.should.eql("START")
-    should.not.exist(report.actions)
+    should.not.exist(report.commands)
   })
 
 
@@ -266,7 +259,6 @@ describe('Machine integrated', () => {
     }, 'foo'])
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-    m.sendMessage = () => Promise.resolve({})
 
     const state = { state: 'START', qa: [], forms: ['foo'], md: { startTime: 123 } }
 
@@ -274,13 +266,13 @@ describe('Machine integrated', () => {
 
     report.user.should.equal('bar')
     should.not.exist(report.error)
-    
+
     report.timestamp.should.equal(now)
     report.publish.should.be.true
 
     report.newState.state.should.eql("RESPONDING")
-    report.actions.length.should.equal(1)
-    report.actions[0].message.text.should.eql("We're sorry, but this survey is now over and closed.")
+    report.commands.length.should.equal(1)
+    report.commands[0].message.native_payload.message.text.should.eql("We're sorry, but this survey is now over and closed.")
   })
 
 
@@ -295,7 +287,6 @@ describe('Machine integrated', () => {
     }, 'foo'])
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-    m.sendMessage = () => Promise.resolve({})
 
     const state = { state: 'ERROR', qa: [], forms: ['foo'] }
 
@@ -307,7 +298,7 @@ describe('Machine integrated', () => {
     report.timestamp.should.equal(event.timestamp)
     report.publish.should.be.false
     report.newState.should.eql(state)
-    should.not.exist(report.actions)
+    should.not.exist(report.commands)
   })
 
 
@@ -318,7 +309,6 @@ describe('Machine integrated', () => {
     m.getForm = () => Promise.reject(new Error('Ah'))
 
     m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-    m.sendMessage = () => Promise.resolve({})
 
     const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', "{foo--:;{-bar}")
     report.user.should.equal('bar')
@@ -327,14 +317,12 @@ describe('Machine integrated', () => {
   })
 
   describe('handoff functionality', () => {
-    it('should call this.handoff when handoff data is present', async () => {
+    it('should include handoff command when handoff data is present', async () => {
       const m = new Machine()
       m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
       m.getPageToken = () => Promise.resolve('footoken')
       m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
       m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
-      m.sendMessage = () => Promise.resolve({})
-      m.handoff = () => Promise.resolve()
 
       const handoffData = {
         userid: 'bar',
@@ -351,21 +339,22 @@ describe('Machine integrated', () => {
       })
 
       const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', { event: 'hello', timestamp: Date.now() })
-      
+
       report.user.should.equal('bar')
       should.not.exist(report.error)
       report.publish.should.be.true
-      report.handoff.should.eql(handoffData)
+      report.commands.should.be.an('array')
+      report.commands.length.should.equal(1)
+      report.commands[0].message.type.should.equal('pass_thread_control')
+      report.commands[0].message.target_app_id.should.equal('987654321')
     })
 
-    it('should not call this.handoff when no handoff data is present', async () => {
+    it('should not include handoff command when no handoff data is present', async () => {
       const m = new Machine()
       m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
       m.getPageToken = () => Promise.resolve('footoken')
       m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
       m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
-      m.sendMessage = () => Promise.resolve({})
-      m.handoff = () => Promise.resolve()
 
       m.actionsResponses = () => Promise.resolve({
         actions: [],
@@ -376,43 +365,11 @@ describe('Machine integrated', () => {
       })
 
       const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', { event: 'hello', timestamp: Date.now() })
-      
+
       report.user.should.equal('bar')
       should.not.exist(report.error)
       report.publish.should.be.true
-      should.not.exist(report.handoff)
-    })
-
-    it('should handle handoff errors gracefully', async () => {
-      const m = new Machine()
-      m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
-      m.getPageToken = () => Promise.resolve('footoken')
-      m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
-      m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
-      m.sendMessage = () => Promise.resolve({})
-      m.handoff = () => Promise.reject(new Error('Handoff failed'))
-
-      const handoffData = {
-        userid: 'bar',
-        target_app_id: '987654321',
-        metadata: { reason: 'test' }
-      }
-
-      m.actionsResponses = () => Promise.resolve({
-        actions: [],
-        pageToken: 'footoken',
-        responses: [],
-        payment: undefined,
-        handoff: handoffData
-      })
-
-      const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', { event: 'hello', timestamp: Date.now() })
-      
-      report.user.should.equal('bar')
-      report.error.should.exist
-      report.error.tag.should.equal('STATE_ACTIONS')
-      report.error.message.should.equal('Handoff failed')
-      report.publish.should.be.true
+      report.commands.should.eql([])
     })
   })
 })

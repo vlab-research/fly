@@ -18,17 +18,19 @@ botEnvs: &botenvs gbv-bot-envs
 chatbaseHost: &host "gbv-cockroachdb-public"
 exporterTopic: &exportertopic "vlab-exports"
 chatLogTopic: &chatlogtopic "vlab-prod-chat-log"
+commandsTopic: &commandstopic "vlab-prod-commands"
 
 versionDashboard: &vdashboard v0.0.63
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.191
+versionReplybot: &vreplybot v0.0.201
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.38
+versionDinersclub: &vdinersclub v0.0.40
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.7
-versionExodus: &vexodus v0.2.1
+versionExodus: &vexodus v0.2.2
+versionMessageWorker: &vmessageworker v0.1.0
 
 processingAlerts:
   - consumergroup: replybot
@@ -61,6 +63,10 @@ laggingAlerts:
     alertname: LaggingConsumerDinersclub
     window: "5m"
     limit: "100"
+  - consumergroup: message-worker
+    alertname: LaggingConsumerMessageWorker
+    window: "5m"
+    limit: "20"
 
 kafkaTopics:
   - name: *topic
@@ -93,12 +99,17 @@ kafkaTopics:
     replicationFactor: 3
     config:
       "retention.ms": "2678400000" # 31 days
+  - name: *commandstopic
+    partitions: 6
+    replicationFactor: 3
+    config:
+      "retention.ms": "2678400000" # 31 days
 
 
 dinersclub:
   replicaCount: 1
   image:
-    repository: vlabresearch/dinersclub
+    repository: ghcr.io/vlab-research/dinersclub
     tag: *vdinersclub
     pullPolicy: IfNotPresent
   resources:
@@ -173,13 +184,13 @@ dean:
   - name: DEAN_FB_CODES
     value: "2022,613,-1,190,80006,551"
   - name: DEAN_BLOCKED_INTERVAL
-    value: "48 hours"
+    value: "120 hours"
   - name: DEAN_RESPONDING_INTERVAL
     value: "48 hours"
   - name: DEAN_RESPONDING_GRACE
     value: "20 minutes"
   - name: DEAN_RETRY_MAX_ATTEMPTS
-    value: "30"
+    value: "60"
   - name: DEAN_PAYMENT_GRACE
     value: "2 hours"
   - name: DEAN_PAYMENT_INTERVAL
@@ -530,6 +541,8 @@ replybot:
     value: *responsetopic
   - name: VLAB_PAYMENT_TOPIC
     value: *paymenttopic
+  - name: KAFKA_COMMANDS_TOPIC
+    value: *commandstopic
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
@@ -615,7 +628,7 @@ exporter:
 
 exodus:
   image:
-    repository: vlabresearch/exodus
+    repository: ghcr.io/vlab-research/exodus
     tag: *vexodus
     pullPolicy: IfNotPresent
   env:
@@ -650,6 +663,48 @@ exodus:
       requests:
         cpu: 50m
         memory: 64Mi
+
+message-worker:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/vlab-research/message-worker
+    tag: *vmessageworker
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  envFrom: *botenvs
+  env:
+  - name: KAFKA_BROKERS
+    value: *kb
+  - name: KAFKA_COMMAND_TOPIC
+    value: *commandstopic
+  - name: KAFKA_EVENT_TOPIC
+    value: *topic
+  - name: KAFKA_GROUP_ID
+    value: "message-worker"
+  - name: KAFKA_AUTO_OFFSET_RESET
+    value: "latest"
+  - name: DATABASE_URL
+    value: "postgresql://chatroach@gbv-cockroachdb-public:26257/chatroach?sslmode=disable"
+  - name: BOTSERVER_URL
+    value: "http://gbv-botserver"
+  - name: FACEBOOK_GRAPH_URL
+    value: "https://graph.facebook.com/v22.0"
+  - name: MESSENGER_URL
+    value: "https://graph.facebook.com/v22.0"
+  - name: NUM_WORKERS
+    value: "1"
+  - name: MAX_RETRY_ATTEMPTS
+    value: "3"
+  - name: INITIAL_BACKOFF_MS
+    value: "100"
+  - name: MAX_BACKOFF_MS
+    value: "1000"
 
 cockroachdb:
   image:

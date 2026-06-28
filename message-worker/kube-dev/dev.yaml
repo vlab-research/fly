@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: message-worker
+  labels:
+    app: message-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: message-worker
+  template:
+    metadata:
+      labels:
+        app: message-worker
+    spec:
+      containers:
+      - name: message-worker
+        image: localhost:5000/message-worker:dev
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "32Mi"
+        env:
+        - name: KAFKA_BROKERS
+          value: "kafka:9092"
+        - name: KAFKA_COMMAND_TOPIC
+          value: "commands"
+        - name: KAFKA_EVENT_TOPIC
+          value: "chat-events"
+        - name: DATABASE_URL
+          value: "postgresql://chatroach@db-cockroachdb-public:26257/chatroach?sslmode=disable"
+        - name: BOTSERVER_URL
+          value: "http://fly-botserver"
+        - name: FACEBOOK_GRAPH_URL
+          value: "http://gbv-facebot"
+        - name: NUM_WORKERS
+          value: "10"

@@ -1,12 +1,13 @@
 const { exec, apply, act, update } = require('./machine')
 const { getForm } = require('./ourform')
-const { getUserInfo, sendMessage, passThreadControl } = require('../messenger')
+const { getUserInfo } = require('../messenger')
 const { responseVals } = require('../responses/responser')
 const { parseEvent, getPageFromEvent } = require('@vlab-research/utils')
 const { MachineIOError, iowrap } = require('../errors')
 const _ = require('lodash')
 const util = require('util')
 const Cacheman = require('cacheman')
+const crypto = require('crypto')
 
 
 class Machine {
@@ -25,9 +26,6 @@ class Machine {
     this.getPageToken = page => {
       return cache.wrap(`pagetoken:${page}`, () => tokenStore.get(page), ttl)
     }
-
-    this.sendMessage = sendMessage
-    this.passThreadControl = passThreadControl
   }
 
   transition(state, parsedEvent) {
@@ -62,17 +60,44 @@ class Machine {
     return { actions: messages, responses, pageToken, timestamp, payment, handoff }
   }
 
-  async act(messages, pageToken) {
-
-    for (const action of messages) {
-
-      await this.sendMessage(action, pageToken)
-
-    }
+  act(messages) {
+    // Just return the messages — they'll be published to Kafka by run()
+    return messages || []
   }
 
-  async handoff(handoff, pageToken) {
-    await this.passThreadControl(handoff.userid, handoff.target_app_id, handoff.metadata, pageToken)
+  buildCommands(messages, handoff, user, page) {
+    // Build command list: messages + optional handoff
+    const commands = messages.map(msg => ({
+      command_id: crypto.randomBytes(8).toString('hex'),
+      issued_at: Date.now(),
+      conversation_id: user,
+      user_id: user,
+      platform: 'messenger',
+      platform_account_id: page,
+      message: {
+        type: 'native',
+        native_payload: msg  // The Facebook-native payload (recipient + message)
+      }
+    }))
+
+    // If there's a handoff action, add it as a command too
+    if (handoff) {
+      commands.push({
+        command_id: crypto.randomBytes(8).toString('hex'),
+        issued_at: Date.now(),
+        conversation_id: user,
+        user_id: user,
+        platform: 'messenger',
+        platform_account_id: page,
+        message: {
+          type: 'pass_thread_control',
+          target_app_id: handoff.target_app_id,
+          handoff_metadata: JSON.stringify(handoff.metadata || {})
+        }
+      })
+    }
+
+    return commands
   }
 
 
@@ -129,23 +154,20 @@ class Machine {
       // Create successful report
       const { actions, pageToken, responses, payment, handoff } = await this.actionsResponses(state, user, timestamp, page, newState, output)
 
-      await this.act(actions, pageToken)
-      
+      // Get messages (act() is now synchronous)
+      const messages = this.act(actions)
 
-      // Process handoff
-      if (handoff) {
-        await this.handoff(handoff, pageToken)
-      }
+      // Build Kafka commands from messages and handoff
+      const commands = this.buildCommands(messages, handoff, user, page)
 
       return {
         publish: true,
         timestamp,
         user,
         page,
-        actions,
         responses,
         payment,
-        handoff,
+        commands,
         newState
       }
 
@@ -159,15 +181,14 @@ class Machine {
           newState,
           error: { ...e.details, tag: e.tag, message: e.message, stack: e.stack }
         }
-      } else {
-        return {
-          publish: true,
-          timestamp,
-          user,
-          page,
-          newState,
-          error: { tag: 'STATE_ACTIONS', message: e.message, stack: e.stack }
-        }
+      }
+      return {
+        publish: true,
+        timestamp,
+        user,
+        page,
+        newState,
+        error: { tag: 'STATE_ACTIONS', message: e.message, stack: e.stack }
       }
     }
   }
