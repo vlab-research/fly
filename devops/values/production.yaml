@@ -664,7 +664,7 @@ exodus:
         cpu: 50m
         memory: 64Mi
 
-messageWorker:
+message-worker:
   replicaCount: 2
   image:
     repository: ghcr.io/vlab-research/message-worker
@@ -694,6 +694,8 @@ messageWorker:
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
+    value: "https://graph.facebook.com/v22.0"
+  - name: MESSENGER_URL
     value: "https://graph.facebook.com/v22.0"
   - name: NUM_WORKERS
     value: "1"

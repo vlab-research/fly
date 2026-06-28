@@ -601,7 +601,7 @@ exodus:
         cpu: 50m
         memory: 64Mi
 
-messageWorker:
+message-worker:
   replicaCount: 1
   image:
     repository: ghcr.io/vlab-research/message-worker
