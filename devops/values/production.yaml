@@ -22,7 +22,7 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 
 versionDashboard: &vdashboard v0.0.63
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.201
+versionReplybot: &vreplybot v0.0.200
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
@@ -665,7 +665,7 @@ exodus:
         memory: 64Mi
 
 message-worker:
-  replicaCount: 2
+  replicaCount: 0
   image:
     repository: ghcr.io/vlab-research/message-worker
     tag: *vmessageworker
