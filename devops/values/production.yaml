@@ -667,7 +667,7 @@ exodus:
 messageWorker:
   replicaCount: 2
   image:
-    repository: vlabresearch/message-worker
+    repository: ghcr.io/vlab-research/message-worker
     tag: *vmessageworker
     pullPolicy: IfNotPresent
   resources:
