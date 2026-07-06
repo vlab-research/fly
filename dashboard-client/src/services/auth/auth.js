@@ -38,7 +38,9 @@ class Auth {
   handleAuthentication = () => {
     this.auth0.parseHash((err, authResult) => {
       if (authResult && authResult.accessToken && authResult.idToken) {
-        this.setSession(authResult, '/');
+        const returnTo = sessionStorage.getItem('authReturnTo');
+        sessionStorage.removeItem('authReturnTo');
+        this.setSession(authResult, returnTo || '/');
       } else if (err) {
         console.error(err);
         history.push('/login');
@@ -80,6 +82,11 @@ class Auth {
         this.setSession(authResult);
         this.renewing = false;
       } else if (err) {
+        const { pathname, search, hash } = window.location;
+        const returnUrl = pathname + search + hash;
+        if (returnUrl !== '/login') {
+          sessionStorage.setItem('authReturnTo', returnUrl);
+        }
         this.clear();
         this.renewing = false;
         this.notify();
