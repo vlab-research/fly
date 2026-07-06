@@ -6,6 +6,8 @@ import AUTH_CONFIG from './auth0-variables';
 
 class Auth {
   constructor() {
+    this.listeners = [];
+
     this.auth0 = new auth0.WebAuth({
       domain: AUTH_CONFIG.domain,
       clientID: AUTH_CONFIG.clientId,
@@ -19,6 +21,15 @@ class Auth {
       this.renewSession();
     }
   }
+
+  subscribe = (fn) => {
+    this.listeners.push(fn);
+    return () => { this.listeners = this.listeners.filter(l => l !== fn); };
+  };
+
+  notify = () => {
+    this.listeners.forEach(fn => fn());
+  };
 
   login = () => {
     this.auth0.authorize();
@@ -38,10 +49,13 @@ class Auth {
   getAccessToken = () => this.accessToken;
 
   getIdToken = () => this.idToken;
+
   getUserEmail = () => this.userEmail;
 
-  setSession = ({ expiresIn, accessToken, idToken, idTokenPayload }, forward) => {
-    this.userEmail = idTokenPayload.email
+  setSession = ({
+    expiresIn, accessToken, idToken, idTokenPayload,
+  }, forward) => {
+    this.userEmail = idTokenPayload.email;
 
     // Set isLoggedIn flag in localStorage
     localStorage.setItem('isLoggedIn', 'true');
@@ -51,6 +65,7 @@ class Auth {
     this.accessToken = accessToken;
     this.idToken = idToken;
     this.expiresAt = expiresAt;
+    this.notify();
 
     if (forward) {
       return history.replace(forward);
@@ -67,6 +82,7 @@ class Auth {
       } else if (err) {
         this.clear();
         this.renewing = false;
+        this.notify();
         history.push('/login');
         console.error(err);
       }
