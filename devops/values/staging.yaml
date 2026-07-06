@@ -349,7 +349,7 @@ replybot:
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
-    value: "https://graph.facebook.com/v22.0"
+    value: "https://graph.facebook.com/v25.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
   - name: STATE_STORE_LIMIT
@@ -417,14 +417,14 @@ linksniffer:
       cert-manager.io/cluster-issuer: letsencrypt-prod
       kubernetes.io/ingress.class: nginx
     hosts:
-      - host: gbvlinks-staging.nandan.cloud
+      - host: staging.links.vlab.digital
         paths:
           - path: '/'
             pathType: Prefix
     tls:
       - secretName: gbv-linksniffer-cert
         hosts:
-          - gbvlinks-staging.nandan.cloud
+          - staging.links.vlab.digital
 
   service:
     type: ClusterIP
@@ -473,7 +473,7 @@ dashboard:
     - name: TYPEFORM_REDIRECT_URL
       value: 'https://staging--vlab-research.netlify.app/surveys/auth'
     - name: FACEBOOK_GRAPH_URL
-      value: 'https://graph.facebook.com/v22.0'
+      value: 'https://graph.facebook.com/v25.0'
     - name: KAFKA_BROKERS
       value: *kb
     - name: KAFKA_EXPORTS_TOPIC
@@ -492,14 +492,14 @@ dashboard:
       kubernetes.io/ingress.class: nginx
       nginx.ingress.kubernetes.io/proxy-body-size: "200m"
     hosts:
-      - host: gbv-dashboard-staging.nandan.cloud
+      - host: staging.fly-dashboard-api.vlab.digital
         paths:
           - path: '/'
             pathType: Prefix
     tls:
       - secretName: gbv-dashboard-cert
         hosts:
-          - gbv-dashboard-staging.nandan.cloud
+          - staging.fly-dashboard-api.vlab.digital
 
   service:
     type: ClusterIP
@@ -537,14 +537,14 @@ botserver:
       cert-manager.io/cluster-issuer: letsencrypt-prod
       kubernetes.io/ingress.class: nginx
     hosts:
-      - host: gbvbot-staging.nandan.cloud
+      - host: staging.fly-botserver.vlab.digital
         paths:
           - path: '/'
             pathType: Prefix
     tls:
       - secretName: gbv-botserver-cert
         hosts:
-          - gbvbot-staging.nandan.cloud
+          - staging.fly-botserver.vlab.digital
 
   service:
     type: ClusterIP
@@ -560,6 +560,12 @@ exporter:
   env:
     - name: "APP_NAME"
       value: "exporter"
+    - name: KAFKA_BROKERS
+      value: *kb
+    - name: KAFKA_TOPIC
+      value: *exportertopic
+    - name: KAFKA_GROUP_ID
+      value: "exporter-staging"
   envSecrets:
     - exporter
 
@@ -631,7 +637,7 @@ message-worker:
   - name: BOTSERVER_URL
     value: "http://gbv-botserver"
   - name: FACEBOOK_GRAPH_URL
-    value: "https://graph.facebook.com/v22.0"
+    value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
     value: "1"
   - name: MAX_RETRY_ATTEMPTS
