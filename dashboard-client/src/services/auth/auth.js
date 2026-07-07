@@ -21,12 +21,35 @@ class Auth {
       clientId: AUTH_CONFIG.clientId,
       callbackUrl: AUTH_CONFIG.callbackUrl,
       isLoggedIn: localStorage.getItem('isLoggedIn'),
+      hasStoredSession: sessionStorage.getItem('authSession') !== null,
       hasReturnTo: sessionStorage.getItem('authReturnTo'),
       location: window.location.href,
     });
 
+    const stored = sessionStorage.getItem('authSession');
+    if (stored) {
+      try {
+        const session = JSON.parse(stored);
+        if (new Date().getTime() < session.expiresAt) {
+          this.accessToken = session.accessToken;
+          this.idToken = session.idToken;
+          this.expiresAt = session.expiresAt;
+          this.userEmail = session.userEmail;
+          localStorage.setItem('isLoggedIn', 'true');
+          console.log('[AUTH] Restored session from sessionStorage');
+        } else {
+          sessionStorage.removeItem('authSession');
+          localStorage.removeItem('isLoggedIn');
+          console.log('[AUTH] Stored session expired, cleared');
+        }
+      } catch (e) {
+        sessionStorage.removeItem('authSession');
+        localStorage.removeItem('isLoggedIn');
+      }
+    }
+
     const loggedIn = localStorage.getItem('isLoggedIn');
-    if (loggedIn) {
+    if (loggedIn && !this.accessToken) {
       this.renewSession();
     }
   }
@@ -70,14 +93,18 @@ class Auth {
   }, forward) => {
     this.userEmail = idTokenPayload.email;
 
-    // Set isLoggedIn flag in localStorage
     localStorage.setItem('isLoggedIn', 'true');
 
-    // Set the time that the access token will expire at
     const expiresAt = expiresIn * 3600 + new Date().getTime();
     this.accessToken = accessToken;
     this.idToken = idToken;
     this.expiresAt = expiresAt;
+
+    sessionStorage.setItem('authSession', JSON.stringify({
+      accessToken, idToken, expiresAt, userEmail: this.userEmail,
+    }));
+
+    console.log('[AUTH] setSession', { expiresIn, expiresAt, forward });
     this.notify();
 
     if (forward) {
@@ -113,7 +140,9 @@ class Auth {
     this.accessToken = null;
     this.idToken = null;
     this.expiresAt = 0;
+    this.userEmail = null;
     localStorage.removeItem('isLoggedIn');
+    sessionStorage.removeItem('authSession');
   }
 
   logout = () => {
