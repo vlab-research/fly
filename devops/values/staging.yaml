@@ -20,7 +20,7 @@ exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
-versionDashboard: &vdashboard v0.0.63
+versionDashboard: &vdashboard v0.0.64
 versionBotserver: &vbotserver v0.0.12
 versionReplybot: &vreplybot v0.0.196
 versionLinksniffer: &vlinksniffer v0.0.6
