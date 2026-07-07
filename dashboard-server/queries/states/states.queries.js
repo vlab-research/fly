@@ -96,8 +96,8 @@ async function list(email, surveyName, shortcodes, { state, errorTag, form, sear
   }
 
   if (errorTag) {
-    extraConditions.push(`states.error_tag = $${paramIndex}`);
-    params.push(errorTag);
+    extraConditions.push(`states.error_tag ILIKE $${paramIndex}`);
+    params.push(`%${errorTag}%`);
     paramIndex++;
   }
 
