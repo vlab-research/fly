@@ -74,7 +74,11 @@ const StatesList = ({ surveyName }) => {
   };
 
   const handleFilterChange = (key, value) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+    setFilters(prev => ({
+      ...prev,
+      [key]: value,
+      ...(key === 'error_tag' && value ? { state: null } : {}),
+    }));
     setPagination(prev => ({ ...prev, current: 1 })); // Reset to first page on filter change
   };
 

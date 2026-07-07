@@ -29,6 +29,13 @@ describe('States API', () => {
     // Create test user
     const user = await User.create({ email });
 
+    // Create credentials so the pageid scoping (states.pageid IN credentials
+    // owned by this user) includes our test page.
+    await vlabPool.query(
+      `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'test-page', $2)`,
+      [user.id, JSON.stringify({ id: 'page-123' })]
+    );
+
     // Anchor times: surveys created BEFORE state start times so the lateral
     // version-resolution join (created <= form_start_time) matches.
     const surveyCreated = new Date(Date.now() - 60000);
@@ -62,52 +69,53 @@ describe('States API', () => {
       translation_conf: {},
     });
 
-    // Insert test state rows with various states. state_json carries
-    // md.startTime so form_start_time (generated column) is non-null and the
-    // version-resolution lateral join can pick a surveys row.
+    // Insert test state rows. state_json carries forms (for current_form
+    // computed column), md.startTime (for form_start_time), error.tag (for
+    // error_tag), and qa arrays (for stuck_on_question) so all computed
+    // columns derive correctly.
     const stateRows = [
       {
         userid: 'test-user-1',
         pageid: 'page-123',
         current_state: 'RESPONDING',
-        current_form: shortcode1,
-        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }] },
+        state_json: { ...formStartJson, forms: [shortcode1], qa: [['Q1', 'A1']] },
         updated: new Date(),
       },
       {
         userid: 'test-user-2',
         pageid: 'page-123',
         current_state: 'ERROR',
-        current_form: shortcode1,
-        error_tag: 'VALIDATION_ERROR',
-        stuck_on_question: 'Q2',
-        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }], error: 'Validation failed' },
+        // stuck_on_question derives to 'Q2' (last 3 qa entries all Q2)
+        state_json: { ...formStartJson, forms: [shortcode1], qa: [['Q1', 'A1'], ['Q2', 'A2'], ['Q2', 'A3'], ['Q2', 'A4']], error: { tag: 'VALIDATION_ERROR' } },
         updated: new Date(),
       },
       {
         userid: 'test-user-3',
         pageid: 'page-123',
         current_state: 'WAIT_EXTERNAL_EVENT',
-        current_form: shortcode2,
-        timeout_date: new Date(Date.now() + 86400000), // 1 day from now
-        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }], wait_condition: 'payment' },
+        // timeout_date derives from wait.type='timeout' + value.type='absolute'
+        state_json: { ...formStartJson, forms: [shortcode2], qa: [['Q1', 'A1']], wait: { type: 'timeout', value: { type: 'absolute', timeout: new Date(Date.now() + 86400000).toISOString() } } },
         updated: new Date(),
       },
       {
         userid: 'test-user-4',
         pageid: 'page-123',
         current_state: 'END',
-        current_form: shortcode2,
-        state_json: { ...formStartJson, qa: [{ question: 'Q1', answer: 'A1' }, { question: 'Q2', answer: 'A2' }] },
+        state_json: { ...formStartJson, forms: [shortcode2], qa: [['Q1', 'A1'], ['Q2', 'A2']] },
         updated: new Date(),
       },
       {
         userid: 'test-user-5',
         pageid: 'page-123',
         current_state: 'ERROR',
-        current_form: shortcode1,
-        error_tag: 'TIMEOUT_ERROR',
-        state_json: { ...formStartJson, qa: [], error: 'Timeout occurred' },
+        state_json: { ...formStartJson, forms: [shortcode1], qa: [], error: { tag: 'TIMEOUT_ERROR' } },
+        updated: new Date(),
+      },
+      {
+        userid: 'test-user-6',
+        pageid: 'page-123',
+        current_state: 'BLOCKED',
+        state_json: { ...formStartJson, forms: [shortcode1], qa: [['Q1', 'A1']], error: { tag: 'FB' } },
         updated: new Date(),
       },
     ];
@@ -115,18 +123,14 @@ describe('States API', () => {
     for (const row of stateRows) {
       testUserIds.push(row.userid);
       await vlabPool.query(
-        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated, error_tag, stuck_on_question, timeout_date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO states (userid, pageid, current_state, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5)`,
         [
           row.userid,
           row.pageid,
           row.current_state,
-          row.current_form,
           row.state_json,
           row.updated,
-          row.error_tag || null,
-          row.stuck_on_question || null,
-          row.timeout_date || null,
         ]
       );
     }
@@ -137,6 +141,7 @@ describe('States API', () => {
     for (const userid of testUserIds) {
       await vlabPool.query(`DELETE FROM states WHERE userid = $1`, [userid]);
     }
+    await vlabPool.query(`DELETE FROM credentials WHERE entity = 'facebook_page' AND details->>'id' = 'page-123'`);
     await vlabPool.query(`DELETE FROM surveys WHERE shortcode = ANY($1)`, [[shortcode1, shortcode2]]);
     await vlabPool.query(`DELETE FROM users WHERE email = $1`, [email]);
     await vlabPool.end();
@@ -164,21 +169,22 @@ describe('States API', () => {
         .set('Accept', 'application/json')
         .expect(200);
 
-      response.body.should.be.an('array');
-      response.body.length.should.be.greaterThan(0);
+      response.body.should.have.property('summary');
+      response.body.summary.should.be.an('array');
+      response.body.summary.length.should.be.greaterThan(0);
 
       // Check structure of results
-      const firstItem = response.body[0];
+      const firstItem = response.body.summary[0];
       firstItem.should.have.property('current_state');
       firstItem.should.have.property('current_form');
       firstItem.should.have.property('count');
 
       // Verify we have counts for our test data
-      const errorInShortcode1 = response.body.find(
+      const errorInShortcode1 = response.body.summary.find(
         item => item.current_state === 'ERROR' && item.current_form === shortcode1
       );
       errorInShortcode1.should.be.an('object');
-      errorInShortcode1.count.should.equal(2); // test-user-2 and test-user-5
+      parseInt(errorInShortcode1.count, 10).should.equal(2); // test-user-2 and test-user-5
     });
   });
 
@@ -207,7 +213,7 @@ describe('States API', () => {
       response.body.should.have.property('states');
       response.body.should.have.property('total');
       response.body.states.should.be.an('array');
-      response.body.total.should.equal(5);
+      parseInt(response.body.total, 10).should.equal(6);
 
       // Check structure of state objects
       const firstState = response.body.states[0];
@@ -227,24 +233,39 @@ describe('States API', () => {
         .expect(200);
 
       response.body.states.should.be.an('array');
-      response.body.total.should.equal(2); // test-user-2 and test-user-5
+      parseInt(response.body.total, 10).should.equal(2); // test-user-2 and test-user-5
       response.body.states.forEach(state => {
         state.current_state.should.equal('ERROR');
       });
     });
 
-    it('filters by error_tag correctly', async () => {
+    it('filters by error_tag with partial match (case-insensitive ILIKE)', async () => {
       const response = await request(app)
         .get(`/api/v1/surveys/${encodeURIComponent(surveyName)}/states`)
-        .query({ error_tag: 'VALIDATION_ERROR' })
+        .query({ error_tag: 'validation' })
         .set('Authorization', `Bearer ${authToken}`)
         .set('Accept', 'application/json')
         .expect(200);
 
       response.body.states.should.be.an('array');
-      response.body.total.should.equal(1); // test-user-2
+      parseInt(response.body.total, 10).should.equal(1); // test-user-2
       response.body.states[0].userid.should.equal('test-user-2');
       response.body.states[0].error_tag.should.equal('VALIDATION_ERROR');
+    });
+
+    it('filters by error_tag across all states (FB tag is in BLOCKED, not ERROR)', async () => {
+      const response = await request(app)
+        .get(`/api/v1/surveys/${encodeURIComponent(surveyName)}/states`)
+        .query({ error_tag: 'FB' })
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Accept', 'application/json')
+        .expect(200);
+
+      response.body.states.should.be.an('array');
+      parseInt(response.body.total, 10).should.equal(1); // test-user-6 in BLOCKED state
+      response.body.states[0].userid.should.equal('test-user-6');
+      response.body.states[0].error_tag.should.equal('FB');
+      response.body.states[0].current_state.should.equal('BLOCKED');
     });
 
     it('filters by search (userid) correctly', async () => {
@@ -256,7 +277,7 @@ describe('States API', () => {
         .expect(200);
 
       response.body.states.should.be.an('array');
-      response.body.total.should.equal(1);
+      parseInt(response.body.total, 10).should.equal(1);
       response.body.states[0].userid.should.equal('test-user-3');
     });
 
@@ -270,7 +291,7 @@ describe('States API', () => {
         .expect(200);
 
       page1.body.states.length.should.equal(2);
-      page1.body.total.should.equal(5);
+      parseInt(page1.body.total, 10).should.equal(6);
 
       // Get second page
       const page2 = await request(app)
@@ -281,7 +302,7 @@ describe('States API', () => {
         .expect(200);
 
       page2.body.states.length.should.equal(2);
-      page2.body.total.should.equal(5);
+      parseInt(page2.body.total, 10).should.equal(6);
 
       // Ensure different results
       page1.body.states[0].userid.should.not.equal(page2.body.states[0].userid);
@@ -356,14 +377,13 @@ describe('States API', () => {
       // Insert a state for the other user's survey
       const otherUserId = 'test-user-other';
       await vlabPool.query(
-        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO states (userid, pageid, current_state, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5)`,
         [
           otherUserId,
           'page-123',
           'RESPONDING',
-          otherShortcode,
-          { md: { startTime: String(Date.now()) }, qa: [] },
+          { md: { startTime: String(Date.now()) }, forms: [otherShortcode], qa: [] },
           new Date(),
         ]
       );
@@ -397,6 +417,12 @@ describe('States API', () => {
     before(async () => {
       collisionToken = await makeAPIToken({ email: collisionEmail });
       const u = await User.create({ email: collisionEmail });
+
+      // Credentials so pageid scoping includes page-c
+      await vlabPool.query(
+        `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'collision-page', $2)`,
+        [u.id, JSON.stringify({ id: 'page-c' })]
+      );
 
       // v1 belongs to survey_name A (older)
       const v1Created = new Date(Date.now() - 120000);
@@ -435,19 +461,20 @@ describe('States API', () => {
       const userBStart = new Date(Date.now() - 30000).getTime();
 
       await vlabPool.query(
-        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userInA, 'page-c', 'RESPONDING', sharedShortcode, { md: { startTime: String(userAStart) }, qa: [] }, new Date()],
+        `INSERT INTO states (userid, pageid, current_state, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [userInA, 'page-c', 'RESPONDING', { md: { startTime: String(userAStart) }, forms: [sharedShortcode], qa: [] }, new Date()],
       );
       await vlabPool.query(
-        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userInB, 'page-c', 'RESPONDING', sharedShortcode, { md: { startTime: String(userBStart) }, qa: [] }, new Date()],
+        `INSERT INTO states (userid, pageid, current_state, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [userInB, 'page-c', 'RESPONDING', { md: { startTime: String(userBStart) }, forms: [sharedShortcode], qa: [] }, new Date()],
       );
     });
 
     after(async () => {
       await vlabPool.query(`DELETE FROM states WHERE userid = ANY($1)`, [[userInA, userInB]]);
+      await vlabPool.query(`DELETE FROM credentials WHERE entity = 'facebook_page' AND details->>'id' = 'page-c'`);
       await vlabPool.query(`DELETE FROM surveys WHERE shortcode = $1`, [sharedShortcode]);
       await vlabPool.query(`DELETE FROM users WHERE email = $1`, [collisionEmail]);
     });
@@ -459,7 +486,7 @@ describe('States API', () => {
         .set('Accept', 'application/json')
         .expect(200);
 
-      response.body.total.should.equal(1);
+      parseInt(response.body.total, 10).should.equal(1);
       response.body.states[0].userid.should.equal(userInA);
     });
 
@@ -470,7 +497,7 @@ describe('States API', () => {
         .set('Accept', 'application/json')
         .expect(200);
 
-      response.body.total.should.equal(1);
+      parseInt(response.body.total, 10).should.equal(1);
       response.body.states[0].userid.should.equal(userInB);
     });
 
@@ -493,9 +520,9 @@ describe('States API', () => {
 
     before(async () => {
       await vlabPool.query(
-        `INSERT INTO states (userid, pageid, current_state, current_form, state_json, updated)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [unattribUser, 'page-123', 'START', shortcode1, { qa: [] }, new Date()],
+        `INSERT INTO states (userid, pageid, current_state, state_json, updated)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [unattribUser, 'page-123', 'START', { qa: [] }, new Date()],
       );
     });
 
@@ -511,7 +538,7 @@ describe('States API', () => {
         .set('Accept', 'application/json')
         .expect(200);
 
-      response.body.total.should.equal(0);
+      parseInt(response.body.total, 10).should.equal(0);
     });
   });
 });
