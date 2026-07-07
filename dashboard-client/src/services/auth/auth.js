@@ -16,6 +16,15 @@ class Auth {
       scope: 'openid email',
     });
 
+    console.log('[AUTH] Constructor', {
+      domain: AUTH_CONFIG.domain,
+      clientId: AUTH_CONFIG.clientId,
+      callbackUrl: AUTH_CONFIG.callbackUrl,
+      isLoggedIn: localStorage.getItem('isLoggedIn'),
+      hasReturnTo: sessionStorage.getItem('authReturnTo'),
+      location: window.location.href,
+    });
+
     const loggedIn = localStorage.getItem('isLoggedIn');
     if (loggedIn) {
       this.renewSession();
@@ -36,13 +45,15 @@ class Auth {
   };
 
   handleAuthentication = () => {
+    console.log('[AUTH] handleAuthentication', { hash: window.location.hash });
     this.auth0.parseHash((err, authResult) => {
       if (authResult && authResult.accessToken && authResult.idToken) {
         const returnTo = sessionStorage.getItem('authReturnTo');
         sessionStorage.removeItem('authReturnTo');
+        console.log('[AUTH] parseHash success', { returnTo });
         this.setSession(authResult, returnTo || '/');
       } else if (err) {
-        console.error(err);
+        console.error('[AUTH] parseHash error', err);
         history.push('/login');
       }
     });
@@ -77,13 +88,16 @@ class Auth {
 
   renewSession = () => {
     this.renewing = true;
+    console.log('[AUTH] renewSession: calling checkSession');
     this.auth0.checkSession({}, (err, authResult) => {
       if (authResult && authResult.accessToken && authResult.idToken) {
+        console.log('[AUTH] checkSession success');
         this.setSession(authResult);
         this.renewing = false;
       } else if (err) {
         const { pathname, search, hash } = window.location;
         const returnUrl = pathname + search + hash;
+        console.error('[AUTH] checkSession error', err, { returnUrl });
         if (returnUrl !== '/login') {
           sessionStorage.setItem('authReturnTo', returnUrl);
         }
@@ -91,7 +105,6 @@ class Auth {
         this.renewing = false;
         this.notify();
         history.push('/login');
-        console.error(err);
       }
     });
   };
