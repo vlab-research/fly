@@ -146,7 +146,9 @@ class Auth {
   }
 
   logout = () => {
-    // TODO: WHY THE HELL DOESNT RETURNTO WORK??
+    sessionStorage.removeItem('authSession');
+    this.clear();
+    this.notify();
     const returnTo = '';
     this.auth0.logout({ clientID: this.auth0.clientID, returnTo });
   };
