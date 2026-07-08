@@ -565,7 +565,7 @@ function apply(state, output) {
 
     case 'RESPOND':
 
-      // NOTE: by removing errors/retries on RESPOND, we are "resetting"
+      // NOTE: by removing errors/retries/waits on RESPOND, we are "resetting"
       // our retry-on-error process (and exponential backoff) whenever
       // the user responds. I think this is reasonable. But it's implicit here.
       return {
@@ -577,6 +577,8 @@ function apply(state, output) {
         previousOutput: output,
         error: undefined, // remove error when responding
         retries: undefined, // remove retries when responding
+        wait: undefined, // remove wait when user responds
+        waitStart: undefined, // remove waitStart when user responds
         qa: updateQA(state.qa, update(output))
       }
 
@@ -602,7 +604,9 @@ function apply(state, output) {
       return {
         ...state,
         ...output.stateUpdate,
-        state: 'RESPONDING'
+        state: 'RESPONDING',
+        error: undefined, // remove stale error on retry (keep retries for backoff)
+        wait: undefined, // remove stale wait on retry
       }
 
 
@@ -620,7 +624,9 @@ function apply(state, output) {
       return {
         ...state,
         state: 'QOUT',
-        question: output.question
+        question: output.question,
+        error: undefined, // question sent, no error context
+        retries: undefined, // question sent, no retry context
       }
 
     case 'HANDOFF':
@@ -631,7 +637,9 @@ function apply(state, output) {
         question: output.question,
         wait: output.wait,
         externalEvents: output.externalEvents || state.externalEvents,
-        waitStart: output.waitStart
+        waitStart: output.waitStart,
+        error: undefined, // entering wait, clear prior error
+        retries: undefined, // entering wait, clear prior retries
       }
 
     case 'WAIT_EXTERNAL_EVENT':
@@ -642,21 +650,42 @@ function apply(state, output) {
         question: output.question,
         wait: output.wait,
         externalEvents: output.externalEvents || state.externalEvents,
-        waitStart: output.waitStart
+        waitStart: output.waitStart,
+        error: undefined, // entering/continuing wait, clear prior error
+        retries: undefined, // entering/continuing wait, clear prior retries
       }
 
 
     case 'END':
-      return { ...state, state: 'END', question: output.question }
+      return {
+        ...state,
+        state: 'END',
+        question: output.question,
+        error: undefined, // completed, no error context
+        wait: undefined, // completed, no wait context
+        retries: undefined, // completed, no retry context
+      }
 
     case 'BLOCKED':
-      return { ...state, state: 'BLOCKED', error: output.error }
+      return {
+        ...state,
+        state: 'BLOCKED',
+        error: output.error,
+        wait: undefined, // blocked, clear prior wait
+        waitStart: undefined, // blocked, clear prior waitStart
+      }
 
     case 'UNBLOCK':
       return { ...state, ...output.stateUpdate }
 
     case 'ERROR':
-      return { ...state, state: 'ERROR', error: output.error }
+      return {
+        ...state,
+        state: 'ERROR',
+        error: output.error,
+        wait: undefined, // errored, clear prior wait
+        waitStart: undefined, // errored, clear prior waitStart
+      }
 
     default:
       return state
