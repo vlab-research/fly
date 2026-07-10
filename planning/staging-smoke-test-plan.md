@@ -2,97 +2,78 @@
 
 ## Goal
 
-Enable end-to-end smoke testing against the staging environment (`vstag`), mirroring the existing production smoke test (`smoke-test/` + `smoke-echo/`) but targeting staging URLs, staging Facebook apps, and staging Kafka topics.
+Enable end-to-end smoke testing against the staging environment (`vstag`), exercising the same features as the production smoke test (logic jumps, payments, thread-control handoff, stitches, timeouts) but targeting staging URLs and staging Kafka topics.
+
+## Key simplification: shared smoke-echo
+
+The production smoke-echo app (`976665718578167`, deployed at `fly-smoke-echo.vlab.digital`) is **shared** between production and staging. This works because smoke-echo is completely stateless — no DB, no Kafka, no persistent state. It just receives a thread handoff, echoes the user's message, and hands control back to Fly.
+
+This means:
+- No staging smoke-echo deployment needed
+- No second Facebook echo app needed
+- No staging-specific `target_app_id` in the form JSON — same `976665718578167` for both environments
+- No staging webhook setup for smoke-echo
+
+**Prerequisite**: The staging Facebook Page (`935593143497601`) must be connected to the production smoke-echo app (`976665718578167`). This is done in the Facebook dashboard for app `976665718578167` → Messenger → Access Tokens → Add Page.
 
 ## Current state
 
-The production smoke test is a manual, two-component system:
-- **`smoke-test/deploy.py`** — deploys Typeform survey forms (form-a, form-b) that exercise logic jumps, Reloadly payments, thread-control handoff, stitches, and timeouts. Hardcoded to a production Typeform workspace and production FB app IDs.
-- **`smoke-echo`** — a minimal Messenger app deployed to production (`fly-smoke-echo.vlab.digital`) that acts as the handoff partner. Hardcoded to production FB app ID `976665718578167` and Fly production app ID `699455733740842`.
-
-Neither component has any staging support — no staging URLs, no environment parameterization, no `vstag` deployment.
+- All staging services deployed and running in `vstag` (replybot, botserver, dashboard, dinersclub, dean, scribble, exodus, exporter, formcentral, linksniffer, cockroachdb, redis)
+- Staging Facebook test app (`790352681363186`) webhook verified at `staging.fly-botserver.vlab.digital/webhooks`
+- Auth0 staging tenant configured (`virtuallab-staging.auth0.com`)
+- Staging DB is empty — no surveys, no users, no credentials
+- Staging page `935593143497601` connected to production smoke-echo app
 
 ## Plan
 
-### Phase 1: Deploy smoke-echo to staging
+### Phase 1: Set up staging dashboard
 
-**1.1 Create staging smoke-echo Kubernetes manifests**
+**1.1 Log into staging dashboard**
 
-Create `smoke-echo/kube-staging/` with modified copies of the existing `kube/` manifests:
-- `deployment.yaml` — same image, but `FACEBOOK_GRAPH_URL` → `https://graph.facebook.com/v25.0` (match staging)
-- `ingress.yaml` — host `staging.fly-smoke-echo.vlab.digital`, secret `staging-smoke-echo-cert`
-- `service.yaml` — unchanged
+Go to `https://staging--vlab-research.netlify.app`, log in via Auth0 (`virtuallab-staging.auth0.com`). Create a user in the Auth0 staging tenant if you haven't already.
 
-**1.2 Create DNS record**
+**1.2 Connect Facebook page**
 
-CNAME `staging.fly-smoke-echo.vlab.digital` → `vlab-cluster.vlab.digital` (via Netlify API, same as other staging ingresses).
+Use the dashboard UI to connect page `935593143497601` to the staging Fly test app. This:
+- Exchanges the short-lived FB token for a long-lived page token
+- Stores it in the `credentials` table (`entity='facebook_page'`)
+- Subscribes the page to webhook events via `POST /{pageid}/subscribed_apps`
+- Sets the `get_started` payload on the page
 
-**1.3 Create staging smoke-echo secret**
+### Phase 2: Create staging smoke test forms
 
-Create `smoke-echo/.env-staging` (gitignored) with:
-- `FACEBOOK_APP_ID` — the new staging echo Facebook app ID (from Phase 2)
-- `PAGE_ACCESS_TOKEN` — page token for the staging echo app
-- `FACEBOOK_PAGE_ID` — same page as the staging Fly app (790352681363186's page)
-- `FACEBOOK_APP_SECRET` — staging echo app secret
-- `FACEBOOK_VERIFY_TOKEN` — a new verify token string
-- `FLY_APP_ID` — `790352681363186` (the staging Fly test app ID)
+The Typeform workspace and token are **shared** with production — no separate workspace needed.
 
-Create the K8s secret:
-```bash
-kubectl -n vstag create secret generic smoke-echo-env --from-env-file=smoke-echo/.env-staging --dry-run=client -o yaml | kubectl apply -f -
-```
+**2.1 Deploy forms**
 
-**1.4 Deploy**
+The existing `smoke-test/form-a.json` and `form-b.json` can be reused as-is since `target_app_id` is `976665718578167` (the shared smoke-echo app). However, we need separate form instances so staging and production don't collide.
 
-```bash
-kubectl apply -f smoke-echo/kube-staging/ -n vstag
-```
-
-cert-manager will provision a TLS cert for `staging.fly-smoke-echo.vlab.digital` automatically.
-
-### Phase 2: Create staging echo Facebook app
-
-**2.1 Create a second Facebook test app**
-
-Go to https://developers.facebook.com/ and create a new app (e.g. "Fly Staging Smoke Echo"). Leave it in Development Mode.
-
-**2.2 Configure the app**
-
-- Add Messenger to the app
-- Connect it to the same Facebook Page used by the staging Fly test app (`790352681363186`)
-- Subscribe webhook to `messages` and `messaging_handovers`
-- Set webhook callback URL: `https://staging.fly-smoke-echo.vlab.digital/webhook`
-- Set verify token: (your chosen string)
-- Note down: App ID, Page Access Token, App Secret
-
-**2.3 Add yourself as Tester/Admin**
-
-Required for Development Mode apps to work with your Facebook account.
-
-### Phase 3: Parameterize smoke-test for staging
-
-**3.1 Add environment support to deploy.py**
-
-Modify `smoke-test/deploy.py` to accept an `--env` flag (`prod` or `staging`):
-- `--env prod` (default) → existing behavior (production form IDs in `.ids`)
-- `--env staging` → writes to `.ids-staging`, uses staging form JSONs
-
-**3.2 Create staging form JSONs**
-
-Copy `form-a.json` → `form-a.staging.json` and `form-b.json` → `form-b.staging.json` with:
-- `target_app_id` → staging echo app ID (from Phase 2)
-- Any other environment-specific references updated
-
-The Typeform workspace and token are **shared** between staging and production — no separate workspace needed. The same `TYPEFORM_TOKEN` in `smoke-test/.env` works for both.
-
-**3.3 Deploy staging forms**
-
+Option A: Create new forms with different titles (e.g. "Fly Smoke Test A - Staging"):
 ```bash
 cd smoke-test
-python3 deploy.py --env staging create both
+TYPEFORM_TOKEN=<token> python3 deploy.py create both
+```
+Then save the new form IDs separately (e.g. in `.ids-staging`).
+
+Option B: Add an `--env` flag to `deploy.py` that writes to `.ids-staging` instead of `.ids`, and optionally prefixes form titles with "Staging".
+
+**2.2 Create survey in staging dashboard**
+
+From the staging dashboard UI, create a new survey from the Typeform form. Use shortcode `flysmoke` (or `flysmoke-staging` to avoid collision with production). This inserts a row in the `surveys` table with the form JSON and shortcode.
+
+### Phase 3: (Optional) Add payment credentials
+
+For testing payments via dinersclub in staging:
+
+**Using the `fake` provider** — no credentials needed. The payment event's `details` JSON must contain a `result` object. This is the simplest option for basic smoke testing.
+
+**Using sandbox Reloadly** — insert credentials into the staging DB:
+```sql
+INSERT INTO credentials (entity, key, details, userid)
+VALUES ('reloadly', 'default', '{"id": "<sandbox_id>", "secret": "<sandbox_secret>"}', '<your-email>');
 ```
 
-This creates new forms in the same Typeform workspace and saves IDs to `.ids-staging`.
+`RELOADLY_SANDBOX=true` is already set in `staging.yaml`, so dinersclub will hit Reloadly's sandbox API.
 
 ### Phase 4: Run the staging smoke test
 
@@ -106,12 +87,12 @@ curl -s https://staging.fly-smoke-echo.vlab.digital/health
 
 **4.2 Trigger the smoke test**
 
-Send a message to the staging Facebook Page with `ref: form.flysmoke` (or whatever shortcode the staging forms use). The full flow should exercise:
+Send a message to the staging Facebook Page (`935593143497601`) with `ref: form.flysmoke` (or whatever shortcode the staging survey uses). The full flow should exercise:
 - Message receipt (botserver → Kafka → replybot)
 - Survey form loading (formcentral)
 - Question flow (logic jumps, statements)
 - Payment (dinersclub with `fake` provider or sandbox Reloadly)
-- Thread handoff (Fly → smoke-echo → Fly)
+- Thread handoff (Fly → smoke-echo at `fly-smoke-echo.vlab.digital` → Fly)
 - Stitch (form-a → form-b)
 - Timeout behavior
 
@@ -126,34 +107,28 @@ kubectl exec gbv-cockroachdb-0 -n vstag -- ./cockroach sql --insecure --database
 
 Update `documentation/staging.md` with:
 - Staging smoke test overview
-- How to deploy smoke-echo to staging
+- Shared smoke-echo approach
 - How to run the staging smoke test
-- Staging form shortcodes and Typeform workspace
+- Staging form shortcodes
 
-## File changes summary
+## File changes
 
 | File | Action |
 |------|--------|
-| `smoke-echo/kube-staging/deployment.yaml` | New — staging deployment manifest |
-| `smoke-echo/kube-staging/ingress.yaml` | New — staging ingress |
-| `smoke-echo/kube-staging/service.yaml` | New — staging service |
-| `smoke-echo/.env-staging` | New (gitignored) — staging FB credentials |
-| `smoke-echo/.gitignore` | Update — add `.env-staging` |
-| `smoke-test/deploy.py` | Modify — add `--env` flag |
-| `smoke-test/form-a.staging.json` | New — staging form with staging echo app ID |
-| `smoke-test/form-b.staging.json` | New — staging form B |
-| `smoke-test/.ids-staging` | New (gitignored) — staging form IDs |
+| `smoke-test/deploy.py` | Modify — add `--env` flag (optional, for separate `.ids-staging`) |
 | `documentation/staging.md` | Update — document staging smoke test |
 
 ## Prerequisites (manual, outside the repo)
 
-- [ ] Create staging echo Facebook app (Phase 2)
-- [ ] Connect both staging FB apps (Fly + echo) to the same Facebook Page
+- [x] Connect staging page (`935593143497601`) to production smoke-echo app (`976665718578167`)
+- [ ] Create user in Auth0 staging tenant (`virtuallab-staging.auth0.com`)
+- [ ] Log into staging dashboard and connect Facebook page
+- [ ] (Optional) Obtain Reloadly sandbox credentials for payment testing
 
 ## Estimation
 
-- Phase 1 (code): ~1 hour
-- Phase 2 (manual FB setup): ~30 min
-- Phase 3 (code): ~1 hour
-- Phase 4 (testing): ~30 min
-- Phase 5 (docs): ~20 min
+- Phase 1 (dashboard login + FB page connect): ~15 min
+- Phase 2 (Typeform forms + survey creation): ~30 min
+- Phase 3 (payment creds, optional): ~15 min
+- Phase 4 (run + verify): ~30 min
+- Phase 5 (docs): ~15 min
