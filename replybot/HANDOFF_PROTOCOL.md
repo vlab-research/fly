@@ -46,6 +46,10 @@ The critical design decision: **the handoff (passing thread control) fires after
 6. **Botserver receives the handover webhook** and forwards it as a `messaging_handovers` event to Kafka.
 7. **Replybot processes the handover event** via `_handleExternalEvent`. The `WAIT_EXTERNAL_EVENT` state's synthesized wait is fulfilled. State transitions to `RESPOND` and the survey resumes from the next question.
 
+### User Input During Handoff Wait
+
+While the machine is in `WAIT_EXTERNAL_EVENT` with `wait.type === 'handover'`, all user-initiated events (`TEXT`, `QUICK_REPLY`, `POSTBACK`, `MEDIA`) are silently ignored via the `_isHandoffWait` guard in `machine.js`. This is intentional — the conversation is owned by the external app, and any user messages during this period are not replies to survey questions. Regular `wait` fields (e.g. timeouts) are not affected; users can still respond before a timeout expires.
+
 ### Why the Echo Must Come First
 
 If `passThreadControl` fired on send (before the echo), Facebook would route the echo to the external app instead of back to replybot. The echo would never reach the ECHO handler, the wait would never be armed, and the survey would be stuck in a state with no pending wait. Firing the handoff after the echo ensures the wait is armed before control leaves replybot.
@@ -202,6 +206,16 @@ handoff:
 - There is no timeout backstop. If the external app never returns control, the survey will not resume.
 - Verify the external app is functioning and will return control.
 - Consider whether a `mode: reclaim` feature is needed for your use case (not yet implemented).
+
+### Replybot crashes with `There is no translator for the question of type handoff`
+
+This happens when a user sends a text message while the machine is in `WAIT_EXTERNAL_EVENT` during a handoff. Two bugs caused this, both fixed in replybot v0.0.202:
+
+1. **machine.js missing guard**: The `TEXT`, `QUICK_REPLY`, `POSTBACK`, and `MEDIA` event handlers only checked for `RESPONDING` and `USER_BLOCKED` states. User input during a handoff wait was treated as a response to the handoff field, triggering the validator. Fixed by adding `_isHandoffWait(state)` — checks `state.state === 'WAIT_EXTERNAL_EVENT' && state.wait.type === 'handover'` — to all four handlers. Regular `wait` fields (timeouts) still accept user input; only handoff waits are blocked.
+
+2. **translate-typeform validator missing `handoff`**: The translator dispatch table had `handoff` (added in 0.2.17) but the validator dispatch table did not. Even if the machine guard is bypassed, the validator would throw. Fixed in translate-typeform 0.2.18 by adding `handoff: validateStatement` to the validator lookup (handoff fields don't accept user input, same as `wait` and `statement`).
+
+The machine.js guard is the primary fix. The validator entry is defense-in-depth.
 
 ## Related Documentation
 

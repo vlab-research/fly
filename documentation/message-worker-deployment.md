@@ -25,8 +25,8 @@ After:   Kafka events → Replybot → state machine → publish commands → Ka
 **Critical:** Replybot and Message Worker must be deployed together. Replybot no longer calls the Facebook API directly — it publishes commands to Kafka. Without Message Worker running, messages will pile up in the commands topic unsent.
 
 Both services need new Docker images:
-- **Message Worker:** `ghcr.io/vlab-research/message-worker:v0.1.0` (new service)
-- **Replybot:** `ghcr.io/vlab-research/replybot:v0.0.201` (code changed — `sendMessage`/`passThreadControl` deleted, `publishCommands` added)
+- **Message Worker:** `ghcr.io/vlab-research/message-worker:v0.1.1` (current)
+- **Replybot:** `ghcr.io/vlab-research/replybot:v0.0.202` (includes handoff wait guard — see `replybot/HANDOFF_PROTOCOL.md`)
 
 ## Deployment Steps
 
@@ -36,17 +36,17 @@ Images are built by the CI pipeline (`release.yml`) when git tags are pushed:
 
 ```bash
 # Tag and push to trigger CI builds
-git tag message-worker-v0.1.0
-git push origin message-worker-v0.1.0
+git tag message-worker-v0.1.1
+git push origin message-worker-v0.1.1
 
-git tag replybot-v0.0.201
-git push origin replybot-v0.0.201
+git tag replybot-v0.0.202
+git push origin replybot-v0.0.202
 ```
 
 CI pushes to `ghcr.io/vlab-research/`. Verify images exist:
 ```bash
-docker pull ghcr.io/vlab-research/message-worker:v0.1.0
-docker pull ghcr.io/vlab-research/replybot:v0.0.201
+docker pull ghcr.io/vlab-research/message-worker:v0.1.1
+docker pull ghcr.io/vlab-research/replybot:v0.0.202
 ```
 
 ### 2. Bump Replybot Version in Values Files
@@ -55,10 +55,10 @@ After the replybot image is built, update the version in both environment files:
 
 ```yaml
 # devops/values/production.yaml
-versionReplybot: &vreplybot v0.0.201
+versionReplybot: &vreplybot v0.0.202
 
 # devops/values/staging.yaml
-versionReplybot: &vreplybot v0.0.201
+versionReplybot: &vreplybot v0.0.202
 ```
 
 ### 3. Verify Helm Chart (Already Done)

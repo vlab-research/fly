@@ -109,3 +109,14 @@ The frontend deploys automatically via Netlify's Git integration on push to the 
 
 - **`checkSession` fails**: Auth0's silent renewal uses a hidden iframe, which fails with `login_required` when third-party cookies are blocked (default in modern browsers). Workaround: tokens are persisted in `sessionStorage` and restored on page reload. The return URL is saved before redirecting to login so OAuth flows (e.g. Typeform) survive the re-login.
 - **Graph API version mismatch**: `netlify.toml` uses `REACT_APP_FACEBOOK_GRAPH_VERSION=25.0` (browser SDK), `staging.yaml` uses `FACEBOOK_GRAPH_URL=https://graph.facebook.com/v25.0` (server-side). Both are v25.0 now but the browser and server use different mechanisms.
+
+## Current Versions
+
+| Service | Staging Version | Notes |
+|---------|----------------|-------|
+| replybot | v0.0.202 | Includes handoff wait guard (`_isHandoffWait`) and message-worker integration |
+| message-worker | v0.1.1 | Native passthrough + `pass_thread_control` support |
+| dashboard | v0.0.64 | |
+| botserver | v0.0.12 | |
+| exodus | v0.2.1 | |
+| dean | v0.0.41 | |

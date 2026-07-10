@@ -304,6 +304,7 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 | Send fails with `Invalid keys "index"` on `message[template][components][…]` (code 100) | A `buttons` component has an `index` field (WhatsApp's per-button shape). Messenger rejects it — emit a single `buttons` component with positional POSTBACK parameters instead. Fixed in `@vlab-research/translate-typeform` 0.2.14. |
 | Send fails with `User pass less payload than required for POSTBACK button` (code 100, subcode 1893029) | The `buttons` component has fewer POSTBACK parameters than the approved template has buttons. The Typeform question's `properties.choices` count must equal the approved template's button count. |
 | Replybot crashes on button tap with `There is no translator for the question of type utility_message` | The validator dispatch table in translate-typeform is missing `utility_message`. Fixed in 0.2.15 — bump replybot's lockfile. |
+| Replybot crashes with `There is no translator for the question of type handoff` | Same pattern as above: the translator dispatch table had `handoff` (added in 0.2.17) but the validator did not. Triggered when a user texts during a handoff wait. Fixed in two places: (1) replybot v0.0.202 adds a `_isHandoffWait` guard to TEXT/QUICK_REPLY/POSTBACK/MEDIA handlers so user input is ignored during handoff wait, and (2) translate-typeform 0.2.18 adds `handoff: validateStatement` to the validator lookup as defense-in-depth. See `replybot/HANDOFF_PROTOCOL.md` for details. |
 
 ---
 
