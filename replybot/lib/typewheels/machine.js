@@ -199,6 +199,10 @@ function _noop() {
   return { action: 'NONE' }
 }
 
+function _isHandoffWait(state) {
+  return state.state === 'WAIT_EXTERNAL_EVENT' && state.wait && state.wait.type === 'handover'
+}
+
 function _repeat(state, message) {
   return {
     action: 'RESPOND',
@@ -485,7 +489,7 @@ function exec(state, nxt) {
     }
 
     case 'POSTBACK': {
-      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
       return {
         action: 'RESPOND',
         response: nxt.postback.payload,
@@ -495,7 +499,7 @@ function exec(state, nxt) {
     }
 
     case 'QUICK_REPLY': {
-      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
 
       const qrResponse = nxt.message.quick_reply.payload.value === undefined ?
         nxt.message.quick_reply.payload :
@@ -510,7 +514,7 @@ function exec(state, nxt) {
     }
 
     case 'TEXT': {
-      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
 
       // Handles the case (testers) where they begin
       // texting without any other previous state or when off
@@ -526,7 +530,7 @@ function exec(state, nxt) {
       }
     }
     case 'MEDIA': {
-      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED') return _noop()
+      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
 
       // Handles the odd case (testers) where they begin
       // texting without any other previous state

@@ -2322,6 +2322,35 @@ describe('Handoff functionality', () => {
 
     actions.messages[0].message.should.deep.equal({ text: 'after', metadata: '{"ref":"after","type":"short_text"}' })
   })
+
+  it('should ignore user text during handoff wait', () => {
+    const form = {
+      logic: [],
+      fields: [
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({
+              type: 'handoff',
+              handoff: { target_app_id: '123456789', mode: 'wait' }
+            })
+          }
+        },
+        { type: 'short_text', title: 'after', ref: 'after' }
+      ]
+    }
+
+    const log = [
+      referral,
+      _echo({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait' } }),
+      text
+    ]
+    const state = getState(log)
+    state.state.should.equal('WAIT_EXTERNAL_EVENT')
+    state.wait.type.should.equal('handover')
+  })
 })
 
 describe('Thread passback functionality', () => {
