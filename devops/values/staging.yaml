@@ -22,7 +22,7 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 
 versionDashboard: &vdashboard v0.0.64
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.196
+versionReplybot: &vreplybot v0.0.202
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
@@ -30,7 +30,7 @@ versionDinersclub: &vdinersclub v0.0.40
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.7
 versionExodus: &vexodus v0.2.1
-versionMessageWorker: &vmessageworker v0.1.0
+versionMessageWorker: &vmessageworker v0.1.1
 
 processingAlerts: []
 laggingAlerts: []
@@ -95,7 +95,7 @@ dinersclub:
     - name: CACHE_BUFFER_ITEMS
       value: "64"
     - name: RELOADLY_SANDBOX
-      value: "true"
+      value: "false"
     - name: BOTSERVER_URL
       value: "http://gbv-botserver/synthetic"
     - name: CHATBASE_DATABASE
