@@ -1,6 +1,9 @@
 const { sendMessage, passThreadControl } = require('./messenger')
+const { getPageConfig, configuredPageIds } = require('./config')
 
 const ECHO_APP_ID = process.env.FACEBOOK_APP_ID
+// Legacy global fallback for the passback target when a page has no configured
+// flyAppId (e.g. a pure single-page deploy). Per-page config is preferred.
 const FLY_APP_ID = process.env.FLY_APP_ID
 
 const INTRO_MESSAGE = "🔄 Thread control handed off to the Smoke Echo app! Send me any message and I'll echo it back, then hand you back to the survey."
@@ -8,9 +11,13 @@ const ECHO_PREFIX = '📣 You said: '
 const RETURN_SUFFIX = ' — handing control back to the survey now!'
 
 // Users currently mid-handoff with this app, waiting for their first reply.
+// Keyed by `pageId:userId` — smoke-echo now serves multiple pages (prod +
+// staging share this one app), and the same Messenger user id could appear on
+// more than one page, so the page must be part of the key.
 // In-memory only: this service is stateless across restarts by design — a
 // smoke test that gets interrupted just needs to be re-run from the top.
 const awaitingReply = new Set()
+const waitKey = (pageId, userId) => `${pageId}:${userId}`
 
 // Tiny structured logger. Everything in this service is a smoke-test aid, so
 // verbosity is a feature: we want to *see* every webhook, every branch taken,
@@ -25,13 +32,21 @@ const log = (msg, data) => {
 
 log('startup config', {
   ECHO_APP_ID,
-  FLY_APP_ID,
+  configuredPages: configuredPageIds(),
   graphUrl: process.env.FACEBOOK_GRAPH_URL || 'https://graph.facebook.com/v22.0 (default)',
-  hasPageToken: !!process.env.PAGE_ACCESS_TOKEN,
+  hasLegacyPageToken: !!process.env.PAGE_ACCESS_TOKEN,
   hasVerifyToken: !!process.env.FACEBOOK_VERIFY_TOKEN,
 })
 if (!ECHO_APP_ID) log('WARNING: FACEBOOK_APP_ID is unset — cannot recognize handovers meant for this app')
-if (!FLY_APP_ID) log('WARNING: FLY_APP_ID is unset — cannot hand control back to Fly')
+if (!configuredPageIds().length && !process.env.PAGE_ACCESS_TOKEN) {
+  log('WARNING: no pages configured — set SMOKE_ECHO_PAGES (or legacy PAGE_ACCESS_TOKEN); cannot send or hand back control')
+}
+
+// The Fly (Primary Receiver) app id to hand control back to for a given page.
+const flyAppIdFor = pageId => {
+  const cfg = getPageConfig(pageId)
+  return (cfg && cfg.flyAppId) || FLY_APP_ID
+}
 
 const verifyToken = ctx => {
   const ok = ctx.query['hub.verify_token'] === process.env.FACEBOOK_VERIFY_TOKEN
@@ -44,7 +59,7 @@ const verifyToken = ctx => {
   }
 }
 
-async function onHandover(handover) {
+async function onHandover(pageId, handover) {
   const { sender, pass_thread_control: passControl } = handover
   if (!passControl || !sender) {
     log('onHandover: ignoring — missing pass_thread_control or sender', { hasPassControl: !!passControl, hasSender: !!sender })
@@ -53,6 +68,7 @@ async function onHandover(handover) {
 
   const newOwner = passControl.new_owner_app_id
   log('onHandover: received pass_thread_control', {
+    pageId,
     userId: sender.id,
     new_owner_app_id: newOwner,
     new_owner_app_id_type: typeof newOwner,
@@ -76,36 +92,37 @@ async function onHandover(handover) {
   }
 
   const userId = sender.id
-  awaitingReply.add(userId)
-  log('onHandover: WE OWN THE THREAD — greeting user and awaiting their reply', { userId, awaitingReplyCount: awaitingReply.size })
-  await sendMessage(userId, INTRO_MESSAGE)
-  log('onHandover: intro message sent', { userId })
+  awaitingReply.add(waitKey(pageId, userId))
+  log('onHandover: WE OWN THE THREAD — greeting user and awaiting their reply', { pageId, userId, awaitingReplyCount: awaitingReply.size })
+  await sendMessage(pageId, userId, INTRO_MESSAGE)
+  log('onHandover: intro message sent', { pageId, userId })
 }
 
-async function onMessage(messaging) {
+async function onMessage(pageId, messaging) {
   const { sender, message } = messaging
   if (!sender || !message) {
     log('onMessage: ignoring — missing sender or message', { hasSender: !!sender, hasMessage: !!message })
     return
   }
   if (message.is_echo) {
-    log('onMessage: ignoring — echo of our own message', { userId: sender.id })
+    log('onMessage: ignoring — echo of our own message', { pageId, userId: sender.id })
     return
   }
 
   const userId = sender.id
-  if (!awaitingReply.has(userId)) {
-    log('onMessage: ignoring — not awaiting a reply from this user', { userId, awaitingReplyUsers: [...awaitingReply] })
+  if (!awaitingReply.has(waitKey(pageId, userId))) {
+    log('onMessage: ignoring — not awaiting a reply from this user', { pageId, userId, awaitingReplyKeys: [...awaitingReply] })
     return
   }
 
-  awaitingReply.delete(userId)
+  awaitingReply.delete(waitKey(pageId, userId))
+  const flyAppId = flyAppIdFor(pageId)
   const text = message.text || '(a non-text message)'
-  log('onMessage: got the awaited reply — echoing and handing control back to Fly', { userId, text, flyAppId: FLY_APP_ID })
-  await sendMessage(userId, `${ECHO_PREFIX}"${text}"${RETURN_SUFFIX}`)
-  log('onMessage: echo message sent', { userId })
-  await passThreadControl(userId, FLY_APP_ID, { smoke_echo: 'ok', echo_text: text })
-  log('onMessage: passThreadControl back to Fly complete', { userId, flyAppId: FLY_APP_ID, metadata: { smoke_echo: 'ok', echo_text: text } })
+  log('onMessage: got the awaited reply — echoing and handing control back to Fly', { pageId, userId, text, flyAppId })
+  await sendMessage(pageId, userId, `${ECHO_PREFIX}"${text}"${RETURN_SUFFIX}`)
+  log('onMessage: echo message sent', { pageId, userId })
+  await passThreadControl(pageId, userId, flyAppId, { smoke_echo: 'ok', echo_text: text })
+  log('onMessage: passThreadControl back to Fly complete', { pageId, userId, flyAppId, metadata: { smoke_echo: 'ok', echo_text: text } })
 }
 
 // Manual recovery endpoint. If a smoke run is interrupted while smoke-echo owns
@@ -114,14 +131,17 @@ async function onMessage(messaging) {
 // it can hand control back on demand:
 //
 //   curl -X POST https://fly-smoke-echo.vlab.digital/admin/passback \
-//        -H 'content-type: application/json' -d '{"userId":"1989430067808669"}'
+//        -H 'content-type: application/json' \
+//        -d '{"userId":"1989430067808669","pageId":"1855355231229529"}'
 //
-// (a GET with ?userId=... works too, for convenience from a browser). Defaults
-// the target to FLY_APP_ID; pass targetAppId to override.
+// (a GET with ?userId=...&pageId=... works too). `pageId` selects which page's
+// token to use and defaults the target to that page's Fly app; pass
+// `targetAppId` to override.
 const passback = async ctx => {
   const body = (ctx.request && ctx.request.body) || {}
   const userId = body.userId || ctx.query.userId
-  const targetAppId = body.targetAppId || ctx.query.targetAppId || FLY_APP_ID
+  const pageId = body.pageId || ctx.query.pageId
+  const targetAppId = body.targetAppId || ctx.query.targetAppId || flyAppIdFor(pageId)
 
   if (!userId) {
     log('admin/passback: rejected — missing userId')
@@ -129,24 +149,36 @@ const passback = async ctx => {
     ctx.body = { ok: false, error: 'userId is required (JSON body or ?userId= query)' }
     return
   }
-  if (!targetAppId) {
-    log('admin/passback: rejected — no targetAppId and FLY_APP_ID is unset')
+  if (!pageId) {
+    log('admin/passback: rejected — missing pageId')
     ctx.status = 400
-    ctx.body = { ok: false, error: 'targetAppId is required (FLY_APP_ID is unset)' }
+    ctx.body = { ok: false, error: 'pageId is required (JSON body or ?pageId= query)' }
+    return
+  }
+  if (!getPageConfig(pageId)) {
+    log('admin/passback: rejected — page not configured', { pageId, configuredPages: configuredPageIds() })
+    ctx.status = 400
+    ctx.body = { ok: false, error: `page ${pageId} is not configured (no token)`, configuredPages: configuredPageIds() }
+    return
+  }
+  if (!targetAppId) {
+    log('admin/passback: rejected — no targetAppId and no flyAppId configured for page', { pageId })
+    ctx.status = 400
+    ctx.body = { ok: false, error: 'targetAppId is required (no flyAppId configured for this page)' }
     return
   }
 
-  log('admin/passback: manually handing control back', { userId, targetAppId })
+  log('admin/passback: manually handing control back', { pageId, userId, targetAppId })
   try {
-    const result = await passThreadControl(userId, targetAppId, { smoke_echo: 'manual_passback' })
-    awaitingReply.delete(userId)
-    log('admin/passback: success — control handed back', { userId, targetAppId, result })
+    const result = await passThreadControl(pageId, userId, targetAppId, { smoke_echo: 'manual_passback' })
+    awaitingReply.delete(waitKey(pageId, userId))
+    log('admin/passback: success — control handed back', { pageId, userId, targetAppId, result })
     ctx.status = 200
-    ctx.body = { ok: true, userId, targetAppId, facebook: result }
+    ctx.body = { ok: true, userId, pageId, targetAppId, facebook: result }
   } catch (error) {
-    log('admin/passback: FAILED', { userId, targetAppId, error: error.message })
+    log('admin/passback: FAILED', { pageId, userId, targetAppId, error: error.message })
     ctx.status = 502
-    ctx.body = { ok: false, userId, targetAppId, error: error.message }
+    ctx.body = { ok: false, userId, pageId, targetAppId, error: error.message }
   }
 }
 
@@ -165,17 +197,21 @@ const handleWebhook = async ctx => {
     // got sent to onMessage, and was discarded for having no `.message`.
     const events = [...(entry.messaging || []), ...(entry.messaging_handovers || [])]
     log(`processing entry ${i}`, {
+      pageId: entry.id,
       messagingCount: entry.messaging ? entry.messaging.length : 0,
       handoverCount: entry.messaging_handovers ? entry.messaging_handovers.length : 0,
     })
     for (const event of events) {
+      // The page id is the webhook entry's id; fall back to the event recipient
+      // (the page is the recipient of a user's message / handover).
+      const pageId = entry.id || (event.recipient && event.recipient.id)
       try {
         if (event.pass_thread_control) {
-          await onHandover(event)
+          await onHandover(pageId, event)
         } else if (event.message) {
-          await onMessage(event)
+          await onMessage(pageId, event)
         } else {
-          log('skipping event — neither pass_thread_control nor message', { keys: Object.keys(event) })
+          log('skipping event — neither pass_thread_control nor message', { pageId, keys: Object.keys(event) })
         }
       } catch (error) {
         console.error('[smoke-echo][ERR] webhook event: ', error)

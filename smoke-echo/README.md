@@ -38,36 +38,68 @@ re-run the smoke test from the top.
    role on the app — App Review is only required to talk to people who
    *don't* have a role on the app, which doesn't apply to a smoke test run by
    your own team.
-3. **Connect the app to the existing smoke-test Page** (the same page
-   `smoke-test/` already uses for `flysmoke`/`flysmokeb`). This is what makes
-   it a Secondary Receiver — no new Page is needed; the handover protocol is
-   built around multiple apps sharing one page. Connecting it generates a
-   **Page Access Token** scoped to this app.
-4. **Subscribe its webhook to both `messaging` and `messaging_handovers`.**
-   `messaging_handovers` is how it learns it just gained control;
+3. **Connect the app to each smoke-test Page** — one per environment you want
+   to smoke-test (e.g. the production smoke page and the staging smoke page).
+   Connecting the app to a page is what makes it a Secondary Receiver on that
+   page; no new Page is needed, the handover protocol is built around multiple
+   apps sharing one page. Connecting it generates a **Page Access Token** scoped
+   to this app *for that page* — you'll get one token per page.
+4. **Subscribe its webhook to both `messaging` and `messaging_handovers` on
+   each page.** `messaging_handovers` is how it learns it just gained control;
    `messaging` is how it then receives the user's reply (once an app owns a
    thread, the user's messages are delivered to it as normal `messaging`
    events, not `standby`).
 5. Note down, for the deployment step below:
-   - the new app's **App ID** (this is `FACEBOOK_APP_ID` for this service)
-   - the **Page Access Token**
+   - the new app's **App ID** (this is `FACEBOOK_APP_ID` for this service — one
+     value, shared across all pages)
+   - the **Page Access Token for each page** (goes into `SMOKE_ECHO_PAGES`)
    - a **verify token** string of your choosing (used for the webhook
      handshake — same idea as botserver's `VERIFY_TOKEN`, called
      `FACEBOOK_VERIFY_TOKEN` here)
-   - Fly's replybot **App ID** (already known — it's `FACEBOOK_APP_ID` in
-     `devops/values/production.yaml`'s botserver/replybot env), needed here as
-     `FLY_APP_ID` so the echo app knows who to hand control back to
+   - Fly's replybot **App ID for each page** — production and staging use
+     different Fly apps (`FACEBOOK_APP_ID` in `devops/values/production.yaml`
+     vs `staging.yaml`); each becomes that page's `flyAppId` in
+     `SMOKE_ECHO_PAGES` so the echo app knows who to hand control back to
 
 ## Configuration
+
+smoke-echo is **multi-page**: one app can be the Secondary Receiver on several
+pages at once (e.g. the production smoke page *and* the staging smoke page).
+Facebook's handover protocol is per-page — each page has its own page access
+token (issued to *this* app for *that* page) and its own Primary Receiver
+("Fly") app that control is handed back to — so tokens and Fly app ids are
+configured **per page** via a single JSON env var, keeping the service stateless
+(no DB, no Kafka).
 
 | Env var | Purpose |
 |---|---|
 | `FACEBOOK_VERIFY_TOKEN` | Must match the verify token you set in the FB webhook config |
-| `PAGE_ACCESS_TOKEN` | Page access token generated when connecting this app to the page |
-| `FACEBOOK_APP_ID` | This app's own App ID — used to recognize "control was passed to *me*" |
-| `FLY_APP_ID` | Fly replybot's App ID — where control gets handed back to |
+| `SMOKE_ECHO_PAGES` | JSON map of `pageId → { token, flyAppId }` (see below) — the per-page tokens and handback targets |
+| `FACEBOOK_APP_ID` | This app's own App ID — used to recognize "control was passed to *me*" (same across all pages) |
 | `FACEBOOK_GRAPH_URL` | Defaults to `https://graph.facebook.com/v22.0` (matches replybot/botserver) |
 | `PORT` | Defaults to `8080`; `kube/deployment.yaml` sets it to `80` |
+
+`SMOKE_ECHO_PAGES` is a JSON object keyed by page id:
+
+```json
+{
+  "1855355231229529": { "token": "<prod page token>",    "flyAppId": "699455733740842" },
+  "935593143497601":  { "token": "<staging page token>", "flyAppId": "790352681363186" }
+}
+```
+
+- `token` — the page access token generated when you connected **this** app to
+  that page. It must be the smoke-echo app's own token for that page; another
+  app's token (e.g. Fly's) will not work (`/me/...` resolves to the token's
+  page, and only the app that owns the thread can pass control).
+- `flyAppId` — the Primary Receiver (Fly replybot) App ID **for that page**;
+  production and staging use different Fly apps, which is the whole reason this
+  is per-page.
+
+**Legacy single-page fallback:** if `SMOKE_ECHO_PAGES` is unset, the service
+falls back to the original `PAGE_ACCESS_TOKEN` / `FLY_APP_ID` env vars for every
+page. Once `SMOKE_ECHO_PAGES` is set it is authoritative — a webhook for a page
+not in the map is skipped rather than sent with the wrong page's token.
 
 `FACEBOOK_APP_SECRET` is *not* currently read by this service — the code
 doesn't validate webhook signatures (botserver doesn't either; see its
@@ -75,15 +107,16 @@ doesn't validate webhook signatures (botserver doesn't either; see its
 rather have it on hand for that later; it's harmless to include in the
 secret either way.
 
-In the cluster, these are expected to live in a Secret named
-`smoke-echo-env`, referenced via `envFrom` in `kube/deployment.yaml`. The
-simplest path: collect every value (including `FACEBOOK_VERIFY_TOKEN`,
-`PAGE_ACCESS_TOKEN`, `FACEBOOK_APP_ID`, `FLY_APP_ID` — and optionally
-`FACEBOOK_APP_SECRET`) in a gitignored `.env` here, same as
-`smoke-test/.env`, and load it directly:
+In the cluster, these live in a Secret named `smoke-echo-env`, referenced via
+`envFrom` in `kube/deployment.yaml`. Because `SMOKE_ECHO_PAGES` is a JSON blob,
+the cleanest path is to keep the values in a gitignored `.env` and create the
+secret from literals (so the JSON is preserved verbatim):
 
 ```bash
-kubectl create secret generic smoke-echo-env --from-env-file=.env
+kubectl create secret generic smoke-echo-env \
+  --from-literal=FACEBOOK_VERIFY_TOKEN='...' \
+  --from-literal=FACEBOOK_APP_ID='976665718578167' \
+  --from-literal=SMOKE_ECHO_PAGES='{"1855355231229529":{"token":"...","flyAppId":"699455733740842"},"935593143497601":{"token":"...","flyAppId":"790352681363186"}}'
 ```
 
 ## Build & deploy
@@ -169,6 +202,32 @@ the metadata round-trip or flattening is broken — check replybot logs for the
 fallback in the handoff question means Fly will reclaim the thread on its own
 after 5 minutes — useful as a sanity check that `take_thread_control` works
 even when this echo app misbehaves.
+
+## Manual recovery: handing control back
+
+If a smoke run gets interrupted while smoke-echo owns the thread, Fly can no
+longer send to the user ("another app is controlling this thread now"). Since
+smoke-echo IS the current owner, it can hand control back on demand via
+`POST /admin/passback`. Because the service is multi-page, you must pass the
+**page id** — it selects which page's token to use and defaults the target to
+that page's Fly app:
+
+```bash
+# staging page, back to staging Fly (default for that page)
+curl -X POST https://fly-smoke-echo.vlab.digital/admin/passback \
+     -H 'content-type: application/json' \
+     -d '{"userId":"1972130092884542","pageId":"935593143497601"}'
+```
+
+A `GET` with `?userId=...&pageId=...` works too. Pass `targetAppId` to override
+the handback target. A wrapper script is included:
+
+```bash
+./scripts/passback.sh <messenger-user-id> <page-id> [target-app-id]
+```
+
+The endpoint returns `400` if the page isn't configured in `SMOKE_ECHO_PAGES`,
+and `502` (with the raw Facebook error) if the pass-thread-control call fails.
 
 ## Local development
 
