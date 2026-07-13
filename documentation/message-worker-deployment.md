@@ -186,6 +186,8 @@ The error tag in the machine_report determines the state transition:
 - `"FB"` → BLOCKED state (platform errors: user blocked the bot, etc.)
 - `"STATE_ACTIONS"` → ERROR state (config/client errors)
 
+**Known Issue:** The code also publishes `message_failed` events to Kafka (not yet consumed), while actual error handling uses the HTTP machine_report→botserver path. This asymmetry exists because message_failed was added for future event-driven error handling but replybot currently only handles machine_report events. Both paths work today, but they should be consolidated in a future refactor.
+
 ## Health Checks
 
 The message-worker exposes a health endpoint on port 8081:
@@ -220,3 +222,5 @@ Graceful shutdown: preStop hook sleeps 15s to allow Kafka offset commits before 
 10. **Production.yaml had uncommitted changes on main:** The main worktree had uncommitted version bumps (replybot v0.0.200, dinersclub v0.0.40, exodus v0.2.2, dean config tweaks) that were already live in production but never committed to git. These had to be merged into the feature branch's production.yaml to avoid regressing those services during the message-worker deploy.
 
 11. **MESSENGER_URL env var required:** The Docker image built by CI contains a config validation from the rust branch that requires at least one of `MESSENGER_URL`, `WHATSAPP_URL`, or `INSTAGRAM_URL` to be set. Even though our branch's config.go doesn't have this validation, the packaged Helm chart was built from the rust branch. Adding `MESSENGER_URL=https://graph.facebook.com/v22.0` to the env config satisfies this validation.
+
+12. **Error logging was masked (v0.1.1→v0.1.2):** When a Facebook message send failed, the worker correctly reported the error to botserver, but main.go logged "command processed successfully" because reportError() returned nil. This masked real failures in production logs. Fixed by introducing a `HandledError` type that signals "send failed but was reported" so main.go can log warnings like "command send failed but handled/reported" with the underlying error details.
