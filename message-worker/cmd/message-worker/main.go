@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -154,7 +155,23 @@ func main() {
 			return nil
 		}
 
-		if err := worker.ProcessCommand(ctx, cmd); err != nil {
+		err := worker.ProcessCommand(ctx, cmd)
+
+		// Check if the error is a handled error (send failed but was reported to botserver)
+		var handledErr *messageworker.HandledError
+		if errors.As(err, &handledErr) {
+			// Send failed but was handled/reported; commit offset
+			logger.Warn("command send failed but handled/reported",
+				zap.String("command_id", cmd.CommandID),
+				zap.String("platform", string(cmd.Platform)),
+				zap.String("platform_account_id", cmd.PlatformAccountID),
+				zap.String("user_id", cmd.UserID),
+				zap.Error(handledErr.Underlying()))
+			return nil
+		}
+
+		// Check if there was any other error (e.g., Kafka publish failure)
+		if err != nil {
 			logger.Error("failed to process command",
 				zap.String("command_id", cmd.CommandID),
 				zap.String("platform", string(cmd.Platform)),

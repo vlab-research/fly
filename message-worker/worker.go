@@ -13,6 +13,31 @@ import (
 	"go.uber.org/zap"
 )
 
+// HandledError represents a send error that has been handled by reporting to botserver.
+// The command failed to send, but the error has been properly reported and the offset
+// should be committed. This allows the consumer to distinguish between:
+// - nil: command succeeded
+// - HandledError: command failed but the failure was handled/reported
+// - other error: command processing failed (e.g., Kafka publish failed)
+type HandledError struct {
+	underlying error
+}
+
+// NewHandledError creates a new HandledError wrapping the underlying send error
+func NewHandledError(err error) *HandledError {
+	return &HandledError{underlying: err}
+}
+
+// Error implements the error interface
+func (he *HandledError) Error() string {
+	return he.underlying.Error()
+}
+
+// Underlying returns the original error
+func (he *HandledError) Underlying() error {
+	return he.underlying
+}
+
 // EventProducer is an interface for emitting events to Kafka
 type EventProducer interface {
 	PublishEvent(ctx context.Context, event types.UniversalEvent) error
@@ -76,7 +101,12 @@ func (w *Worker) processTranslatedMessage(ctx context.Context, cmd types.SendMes
 	if err != nil {
 		// Translation error - report to trigger ERROR state transition
 		// This uses STATE_ACTIONS tag since it's not a platform error
-		return w.reportError(cmd, err)
+		// Wrap in HandledError to signal the error was handled
+		reportErr := w.reportError(cmd, err)
+		if reportErr != nil {
+			return reportErr
+		}
+		return NewHandledError(err)
 	}
 
 	// Get platform-specific client
@@ -84,7 +114,11 @@ func (w *Worker) processTranslatedMessage(ctx context.Context, cmd types.SendMes
 	if !ok {
 		// No client configured for this platform - report to trigger ERROR state
 		err := fmt.Errorf("no client configured for platform: %s", cmd.Platform)
-		return w.reportError(cmd, err)
+		reportErr := w.reportError(cmd, err)
+		if reportErr != nil {
+			return reportErr
+		}
+		return NewHandledError(err)
 	}
 
 	// Send message with retry logic
@@ -96,7 +130,11 @@ func (w *Worker) processTranslatedMessage(ctx context.Context, cmd types.SendMes
 	if sendErr != nil {
 		// Failed after retries - report to trigger state transition
 		// IsPlatformError determines tag: FB (→ BLOCKED) or STATE_ACTIONS (→ ERROR)
-		return w.reportError(cmd, sendErr)
+		reportErr := w.reportError(cmd, sendErr)
+		if reportErr != nil {
+			return reportErr
+		}
+		return NewHandledError(sendErr)
 	}
 
 	// Success
@@ -111,7 +149,11 @@ func (w *Worker) processNativeMessage(ctx context.Context, cmd types.SendMessage
 	if !ok {
 		// No client configured for this platform - report to trigger ERROR state
 		err := fmt.Errorf("no client configured for platform: %s", cmd.Platform)
-		return w.reportError(cmd, err)
+		reportErr := w.reportError(cmd, err)
+		if reportErr != nil {
+			return reportErr
+		}
+		return NewHandledError(err)
 	}
 
 	// Send native message with retry logic
@@ -122,7 +164,11 @@ func (w *Worker) processNativeMessage(ctx context.Context, cmd types.SendMessage
 
 	if sendErr != nil {
 		// Failed after retries - report to trigger state transition
-		return w.reportError(cmd, sendErr)
+		reportErr := w.reportError(cmd, sendErr)
+		if reportErr != nil {
+			return reportErr
+		}
+		return NewHandledError(sendErr)
 	}
 
 	// Success
@@ -137,7 +183,11 @@ func (w *Worker) processPassThreadControl(ctx context.Context, cmd types.SendMes
 	if !ok {
 		// No client configured for this platform - report to trigger ERROR state
 		err := fmt.Errorf("no client configured for platform: %s", cmd.Platform)
-		return w.reportError(cmd, err)
+		reportErr := w.reportError(cmd, err)
+		if reportErr != nil {
+			return reportErr
+		}
+		return NewHandledError(err)
 	}
 
 	// Send pass_thread_control with retry logic
@@ -147,7 +197,11 @@ func (w *Worker) processPassThreadControl(ctx context.Context, cmd types.SendMes
 
 	if handoffErr != nil {
 		// Failed after retries - report to trigger state transition
-		return w.reportError(cmd, handoffErr)
+		reportErr := w.reportError(cmd, handoffErr)
+		if reportErr != nil {
+			return reportErr
+		}
+		return NewHandledError(handoffErr)
 	}
 
 	// Success - for pass_thread_control, we emit with empty message_id since there's no message to track

@@ -156,10 +156,11 @@ func TestWorker_ProcessCommand_TranslationError(t *testing.T) {
 		},
 	}
 
-	// Process command - should fail on translation but return nil after reporting error
+	// Process command - should fail on translation and return HandledError after reporting
 	err := worker.ProcessCommand(context.Background(), cmd)
-	if err != nil {
-		t.Fatalf("Expected nil (error handled by reporting to botserver), got: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError, got: %v (type: %T)", err, err)
 	}
 
 	// Verify machine_report was sent to botserver
@@ -372,10 +373,11 @@ func TestWorker_ProcessCommand_NoClientForPlatform(t *testing.T) {
 		},
 	}
 
-	// Should return nil because error is handled by reporting to botserver
+	// Should return HandledError because error is handled by reporting to botserver
 	err := worker.ProcessCommand(context.Background(), cmd)
-	if err != nil {
-		t.Fatalf("Expected nil (error handled), got: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError (error handled), got: %v (type: %T)", err, err)
 	}
 
 	// Should have sent a machine_report to botserver

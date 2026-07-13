@@ -3,6 +3,7 @@ package messageworker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/vlab-research/botparty"
@@ -142,8 +143,9 @@ func TestWorker_ProcessCommand_Native_NoClient(t *testing.T) {
 	}
 
 	err := worker.ProcessCommand(context.Background(), cmd)
-	if err != nil {
-		t.Fatalf("ProcessCommand failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError, got: %v (type: %T)", err, err)
 	}
 
 	// Verify that an error was reported to botserver
@@ -187,8 +189,9 @@ func TestWorker_ProcessCommand_Native_RetriableError(t *testing.T) {
 	}
 
 	err := worker.ProcessCommand(context.Background(), cmd)
-	if err != nil {
-		t.Fatalf("ProcessCommand failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError, got: %v (type: %T)", err, err)
 	}
 
 	// Verify that the error was retried and then reported
@@ -238,8 +241,9 @@ func TestWorker_ProcessCommand_Native_NonRetriableError(t *testing.T) {
 	}
 
 	err := worker.ProcessCommand(context.Background(), cmd)
-	if err != nil {
-		t.Fatalf("ProcessCommand failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError, got: %v (type: %T)", err, err)
 	}
 
 	// For non-retriable errors, should only try once
