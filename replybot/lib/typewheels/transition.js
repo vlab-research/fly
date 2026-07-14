@@ -128,9 +128,13 @@ class Machine {
         }
       }
 
-      if (output.action === 'RESET') {
+      if (output.action === 'RESET' || output.action === 'RESTORE_STATE') {
 
-        // publish a report, but don't do anything else, state is reset, no messages or responses
+        // publish a report, but don't do anything else, state is reset/restored,
+        // no messages or responses. For RESTORE_STATE this also deliberately skips
+        // the getPageToken/getForm/getUser IO in actionsResponses -- the snapshot
+        // is self-contained, so no form lookup is needed and nothing is sent to
+        // the user. newState is published to the state topic and written to Redis.
         return {
           publish: true,
           timestamp,

@@ -68,6 +68,25 @@ describe('machine.run', () => {
   })
 
 
+  it('short-circuits RESTORE_STATE: publishes newState, no commands, no responses, no IO', async () => {
+    const m = new Machine()
+    // If the short-circuit failed, actionsResponses would run and throw here.
+    m.actionsResponses = () => { throw new Error('actionsResponses must not run for RESTORE_STATE') }
+
+    const P = { state: 'QOUT', question: 'q2', qa: [['q1', 'yes']], forms: ['FOO'], md: { startTime: 100 }, pointer: 500 }
+    const event = synthetic({ type: 'restore_state', value: { state: P } }, { timestamp: 9999 })
+
+    const report = await m.run({ state: 'USER_BLOCKED', qa: [], forms: ['FOO'] }, USER_ID, event)
+
+    report.publish.should.be.true
+    report.newState.state.should.equal('QOUT')
+    report.newState.qa.should.eql([['q1', 'yes']])
+    report.newState.pointer.should.equal(9999)
+    should.not.exist(report.commands)
+    should.not.exist(report.responses)
+    should.not.exist(report.error)
+  })
+
   it('returns a report with commands if all goes well', async () => {
     const m = new Machine()
     m.transition = () => ({ newState: {}, output: {} })
