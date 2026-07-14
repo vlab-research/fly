@@ -19,15 +19,18 @@ import (
 
 // mockDB implements the database interface for testing
 type mockDB struct {
-	bails                  []*db.Bail
-	events                 []*db.BailEvent
-	queryFunc              func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
-	createFunc             func(ctx context.Context, bail *db.Bail) error
-	updateFunc             func(ctx context.Context, bail *db.Bail) error
-	deleteFunc             func(ctx context.Context, id uuid.UUID) error
-	latestEventsFunc       func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
-	latestEventsCallCount  int
-	latestEventsLastCalled []uuid.UUID
+	bails                       []*db.Bail
+	events                      []*db.BailEvent
+	queryFunc                   func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
+	createFunc                  func(ctx context.Context, bail *db.Bail) error
+	updateFunc                  func(ctx context.Context, bail *db.Bail) error
+	deleteFunc                  func(ctx context.Context, id uuid.UUID) error
+	latestEventsFunc            func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
+	latestEventsCallCount       int
+	latestEventsLastCalled      []uuid.UUID
+	latestSummariesFunc         func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error)
+	latestSummariesCallCount    int
+	latestSummariesLastCalled   []uuid.UUID
 }
 
 func (m *mockDB) GetBailsByUser(ctx context.Context, userID uuid.UUID) ([]*db.Bail, error) {
@@ -118,6 +121,39 @@ func (m *mockDB) GetLatestEventsByBailIDs(ctx context.Context, bailIDs []uuid.UU
 		existing, ok := latest[*event.BailID]
 		if !ok || event.Timestamp.After(existing.Timestamp) {
 			latest[*event.BailID] = event
+		}
+	}
+	return latest, nil
+}
+
+func (m *mockDB) GetLatestEventSummariesByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error) {
+	m.latestSummariesCallCount++
+	m.latestSummariesLastCalled = append([]uuid.UUID(nil), bailIDs...)
+	if m.latestSummariesFunc != nil {
+		return m.latestSummariesFunc(ctx, bailIDs)
+	}
+	latest := make(map[uuid.UUID]*db.BailEventSummary, len(bailIDs))
+	wanted := make(map[uuid.UUID]struct{}, len(bailIDs))
+	for _, id := range bailIDs {
+		wanted[id] = struct{}{}
+	}
+	for _, event := range m.events {
+		if event.BailID == nil {
+			continue
+		}
+		if _, ok := wanted[*event.BailID]; !ok {
+			continue
+		}
+		existing, ok := latest[*event.BailID]
+		if !ok || event.Timestamp.After(existing.Timestamp) {
+			latest[*event.BailID] = &db.BailEventSummary{
+				ID:           event.ID,
+				BailID:       event.BailID,
+				EventType:    event.EventType,
+				Timestamp:    event.Timestamp,
+				UsersMatched: event.UsersMatched,
+				UsersBailed:  event.UsersBailed,
+			}
 		}
 	}
 	return latest, nil
@@ -309,9 +345,9 @@ func TestListBails_AggregatesLatestEventsInOneCall(t *testing.T) {
 	mock := &mockDB{
 		bails:  bails,
 		events: events,
-		latestEventsFunc: func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error) {
+		latestSummariesFunc: func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error) {
 			if len(ids) == 1 {
-				return nil, fmt.Errorf("GetLatestEventsByBailIDs called per-bail (only %d id)", len(ids))
+				return nil, fmt.Errorf("GetLatestEventSummariesByBailIDs called per-bail (only %d id)", len(ids))
 			}
 			return nil, nil
 		},
@@ -333,26 +369,26 @@ func TestListBails_AggregatesLatestEventsInOneCall(t *testing.T) {
 		t.Fatalf("Expected status 200, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
 
-	if mock.latestEventsCallCount != 1 {
-		t.Errorf("Expected exactly 1 call to GetLatestEventsByBailIDs, got %d", mock.latestEventsCallCount)
+	if mock.latestSummariesCallCount != 1 {
+		t.Errorf("Expected exactly 1 call to GetLatestEventSummariesByBailIDs, got %d", mock.latestSummariesCallCount)
 	}
 
 	expectedIDs := map[uuid.UUID]bool{bailA: false, bailB: false, bailC: false}
-	for _, id := range mock.latestEventsLastCalled {
+	for _, id := range mock.latestSummariesLastCalled {
 		if _, ok := expectedIDs[id]; !ok {
-			t.Errorf("Unexpected bail id passed to GetLatestEventsByBailIDs: %s", id)
+			t.Errorf("Unexpected bail id passed to GetLatestEventSummariesByBailIDs: %s", id)
 		}
 		expectedIDs[id] = true
 	}
 	for id, seen := range expectedIDs {
 		if !seen {
-			t.Errorf("Expected bail id %s to be passed to GetLatestEventsByBailIDs", id)
+			t.Errorf("Expected bail id %s to be passed to GetLatestEventSummariesByBailIDs", id)
 		}
 	}
 
 	// Now drop the sabotage and assert the response shape picks "newest per bail"
 	// and leaves bail C with a nil LastEvent.
-	mock.latestEventsFunc = nil
+	mock.latestSummariesFunc = nil
 	req2 := httptest.NewRequest(http.MethodGet, "/users/"+userID.String()+"/bails", nil)
 	rec2 := httptest.NewRecorder()
 	c2 := server.echo.NewContext(req2, rec2)

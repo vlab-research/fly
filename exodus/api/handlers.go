@@ -38,7 +38,7 @@ func (s *Server) ListBails(c echo.Context) error {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
-	bailResponses := make([]*BailResponse, len(dbBails))
+	bailResponses := make([]*BailListItemResponse, len(dbBails))
 	if len(dbBails) == 0 {
 		return c.JSON(http.StatusOK, BailsListResponse{Bails: bailResponses})
 	}
@@ -48,7 +48,7 @@ func (s *Server) ListBails(c echo.Context) error {
 		bailIDs[i] = dbBail.ID
 	}
 
-	latestByID, err := s.db.GetLatestEventsByBailIDs(ctx, bailIDs)
+	latestByID, err := s.db.GetLatestEventSummariesByBailIDs(ctx, bailIDs)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
@@ -59,15 +59,12 @@ func (s *Server) ListBails(c echo.Context) error {
 			return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert bail: %v", err))
 		}
 
-		var lastEvent *types.BailEvent
-		if dbEvent, ok := latestByID[dbBail.ID]; ok {
-			lastEvent, err = dbEventToTypesEvent(dbEvent)
-			if err != nil {
-				return respondError(c, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("Failed to convert event: %v", err))
-			}
+		var lastEvent *types.BailEventSummary
+		if dbSummary, ok := latestByID[dbBail.ID]; ok {
+			lastEvent = dbEventSummaryToTypesEventSummary(dbSummary)
 		}
 
-		bailResponses[i] = &BailResponse{
+		bailResponses[i] = &BailListItemResponse{
 			Bail:      typeBail,
 			LastEvent: lastEvent,
 		}
@@ -524,4 +521,17 @@ func dbEventToTypesEvent(dbEvent *db.BailEvent) (*types.BailEvent, error) {
 		Error:              dbEvent.Error,
 		ExecutionResults:   dbEvent.ExecutionResults,
 	}, nil
+}
+
+// dbEventSummaryToTypesEventSummary converts a db.BailEventSummary to the
+// public types.BailEventSummary used by the list endpoint.
+func dbEventSummaryToTypesEventSummary(dbSummary *db.BailEventSummary) *types.BailEventSummary {
+	return &types.BailEventSummary{
+		ID:           dbSummary.ID,
+		BailID:       dbSummary.BailID,
+		EventType:    dbSummary.EventType,
+		Timestamp:    dbSummary.Timestamp,
+		UsersMatched: dbSummary.UsersMatched,
+		UsersBailed:  dbSummary.UsersBailed,
+	}
 }

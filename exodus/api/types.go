@@ -27,9 +27,17 @@ type BailResponse struct {
 	LastEvent *types.BailEvent `json:"last_event,omitempty"`
 }
 
+// BailListItemResponse wraps a bail with a lightweight summary of its most
+// recent event. Used by the list endpoint, which does not need the full audit
+// fields present in BailResponse.LastEvent.
+type BailListItemResponse struct {
+	Bail      *types.Bail             `json:"bail"`
+	LastEvent *types.BailEventSummary `json:"last_event,omitempty"`
+}
+
 // BailsListResponse contains a list of bails with their events
 type BailsListResponse struct {
-	Bails []*BailResponse `json:"bails"`
+	Bails []*BailListItemResponse `json:"bails"`
 }
 
 // EventsListResponse contains a list of bail events

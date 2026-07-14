@@ -25,6 +25,18 @@ type BailEvent struct {
 	ExecutionResults   *json.RawMessage `json:"execution_results,omitempty"`
 }
 
+// BailEventSummary is a lightweight projection used for the bail list endpoint.
+// It omits the large audit fields (definition_snapshot, error, execution_results)
+// so the query can be fully satisfied by the idx_bail_events_bail index.
+type BailEventSummary struct {
+	ID           uuid.UUID
+	BailID       *uuid.UUID
+	EventType    string
+	Timestamp    time.Time
+	UsersMatched int
+	UsersBailed  int
+}
+
 // RecordEvent inserts a new bail event into the database
 // The event.ID and event.Timestamp will be populated with generated values
 func (d *DB) RecordEvent(ctx context.Context, event *BailEvent) error {
@@ -114,6 +126,60 @@ func (d *DB) GetLatestEventsByBailIDs(ctx context.Context, bailIDs []uuid.UUID) 
 		if event.BailID != nil {
 			latest[*event.BailID] = event
 		}
+	}
+
+	return latest, nil
+}
+
+// GetLatestEventSummariesByBailIDs returns the most recent event summary for
+// each of the given bail IDs, looked up in a single round-trip. The result map
+// is keyed by bail_id; bails with no recorded events are absent from the map
+// (and not an error).
+//
+// This is intended for the bail list endpoint, which only needs the "last
+// execution" metadata (timestamp and user counts) for the UI. The projection
+// avoids the large JSON audit columns (definition_snapshot, error,
+// execution_results) so the query remains fast even as event history grows.
+func (d *DB) GetLatestEventSummariesByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*BailEventSummary, error) {
+	latest := make(map[uuid.UUID]*BailEventSummary, len(bailIDs))
+	if len(bailIDs) == 0 {
+		return latest, nil
+	}
+
+	query := `
+		SELECT DISTINCT ON (bail_id)
+		       id, bail_id, event_type, timestamp, users_matched, users_bailed
+		FROM chatroach.bail_events
+		WHERE bail_id = ANY($1::uuid[])
+		ORDER BY bail_id, timestamp DESC
+	`
+
+	rows, err := d.pool.Query(ctx, query, bailIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query latest event summaries for bails: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		summary := &BailEventSummary{}
+		err := rows.Scan(
+			&summary.ID,
+			&summary.BailID,
+			&summary.EventType,
+			&summary.Timestamp,
+			&summary.UsersMatched,
+			&summary.UsersBailed,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan event summary: %w", err)
+		}
+		if summary.BailID != nil {
+			latest[*summary.BailID] = summary
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating event summaries: %w", err)
 	}
 
 	return latest, nil
