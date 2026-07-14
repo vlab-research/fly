@@ -178,6 +178,7 @@ function categorizeEvent(nxt) {
   if (_synth('machine_report', nxt)) return 'MACHINE_REPORT'
   if (_synth('bailout', nxt)) return 'BAILOUT'
   if (_synth('block_user', nxt)) return 'BLOCK_USER'
+  if (_synth('restore_state', nxt)) return 'RESTORE_STATE'
   if (_handoverEvent(nxt)) return 'HANDOVER_EVENT'
   if (_externalEvent(nxt)) return 'EXTERNAL_EVENT'
   if (getWatermark(nxt)) return 'WATERMARK'
@@ -405,6 +406,25 @@ function exec(state, nxt) {
       }
     }
 
+    case 'RESTORE_STATE': {
+      // Recovery-only. The event carries a full, self-contained state
+      // snapshot (event.value.state) produced by folding the user's log
+      // offline. We overwrite state from it and advance the pointer to the
+      // event's timestamp so any future reload starts AT this event and
+      // re-hydrates the snapshot without re-folding the events before it
+      // (notably the block_user that this recovers from).
+      //
+      // Unconditional by design: on a live restore the fold starts from
+      // USER_BLOCKED, but on a subsequent Redis-miss reload the fold starts
+      // from START at message_pointer = this timestamp. Gating on any
+      // particular incoming state would break durability on reload.
+      const restored = nxt.event.value.state
+      return {
+        action: 'RESTORE_STATE',
+        stateUpdate: { ...restored, pointer: nxt.timestamp }
+      }
+    }
+
     case 'ECHO': {
       // what happens when you're not in responding state?
       // it shouldn't happen but it does and indicates
@@ -601,6 +621,14 @@ function apply(state, output) {
       }
 
     case 'RESET':
+      return {
+        ..._initialState(),
+        ...output.stateUpdate,
+      }
+
+    case 'RESTORE_STATE':
+      // The snapshot in stateUpdate is a complete state; start from a clean
+      // initial state so no stray fields from the pre-restore state survive.
       return {
         ..._initialState(),
         ...output.stateUpdate,
