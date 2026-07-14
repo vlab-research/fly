@@ -506,12 +506,25 @@ GET /users/:userId/bails
 Authorization: Bearer {token}
 ```
 
-> **Performance note.** Each row in this response is enriched with a `last_event`
-> for the "Last Execution" column. The list endpoint resolves all latest events
-> in **one** batched query (`SELECT DISTINCT ON (bail_id) ... WHERE bail_id = ANY($1::uuid[]) ORDER BY bail_id, timestamp DESC` against `idx_bail_events_bail`)
-> rather than fetching the entire event history per bail. This keeps the request
-> O(N distinct bails owned by the user) instead of O(N bails × events_per_bail),
-> which previously overwhelmed the 10s API timeout under accumulated history.
+> **Performance note.** Each row in this response is enriched with a lightweight
+> `last_event` summary for the "Last Execution" column. The list endpoint resolves
+> all latest events in **one** batched query that selects only the small fields the
+> UI needs:
+>
+> ```sql
+> SELECT DISTINCT ON (bail_id)
+>        id, bail_id, event_type, timestamp, users_matched, users_bailed
+> FROM chatroach.bail_events
+> WHERE bail_id = ANY($1::uuid[])
+> ORDER BY bail_id, timestamp DESC
+> ```
+>
+> This projection is fully covered by the existing `idx_bail_events_bail` index,
+> avoiding the heavy JSON audit columns (`definition_snapshot`, `error`,
+> `execution_results`) and primary-table lookups. The first batched fix (commit
+> `8276e15`) reduced the number of rows touched; this second layer reduces the
+> amount of data read per row, which is what caused the timeout to return for
+> users with very large accumulated event history.
 
 **Response** (200 OK):
 ```json
@@ -532,20 +545,20 @@ Authorization: Bearer {token}
       "last_event": {
         "id": "uuid",
         "bail_id": "uuid",
-        "user_id": "uuid",
-        "bail_name": "string",
         "event_type": "execution|error",
         "timestamp": "ISO-8601",
         "users_matched": 0,
-        "users_bailed": 0,
-        "definition_snapshot": {},
-        "error": null,
-        "execution_results": {"user_ids": ["uid1", "uid2"]}
+        "users_bailed": 0
       }
     }
   ]
 }
 ```
+
+> Note: `GET /users/:userId/bails/:id`, `POST /users/:userId/bails`, and
+> `PUT /users/:userId/bails/:id` still return the full `BailResponse` shape with a
+> complete `last_event` (including `definition_snapshot`, `error`, and
+> `execution_results`). Only the list endpoint uses the lean summary.
 
 ### Get Single Bail
 
@@ -776,6 +789,21 @@ Compound conditions:
   ]
 }
 ```
+
+**BailEventSummary** (returned as `last_event` by the list endpoint):
+
+```json
+{
+  "id": "uuid",
+  "bail_id": "uuid",
+  "event_type": "execution|error",
+  "timestamp": "ISO-8601",
+  "users_matched": 0,
+  "users_bailed": 0
+}
+```
+
+The full `BailEvent` (including `definition_snapshot`, `error`, and `execution_results`) is still returned by `GET /users/:userId/bails/:id`, `POST /users/:userId/bails`, and `PUT /users/:userId/bails/:id`.
 
 ### Error Handling
 

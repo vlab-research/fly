@@ -419,6 +419,18 @@ type BailEvent struct {
 	ExecutionResults   *json.RawMessage `json:"execution_results,omitempty"`
 }
 
+// BailEventSummary is a lightweight projection of the most recent bail event
+// used by the bail list endpoint. It omits the large audit fields that are not
+// needed for the UI.
+type BailEventSummary struct {
+	ID           uuid.UUID  `json:"id"`
+	BailID       *uuid.UUID `json:"bail_id,omitempty"`
+	EventType    string     `json:"event_type"`
+	Timestamp    time.Time  `json:"timestamp"`
+	UsersMatched int        `json:"users_matched"`
+	UsersBailed  int        `json:"users_bailed"`
+}
+
 // Validate checks if the BailEvent is valid
 func (be *BailEvent) Validate() error {
 	if be.UserID == uuid.Nil {
