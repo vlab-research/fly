@@ -244,6 +244,7 @@ def export_data(cnf, export_id, user, survey, options: ExportOptions):
         set_export_status(cnf, export_id, url, status="Finished")
         log.info(f"finished csv export for survey: {survey}")
     except Exception as e:
+        set_metadata(cnf, export_id, error=str(e)[:500])
         set_export_status(cnf, export_id, status="Failed")
         raise e
 
@@ -441,6 +442,7 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         set_export_status(cnf, export_id, url, status="Finished")
         log.info(f"finished full messages export for survey: {survey}")
     except Exception as e:
+        set_metadata(cnf, export_id, error=str(e)[:500])
         set_export_status(cnf, export_id, status="Failed")
         raise e
 
@@ -470,6 +472,7 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options):
         set_export_status(cnf, export_id, url, status="Finished")
         log.info(f"finished chat log export for survey: {survey}")
     except Exception as e:
+        set_metadata(cnf, export_id, error=str(e)[:500])
         set_export_status(cnf, export_id, status="Failed")
         raise e
 

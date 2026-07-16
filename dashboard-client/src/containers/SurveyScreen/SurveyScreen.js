@@ -173,8 +173,8 @@ const renderMetadata = (metadata) => {
   return (
     <span>
       {entries.map(([k, v]) => (
-        <Tag key={k} color="blue" style={{ marginBottom: 4 }}>
-          {`${k}: ${typeof v === 'number' ? v.toLocaleString() : v}`}
+        <Tag key={k} color={k === 'error' ? 'red' : 'blue'} style={{ marginBottom: 4 }}>
+          {k === 'error' ? v : `${k}: ${typeof v === 'number' ? v.toLocaleString() : v}`}
         </Tag>
       ))}
     </span>
@@ -188,6 +188,9 @@ const exportColumns = [
       return isStale(record.updated)
         ? <span style={{ color: '#faad14' }}>Stale</span>
         : status;
+    }
+    if (status === 'Failed') {
+      return <span style={{ color: '#ff4d4f' }}>Failed</span>;
     }
     return status;
   }},
