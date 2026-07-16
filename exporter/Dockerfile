@@ -5,7 +5,9 @@ WORKDIR /usr/src/app
 RUN apt-get update && \
     apt-get install --yes \
     curl \
-    git
+    git \
+    g++ && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip
 
