@@ -525,7 +525,7 @@ describe('getState', () => {
   })
 
 
-  it('Responds while waiting with response and repeats with old waitstart', () => {
+  it('Responds while waiting with response and gets fresh waitstart on new wait', () => {
 
     const wait = { type: 'timeout', value: '2 days' }
 
@@ -538,7 +538,7 @@ describe('getState', () => {
     ]
     const state = getState(log)
     state.state.should.equal('WAIT_EXTERNAL_EVENT')
-    state.waitStart.should.equal(5)
+    state.waitStart.should.equal(10)
   })
 
 
@@ -900,6 +900,69 @@ describe('getState', () => {
     output.form.should.equal('BAR')
     actions.messages[0].recipient.one_time_notif_token.should.equal('FOOBAR')
     actions.messages[0].message.text.should.equal('barbaz')
+  })
+
+  describe('transient field cleanup', () => {
+
+    it('clears error on REDO but keeps retries accumulating', () => {
+      const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
+      const redo = synthetic({ type: 'redo' })
+      const log = [referral, echo, text, report, redo]
+      const state = getState(log)
+      state.state.should.equal('RESPONDING')
+      should.not.exist(state.error)
+      state.retries.should.exist
+      state.retries.length.should.equal(1)
+    })
+
+    it('clears error and retries when user responds from ERROR state', () => {
+      const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
+      const log = [referral, echo, text, report, text]
+      const state = getState(log)
+      state.state.should.equal('RESPONDING')
+      should.not.exist(state.error)
+      should.not.exist(state.retries)
+    })
+
+    it('clears wait when entering ERROR from WAIT_EXTERNAL_EVENT', () => {
+      const wait = { type: 'timeout', value: '2 days' }
+      const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
+      const log = [referral, echo, text, _echo({ wait, ref: 'bar' }), report]
+      const state = getState(log)
+      state.state.should.equal('ERROR')
+      should.not.exist(state.wait)
+      should.not.exist(state.waitStart)
+      state.error.code.should.equal('FOO')
+    })
+
+    it('clears wait when entering BLOCKED from WAIT_EXTERNAL_EVENT', () => {
+      const wait = { type: 'timeout', value: '2 days' }
+      const fbReport = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200, message: 'foo' } } })
+      const log = [referral, echo, text, _echo({ wait, ref: 'bar' }), fbReport]
+      const state = getState(log)
+      state.state.should.equal('BLOCKED')
+      should.not.exist(state.wait)
+      should.not.exist(state.waitStart)
+    })
+
+    it('clears error, wait, and retries on END', () => {
+      const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
+      const log = [referral, echo, text, report, tyEcho]
+      const state = getState(log)
+      state.state.should.equal('END')
+      should.not.exist(state.error)
+      should.not.exist(state.wait)
+      should.not.exist(state.retries)
+    })
+
+    it('clears wait and waitStart when user responds while waiting', () => {
+      const wait = { type: 'timeout', value: '2 days' }
+      const log = [referral, echo, delivery, text, _echo({ wait, ref: 'bar' }), text]
+      const state = getState(log)
+      state.state.should.equal('RESPONDING')
+      should.not.exist(state.wait)
+      should.not.exist(state.waitStart)
+    })
   })
 })
 
