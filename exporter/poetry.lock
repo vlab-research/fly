@@ -1079,14 +1079,14 @@ zstd = ["zstandard (>=0.18.0)"]
 
 [[package]]
 name = "vlab-prepro"
-version = "0.5.2"
+version = "0.5.3"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 files = [
-    {file = "vlab_prepro-0.5.2-py3-none-any.whl", hash = "sha256:7291154cd2fb09c18faafd8f4e4731f33514ea5277c9425a6628970ff4ceab6f"},
-    {file = "vlab_prepro-0.5.2.tar.gz", hash = "sha256:02ca961a12a3ebe6b82648c78ebf817beef4171cf5c5041882c689ffa6f1dea3"},
+    {file = "vlab_prepro-0.5.3-py3-none-any.whl", hash = "sha256:d5a48e9dc829374005186886142e2d5b37d97c5d03c1deaccbf56645c1164441"},
+    {file = "vlab_prepro-0.5.3.tar.gz", hash = "sha256:47a1d711e0094f5b00c9cbc54d5bcb3e70f9962b10659817bfe3f9b3acb45f82"},
 ]
 
 [package.dependencies]
@@ -1098,4 +1098,4 @@ toolz = ">=0.11.1,<0.12.0"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "6b5f38f1f739efa503fee99d2a25cbb152464572ba352e8f98620f4838883595"
+content-hash = "4b32f64ca48fa0ef54da96ca37b63d631ce160853e5eb5c615e26b72ccbb968a"
