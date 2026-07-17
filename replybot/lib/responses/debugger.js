@@ -1,9 +1,8 @@
 const { StateStore } = require('../typewheels/statestore')
 const Chatbase = require(process.env.CHATBASE_BACKEND)
 const { PromiseStream } = require('@vlab-research/steez')
-const { parseEvent } = require('@vlab-research/utils')
+const { parseEvent } = require('../event-normalizer')
 const { DBStream } = require('./pgstream')
-const { TokenStore } = require('../typewheels/tokenstore')
 const { Machine } = require('../typewheels/transition')
 
 // Keyset pagination on (timestamp, hsh) -- avoids re-scanning and
@@ -45,8 +44,7 @@ const stream = new DBStream(fn, null)
 const chatbase = new Chatbase()
 const emptyBase = { get: () => [], pool: chatbase.pool }
 const stateStore = new StateStore(emptyBase)
-const tokenStore = new TokenStore(chatbase.pool)
-const machine = new Machine('600s', tokenStore)
+const machine = new Machine('600s')
 
 stream
   .pipe(new PromiseStream(async ({ userid: userId, content: event }) => {

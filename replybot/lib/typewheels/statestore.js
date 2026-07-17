@@ -1,7 +1,7 @@
 const Redis = require('ioredis')
 const parse = require('parse-duration')
 const { getState } = require('./machine')
-const { parseEvent } = require('@vlab-research/utils')
+const { parseEvent } = require('../event-normalizer')
 
 const STATE_STORE_LIMIT = process.env.STATE_STORE_LIMIT; // can be undefined 
 
@@ -65,14 +65,10 @@ class StateStore {
     return `state:${user}`
   }
 
-  parseEvent(event) {
-    return parseEvent(event)
-  }
-
   async _getEvents(user, event) {
     const res = await this.db.get(user, +STATE_STORE_LIMIT)
     return _resolve(res, event)
-      .map(this.parseEvent)
+      .map(parseEvent)
       .slice(0, -1)
   }
 

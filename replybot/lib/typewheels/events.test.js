@@ -2,244 +2,276 @@ const USER_ID = '1800244896727776'
 const PAGE_ID = '1051551461692797'
 
 const referral = {
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_referral',
+  user_id: USER_ID,
   timestamp: 1542123799219,
-  sender: { id: USER_ID },
-  referral:
-  {
-    ref: 'form.FOO.foo.bar',
-    source: 'SHORTLINK',
-    type: 'OPEN_THREAD'
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'conversation_started',
+  payload: {
+    type: 'conversation_started',
+    trigger: 'referral',
+    referral: { ref: 'form.FOO.foo.bar', source: 'SHORTLINK', type: 'OPEN_THREAD' }
   }
 }
 
 const payloadReferral = {
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_payload_referral',
+  user_id: USER_ID,
   timestamp: 1542123799219,
-  sender: { id: USER_ID },
-  postback: {
-    payload: { referral: { ref: "form.FOO.foo.bar" } },
-    title: 'whatever'
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'conversation_started',
+  payload: {
+    type: 'conversation_started',
+    trigger: 'referral',
+    referral: { ref: 'form.FOO.foo.bar' }
   }
 }
 
-
-// Legacy postback response (old format for yes_no/legal with boolean values)
-// Keep this for backward compatibility testing - replaying old user logs
 const multipleChoice = {
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_mc',
+  user_id: USER_ID,
   timestamp: 1542116257642,
-  sender: { id: USER_ID },
-  postback:
-  {
-    payload: { value: true, ref: "foo" },
-    title: 'I Accept'
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'user_interaction',
+  payload: {
+    type: 'user_interaction',
+    value: true,
+    label: 'I Accept',
+    source_message_id: 'foo',
+    interaction_type: 'postback'
   }
 }
 
-// New quick reply response format for yes_no/legal (uses string labels)
 const legalQuickReply = {
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_legal_qr',
+  user_id: USER_ID,
   timestamp: 1542116257642,
-  sender: { id: USER_ID },
-  message: {
-    quick_reply: {
-      payload: { value: 'I Accept', ref: "foo" }
-    }
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'user_interaction',
+  payload: {
+    type: 'user_interaction',
+    value: 'I Accept',
+    label: 'I Accept',
+    source_message_id: 'foo',
+    interaction_type: 'quick_reply'
   }
 }
 
 const getStarted = {
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_get_started',
+  user_id: USER_ID,
   timestamp: 1542116257642,
-  sender: { id: USER_ID },
-  postback: {
-    payload: "get_started",
-    referral: {
-      ref: "form.FOO",
-      source: "SHORTLINK",
-      type: "OPEN_THREAD",
-    },
-    title: 'Get Started'
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'conversation_started',
+  payload: {
+    type: 'conversation_started',
+    trigger: 'referral',
+    referral: { ref: 'form.FOO', source: 'SHORTLINK', type: 'OPEN_THREAD' }
   }
 }
-// Text sent by user...
-const text = {
-  sender: { id: USER_ID },
-  recipient: { id: PAGE_ID },
-  timestamp: 1542116363617,
-  message: { text: 'foo' }
-}
 
+const text = {
+  event_id: 'evt_test_text',
+  user_id: USER_ID,
+  timestamp: 1542116363617,
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'user_text',
+  payload: {
+    type: 'user_text',
+    text: 'foo'
+  }
+}
 
 const sticker = {
-  sender: { id: USER_ID },
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_sticker',
+  user_id: USER_ID,
   timestamp: 1542116363617,
-  message: { stickerId: 369239263222822, attachments: [{ type: 'image' }] }
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'user_media',
+  payload: {
+    type: 'user_media',
+    attachments: [{ type: 'image' }],
+    stickerId: 369239263222822
+  }
 }
 
-// Continue via quick reply...
 const qr = {
-  sender: { id: USER_ID },
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_qr',
+  user_id: USER_ID,
   timestamp: 20,
-  message:
-    { quick_reply: { payload: { value: "Continue", ref: "foo" } } }
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'user_interaction',
+  payload: {
+    type: 'user_interaction',
+    value: 'Continue',
+    label: '',
+    source_message_id: 'foo',
+    interaction_type: 'quick_reply'
+  }
 }
 
-// read
 const read = {
-  sender: { id: USER_ID },
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_read',
+  user_id: USER_ID,
   timestamp: 15,
-  read: { watermark: 10 }
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'bot_message_read',
+  payload: {
+    type: 'bot_message_read',
+    watermark: 10,
+    read_at: 15
+  }
 }
 
 const delivery = {
-  sender: { id: USER_ID },
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_delivery',
+  user_id: USER_ID,
   timestamp: 16,
-  delivery:
-    { watermark: 15 }
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'bot_message_delivered',
+  payload: {
+    type: 'bot_message_delivered',
+    watermark: 15,
+    delivered_at: 16
+  }
 }
 
 const optin = {
-  sender: { id: USER_ID },
-  recipient: { id: PAGE_ID },
+  event_id: 'evt_test_optin',
+  user_id: USER_ID,
   timestamp: 25,
-  optin: {
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'optin',
+  payload: {
     type: 'one_time_notif_req',
-    one_time_notif_token: 'FOOBAR',
+    token: 'FOOBAR',
     payload: { ref: 'foo' }
   }
 }
 
-// is echo
 const echo = {
-  sender: { id: PAGE_ID },
-  recipient: { id: USER_ID },
+  event_id: 'evt_test_echo',
+  user_id: USER_ID,
   timestamp: 5,
-  message:
-  {
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'bot_message_sent',
+  payload: {
+    type: 'bot_message_sent',
     is_echo: true,
-    metadata: { "ref": "foo" },
+    metadata: { ref: 'foo' },
     text: 'Whatsupp welcome you agree or what?'
   }
 }
 
 const statementEcho = {
-  sender: { id: PAGE_ID },
-  recipient: { id: USER_ID },
+  event_id: 'evt_test_stmt_echo',
+  user_id: USER_ID,
   timestamp: 5,
-  message:
-  {
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'bot_message_sent',
+  payload: {
+    type: 'bot_message_sent',
     is_echo: true,
-    metadata: { "ref": "bar", "type": "statement" },
+    metadata: { ref: 'bar', type: 'statement' },
     text: 'Whatsupp, welcome.'
   }
 }
 
 const tyEcho = {
-  sender: { id: PAGE_ID },
-  recipient: { id: USER_ID },
+  event_id: 'evt_test_ty_echo',
+  user_id: USER_ID,
   timestamp: 5,
-  message:
-  {
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'bot_message_sent',
+  payload: {
+    type: 'bot_message_sent',
     is_echo: true,
-    metadata: { "ref": "baz", "type": "thankyou_screen" },
+    metadata: { ref: 'baz', type: 'thankyou_screen' },
     text: 'Thanks'
   }
 }
 
-
 const fakeEcho = {
-  sender: { id: PAGE_ID },
-  recipient: { id: USER_ID },
+  event_id: 'evt_test_fake_echo',
+  user_id: USER_ID,
   timestamp: 5,
-  message:
-  {
-    fake_echo: true,
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'bot_message_sent',
+  payload: {
+    type: 'bot_message_sent',
     is_echo: true,
-    metadata: { "ref": "foo", "type": "statement" },
+    metadata: { ref: 'foo', type: 'statement', fake_echo: true },
     text: 'Whatsupp, welcome.'
   }
 }
 
 const repeatEcho = {
-  sender: { id: PAGE_ID },
-  recipient: { id: USER_ID },
+  event_id: 'evt_test_repeat_echo',
+  user_id: USER_ID,
   timestamp: 5,
-  message:
-  {
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'bot_message_sent',
+  payload: {
+    type: 'bot_message_sent',
     is_echo: true,
-    metadata: { ref: "bar", repeat: "true" },
+    metadata: { ref: 'bar', repeat: 'true' },
     text: 'Whatsupp, welcome.'
   }
 }
 
-
 const syntheticBail = {
-  source: 'synthetic',
-  event: {
-    type: 'bailout',
-    value: {
-      form: 'BAR'
-    }
-  },
-  user: USER_ID,
-  page: PAGE_ID,
-  timestamp: 20
+  event_id: 'evt_test_bail',
+  user_id: USER_ID,
+  timestamp: 20,
+  source: { type: 'synthetic' },
+  event_type: 'synthetic_bailout',
+  payload: { form: 'BAR' }
 }
 
 const syntheticRedo = {
-  source: 'synthetic',
-  event: {
-    type: 'redo'
-  },
-  user: USER_ID,
-  page: PAGE_ID,
-  timestamp: 20
+  event_id: 'evt_test_redo',
+  user_id: USER_ID,
+  timestamp: 20,
+  source: { type: 'synthetic' },
+  event_type: 'synthetic_redo',
+  payload: null
 }
 
-
 const syntheticPR = {
-  source: 'synthetic',
-  event: {
-    type: 'platform_response',
-    value: {
-      response: 'OK',
-      metadata: ''
-    }
-  },
-  user: USER_ID,
-  page: PAGE_ID,
-  timestamp: 20
+  event_id: 'evt_test_pr',
+  user_id: USER_ID,
+  timestamp: 20,
+  source: { type: 'synthetic' },
+  event_type: 'synthetic_platform_response',
+  payload: { response: 'OK', metadata: '' }
 }
 
 const synthetic = (event, more = {}) => {
+  const eventType = event.type
+  const unifiedType = `synthetic_${eventType}`
   return {
-    source: 'synthetic',
-    user: USER_ID,
-    page: PAGE_ID,
+    event_id: `evt_test_${eventType}`,
+    user_id: USER_ID,
     timestamp: 20,
-    event,
+    source: { type: 'synthetic' },
+    event_type: unifiedType,
+    payload: event.value !== undefined ? event.value : null,
     ...more
   }
 }
 
 const reaction = {
-  sender: { id: '1972130092884542' },
-  recipient: { id: USER_ID },
+  event_id: 'evt_test_reaction',
+  user_id: '1972130092884542',
   timestamp: 1581454140135,
-  reaction: {
-    action: 'react',
-    emoji: '😠',
-    reaction: 'angry'
-  },
-  source: 'messenger'
+  source: { type: 'messenger', account_id: USER_ID },
+  event_type: 'user_reaction',
+  payload: {
+    type: 'user_reaction',
+    reaction: 'angry',
+    emoji: '\u{1F620}',
+    action: 'react'
+  }
 }
 
-
-
-module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic }
+module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, PAGE_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic }

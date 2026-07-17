@@ -1,6 +1,25 @@
-const { recursiveJSONParser, getPageFromEvent } = require('@vlab-research/utils')
 const farmhash = require('farmhash')
-const _ = require('lodash')
+
+function recursiveJSONParser(obj) {
+  function traverse(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj
+    for (let key in obj) {
+      obj[key] = recursiveJSONParser(obj[key])
+    }
+    return obj
+  }
+
+  try {
+    const o = JSON.parse(obj)
+    if (o === +obj) {
+      return traverse(obj)
+    }
+    return traverse(o)
+  }
+  catch (e) {
+    return traverse(obj)
+  }
+}
 
 function parseLogJSON(log) {
   return recursiveJSONParser(log)
@@ -28,7 +47,7 @@ function hash(s) {
 
 
 function randomSeed(event, md) {
-  const userId = event.sender.id
+  const userId = event.user_id
   const { form } = md
 
   if (!form || !userId) return null
@@ -38,27 +57,25 @@ function randomSeed(event, md) {
 }
 
 function getMetadata(event) {
-  let md
+  let md = {}
 
   try {
+    let r
+    if (event.event_type === 'conversation_started') {
+      r = event.payload.referral
+    }
 
-    const r = event.referral ||
-      _.get(event, ['postback', 'referral']) ||
-      _.get(event, ['postback', 'payload', 'referral']) ||
-      _.get(event, ['message', 'quick_reply', 'payload', 'referral'])
-
-    const pairs = r.ref.split('.')
-    md = _group(pairs.map(decodeURIComponent))
-
-  }
-  catch (e) {
-    // TODO: should only really do this for TypeErrors from referral or ref...
+    if (r && r.ref) {
+      const pairs = r.ref.split('.')
+      md = _group(pairs.map(decodeURIComponent))
+    }
+  } catch (e) {
     md = {}
   }
 
   md.form = md.form || process.env.FALLBACK_FORM
   md.startTime = event.timestamp
-  md.pageid = getPageFromEvent(event)
+  md.pageid = event.source.account_id
 
   return {
     ...md,
