@@ -409,6 +409,20 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow);
     });
 
+    it('Multi-part attachment question sends both the image and the multiple-choice', async () => {
+      const userId = uuid();
+      const fields = getFields('forms/multi-part-attachment.json');
+
+      const testFlow: TestFlow = [
+        [ok, fields[0], []],
+        [ok, fields[1], [makeQR(fields[1], userId, 0)]],
+        [ok, fields[2], []]
+      ];
+
+      await sendMessage(makeReferral(userId, 'multi-part-attachment'));
+      await flowMaster(userId, testFlow);
+    });
+
     it('Waits for external event and continues after event', async () => {
       const userId = uuid();
       const fields = getFields('forms/Ep5wnS.json');
