@@ -7,7 +7,6 @@ import (
 	"github.com/vlab-research/fly/message-worker/types"
 )
 
-// Helper functions for pointer creation
 func stringPtr(s string) *string {
 	return &s
 }
@@ -51,9 +50,9 @@ func TestTranslateToMessenger(t *testing.T) {
 					Type:         types.MessageTypeQuestion,
 					QuestionText: stringPtr("What is your gender?"),
 					Options: []types.Option{
-						{Value: "male", Label: "Male"},
-						{Value: "female", Label: "Female"},
-						{Value: "other", Label: "Other"},
+						{Value: json.RawMessage(`"male"`), Label: "Male"},
+						{Value: json.RawMessage(`"female"`), Label: "Female"},
+						{Value: json.RawMessage(`"other"`), Label: "Other"},
 					},
 				},
 			},
@@ -78,19 +77,19 @@ func TestTranslateToMessenger(t *testing.T) {
 					Type:         types.MessageTypeQuestion,
 					QuestionText: stringPtr("Select a month:"),
 					Options: []types.Option{
-						{Value: "1", Label: "January"},
-						{Value: "2", Label: "February"},
-						{Value: "3", Label: "March"},
-						{Value: "4", Label: "April"},
-						{Value: "5", Label: "May"},
-						{Value: "6", Label: "June"},
-						{Value: "7", Label: "July"},
-						{Value: "8", Label: "August"},
-						{Value: "9", Label: "September"},
-						{Value: "10", Label: "October"},
-						{Value: "11", Label: "November"},
-						{Value: "12", Label: "December"},
-						{Value: "0", Label: "Not sure"},
+						{Value: json.RawMessage(`"1"`), Label: "January"},
+						{Value: json.RawMessage(`"2"`), Label: "February"},
+						{Value: json.RawMessage(`"3"`), Label: "March"},
+						{Value: json.RawMessage(`"4"`), Label: "April"},
+						{Value: json.RawMessage(`"5"`), Label: "May"},
+						{Value: json.RawMessage(`"6"`), Label: "June"},
+						{Value: json.RawMessage(`"7"`), Label: "July"},
+						{Value: json.RawMessage(`"8"`), Label: "August"},
+						{Value: json.RawMessage(`"9"`), Label: "September"},
+						{Value: json.RawMessage(`"10"`), Label: "October"},
+						{Value: json.RawMessage(`"11"`), Label: "November"},
+						{Value: json.RawMessage(`"12"`), Label: "December"},
+						{Value: json.RawMessage(`"0"`), Label: "Not sure"},
 					},
 				},
 			},
@@ -125,20 +124,20 @@ func TestTranslateToMessenger(t *testing.T) {
 					Type:         types.MessageTypeQuestion,
 					QuestionText: stringPtr("Select an option:"),
 					Options: []types.Option{
-						{Value: "1", Label: "Option 1"},
-						{Value: "2", Label: "Option 2"},
-						{Value: "3", Label: "Option 3"},
-						{Value: "4", Label: "Option 4"},
-						{Value: "5", Label: "Option 5"},
-						{Value: "6", Label: "Option 6"},
-						{Value: "7", Label: "Option 7"},
-						{Value: "8", Label: "Option 8"},
-						{Value: "9", Label: "Option 9"},
-						{Value: "10", Label: "Option 10"},
-						{Value: "11", Label: "Option 11"},
-						{Value: "12", Label: "Option 12"},
-						{Value: "13", Label: "Option 13"},
-						{Value: "14", Label: "Option 14"},
+						{Value: json.RawMessage(`"1"`), Label: "Option 1"},
+						{Value: json.RawMessage(`"2"`), Label: "Option 2"},
+						{Value: json.RawMessage(`"3"`), Label: "Option 3"},
+						{Value: json.RawMessage(`"4"`), Label: "Option 4"},
+						{Value: json.RawMessage(`"5"`), Label: "Option 5"},
+						{Value: json.RawMessage(`"6"`), Label: "Option 6"},
+						{Value: json.RawMessage(`"7"`), Label: "Option 7"},
+						{Value: json.RawMessage(`"8"`), Label: "Option 8"},
+						{Value: json.RawMessage(`"9"`), Label: "Option 9"},
+						{Value: json.RawMessage(`"10"`), Label: "Option 10"},
+						{Value: json.RawMessage(`"11"`), Label: "Option 11"},
+						{Value: json.RawMessage(`"12"`), Label: "Option 12"},
+						{Value: json.RawMessage(`"13"`), Label: "Option 13"},
+						{Value: json.RawMessage(`"14"`), Label: "Option 14"},
 					},
 				},
 			},
@@ -199,7 +198,7 @@ func TestTranslateToMessenger(t *testing.T) {
 				Platform:       types.PlatformMessenger,
 				Message: types.MessageContent{
 					Type: types.MessageTypeText,
-					Text: nil, // Missing text
+					Text: nil,
 				},
 			},
 			wantErr: true,
@@ -213,7 +212,7 @@ func TestTranslateToMessenger(t *testing.T) {
 				Platform:       types.PlatformMessenger,
 				Message: types.MessageContent{
 					Type:    types.MessageTypeQuestion,
-					Options: []types.Option{{Value: "yes", Label: "Yes"}},
+					Options: []types.Option{{Value: json.RawMessage(`"yes"`), Label: "Yes"}},
 				},
 			},
 			wantErr: true,
@@ -228,7 +227,6 @@ func TestTranslateToMessenger(t *testing.T) {
 				return
 			}
 			if !tt.wantErr {
-				// Compare JSON representations for deep equality
 				gotJSON, _ := json.Marshal(got)
 				wantJSON, _ := json.Marshal(tt.want)
 				if string(gotJSON) != string(wantJSON) {
