@@ -29,7 +29,7 @@ function translateTextField(field) {
 
 function translateQuestionWithChoices(field) {
   const options = field.properties.choices.map(choice => ({
-    value: choice.ref || choice.label,
+    value: choice.label,
     label: choice.label,
     description: null
   }))
@@ -48,8 +48,8 @@ function translateQuestionWithChoices(field) {
 
 function translateYesNo(field) {
   const options = [
-    { value: true, label: 'Yes', description: null },
-    { value: false, label: 'No', description: null }
+    { value: 'Yes', label: 'Yes', description: null },
+    { value: 'No', label: 'No', description: null }
   ]
 
   return {
@@ -66,8 +66,8 @@ function translateYesNo(field) {
 
 function translateLegal(field) {
   const options = [
-    { value: true, label: 'I Accept', description: null },
-    { value: false, label: "I don't Accept", description: null }
+    { value: 'I Accept', label: 'I Accept', description: null },
+    { value: "I don't Accept", label: "I don't Accept", description: null }
   ]
 
   return {

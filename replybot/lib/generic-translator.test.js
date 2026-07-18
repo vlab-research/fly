@@ -103,5 +103,57 @@ describe('translateTypeformField', () => {
       result.metadata.should.have.property('keepMoving', false)
       result.metadata.should.have.property('ref', 'q_1')
     })
+
+    it('uses choice label as value (not ref)', () => {
+      const field = {
+        type: 'multiple_choice',
+        ref: 'q_1',
+        title: 'Pick one',
+        properties: {
+          choices: [
+            { label: 'Option A', ref: 'opt_a' },
+            { label: 'Option B', ref: 'opt_b' }
+          ]
+        }
+      }
+
+      const result = translateTypeformField(field)
+
+      result.options.should.have.lengthOf(2)
+      result.options[0].should.deep.equal({ value: 'Option A', label: 'Option A', description: null })
+      result.options[1].should.deep.equal({ value: 'Option B', label: 'Option B', description: null })
+    })
+  })
+
+  describe('translateYesNo', () => {
+    it('uses string labels as values (not booleans)', () => {
+      const field = {
+        type: 'yes_no',
+        ref: 'q_yes_no',
+        title: 'Do you agree?'
+      }
+
+      const result = translateTypeformField(field)
+
+      result.options.should.have.lengthOf(2)
+      result.options[0].should.deep.equal({ value: 'Yes', label: 'Yes', description: null })
+      result.options[1].should.deep.equal({ value: 'No', label: 'No', description: null })
+    })
+  })
+
+  describe('translateLegal', () => {
+    it('uses string labels as values (not booleans)', () => {
+      const field = {
+        type: 'legal',
+        ref: 'q_legal',
+        title: 'Do you accept?'
+      }
+
+      const result = translateTypeformField(field)
+
+      result.options.should.have.lengthOf(2)
+      result.options[0].should.deep.equal({ value: 'I Accept', label: 'I Accept', description: null })
+      result.options[1].should.deep.equal({ value: "I don't Accept", label: "I don't Accept", description: null })
+    })
   })
 })
