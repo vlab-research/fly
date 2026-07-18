@@ -3,6 +3,10 @@
 ## Purpose
 Resume point for rebuilding the platform-abstraction work onto fresh main and hardening it to pass the facebot integration suite. Paused deliberately at owner request.
 
+## Staging reality (known facts)
+
+**Staging usage to date**: Exactly ONE two-message attempt was made on staging (branch v0.0.205-wa/v0.1.11-wa deployed to vstag). In that attempt, the bot sent the image (picture) but did NOT send the multiple-choice question that should have followed. That single two-message attempt is the **entire real-world usage** of the abstraction on staging. Staging is NOT a validated or "working" baseline — no full conversation has ever completed there. Behavior beyond that one attempt is unverified on staging.
+
 ## Context (verified facts)
 
 **Main branch state**: Phase-1 only. message-worker exists but replybot emits Facebook-NATIVE payloads (type:'native'); message-worker forwards without translating (its translator functions are dead code). Messenger-only inbound. No event-normalizer on main.
@@ -55,7 +59,7 @@ fe340db test(facebot): re-apply multi-part attachment integration test on v2
 
 ## THE BLOCKER: facebot integration suite = **0 passing / 26 failing**
 
-This is the first-ever integration run against the abstraction. Not 26 independent issues — **~3 root causes** gate all others. Full failure inventory: see `planning/v2-integration-test-results.md`.
+The facebot integration test suite runs the full pipeline on v2 (v2 inherits main's testrunner, which boots message-worker). Current result: 0 passing / 26 failing. This is the first end-to-end exercise of the abstraction. Not 26 independent issues — **~3 root causes** gate all others. Full failure inventory: see `planning/v2-integration-test-results.md`.
 
 ### Root cause #1 (LINCHPIN, NOT yet root-caused) — quick-reply/choice ANSWERS rejected
 
@@ -65,7 +69,7 @@ This is the first-ever integration run against the abstraction. Not 26 independe
 
 **Diagnosis attempt 2** (planning/v2-verification-status.md): Contradicted attempt 1; unclear if the issue is parsing, matching logic, or something else.
 
-**Status**: UNRESOLVED. Two diagnosis passes gave conflicting signals. The true integration cause is NOT pinned.
+**Status**: UNRESOLVED — two diagnosis passes gave conflicting unit-level signals. To determine whether this is a real bug in the matching logic or a test-harness simulation of an incorrect round-trip, hands-on observation of the running stack is required.
 
 **NEXT STEP (hands-on, REQUIRED)**:
 1. Instrument the answer-validation path in v2: add logging at the point where replybot evaluates whether an incoming answer matches one of the current question's valid options.
@@ -74,7 +78,7 @@ This is the first-ever integration run against the abstraction. Not 26 independe
    - The current question's valid options at the moment the "please use the buttons" error fires
 3. Run ONE integration test (e.g., the opinion_scale logic-jump test, or the payment test).
 4. Read the **container logs** (replybot and message-worker) to see the real value-vs-options mismatch.
-5. **DO NOT guess from unit code alone.** The bug is an integration-level data-flow issue, not a parsing issue.
+5. **DO NOT guess from unit code alone.** Resolve this by observing the running stack, not unit code analysis.
 
 ### Root cause #2 — all Messenger TEMPLATE types dropped (feature-add, ~135-185 LOC, owner approved)
 
@@ -96,7 +100,7 @@ This is the first-ever integration run against the abstraction. Not 26 independe
 
 ## IMPORTANT CAVEAT
 
-These abstraction bugs very likely exist on STAGING too (old branch v0.0.205-wa/v0.1.11-wa is deployed to vstag) — the abstraction was **never integration-tested**. Do not assume staging is fully working just because it deploys.
+**Staging usage to date = one two-message attempt** (see Staging reality above). Behavior beyond that single attempt is unverified anywhere, including on staging. These bugs may or may not exist on the old branch; the abstraction has never been full-flow validated anywhere.
 
 ## Resume order
 
