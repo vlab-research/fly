@@ -58,10 +58,6 @@ func translateMessengerText(msg types.MessageContent, metadata string) (types.Me
 	if len(msg.Metadata) > 0 {
 		fieldType := msg.GetTypeFromMetadata()
 		switch fieldType {
-		case "phone_number":
-			result.QuickReplies = []types.QuickReply{
-				{ContentType: "user_phone_number"},
-			}
 		case "email":
 			result.QuickReplies = []types.QuickReply{
 				{ContentType: "user_email"},
@@ -120,6 +116,10 @@ func buildQuickReplyPayload(value json.RawMessage, ref string) string {
 	return string(data)
 }
 
+func ptrBool(b bool) *bool {
+	return &b
+}
+
 func translateMessengerMedia(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
 	var attachmentType string
 	switch *msg.MediaType {
@@ -139,7 +139,8 @@ func translateMessengerMedia(msg types.MessageContent, metadata string) (types.M
 		Attachment: &types.Attachment{
 			Type: attachmentType,
 			Payload: types.AttachmentPayload{
-				URL: *msg.MediaURL,
+				URL:        *msg.MediaURL,
+				IsReusable: ptrBool(true),
 			},
 		},
 		Metadata: metadata,

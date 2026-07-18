@@ -15,6 +15,10 @@ func mediaTypePtr(m types.MediaType) *types.MediaType {
 	return &m
 }
 
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func TestTranslateToMessenger(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -160,7 +164,8 @@ func TestTranslateToMessenger(t *testing.T) {
 				Attachment: &types.Attachment{
 					Type: "image",
 					Payload: types.AttachmentPayload{
-						URL: "https://example.com/image.jpg",
+						URL:        "https://example.com/image.jpg",
+						IsReusable: boolPtr(true),
 					},
 				},
 			},
@@ -183,7 +188,8 @@ func TestTranslateToMessenger(t *testing.T) {
 				Attachment: &types.Attachment{
 					Type: "video",
 					Payload: types.AttachmentPayload{
-						URL: "https://example.com/video.mp4",
+						URL:        "https://example.com/video.mp4",
+						IsReusable: boolPtr(true),
 					},
 				},
 			},
@@ -216,6 +222,48 @@ func TestTranslateToMessenger(t *testing.T) {
 				},
 			},
 			wantErr: true,
+		},
+		{
+			name: "phone field (no quick reply)",
+			cmd: types.SendMessageCommand{
+				CommandID:      "cmd_9",
+				ConversationID: "conv_1",
+				UserID:         "user_1",
+				Platform:       types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("What is your phone number?"),
+					Metadata: json.RawMessage(`{"type":"phone_number","ref":"phone_1"}`),
+				},
+			},
+			want: types.MessengerMessage{
+				Text:     "What is your phone number?",
+				Metadata: `{"type":"phone_number","ref":"phone_1"}`,
+				// Note: NO QuickReplies for phone field
+			},
+			wantErr: false,
+		},
+		{
+			name: "email field (with quick reply)",
+			cmd: types.SendMessageCommand{
+				CommandID:      "cmd_10",
+				ConversationID: "conv_1",
+				UserID:         "user_1",
+				Platform:       types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("What is your email?"),
+					Metadata: json.RawMessage(`{"type":"email","ref":"email_1"}`),
+				},
+			},
+			want: types.MessengerMessage{
+				Text:     "What is your email?",
+				Metadata: `{"type":"email","ref":"email_1"}`,
+				QuickReplies: []types.QuickReply{
+					{ContentType: "user_email"},
+				},
+			},
+			wantErr: false,
 		},
 	}
 

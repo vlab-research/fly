@@ -23,5 +23,6 @@ type Attachment struct {
 
 // AttachmentPayload contains the attachment URL
 type AttachmentPayload struct {
-	URL string `json:"url"`
+	URL         string `json:"url"`
+	IsReusable  *bool  `json:"is_reusable,omitempty"`
 }
