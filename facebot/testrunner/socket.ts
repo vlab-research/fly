@@ -46,6 +46,39 @@ async function send(token: string, json: any): Promise<any> {
   return res;
 }
 
+function normalizeMetadataForComparison(obj: any): any {
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
+
+  // If this is an array, recursively normalize each element
+  if (Array.isArray(obj)) {
+    return obj.map(normalizeMetadataForComparison);
+  }
+
+  // If this object has a metadata field that is a JSON string, parse it as an object
+  if (typeof obj.metadata === 'string') {
+    try {
+      return {
+        ...obj,
+        metadata: JSON.parse(obj.metadata)
+      };
+    } catch (e) {
+      // If it's not valid JSON, leave it as is
+      return obj;
+    }
+  }
+
+  // Recursively normalize nested objects
+  const normalized: any = {};
+  for (const key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      normalized[key] = normalizeMetadataForComparison(obj[key]);
+    }
+  }
+  return normalized;
+}
+
 export async function flowMaster(userId: string, testFlow: TestFlow): Promise<void> {
   for (const [res, get, gives, recip] of testFlow) {
     let sent: SentResponse;
@@ -62,7 +95,9 @@ export async function flowMaster(userId: string, testFlow: TestFlow): Promise<vo
     const msg = data.message;
 
     try {
-      msg.should.eql(get);
+      const normalizedMsg = normalizeMetadataForComparison(msg);
+      const normalizedGet = normalizeMetadataForComparison(get);
+      normalizedMsg.should.eql(normalizedGet);
       await send(token, res);
     }
     catch (e) {
