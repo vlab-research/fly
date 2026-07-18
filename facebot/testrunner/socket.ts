@@ -46,37 +46,46 @@ async function send(token: string, json: any): Promise<any> {
   return res;
 }
 
-function normalizeMetadataForComparison(obj: any): any {
+function canonicalizeJsonString(str: string): string {
+  try {
+    // Parse the JSON string and re-stringify with sorted keys
+    const parsed = JSON.parse(str);
+    return JSON.stringify(parsed, Object.keys(parsed).sort());
+  } catch (e) {
+    // If it's not valid JSON, return as-is
+    return str;
+  }
+}
+
+function deepCanonicalizeJsonStrings(obj: any): any {
   if (!obj || typeof obj !== 'object') {
     return obj;
   }
 
-  // If this is an array, recursively normalize each element
+  // If this is an array, recursively canonicalize each element
   if (Array.isArray(obj)) {
-    return obj.map(normalizeMetadataForComparison);
+    return obj.map(deepCanonicalizeJsonStrings);
   }
 
-  // If this object has a metadata field that is a JSON string, parse it as an object
-  if (typeof obj.metadata === 'string') {
-    try {
-      return {
-        ...obj,
-        metadata: JSON.parse(obj.metadata)
-      };
-    } catch (e) {
-      // If it's not valid JSON, leave it as is
-      return obj;
-    }
-  }
-
-  // Recursively normalize nested objects
-  const normalized: any = {};
+  // Recursively process nested objects and canonicalize JSON string fields
+  const canonicalized: any = {};
   for (const key in obj) {
     if (obj.hasOwnProperty(key)) {
-      normalized[key] = normalizeMetadataForComparison(obj[key]);
+      const value = obj[key];
+
+      if (typeof value === 'string') {
+        // Try to canonicalize any string field that looks like JSON
+        canonicalized[key] = canonicalizeJsonString(value);
+      } else if (value && typeof value === 'object') {
+        // Recursively process nested objects/arrays
+        canonicalized[key] = deepCanonicalizeJsonStrings(value);
+      } else {
+        // Keep primitives as-is
+        canonicalized[key] = value;
+      }
     }
   }
-  return normalized;
+  return canonicalized;
 }
 
 export async function flowMaster(userId: string, testFlow: TestFlow): Promise<void> {
@@ -95,9 +104,9 @@ export async function flowMaster(userId: string, testFlow: TestFlow): Promise<vo
     const msg = data.message;
 
     try {
-      const normalizedMsg = normalizeMetadataForComparison(msg);
-      const normalizedGet = normalizeMetadataForComparison(get);
-      normalizedMsg.should.eql(normalizedGet);
+      const canonicalizedMsg = deepCanonicalizeJsonStrings(msg);
+      const canonicalizedGet = deepCanonicalizeJsonStrings(get);
+      canonicalizedMsg.should.eql(canonicalizedGet);
       await send(token, res);
     }
     catch (e) {
