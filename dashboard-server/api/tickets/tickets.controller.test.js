@@ -54,6 +54,7 @@ describe('tickets.controller (makeHandlers)', () => {
       linearClient: overrides.linearClient || defaultClient,
       apiKey: overrides.apiKey === undefined ? apiKey : overrides.apiKey,
       teamId: overrides.teamId === undefined ? teamId : overrides.teamId,
+      todoStateId: overrides.todoStateId === undefined ? 'state-todo' : overrides.todoStateId,
     });
   }
 
@@ -115,14 +116,27 @@ describe('tickets.controller (makeHandlers)', () => {
 
     it('stamps the reporter marker into the Linear issue description', async () => {
       let captured;
+      let capturedStateId;
       const res = mockRes();
       await makeTestHandlers({
-        linearClient: { ...defaultClient, createIssue: async ({ title, description }) => { captured = description; return { id: 'i', identifier: 'VLAB-9', url: 'u', title, createdAt: 't', updatedAt: 't', state: { name: 'Backlog' }, priority: 0, description }; } },
+        linearClient: { ...defaultClient, createIssue: async ({ title, description, stateId }) => { captured = description; capturedStateId = stateId; return { id: 'i', identifier: 'VLAB-9', url: 'u', title, createdAt: 't', updatedAt: 't', state: { name: 'Todo' }, priority: 0, description }; } },
       }).create(validReq, res);
       res.statusCode.should.equal(201);
       captured.should.include(`vlab-reporter:${email}`);
       captured.should.include('**Survey:** HPV');
       captured.should.include('**Impacted user IDs:** 123, 456');
+      capturedStateId.should.equal('state-todo');
+    });
+
+    it('omits stateId when todoStateId is not configured (falls back to Linear default)', async () => {
+      let capturedStateId = 'sentinel';
+      const res = mockRes();
+      await makeTestHandlers({
+        todoStateId: '',
+        linearClient: { ...defaultClient, createIssue: async ({ title, description, stateId }) => { capturedStateId = stateId; return { id: 'i', identifier: 'VLAB-9', url: 'u', title, createdAt: 't', updatedAt: 't', state: { name: 'Backlog' }, priority: 0, description }; } },
+      }).create(validReq, res);
+      res.statusCode.should.equal(201);
+      should.equal(capturedStateId, undefined);
     });
 
     it('returns 201 with the formatted issue on success', async () => {

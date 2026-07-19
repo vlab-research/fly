@@ -71,6 +71,8 @@ Required `dashboard-server` env vars:
 
 When `LINEAR_API_KEY` or `LINEAR_TEAM_ID` is unset, all `/tickets` endpoints return `503` with a clear message, so misconfiguration fails loud rather than silently.
 
+New tickets are created in the **Todo** state (not Linear's default Backlog). The state ID is configured via `LINEAR_TODO_STATE_ID` (Virtual Lab team's Todo state: `ebc049cd-ca61-4ef2-a117-250bd08873f9`). If unset, tickets fall back to Linear's default state.
+
 In Kubernetes, `LINEAR_API_KEY` should come from a secret (e.g. `kubectl create secret generic gbv-linear --from-literal=api-key=...`) and `LINEAR_TEAM_ID` from a plain env value. See `devops/values/production.yaml`.
 
 ## API

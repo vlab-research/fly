@@ -71,11 +71,13 @@ async function graphqlRequest({ url, apiKey, query, variables }) {
   return json.data;
 }
 
-async function createIssue({ apiKey, url, teamId, title, description }) {
+async function createIssue({ apiKey, url, teamId, title, description, stateId }) {
+  const input = { teamId, title, description };
+  if (stateId) input.stateId = stateId;
   const data = await graphqlRequest({
     url, apiKey,
     query: ISSUE_CREATE,
-    variables: { input: { teamId, title, description } },
+    variables: { input },
   });
   if (!data.issueCreate || !data.issueCreate.success || !data.issueCreate.issue) {
     throw new Error('Linear issueCreate did not return a successful issue');
@@ -123,7 +125,7 @@ function makeClient({ apiKey, url, teamId }) {
     teamId,
   };
   return {
-    createIssue: ({ title, description }) => createIssue({ ...bound, teamId, title, description }),
+    createIssue: ({ title, description, stateId }) => createIssue({ ...bound, teamId, title, description, stateId }),
     listTeamIssues: ({ first } = {}) => listTeamIssues({ ...bound, teamId, first }),
     getIssue: ({ id }) => getIssue({ ...bound, id }),
     createComment: ({ issueId, body }) => createComment({ ...bound, issueId, body }),

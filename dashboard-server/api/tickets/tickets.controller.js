@@ -11,7 +11,7 @@ const {
 } = require('../../utils/linear/linear.core');
 const { validateCreate, validateReply } = require('./tickets.core');
 
-function makeHandlers({ linearClient, apiKey, teamId }) {
+function makeHandlers({ linearClient, apiKey, teamId, todoStateId }) {
   function ensureConfigured(res) {
     if (!apiKey || !teamId) {
       res.status(503).json({ error: 'Linear is not configured on the server. Set LINEAR_API_KEY and LINEAR_TEAM_ID.' });
@@ -46,7 +46,7 @@ function makeHandlers({ linearClient, apiKey, teamId }) {
         userIds: v.userIds,
         email,
       });
-      const issue = await linearClient.createIssue({ title: v.title, description });
+      const issue = await linearClient.createIssue({ title: v.title, description, stateId: todoStateId || undefined });
       return res.status(201).json(formatIssue(issue));
     } catch (e) {
       console.error('tickets create error:', e);

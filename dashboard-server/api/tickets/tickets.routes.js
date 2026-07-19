@@ -15,6 +15,7 @@ const handlers = makeHandlers({
   linearClient,
   apiKey: LINEAR.apiKey,
   teamId: LINEAR.teamId,
+  todoStateId: LINEAR.todoStateId,
 });
 
 router

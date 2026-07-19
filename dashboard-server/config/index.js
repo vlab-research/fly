@@ -28,6 +28,7 @@ const envVarsSchema = joi
     LINEAR_API_KEY: joi.string().optional().empty(''),
     LINEAR_TEAM_ID: joi.string().optional().empty(''),
     LINEAR_API_URL: joi.string().optional().empty(''),
+    LINEAR_TODO_STATE_ID: joi.string().optional().empty(''),
   })
   .unknown()
   .required();
@@ -92,6 +93,7 @@ const config = {
     apiKey: envVars.LINEAR_API_KEY || '',
     teamId: envVars.LINEAR_TEAM_ID || '',
     url: envVars.LINEAR_API_URL || 'https://api.linear.app/graphql',
+    todoStateId: envVars.LINEAR_TODO_STATE_ID || '',
   },
 };
 
