@@ -14,7 +14,9 @@ var (
 
 // Translation errors
 var (
-	ErrTooManyOptions          = errors.New("too many options for platform")
-	ErrUnsupportedMediaType    = errors.New("unsupported media type for platform")
-	ErrInvalidPlatform         = errors.New("invalid platform type")
+	ErrTooManyOptions         = errors.New("too many options for platform")
+	ErrUnsupportedMediaType   = errors.New("unsupported media type for platform")
+	ErrInvalidPlatform        = errors.New("invalid platform type")
+	ErrMissingUtilityTemplate = errors.New(`utility_message field missing required "template" in metadata`)
+	ErrMissingUtilityLanguage = errors.New(`utility_message field missing required "language" in metadata`)
 )

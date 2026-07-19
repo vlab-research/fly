@@ -14,6 +14,16 @@ func TranslateToMessenger(cmd types.SendMessageCommand) (types.MessengerMessage,
 
 	metadata := getMetadataString(cmd.Message.Metadata)
 
+	// utility_message (the go-forward re-contact mechanism) is dispatched
+	// ahead of the base-type switch below: replybot emits it as base type
+	// "question" when the field has choices/buttons and "text" when it
+	// doesn't (generic-translator.js translateUtilityMessage) — the
+	// metadata.type discriminator is what identifies it, not
+	// MessageContent.Type.
+	if cmd.Message.GetTypeFromMetadata() == "utility_message" {
+		return translateMessengerUtility(cmd.Message, metadata)
+	}
+
 	switch cmd.Message.Type {
 	case types.MessageTypeText:
 		return translateMessengerText(cmd.Message, metadata)
@@ -24,6 +34,31 @@ func TranslateToMessenger(cmd types.SendMessageCommand) (types.MessengerMessage,
 	default:
 		return types.MessengerMessage{}, fmt.Errorf("%w: %s", types.ErrUnsupportedMessageType, cmd.Message.Type)
 	}
+}
+
+// getMessengerSendParams derives the top-level Facebook Send API
+// messaging_type/tag that must ride alongside — not inside — the message
+// body TranslateToMessenger produces (Facebook puts messaging_type/tag as
+// siblings of "message" on the request). UTILITY is hardcoded for
+// utility_message fields (message-worker's own concern — replybot's
+// generic-translator.js doesn't set sendParams for it); message tags come
+// from the field's sendParams metadata, which replybot's transition.js
+// buildCommands nests at message.metadata.sendParams and never promotes to
+// the top level (see transition.test.js "carries sendParams (message-tag)
+// through to the outbound command...").
+func getMessengerSendParams(cmd types.SendMessageCommand) (messagingType, tag string) {
+	if cmd.Message.GetTypeFromMetadata() == "utility_message" {
+		return "UTILITY", ""
+	}
+
+	md := metadataMap(cmd.Message.Metadata)
+	sendParams, ok := md["sendParams"].(map[string]interface{})
+	if !ok {
+		return "", ""
+	}
+	messagingType, _ = sendParams["messaging_type"].(string)
+	tag, _ = sendParams["tag"].(string)
+	return messagingType, tag
 }
 
 func getMetadataString(metadata json.RawMessage) string {
@@ -174,6 +209,74 @@ func translateMessengerNotificationMessages(msg types.MessageContent, metadata s
 		},
 		Metadata: metadata,
 	}, nil
+}
+
+// translateMessengerUtility renders a utility_message field as a Meta
+// message template (matches translate-typeform's translateUtilityMessage).
+// template/language/params come from the field's metadata (populated from
+// its parsed YAML description); buttons come from the field's own
+// choices/options — one {type: POSTBACK, payload: <field ref>} per choice,
+// same ref value repeated for every button, per the reference translator.
+// A body component is always present (even with zero params); a buttons
+// component is only added when there are choices.
+func translateMessengerUtility(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
+	md := metadataMap(msg.Metadata)
+
+	template := metadataString(md, "template")
+	if template == "" {
+		return types.MessengerMessage{}, fmt.Errorf("%w", types.ErrMissingUtilityTemplate)
+	}
+	language := metadataString(md, "language")
+	if language == "" {
+		return types.MessengerMessage{}, fmt.Errorf("%w", types.ErrMissingUtilityLanguage)
+	}
+
+	params := metadataStringSlice(md, "params")
+	bodyParams := make([]types.TemplateComponentParameter, len(params))
+	for i, p := range params {
+		bodyParams[i] = types.TemplateComponentParameter{Type: "text", Text: p}
+	}
+
+	components := []types.TemplateComponent{
+		{Type: "body", Parameters: bodyParams},
+	}
+
+	if len(msg.Options) > 0 {
+		ref := getRefFromMetadata(msg.Metadata)
+		buttonParams := make([]types.TemplateComponentParameter, len(msg.Options))
+		for i := range msg.Options {
+			buttonParams[i] = types.TemplateComponentParameter{Type: "POSTBACK", Payload: ref}
+		}
+		components = append(components, types.TemplateComponent{Type: "buttons", Parameters: buttonParams})
+	}
+
+	return types.MessengerMessage{
+		Template: &types.MessageTemplate{
+			Name:       template,
+			Language:   types.TemplateLanguage{Code: language},
+			Components: components,
+		},
+		Metadata: metadata,
+	}, nil
+}
+
+// metadataStringSlice reads a []string-ish value out of parsed metadata.
+// Non-string elements are stringified (mirrors JS's String(text) in the
+// reference translator's params.map(text => ({type: 'text', text: String(text)}))).
+func metadataStringSlice(m map[string]interface{}, key string) []string {
+	raw, ok := m[key].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(raw))
+	for i, item := range raw {
+		if s, ok := item.(string); ok {
+			out[i] = s
+			continue
+		}
+		out[i] = fmt.Sprintf("%v", item)
+	}
+	return out
 }
 
 func translateMessengerQuestion(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {

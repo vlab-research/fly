@@ -2,10 +2,56 @@ package types
 
 // MessengerMessage represents a message in Messenger API format
 type MessengerMessage struct {
-	Text         string       `json:"text,omitempty"`
-	QuickReplies []QuickReply `json:"quick_replies,omitempty"`
-	Attachment   *Attachment  `json:"attachment,omitempty"`
-	Metadata     string       `json:"metadata,omitempty"` // JSON string with ref for tracking
+	Text         string           `json:"text,omitempty"`
+	QuickReplies []QuickReply     `json:"quick_replies,omitempty"`
+	Attachment   *Attachment      `json:"attachment,omitempty"`
+	Template     *MessageTemplate `json:"template,omitempty"` // Meta message template (utility_message)
+	Metadata     string           `json:"metadata,omitempty"` // JSON string with ref for tracking
+}
+
+// MessengerSendRequest wraps a translated MessengerMessage together with the
+// top-level Facebook Send API fields (messaging_type, tag) that must ride
+// alongside — not inside — the message body. Facebook's Send API puts
+// messaging_type/tag as siblings of "message" on the request, so they can't
+// live on MessengerMessage itself; this wrapper is what TranslateToMessenger's
+// caller builds before handing off to MessengerClient.SendMessage.
+type MessengerSendRequest struct {
+	Message       MessengerMessage
+	MessagingType string
+	Tag           string
+}
+
+// MessageTemplate represents a Meta message template payload, e.g. for
+// utility_message (messaging_type: UTILITY). Distinct from TemplatePayload,
+// which is the older Messenger *attachment* template (button /
+// one_time_notif_req / notification_messages) — this is the newer
+// message.template shape used for WhatsApp-style pre-approved templates sent
+// over Messenger's utility messaging class.
+type MessageTemplate struct {
+	Name       string              `json:"name"`
+	Language   TemplateLanguage    `json:"language"`
+	Components []TemplateComponent `json:"components,omitempty"`
+}
+
+// TemplateLanguage identifies the approved template's language code (e.g. "en_US").
+type TemplateLanguage struct {
+	Code string `json:"code"`
+}
+
+// TemplateComponent is one component of a MessageTemplate ("body" carries
+// text substitutions, "buttons" carries per-button POSTBACK payloads).
+type TemplateComponent struct {
+	Type       string                       `json:"type"`
+	Parameters []TemplateComponentParameter `json:"parameters,omitempty"`
+}
+
+// TemplateComponentParameter is a single parameter within a TemplateComponent:
+// {type: "text", text: ...} for body components, {type: "POSTBACK", payload: ...}
+// for button components.
+type TemplateComponentParameter struct {
+	Type    string `json:"type,omitempty"`
+	Text    string `json:"text,omitempty"`
+	Payload string `json:"payload,omitempty"`
 }
 
 // QuickReply represents a Messenger quick reply button

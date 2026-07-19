@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/vlab-research/fly/message-worker/types"
 )
 
 type MessengerClient struct {
@@ -26,7 +28,14 @@ func NewMessengerClient(baseURL string, tokenStore TokenStore) *MessengerClient 
 
 type FacebookSendRequest struct {
 	Recipient FacebookRecipient `json:"recipient"`
-	Message   interface{}       `json:"message"`
+	// MessagingType and Tag surface a field's message tag (sendParams) or
+	// the hardcoded UTILITY class for utility_message templates. They ride
+	// at the top level of the Send API request, alongside "message" — see
+	// types.MessengerSendRequest, which is how the translator/worker hand
+	// these off to SendMessage without baking them into the message body.
+	MessagingType string      `json:"messaging_type,omitempty"`
+	Tag           string      `json:"tag,omitempty"`
+	Message       interface{} `json:"message"`
 }
 
 type FacebookRecipient struct {
@@ -64,9 +73,14 @@ func (c *MessengerClient) SendMessage(ctx context.Context, platformAccountID, us
 
 	recipient := c.buildRecipient(userID, platformContext)
 
-	req := FacebookSendRequest{
-		Recipient: recipient,
-		Message:   message,
+	req := FacebookSendRequest{Recipient: recipient}
+	switch m := message.(type) {
+	case types.MessengerSendRequest:
+		req.Message = m.Message
+		req.MessagingType = m.MessagingType
+		req.Tag = m.Tag
+	default:
+		req.Message = message
 	}
 
 	data, err := json.Marshal(req)

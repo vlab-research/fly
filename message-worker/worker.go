@@ -76,7 +76,16 @@ func (w *Worker) processSendMessage(ctx context.Context, cmd types.SendMessageCo
 
 	switch cmd.Platform {
 	case types.PlatformMessenger:
-		platformMsg, err = TranslateToMessenger(cmd)
+		var msg types.MessengerMessage
+		msg, err = TranslateToMessenger(cmd)
+		if err == nil {
+			messagingType, tag := getMessengerSendParams(cmd)
+			platformMsg = types.MessengerSendRequest{
+				Message:       msg,
+				MessagingType: messagingType,
+				Tag:           tag,
+			}
+		}
 	case types.PlatformWhatsApp:
 		platformMsg, err = TranslateToWhatsApp(cmd)
 	case types.PlatformInstagram:

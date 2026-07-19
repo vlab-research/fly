@@ -349,6 +349,107 @@ func TestTranslateToMessenger(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			// replybot's translateUtilityMessage (generic-translator.js) emits a
+			// utility_message field with no choices as base type "text"
+			// (translateTextField). The metadata.type=="utility_message"
+			// discriminator must still route it to the template builder.
+			name: "utility_message with no choices renders as message template (no buttons component)",
+			cmd: types.SendMessageCommand{
+				CommandID: "cmd_util_1",
+				Platform:  types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("Payment update"),
+					Metadata: json.RawMessage(`{"type":"utility_message","template":"recontact_owis","language":"en_US","params":["KSh 35"],"ref":"utility_1"}`),
+				},
+			},
+			want: types.MessengerMessage{
+				Template: &types.MessageTemplate{
+					Name:     "recontact_owis",
+					Language: types.TemplateLanguage{Code: "en_US"},
+					Components: []types.TemplateComponent{
+						{
+							Type: "body",
+							Parameters: []types.TemplateComponentParameter{
+								{Type: "text", Text: "KSh 35"},
+							},
+						},
+					},
+				},
+				Metadata: `{"type":"utility_message","template":"recontact_owis","language":"en_US","params":["KSh 35"],"ref":"utility_1"}`,
+			},
+			wantErr: false,
+		},
+		{
+			// With choices, replybot emits utility_message as base type
+			// "question" (translateUtilityMessage's choices branch). Buttons
+			// component gets one {type: POSTBACK, payload: ref} per choice --
+			// same ref value repeated, per the reference translator.
+			name: "utility_message with choices renders as message template with buttons component",
+			cmd: types.SendMessageCommand{
+				CommandID: "cmd_util_2",
+				Platform:  types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:         types.MessageTypeQuestion,
+					QuestionText: stringPtr("Can you make it at 10:00?"),
+					Options: []types.Option{
+						{Value: json.RawMessage(`"utility_2"`), Label: "Yes"},
+						{Value: json.RawMessage(`"utility_2"`), Label: "No"},
+					},
+					Metadata: json.RawMessage(`{"type":"utility_message","template":"recontact_confirm","language":"en_US","params":["10:00"],"ref":"utility_2"}`),
+				},
+			},
+			want: types.MessengerMessage{
+				Template: &types.MessageTemplate{
+					Name:     "recontact_confirm",
+					Language: types.TemplateLanguage{Code: "en_US"},
+					Components: []types.TemplateComponent{
+						{
+							Type: "body",
+							Parameters: []types.TemplateComponentParameter{
+								{Type: "text", Text: "10:00"},
+							},
+						},
+						{
+							Type: "buttons",
+							Parameters: []types.TemplateComponentParameter{
+								{Type: "POSTBACK", Payload: "utility_2"},
+								{Type: "POSTBACK", Payload: "utility_2"},
+							},
+						},
+					},
+				},
+				Metadata: `{"type":"utility_message","template":"recontact_confirm","language":"en_US","params":["10:00"],"ref":"utility_2"}`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "utility_message missing template in metadata errors",
+			cmd: types.SendMessageCommand{
+				CommandID: "cmd_util_3",
+				Platform:  types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("x"),
+					Metadata: json.RawMessage(`{"type":"utility_message","language":"en_US","ref":"utility_3"}`),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "utility_message missing language in metadata errors",
+			cmd: types.SendMessageCommand{
+				CommandID: "cmd_util_4",
+				Platform:  types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("x"),
+					Metadata: json.RawMessage(`{"type":"utility_message","template":"recontact_owis","ref":"utility_4"}`),
+				},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -364,6 +465,83 @@ func TestTranslateToMessenger(t *testing.T) {
 				if string(gotJSON) != string(wantJSON) {
 					t.Errorf("TranslateToMessenger() = %s, want %s", gotJSON, wantJSON)
 				}
+			}
+		})
+	}
+}
+
+// TestGetMessengerSendParams locks the seam that surfaces Facebook's
+// top-level Send API fields (messaging_type, tag) — which cannot live on
+// MessengerMessage/message.template itself since Facebook puts them as
+// siblings of "message" on the request. utility_message always forces
+// messaging_type=UTILITY (message-worker's own concern); everything else
+// gets its messaging_type/tag from the field's sendParams metadata, which
+// replybot's transition.js buildCommands nests at message.metadata.sendParams
+// (see transition.test.js "carries sendParams (message-tag) through...").
+func TestGetMessengerSendParams(t *testing.T) {
+	tests := []struct {
+		name              string
+		cmd               types.SendMessageCommand
+		wantMessagingType string
+		wantTag           string
+	}{
+		{
+			name: "utility_message forces UTILITY messaging_type regardless of sendParams",
+			cmd: types.SendMessageCommand{
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("x"),
+					Metadata: json.RawMessage(`{"type":"utility_message","template":"t","language":"en_US","sendParams":{"messaging_type":"MESSAGE_TAG","tag":"SHOULD_BE_IGNORED"}}`),
+				},
+			},
+			wantMessagingType: "UTILITY",
+			wantTag:           "",
+		},
+		{
+			name: "sendParams metadata surfaces messaging_type and tag",
+			cmd: types.SendMessageCommand{
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("x"),
+					Metadata: json.RawMessage(`{"sendParams":{"messaging_type":"MESSAGE_TAG","tag":"CONFIRMED_EVENT_UPDATE"}}`),
+				},
+			},
+			wantMessagingType: "MESSAGE_TAG",
+			wantTag:           "CONFIRMED_EVENT_UPDATE",
+		},
+		{
+			name: "no metadata yields empty messaging_type and tag",
+			cmd: types.SendMessageCommand{
+				Message: types.MessageContent{
+					Type: types.MessageTypeText,
+					Text: stringPtr("x"),
+				},
+			},
+			wantMessagingType: "",
+			wantTag:           "",
+		},
+		{
+			name: "metadata with unrelated fields (e.g. webview) yields empty messaging_type and tag",
+			cmd: types.SendMessageCommand{
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("x"),
+					Metadata: json.RawMessage(`{"type":"webview","url":"https://example.com","ref":"wv_1"}`),
+				},
+			},
+			wantMessagingType: "",
+			wantTag:           "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMessagingType, gotTag := getMessengerSendParams(tt.cmd)
+			if gotMessagingType != tt.wantMessagingType {
+				t.Errorf("messagingType = %q, want %q", gotMessagingType, tt.wantMessagingType)
+			}
+			if gotTag != tt.wantTag {
+				t.Errorf("tag = %q, want %q", gotTag, tt.wantTag)
 			}
 		})
 	}
