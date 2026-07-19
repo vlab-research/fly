@@ -125,19 +125,21 @@ verification handshake (Facebook will `GET` it with `hub.verify_token` /
 
 `smoke-test/form-a.json` gates the handoff behind a `test_handoff` yes/no
 question, then runs `handoff_statement` → `handoff_result`. The
-`handoff_statement` description uses the **wait-based** handoff format:
+`handoff_statement` description uses the **first-class handoff field** format
+(see `replybot/HANDOFF_PROTOCOL.md`):
 
 ```json
-{"type":"wait","wait":{"type":"handover"},"handoff":{"target_app_id":"976665718578167","metadata":{"check":"smoke_test"}}}
+{"type":"handoff","handoff":{"target_app_id":"976665718578167","mode":"wait","metadata":{"check":"smoke_test"}}}
 ```
 
-Two things matter here (both were bugs we hit):
+Two things matter here:
 
-- **`"type":"wait"` is required.** Without it the question is a plain
-  statement: the handoff still fires, but its echo is treated as a statement
-  and the `wait` is never armed, so the survey never resumes when control
-  returns. (See the docs site, *Reference → Questions → Passing Thread
-  Control*.)
+- **`"type":"handoff"` is required.** The runtime synthesizes the
+  `wait: {type: "handover"}` automatically when the echo of the handoff
+  message arrives. (An older wait-based format —
+  `{"type":"wait","wait":{"type":"handover"},"handoff":{...}}` — was used
+  before commit `c2e2eed9`; under the current runtime it would arm the wait
+  but never fire the handoff. Do not use it.)
 - **`target_app_id` is the smoke-echo app's real App ID** (`976665718578167`
   here). If you stand up a different echo app, replace it and push the update:
 
@@ -164,11 +166,57 @@ reach the handoff question:
 
 If step 5 shows empty `{{hidden:...}}` placeholders instead of your text,
 the metadata round-trip or flattening is broken — check replybot logs for the
-`handoff_return` synthetic event (see `replybot/HANDOFF_PROTOCOL.md`
-"Troubleshooting"). If the bot never resumes at all, the `timeout_minutes: 5`
-fallback in the handoff question means Fly will reclaim the thread on its own
-after 5 minutes — useful as a sanity check that `take_thread_control` works
-even when this echo app misbehaves.
+handover event processing (see `replybot/HANDOFF_PROTOCOL.md`
+"Troubleshooting"). One confirmed cause: replybot's flattening depends on its
+event-parsing pipeline — returned metadata must land under
+`e_handover_metadata_*` keys (see the prefix note above); a pipeline that
+flattens to `e_handover_*` produces exactly this symptom. If the bot never
+resumes at all, note there is currently **no timeout fallback** — Fly will
+wait in `WAIT_EXTERNAL_EVENT` indefinitely, so use `scripts/passback.sh`
+(below) to hand control back manually.
+
+## Manual recovery: handing control back
+
+If a smoke run gets interrupted while smoke-echo owns the thread, Fly can no
+longer send to the user because another app controls the thread. The smoke-echo
+service exposes an admin endpoint to hand control back to Fly on demand.
+
+### `scripts/passback.sh`
+
+A small helper script is included:
+
+```bash
+./scripts/passback.sh <messenger-user-id> [target-app-id]
+```
+
+Examples:
+
+```bash
+# Hand control back to Fly (default target app)
+./scripts/passback.sh 1989430067808669
+
+# Hand control back to a specific app
+./scripts/passback.sh 1989430067808669 699455733740842
+```
+
+The script reads `FLY_APP_ID` from `smoke-echo/.env` if available, otherwise
+defaults to `699455733740842`. The target endpoint defaults to the production
+URL `https://fly-smoke-echo.vlab.digital/admin/passback`; override it by setting
+`SMOKE_ECHO_ENDPOINT`.
+
+### Under the hood
+
+`scripts/passback.sh` is a thin wrapper around the `POST /admin/passback` endpoint
+built into the service:
+
+```bash
+curl -X POST https://fly-smoke-echo.vlab.digital/admin/passback \
+     -H 'content-type: application/json' \
+     -d '{"userId":"1989430067808669"}'
+```
+
+A `GET` with `?userId=...` works too, for convenience from a browser. The endpoint
+defaults the target to `FLY_APP_ID`; pass `targetAppId` to override.
 
 ## Local development
 
