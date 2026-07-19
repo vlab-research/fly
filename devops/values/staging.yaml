@@ -22,7 +22,7 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 
 versionDashboard: &vdashboard v0.0.64
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.202
+versionReplybot: &vreplybot v0.0.207-wa
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
