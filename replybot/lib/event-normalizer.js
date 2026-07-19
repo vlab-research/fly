@@ -230,6 +230,138 @@ function parseSyntheticEvent(data, timestamp) {
   }
 }
 
+// WhatsApp Cloud API. Hermes publishes one raw event per `messages[]` /
+// `statuses[]` item, augmented with `source: 'whatsapp'`, `phone_number_id`,
+// and a normalized (ms) `timestamp`. This maps each to the same event_type
+// vocabulary the machine already understands (see categorizeMessengerEvent).
+function categorizeWhatsAppEvent(data) {
+  // A referral (click-to-WhatsApp / ref link) starts a conversation, exactly
+  // like a Messenger referral — payload.referral.ref carries `form.<shortcode>`.
+  if (data.referral) {
+    return {
+      event_type: 'conversation_started',
+      payload: {
+        type: 'conversation_started',
+        trigger: 'referral',
+        referral: data.referral
+      }
+    }
+  }
+
+  // Synthetic echo emitted by the message-worker after a successful WhatsApp
+  // send (WhatsApp has no native message echo). Carries the outbound message's
+  // metadata so the ECHO handler can advance the conversation, exactly like a
+  // Messenger is_echo message.
+  if (data.type === 'bot_echo') {
+    return {
+      event_type: 'bot_message_sent',
+      payload: {
+        type: 'bot_message_sent',
+        metadata: data.metadata
+      }
+    }
+  }
+
+  // Delivery/read/sent receipts (statuses[]) → watermarks, like Messenger.
+  if (data.status) {
+    const statusMap = {
+      delivered: 'bot_message_delivered',
+      read: 'bot_message_read',
+      sent: 'bot_message_sent'
+    }
+    const eventType = statusMap[data.status] || 'bot_message_delivered'
+    return {
+      event_type: eventType,
+      payload: {
+        type: eventType,
+        watermark: data.timestamp,
+        status_at: data.timestamp
+      }
+    }
+  }
+
+  if (data.type === 'text') {
+    return {
+      event_type: 'user_text',
+      payload: {
+        type: 'user_text',
+        text: (data.text && data.text.body) || ''
+      }
+    }
+  }
+
+  // Interactive replies (button_reply / list_reply). The machine validates
+  // choice answers against the field's option LABELS, so value = the reply
+  // title (the visible label); the reply id is kept as source_message_id.
+  if (data.type === 'interactive' && data.interactive) {
+    const reply = data.interactive.button_reply || data.interactive.list_reply || {}
+    const label = reply.title || ''
+    return {
+      event_type: 'user_interaction',
+      payload: {
+        type: 'user_interaction',
+        value: label,
+        label,
+        source_message_id: reply.id || '',
+        interaction_type: 'quick_reply'
+      }
+    }
+  }
+
+  // Template quick-reply button click (type: 'button').
+  if (data.type === 'button' && data.button) {
+    const label = data.button.text || ''
+    return {
+      event_type: 'user_interaction',
+      payload: {
+        type: 'user_interaction',
+        value: label,
+        label,
+        source_message_id: data.button.payload || '',
+        interaction_type: 'quick_reply'
+      }
+    }
+  }
+
+  if (['image', 'video', 'audio', 'voice', 'document', 'sticker'].includes(data.type)) {
+    const media = data[data.type] || {}
+    return {
+      event_type: 'user_media',
+      payload: {
+        type: 'user_media',
+        attachments: [{
+          type: data.type === 'voice' ? 'audio' : data.type,
+          payload: { id: media.id || null, url: media.link || null }
+        }],
+        stickerId: null
+      }
+    }
+  }
+
+  return {
+    event_type: 'unknown',
+    payload: { type: 'unknown' }
+  }
+}
+
+function parseWhatsAppEvent(data, timestamp) {
+  const isStatus = !!data.status
+  const userId = isStatus ? (data.recipient_id || '') : (data.from || '')
+  const accountId = data.phone_number_id
+
+  const { event_type, payload } = categorizeWhatsAppEvent(data)
+
+  return {
+    event_id: newEventId(),
+    user_id: userId,
+    timestamp,
+    source: { type: 'whatsapp', account_id: accountId },
+    event_type,
+    payload,
+    raw: data
+  }
+}
+
 function parseEvent(rawKafkaEvent) {
   let parsed
   if (typeof rawKafkaEvent === 'string') {
@@ -264,6 +396,8 @@ function parseEvent(rawKafkaEvent) {
       return parseMessengerEvent(parsed, timestamp)
     case 'synthetic':
       return parseSyntheticEvent(parsed, timestamp)
+    case 'whatsapp':
+      return parseWhatsAppEvent(parsed, timestamp)
     default:
       return {
         event_id: newEventId(),
@@ -281,7 +415,9 @@ module.exports = {
   parseEvent,
   parseMessengerEvent,
   parseSyntheticEvent,
+  parseWhatsAppEvent,
   categorizeMessengerEvent,
+  categorizeWhatsAppEvent,
   parsePayload,
   newEventId
 }

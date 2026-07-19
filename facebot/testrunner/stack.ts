@@ -380,6 +380,7 @@ export async function startStack(): Promise<Stack> {
     DATABASE_URL: `postgresql://chatroach@cockroach:26257/chatroach?sslmode=disable`,
     BOTSERVER_URL: 'http://botserver',
     FACEBOOK_GRAPH_URL: 'http://facebot:3000',
+    WHATSAPP_GRAPH_URL: 'http://facebot:3000',
     NUM_WORKERS: '1',
     TOKEN_CACHE_TTL: '300',
   };

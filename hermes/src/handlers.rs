@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::error;
 
 use crate::config::Config;
-use crate::event::stamp_event;
+use crate::event::{stamp_event, stamp_whatsapp_event};
 use crate::producer::EventProducer;
 use crate::templates::handle_template_status_update;
 
@@ -38,6 +38,81 @@ pub async fn verify_token(
     } else {
         (StatusCode::UNAUTHORIZED, "invalid verify token".to_string())
     }
+}
+
+/// WhatsApp Cloud API webhook verification (GET /whatsapp). Uses a dedicated
+/// WHATSAPP_VERIFY_TOKEN so it can be provisioned independently of Messenger.
+pub async fn verify_token_whatsapp(
+    State(state): State<AppState>,
+    Query(query): Query<VerifyQuery>,
+) -> impl IntoResponse {
+    if query.hub_verify_token.is_some()
+        && query.hub_verify_token.as_deref() == state.config.whatsapp_verify_token.as_deref()
+    {
+        (StatusCode::OK, query.hub_challenge.unwrap_or_default())
+    } else {
+        (StatusCode::UNAUTHORIZED, "invalid verify token".to_string())
+    }
+}
+
+/// Handles WhatsApp Cloud API webhooks (POST /whatsapp). Mirrors handle_webhook
+/// for source='whatsapp': walks entry[].changes[].value.{messages,statuses}[],
+/// stamps each with source + phone_number_id, and publishes one raw event per
+/// item. Always returns 200 so Meta does not retry on per-item errors.
+pub async fn handle_whatsapp(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    let entries = match body.get("entry").and_then(|e| e.as_array()) {
+        Some(e) => e.clone(),
+        None => return StatusCode::OK,
+    };
+
+    for entry in &entries {
+        if let Err(e) = process_whatsapp_entry(&state, entry).await {
+            error!("[ERR] handleWhatsAppEvents: {}", e);
+        }
+    }
+
+    StatusCode::OK
+}
+
+async fn process_whatsapp_entry(state: &AppState, entry: &Value) -> Result<(), String> {
+    let changes = match entry.get("changes").and_then(|c| c.as_array()) {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+
+    for change in changes {
+        let value = match change.get("value") {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let phone_number_id = value
+            .get("metadata")
+            .and_then(|m| m.get("phone_number_id"))
+            .and_then(|p| p.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        for key in &["messages", "statuses"] {
+            if let Some(items) = value.get(key).and_then(|m| m.as_array()) {
+                for item in items {
+                    match stamp_whatsapp_event(item.clone(), &phone_number_id) {
+                        Ok((user, bytes)) => {
+                            state.producer.produce(&state.config.event_topic, user, bytes);
+                        }
+                        Err(e) => {
+                            error!("[ERR] stamp_whatsapp_event: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Returns 200 once Kafka producer is ready, 503 before.

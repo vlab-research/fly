@@ -23,6 +23,12 @@ const sendMessage = async function (message: Message): Promise<Response> {
       json = message;
       break;
 
+    case 'whatsapp':
+      // WhatsApp builders already produce the full { entry: [...] } webhook body.
+      url = `${BOTSERVER_URL}/whatsapp`;
+      json = message;
+      break;
+
     default:
       url = `${BOTSERVER_URL}/webhooks`;
       json = { entry: [message] };

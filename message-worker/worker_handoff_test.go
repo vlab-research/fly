@@ -47,6 +47,13 @@ func (m *handoffMockEventProducer) PublishEvent(ctx context.Context, event types
 	return nil
 }
 
+func (m *handoffMockEventProducer) PublishRawEvent(ctx context.Context, key string, value []byte) error {
+	if m.err != nil {
+		return m.err
+	}
+	return nil
+}
+
 func TestWorker_ProcessCommand_Handoff_Success(t *testing.T) {
 	mockProducer := &handoffMockEventProducer{}
 	mockSender := &mockHandoffSender{}

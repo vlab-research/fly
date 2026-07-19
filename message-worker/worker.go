@@ -15,6 +15,10 @@ import (
 
 type EventProducer interface {
 	PublishEvent(ctx context.Context, event types.UniversalEvent) error
+	// PublishRawEvent publishes pre-serialized event bytes under the given
+	// partition key. Used to emit replybot-shaped events (whose JSON shape
+	// differs from types.UniversalEvent) such as the WhatsApp send echo.
+	PublishRawEvent(ctx context.Context, key string, value []byte) error
 }
 
 type Worker struct {
@@ -113,9 +117,51 @@ func (w *Worker) processSendMessage(ctx context.Context, cmd types.SendMessageCo
 		return w.reportError(cmd, sendErr)
 	}
 
+	// WhatsApp has no native message echo (unlike Messenger's is_echo webhook),
+	// yet the replybot state machine advances RESPONDING -> QOUT off a
+	// bot_message_sent echo carrying the outbound message's metadata. Emit that
+	// echo here so the survey progresses. Scoped to WhatsApp so platforms that
+	// already echo natively don't get a duplicate.
+	if cmd.Platform == types.PlatformWhatsApp {
+		if err := w.emitWhatsAppEcho(ctx, cmd); err != nil {
+			w.logger.Warn("failed to emit whatsapp echo", zap.Error(err))
+		}
+	}
+
 	// Event emission is temporarily disabled - replybot can't parse message_worker event shape
 	// return w.emitMessageSent(ctx, cmd, resp.MessageID, 1)
 	return nil
+}
+
+// emitWhatsAppEcho publishes a replybot-shaped WhatsApp event (type "bot_echo")
+// carrying the outbound message's metadata. The replybot normalizer maps it to
+// event_type "bot_message_sent"; its ECHO handler reads payload.metadata (the
+// ref/type/wait flags) to move the conversation forward.
+func (w *Worker) emitWhatsAppEcho(ctx context.Context, cmd types.SendMessageCommand) error {
+	metadata := cmd.Message.Metadata
+	if len(metadata) == 0 {
+		metadata = json.RawMessage("null")
+	}
+	echo := struct {
+		Source        string          `json:"source"`
+		PhoneNumberID string          `json:"phone_number_id"`
+		From          string          `json:"from"`
+		Type          string          `json:"type"`
+		Metadata      json.RawMessage `json:"metadata"`
+		Timestamp     int64           `json:"timestamp"`
+	}{
+		Source:        "whatsapp",
+		PhoneNumberID: cmd.PlatformAccountID,
+		From:          cmd.UserID,
+		Type:          "bot_echo",
+		Metadata:      metadata,
+		Timestamp:     time.Now().UnixMilli(),
+	}
+	data, err := json.Marshal(echo)
+	if err != nil {
+		return err
+	}
+	return w.producer.PublishRawEvent(ctx, cmd.UserID, data)
 }
 
 func (w *Worker) processHandoff(ctx context.Context, cmd types.HandoffCommand) error {

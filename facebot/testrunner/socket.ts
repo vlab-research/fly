@@ -102,6 +102,53 @@ function deepCanonicalizeJsonStrings(obj: any): any {
   return canonicalized;
 }
 
+// Extracts the human-visible text from a WhatsApp Cloud API send envelope.
+function waSentText(data: any): any {
+  if (!data) return undefined;
+  if (data.type === 'text') return data.text?.body;
+  if (data.type === 'interactive') return data.interactive?.body?.text;
+  if (data.image) return data.image?.caption;
+  if (data.video) return data.video?.caption;
+  return undefined;
+}
+
+// WhatsApp flow driver. Mirrors flowMaster but (1) asserts against the WhatsApp
+// send envelope's visible text (text.body / interactive.body.text) instead of
+// data.message, and (2) does NOT synthesize an echo: the WhatsApp send carries
+// no metadata to echo, so the message-worker emits the bot_echo itself. The
+// snooze lets that worker echo advance the conversation to QOUT before the next
+// user answer is sent (both are keyed by userId, so ordering holds once the
+// echo is produced).
+export async function flowMasterWhatsApp(userId: string, testFlow: TestFlow): Promise<void> {
+  for (const [res, get, gives] of testFlow) {
+    const sent = await receive(userId);
+    const { data, token } = sent as any;
+    if (!data || !token) throw new Error('Invalid response from receive');
+
+    const sentText = waSentText(data);
+    const expected = (get as any).text ?? (get as any).attachment?.payload?.text ?? (get as any).question_text;
+
+    try {
+      sentText.should.eql(expected);
+      await send(token, res);
+    } catch (e) {
+      console.log('WA sent:', util.inspect(data, undefined, 8));
+      console.log('WA expected text:', expected);
+      console.error(e);
+      await send(token, { error: { message: 'test broke', code: 99999 } });
+      throw e;
+    }
+
+    if (!('error' in res)) {
+      await snooze(1000); // let the worker-emitted bot_echo advance state to QOUT
+    }
+
+    for (const giv of gives) {
+      await sendMessage(giv);
+    }
+  }
+}
+
 export async function flowMaster(userId: string, testFlow: TestFlow): Promise<void> {
   for (const [res, get, gives, recip] of testFlow) {
     let sent: SentResponse;

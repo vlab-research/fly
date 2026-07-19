@@ -85,6 +85,37 @@ func (kp *KafkaProducer) PublishEvent(ctx context.Context, event types.Universal
 	}
 }
 
+// PublishRawEvent sends pre-serialized event bytes to the configured topic
+// under the given partition key (used for replybot-shaped events like the
+// WhatsApp send echo, whose JSON differs from types.UniversalEvent).
+func (kp *KafkaProducer) PublishRawEvent(ctx context.Context, key string, value []byte) error {
+	topicName := kp.topic
+	msg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{
+			Topic:     &topicName,
+			Partition: kafka.PartitionAny,
+		},
+		Key:   []byte(key),
+		Value: value,
+	}
+
+	deliveryChan := make(chan kafka.Event)
+	if err := kp.producer.Produce(msg, deliveryChan); err != nil {
+		return fmt.Errorf("failed to produce message: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case e := <-deliveryChan:
+		m := e.(*kafka.Message)
+		if m.TopicPartition.Error != nil {
+			return fmt.Errorf("delivery failed: %w", m.TopicPartition.Error)
+		}
+		return nil
+	}
+}
+
 // Close closes the Kafka producer
 func (kp *KafkaProducer) Close() {
 	// Flush any pending messages

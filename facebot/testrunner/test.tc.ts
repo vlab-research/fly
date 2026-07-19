@@ -2,11 +2,11 @@
 import 'chai';
 import parallel from 'mocha.parallel';
 import sendMessage from './sender';
-import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, fieldsFromForm, makeNotify, makeEcho, makeHandover, Field } from './mox';
+import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, fieldsFromForm, makeNotify, makeEcho, makeHandover, makeWhatsAppReferral, makeWhatsAppText, makeWhatsAppReply, Field } from './mox';
 import { v4 as uuid } from 'uuid';
 import farmhash from 'farmhash';
 import { seed } from './seed-db';
-import { flowMaster, TestFlow, ErrorResponse, SuccessResponse, receiveSent } from './socket';
+import { flowMaster, flowMasterWhatsApp, TestFlow, ErrorResponse, SuccessResponse, receiveSent } from './socket';
 import { snooze, waitFor } from './utils';
 import { getResponses, getState } from './responses';
 import { startStack, stopStack, Stack } from './stack';
@@ -753,6 +753,43 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
       state.state_json.md.e_payment_fake_phone.should.equal('+918888000000');
       state.state_json.md.e_payment_fake_success.should.equal(true);
+    });
+  });
+
+  // End-to-end WhatsApp coverage: inbound events enter via Hermes' /whatsapp
+  // handler (source:'whatsapp'), the replybot normalizes them to UniversalEvents
+  // and drives the SAME platform-agnostic state machine, and outbound messages
+  // go out through the real message-worker WhatsApp client to the facebot mock's
+  // /{phone_number_id}/messages endpoint. Because WhatsApp has no native message
+  // echo, the worker emits the bot_echo that advances the conversation.
+  parallel('WhatsApp E2E', function () {
+    this.timeout(60000);
+
+    it('Processes a WhatsApp text answer and advances the survey', async () => {
+      const userId = 'wa_' + uuid();
+      const fields = getFields('forms/KAvzEUWn.json');
+
+      await sendMessage(makeWhatsAppReferral(userId, 'KAvzEUWn'));
+      await flowMasterWhatsApp(userId, [
+        [ok, fields[0], [makeWhatsAppText(userId, '590')]],
+        [ok, fields[1], []],
+      ]);
+    });
+
+    ['red', 'blue'].forEach((color, idx) => {
+      it(`Follows a WhatsApp interactive choice logic jump: ${color}`, async () => {
+        const userId = 'wa_' + uuid();
+        const fields = getFields('forms/choiceJump.json');
+        const target = color === 'red' ? fields[1] : fields[2];
+
+        await sendMessage(makeWhatsAppReferral(userId, 'choiceJump'));
+        await flowMasterWhatsApp(userId, [
+          [ok, fields[0], [makeWhatsAppReply(fields[0], userId, idx)]],
+          [ok, target, []],
+          [ok, fields[3], []],
+          [ok, fields[4], []],
+        ]);
+      });
     });
   });
 });

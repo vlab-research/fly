@@ -30,15 +30,7 @@ func (c *StubClient) PassThreadControl(ctx context.Context, userID, platformAcco
 	}
 }
 
-type WhatsAppClient struct {
-	StubClient
-}
-
-func NewWhatsAppClient() *WhatsAppClient {
-	return &WhatsAppClient{
-		StubClient: StubClient{platformName: "WhatsApp"},
-	}
-}
+// WhatsAppClient is a real HTTP client — see whatsapp_client.go.
 
 type InstagramClient struct {
 	StubClient

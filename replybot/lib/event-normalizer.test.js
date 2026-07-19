@@ -1,7 +1,7 @@
 const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
-const { parseEvent, parsePayload, categorizeMessengerEvent, parseMessengerEvent } = require('./event-normalizer')
+const { parseEvent, parsePayload, categorizeMessengerEvent, parseMessengerEvent, parseWhatsAppEvent, categorizeWhatsAppEvent } = require('./event-normalizer')
 
 describe('parsePayload', () => {
   it('parses JSON string to object', () => {
@@ -333,5 +333,112 @@ describe('parseEvent', () => {
     result.payload.value.should.equal('confirm')
     result.payload.source_message_id.should.equal('msg_ref_100')
     result.payload.interaction_type.should.equal('postback')
+  })
+})
+
+describe('categorizeWhatsAppEvent', () => {
+  it('categorizes a text message as user_text', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'hello' } })
+    event_type.should.equal('user_text')
+    payload.text.should.equal('hello')
+  })
+
+  it('categorizes an interactive button_reply as user_interaction with the title as value', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({
+      type: 'interactive',
+      interactive: { type: 'button_reply', button_reply: { id: 'ref_a', title: 'Yes' } }
+    })
+    event_type.should.equal('user_interaction')
+    payload.value.should.equal('Yes')
+    payload.label.should.equal('Yes')
+    payload.source_message_id.should.equal('ref_a')
+    payload.interaction_type.should.equal('quick_reply')
+  })
+
+  it('categorizes an interactive list_reply as user_interaction with the title as value', () => {
+    const { payload } = categorizeWhatsAppEvent({
+      type: 'interactive',
+      interactive: { type: 'list_reply', list_reply: { id: 'row_1', title: 'Blue', description: 'the colour' } }
+    })
+    payload.value.should.equal('Blue')
+    payload.source_message_id.should.equal('row_1')
+  })
+
+  it('categorizes a template button click (type button) as user_interaction', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({ type: 'button', button: { text: 'Confirm', payload: 'p1' } })
+    event_type.should.equal('user_interaction')
+    payload.value.should.equal('Confirm')
+  })
+
+  it('categorizes a referral as conversation_started', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'x' }, referral: { ref: 'form.ABC123' } })
+    event_type.should.equal('conversation_started')
+    payload.referral.ref.should.equal('form.ABC123')
+  })
+
+  it('maps a worker bot_echo to bot_message_sent carrying the metadata', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({ type: 'bot_echo', metadata: { ref: 'q1', type: 'multiple_choice' } })
+    event_type.should.equal('bot_message_sent')
+    payload.metadata.ref.should.equal('q1')
+    payload.metadata.type.should.equal('multiple_choice')
+  })
+
+  it('categorizes a delivered status as bot_message_delivered', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({ status: 'delivered', timestamp: 1640995200000, recipient_id: 'u1' })
+    event_type.should.equal('bot_message_delivered')
+    payload.watermark.should.equal(1640995200000)
+  })
+
+  it('categorizes a read status as bot_message_read', () => {
+    const { event_type } = categorizeWhatsAppEvent({ status: 'read', timestamp: 1, recipient_id: 'u1' })
+    event_type.should.equal('bot_message_read')
+  })
+
+  it('categorizes image media as user_media', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({ type: 'image', image: { id: 'media_1' } })
+    event_type.should.equal('user_media')
+    payload.attachments[0].type.should.equal('image')
+    payload.attachments[0].payload.id.should.equal('media_1')
+  })
+
+  it('returns unknown for unrecognized types', () => {
+    const { event_type } = categorizeWhatsAppEvent({ type: 'location' })
+    event_type.should.equal('unknown')
+  })
+})
+
+describe('parseWhatsAppEvent', () => {
+  it('builds a UniversalEvent from a WhatsApp text message', () => {
+    const data = { from: '27123', phone_number_id: 'PHONE_1', type: 'text', text: { body: 'hi' }, timestamp: 1640995200000 }
+    const result = parseWhatsAppEvent(data, 1640995200000)
+    result.user_id.should.equal('27123')
+    result.source.type.should.equal('whatsapp')
+    result.source.account_id.should.equal('PHONE_1')
+    result.event_type.should.equal('user_text')
+    result.payload.text.should.equal('hi')
+  })
+
+  it('keys a status event on recipient_id', () => {
+    const data = { status: 'delivered', recipient_id: '27123', phone_number_id: 'PHONE_1', timestamp: 1 }
+    const result = parseWhatsAppEvent(data, 1)
+    result.user_id.should.equal('27123')
+    result.event_type.should.equal('bot_message_delivered')
+  })
+})
+
+describe('parseEvent - whatsapp source', () => {
+  it('dispatches source:whatsapp through parseWhatsAppEvent', () => {
+    const kafkaEvent = JSON.stringify({
+      source: 'whatsapp',
+      phone_number_id: 'PHONE_1',
+      from: '27123',
+      type: 'interactive',
+      interactive: { type: 'button_reply', button_reply: { id: 'r0', title: 'Red' } },
+      timestamp: 1640995200000
+    })
+    const result = parseEvent(kafkaEvent)
+    result.source.type.should.equal('whatsapp')
+    result.event_type.should.equal('user_interaction')
+    result.payload.value.should.equal('Red')
   })
 })

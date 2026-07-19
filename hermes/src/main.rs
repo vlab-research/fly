@@ -4,7 +4,10 @@ use axum::{
 };
 use hermes::{
     config::Config,
-    handlers::{AppState, handle_synthetic, handle_webhook, health, verify_token},
+    handlers::{
+        AppState, handle_synthetic, handle_webhook, handle_whatsapp, health, verify_token,
+        verify_token_whatsapp,
+    },
     producer::KafkaProducer,
 };
 use std::sync::Arc;
@@ -48,6 +51,8 @@ async fn main() {
     let app = Router::new()
         .route("/webhooks", get(verify_token))
         .route("/webhooks", post(handle_webhook))
+        .route("/whatsapp", get(verify_token_whatsapp))
+        .route("/whatsapp", post(handle_whatsapp))
         .route("/synthetic", post(handle_synthetic))
         .route("/health", get(health))
         .layer(CorsLayer::permissive())

@@ -43,6 +43,13 @@ func (m *customMockEventProducer) PublishEvent(ctx context.Context, event types.
 	return nil
 }
 
+func (m *customMockEventProducer) PublishRawEvent(ctx context.Context, key string, value []byte) error {
+	if m.err != nil {
+		return m.err
+	}
+	return nil
+}
+
 func TestWorker_ProcessCommand_NativeLegacy_ReturnsError(t *testing.T) {
 	mockProducer := &customMockEventProducer{}
 	mockBot := newMockBotserver()

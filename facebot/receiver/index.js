@@ -44,6 +44,39 @@ app.post('/me/messages', express.json(), async (req, res) => {
   }
 });
 
+// WhatsApp Cloud API send: POST /{phone_number_id}/messages. Mirrors
+// /me/messages but keys the captured payload by `to` (the recipient user id),
+// so GET /sent/:userId polls WhatsApp and Messenger sends the same way.
+app.post('/:phoneNumberId/messages', express.json(), async (req, res) => {
+  const data = req.body
+  let sent
+
+  const cb = (response) => {
+    if (sent) return
+    res.json(response)
+    sent = true
+  }
+
+  setTimeout(() => {
+    if (sent) return
+    console.error('Timed out (whatsapp) in response to: ', util.inspect(data, null, 6))
+    res.json(err)
+    sent = true
+  }, 10000)
+
+  const rec = data && data.to
+  if (!rec) {
+    console.error('NO WHATSAPP RECIPIENT: ', data)
+    return res.json(err)
+  }
+
+  if (!messages[rec]) {
+    messages[rec] = [[data, cb]]
+  } else {
+    messages[rec].push([data, cb])
+  }
+});
+
 app.post('/me/pass_thread_control', express.json(), async (req, res) => {
   res.json({ success: true })
 });

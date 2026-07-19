@@ -107,10 +107,12 @@ func main() {
 	clients[types.PlatformMessenger] = messengerClient
 	logger.Info("registered Messenger client", zap.String("url", config.FacebookGraphURL))
 
-	// Create stub clients for platforms not yet implemented
-	clients[types.PlatformWhatsApp] = messageworker.NewWhatsAppClient()
-	logger.Info("registered WhatsApp client (stub)")
+	// Create WhatsApp client (real Cloud API HTTP client)
+	whatsappClient := messageworker.NewWhatsAppClient(config.WhatsAppGraphURL, tokenStore)
+	clients[types.PlatformWhatsApp] = whatsappClient
+	logger.Info("registered WhatsApp client", zap.String("url", config.WhatsAppGraphURL))
 
+	// Create stub clients for platforms not yet implemented
 	clients[types.PlatformInstagram] = messageworker.NewInstagramClient()
 	logger.Info("registered Instagram client (stub)")
 

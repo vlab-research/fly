@@ -26,6 +26,7 @@ type Config struct {
 
 	// Platform API base URLs
 	FacebookGraphURL string // For Messenger/Instagram (e.g., "https://graph.facebook.com/v18.0" or "http://gbv-facebot")
+	WhatsAppGraphURL string // WhatsApp Cloud API base (e.g., "https://graph.facebook.com/v18.0" or a mock)
 
 	// Legacy config (kept for backwards compatibility but not used)
 	MessengerURL    string
@@ -63,6 +64,8 @@ func LoadConfigFromEnv() (*Config, error) {
 
 		// Facebook Graph API URL (for Messenger/Instagram)
 		FacebookGraphURL: getEnvOrDefault("FACEBOOK_GRAPH_URL", "https://graph.facebook.com/v18.0"),
+		// WhatsApp Cloud API URL (defaults to the Graph API; overridden to a mock in tests)
+		WhatsAppGraphURL: getEnvOrDefault("WHATSAPP_GRAPH_URL", "https://graph.facebook.com/v18.0"),
 
 		// Legacy config (kept for backwards compatibility)
 		MessengerURL:    os.Getenv("MESSENGER_URL"),

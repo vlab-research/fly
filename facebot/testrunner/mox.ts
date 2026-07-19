@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import { WHATSAPP_PHONE_NUMBER_ID } from './seed-db';
 
 // translate-typeform has no TypeScript types
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -156,3 +157,69 @@ export function makeNotify(userId: string, payload: string, time = Date.now(), p
 }
 
 export const _baseMessage = baseMessage;
+
+// --- WhatsApp Cloud API webhook builders ---
+// These produce the { entry: [ { changes: [ { value: { messages: [...] } } ] } ] }
+// shape Hermes' /whatsapp handler consumes, tagged source:'whatsapp' so
+// sender.ts routes them there. The account is the seeded phone_number_id.
+
+export const WA_PHONE_NUMBER_ID = WHATSAPP_PHONE_NUMBER_ID;
+
+function waEnvelope(userId: string, message: any, phoneNumberId = WA_PHONE_NUMBER_ID): any {
+  return {
+    source: 'whatsapp',
+    entry: [{
+      id: 'WABA_TEST',
+      changes: [{
+        field: 'messages',
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: { display_phone_number: '15550000000', phone_number_id: phoneNumberId },
+          contacts: [{ profile: { name: 'Tester' }, wa_id: userId }],
+          messages: [message],
+        },
+      }],
+    }],
+  };
+}
+
+export function makeWhatsAppReferral(userId: string, formId: string, time = Date.now(), phoneNumberId = WA_PHONE_NUMBER_ID): any {
+  return waEnvelope(userId, {
+    from: userId,
+    id: uuidv4(),
+    timestamp: Math.floor(time / 1000),
+    type: 'text',
+    text: { body: `start ${formId}` },
+    referral: { ref: `form.${formId}`, source: 'ctwa', type: 'OPEN' },
+  }, phoneNumberId);
+}
+
+export function makeWhatsAppText(userId: string, text: string, time = Date.now(), phoneNumberId = WA_PHONE_NUMBER_ID): any {
+  return waEnvelope(userId, {
+    from: userId,
+    id: uuidv4(),
+    timestamp: Math.floor(time / 1000),
+    type: 'text',
+    text: { body: text },
+  }, phoneNumberId);
+}
+
+// Answer a multiple-choice field via a WhatsApp interactive reply. The reply
+// title must be the field's choice LABEL — the machine validates choice answers
+// against labels, and the normalizer maps button_reply.title to payload.value.
+export function makeWhatsAppReply(field: Field, userId: string, idx: number, time = Date.now(), phoneNumberId = WA_PHONE_NUMBER_ID): any {
+  if (!field.quick_replies) {
+    throw new Error('makeWhatsAppReply: field has no quick_replies');
+  }
+  const qr = field.quick_replies[idx];
+  return waEnvelope(userId, {
+    from: userId,
+    id: uuidv4(),
+    timestamp: Math.floor(time / 1000),
+    type: 'interactive',
+    interactive: {
+      type: 'button_reply',
+      button_reply: { id: qr.payload || String(idx), title: qr.title || '' },
+    },
+  }, phoneNumberId);
+}

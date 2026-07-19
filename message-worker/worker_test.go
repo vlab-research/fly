@@ -14,8 +14,9 @@ import (
 )
 
 type mockEventProducer struct {
-	events []types.UniversalEvent
-	err    error
+	events    []types.UniversalEvent
+	rawEvents [][]byte
+	err       error
 }
 
 func (m *mockEventProducer) PublishEvent(ctx context.Context, event types.UniversalEvent) error {
@@ -23,6 +24,14 @@ func (m *mockEventProducer) PublishEvent(ctx context.Context, event types.Univer
 		return m.err
 	}
 	m.events = append(m.events, event)
+	return nil
+}
+
+func (m *mockEventProducer) PublishRawEvent(ctx context.Context, key string, value []byte) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.rawEvents = append(m.rawEvents, value)
 	return nil
 }
 

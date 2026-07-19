@@ -1,7 +1,10 @@
 use axum::{body::Body, http::{Request, StatusCode}};
 use hermes::{
     config::Config,
-    handlers::{AppState, handle_synthetic, handle_webhook, health, verify_token},
+    handlers::{
+        AppState, handle_synthetic, handle_webhook, handle_whatsapp, health, verify_token,
+        verify_token_whatsapp,
+    },
     producer::EventProducer,
 };
 use http_body_util::BodyExt;
@@ -46,6 +49,7 @@ fn make_config() -> Config {
         auth0_dashboard_secret: None,
         port: 8080,
         fb_app_secret: None,
+        whatsapp_verify_token: Some("test-wa-token".into()),
     }
 }
 
@@ -59,6 +63,8 @@ fn make_app(producer: Arc<MockProducer>) -> axum::Router {
     axum::Router::new()
         .route("/webhooks", get(verify_token))
         .route("/webhooks", post(handle_webhook))
+        .route("/whatsapp", get(verify_token_whatsapp))
+        .route("/whatsapp", post(handle_whatsapp))
         .route("/synthetic", post(handle_synthetic))
         .route("/health", get(health))
         .with_state(state)
@@ -316,6 +322,186 @@ async fn synthetic_event_missing_user_returns_500() {
     let resp = app.oneshot(json_post("/synthetic", payload)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(producer.get_calls().len(), 0);
+}
+
+// --- WhatsApp webhook tests ---
+
+#[tokio::test]
+async fn whatsapp_single_message_produces_one_record() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "entry": [{
+            "id": "WABA_ID",
+            "changes": [{
+                "field": "messages",
+                "value": {
+                    "messaging_product": "whatsapp",
+                    "metadata": { "display_phone_number": "1555", "phone_number_id": "PHONE_ID_1" },
+                    "contacts": [{ "profile": { "name": "Tester" }, "wa_id": "27123456789" }],
+                    "messages": [{
+                        "from": "27123456789",
+                        "id": "wamid.abc",
+                        "timestamp": "1640995200",
+                        "type": "text",
+                        "text": { "body": "Hello bot!" }
+                    }]
+                }
+            }]
+        }]
+    });
+
+    let resp = app.oneshot(json_post("/whatsapp", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 1);
+    let (topic, key, data) = &calls[0];
+    assert_eq!(topic, "test-events");
+    assert_eq!(key, "27123456789");
+    let event: serde_json::Value = serde_json::from_slice(data).unwrap();
+    assert_eq!(event["source"], "whatsapp");
+    assert_eq!(event["phone_number_id"], "PHONE_ID_1");
+    assert_eq!(event["text"]["body"], "Hello bot!");
+    assert_eq!(event["timestamp"], json!(1_640_995_200_000_i64));
+}
+
+#[tokio::test]
+async fn whatsapp_multiple_messages_produce_n_records() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "metadata": { "phone_number_id": "PHONE_ID_1" },
+                    "messages": [
+                        { "from": "27111", "timestamp": "1640995200", "type": "text", "text": { "body": "First" } },
+                        { "from": "27222", "timestamp": "1640995201", "type": "text", "text": { "body": "Second" } }
+                    ]
+                }
+            }]
+        }]
+    });
+
+    let resp = app.oneshot(json_post("/whatsapp", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(&calls[0].1, "27111");
+    assert_eq!(&calls[1].1, "27222");
+}
+
+#[tokio::test]
+async fn whatsapp_status_event_produces_record() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "metadata": { "phone_number_id": "PHONE_ID_1" },
+                    "statuses": [{
+                        "id": "wamid.abc",
+                        "status": "delivered",
+                        "timestamp": "1640995200",
+                        "recipient_id": "27123456789"
+                    }]
+                }
+            }]
+        }]
+    });
+
+    let resp = app.oneshot(json_post("/whatsapp", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(&calls[0].1, "27123456789");
+    let event: serde_json::Value = serde_json::from_slice(&calls[0].2).unwrap();
+    assert_eq!(event["source"], "whatsapp");
+    assert_eq!(event["status"], "delivered");
+}
+
+#[tokio::test]
+async fn whatsapp_interactive_reply_produces_record() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "metadata": { "phone_number_id": "PHONE_ID_1" },
+                    "messages": [{
+                        "from": "27123456789",
+                        "timestamp": "1640995200",
+                        "type": "interactive",
+                        "interactive": {
+                            "type": "button_reply",
+                            "button_reply": { "id": "ref_0", "title": "Yes" }
+                        }
+                    }]
+                }
+            }]
+        }]
+    });
+
+    let resp = app.oneshot(json_post("/whatsapp", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 1);
+    let event: serde_json::Value = serde_json::from_slice(&calls[0].2).unwrap();
+    assert_eq!(event["interactive"]["button_reply"]["title"], "Yes");
+}
+
+#[tokio::test]
+async fn whatsapp_missing_changes_returns_200_no_produce() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let resp = app
+        .oneshot(json_post("/whatsapp", json!({ "entry": [{ "id": "WABA" }] })))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(producer.get_calls().len(), 0);
+}
+
+#[tokio::test]
+async fn whatsapp_verify_token_valid() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/whatsapp?hub.verify_token=test-wa-token&hub.challenge=wachallenge")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], b"wachallenge");
+}
+
+#[tokio::test]
+async fn whatsapp_verify_token_invalid() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/whatsapp?hub.verify_token=wrong&hub.challenge=c")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 // --- health ---

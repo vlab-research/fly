@@ -8,6 +8,8 @@ pub struct Config {
     pub port: u16,
     /// If set, enables X-Hub-Signature-256 verification on POST /webhooks.
     pub fb_app_secret: Option<String>,
+    /// Verify token for the WhatsApp Cloud API webhook (GET /whatsapp handshake).
+    pub whatsapp_verify_token: Option<String>,
 }
 
 impl Config {
@@ -30,6 +32,7 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(8080),
             fb_app_secret: std::env::var("FB_APP_SECRET").ok(),
+            whatsapp_verify_token: std::env::var("WHATSAPP_VERIFY_TOKEN").ok(),
         })
     }
 }
