@@ -50,22 +50,130 @@ func getRefFromMetadata(metadata json.RawMessage) string {
 }
 
 func translateMessengerText(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
-	result := types.MessengerMessage{
-		Text:     *msg.Text,
-		Metadata: metadata,
-	}
-
+	// Some field types arrive as platform-agnostic "text" but render on Messenger
+	// as template attachments (webview button, one-time-notification request,
+	// recurring notification opt-in). Dispatch on the field type carried in
+	// metadata. Everything else (short_text, email, phone_number, ...) is plain
+	// text — matching translate-typeform, which renders those with no quick reply.
 	if len(msg.Metadata) > 0 {
-		fieldType := msg.GetTypeFromMetadata()
-		switch fieldType {
-		case "email":
-			result.QuickReplies = []types.QuickReply{
-				{ContentType: "user_email"},
-			}
+		switch msg.GetTypeFromMetadata() {
+		case "webview":
+			return translateMessengerWebview(msg, metadata)
+		case "notify":
+			return translateMessengerNotify(msg, metadata)
+		case "notification_messages":
+			return translateMessengerNotificationMessages(msg, metadata)
 		}
 	}
 
-	return result, nil
+	return types.MessengerMessage{
+		Text:     *msg.Text,
+		Metadata: metadata,
+	}, nil
+}
+
+func metadataMap(metadata json.RawMessage) map[string]interface{} {
+	m := map[string]interface{}{}
+	if len(metadata) > 0 {
+		_ = json.Unmarshal(metadata, &m)
+	}
+	return m
+}
+
+func metadataString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// translateMessengerWebview renders a webview/link field as a button template
+// with a single web_url button (matches translate-typeform translateWebview).
+func translateMessengerWebview(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
+	md := metadataMap(msg.Metadata)
+	buttonText := metadataString(md, "buttonText")
+	if buttonText == "" {
+		buttonText = "View website"
+	}
+	// messenger_extensions defaults to true when unspecified.
+	extensions := true
+	if e, ok := md["extensions"].(bool); ok {
+		extensions = e
+	}
+
+	return types.MessengerMessage{
+		Attachment: &types.Attachment{
+			Type: "template",
+			Payload: types.TemplatePayload{
+				TemplateType: "button",
+				Text:         *msg.Text,
+				Buttons: []types.Button{{
+					Type:                "web_url",
+					URL:                 metadataString(md, "url"),
+					Title:               buttonText,
+					WebviewHeightRatio:  "full",
+					MessengerExtensions: ptrBool(extensions),
+				}},
+			},
+		},
+		Metadata: metadata,
+	}, nil
+}
+
+// translateMessengerNotify renders a notify field as a one_time_notif_req
+// template (matches translate-typeform translateNotify).
+func translateMessengerNotify(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
+	ref := getRefFromMetadata(msg.Metadata)
+	payload, err := json.Marshal(map[string]string{"ref": ref})
+	if err != nil {
+		return types.MessengerMessage{}, err
+	}
+
+	return types.MessengerMessage{
+		Attachment: &types.Attachment{
+			Type: "template",
+			Payload: types.TemplatePayload{
+				TemplateType: "one_time_notif_req",
+				Title:        *msg.Text,
+				Payload:      string(payload),
+			},
+		},
+		Metadata: metadata,
+	}, nil
+}
+
+// translateMessengerNotificationMessages renders a notification_messages field
+// as a notification_messages template (matches translate-typeform).
+func translateMessengerNotificationMessages(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
+	md := metadataMap(msg.Metadata)
+	ref := getRefFromMetadata(msg.Metadata)
+	payload, err := json.Marshal(map[string]string{"ref": ref})
+	if err != nil {
+		return types.MessengerMessage{}, err
+	}
+
+	timezone := metadataString(md, "timezone")
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	ctaText := metadataString(md, "ctaText")
+	if ctaText == "" {
+		ctaText = "ALLOW"
+	}
+
+	return types.MessengerMessage{
+		Attachment: &types.Attachment{
+			Type: "template",
+			Payload: types.TemplatePayload{
+				TemplateType:                 "notification_messages",
+				Title:                        *msg.Text,
+				NotificationMessagesTimezone: timezone,
+				NotificationMessagesCTAText:  ctaText,
+				Payload:                      string(payload),
+			},
+		},
+		Metadata: metadata,
+	}, nil
 }
 
 func translateMessengerQuestion(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {

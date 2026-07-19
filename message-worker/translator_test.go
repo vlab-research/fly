@@ -244,7 +244,10 @@ func TestTranslateToMessenger(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "email field (with quick reply)",
+			// Email renders as plain text (no user_email quick reply), matching
+			// translate-typeform (translateEmail = translateShortText) and the
+			// plain-text treatment of native input fields (cf. phone_number).
+			name: "email field (plain text, no quick reply)",
 			cmd: types.SendMessageCommand{
 				CommandID:      "cmd_10",
 				ConversationID: "conv_1",
@@ -259,9 +262,90 @@ func TestTranslateToMessenger(t *testing.T) {
 			want: types.MessengerMessage{
 				Text:     "What is your email?",
 				Metadata: `{"type":"email","ref":"email_1"}`,
-				QuickReplies: []types.QuickReply{
-					{ContentType: "user_email"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "webview field renders as button template",
+			cmd: types.SendMessageCommand{
+				CommandID: "cmd_11",
+				Platform:  types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("Take a look!"),
+					Metadata: json.RawMessage(`{"type":"webview","url":"https://example.com","buttonText":"Visit","extensions":false,"ref":"wv_1"}`),
 				},
+			},
+			want: types.MessengerMessage{
+				Attachment: &types.Attachment{
+					Type: "template",
+					Payload: types.TemplatePayload{
+						TemplateType: "button",
+						Text:         "Take a look!",
+						Buttons: []types.Button{{
+							Type:                "web_url",
+							URL:                 "https://example.com",
+							Title:               "Visit",
+							WebviewHeightRatio:  "full",
+							MessengerExtensions: boolPtr(false),
+						}},
+					},
+				},
+				Metadata: `{"type":"webview","url":"https://example.com","buttonText":"Visit","extensions":false,"ref":"wv_1"}`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "webview defaults messenger_extensions to true",
+			cmd: types.SendMessageCommand{
+				CommandID: "cmd_12",
+				Platform:  types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("Watch this"),
+					Metadata: json.RawMessage(`{"type":"webview","url":"https://example.com/v","buttonText":"Play","ref":"wv_2"}`),
+				},
+			},
+			want: types.MessengerMessage{
+				Attachment: &types.Attachment{
+					Type: "template",
+					Payload: types.TemplatePayload{
+						TemplateType: "button",
+						Text:         "Watch this",
+						Buttons: []types.Button{{
+							Type:                "web_url",
+							URL:                 "https://example.com/v",
+							Title:               "Play",
+							WebviewHeightRatio:  "full",
+							MessengerExtensions: boolPtr(true),
+						}},
+					},
+				},
+				Metadata: `{"type":"webview","url":"https://example.com/v","buttonText":"Play","ref":"wv_2"}`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "notify field renders as one_time_notif_req template",
+			cmd: types.SendMessageCommand{
+				CommandID: "cmd_13",
+				Platform:  types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:     types.MessageTypeText,
+					Text:     stringPtr("Can we message you again?"),
+					Metadata: json.RawMessage(`{"type":"notify","ref":"nt_1"}`),
+				},
+			},
+			want: types.MessengerMessage{
+				Attachment: &types.Attachment{
+					Type: "template",
+					Payload: types.TemplatePayload{
+						TemplateType: "one_time_notif_req",
+						Title:        "Can we message you again?",
+						Payload:      `{"ref":"nt_1"}`,
+					},
+				},
+				Metadata: `{"type":"notify","ref":"nt_1"}`,
 			},
 			wantErr: false,
 		},
