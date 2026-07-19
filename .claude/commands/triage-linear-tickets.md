@@ -1,6 +1,6 @@
 ---
-name: triage-linear-tickets
-description: Use when triaging or responding to support tickets filed via the dashboard. Covers fetching Linear issues in the Virtual Lab team, parsing the vlab-reporter marker to identify who filed each ticket, looking up that user and their impacted user IDs in CockroachDB, investigating their survey/state data, and posting a reply comment back on the Linear issue via the Linear MCP. Trigger on phrases like "triage tickets", "check support tickets", "respond to Linear tickets", or when a user asks to review new support requests.
+description: "Triage or respond to support tickets filed via the dashboard. Fetches Linear issues in the Virtual Lab team, parses the vlab-reporter marker to identify who filed each ticket, looks up that user and their impacted user IDs in CockroachDB, investigates their survey/state data, and posts a reply comment back on the Linear issue. Use when the user says 'triage tickets', 'check support tickets', 'respond to Linear tickets', or asks to review new support requests."
+allowed-tools: ["Bash", "Read", "Grep", "Glob", "WebFetch"]
 ---
 
 # Triage Linear Tickets
@@ -11,7 +11,7 @@ This skill covers the full triage loop: fetch tickets → identify reporter → 
 
 ## Linear access
 
-A Linear MCP server is configured in this project's MCP config (see `opencode.json` / `.mcp.json`). Use the MCP tools to query and mutate Linear. The key operations:
+A Linear MCP server is configured in this project's MCP config. Use the MCP tools to query and mutate Linear if available. The key operations:
 
 | Action | How |
 |--------|-----|
@@ -20,7 +20,7 @@ A Linear MCP server is configured in this project's MCP config (see `opencode.js
 | Post a reply comment | Mutation `commentCreate(input: { issueId: "<id>", body: "<your reply>" })` |
 | Change issue state | Mutation `issueUpdate(input: { id: "<id>", stateId: "<stateId>" })` |
 
-If the MCP is unavailable, you can also use curl with the API key from `devops/dev/.env-prod` (`LINEAR_API_KEY`):
+If the MCP is unavailable, use curl with the API key from `devops/dev/.env-prod` (`LINEAR_API_KEY`):
 
 ```bash
 KEY=$(grep -E '^LINEAR_API_KEY=' devops/dev/.env-prod | cut -d= -f2)
