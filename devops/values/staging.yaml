@@ -30,7 +30,7 @@ versionDinersclub: &vdinersclub v0.0.41-wa
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.9
 versionExodus: &vexodus v0.2.1
-versionMessageWorker: &vmessageworker v0.1.12-wa
+versionMessageWorker: &vmessageworker v0.1.13-wa
 
 processingAlerts: []
 laggingAlerts: []
