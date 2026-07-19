@@ -19,8 +19,19 @@ class Machine {
   }
 
   transition(state, parsedEvent) {
-    const page = parsedEvent.source.account_id
-    const platform = parsedEvent.source.type
+    // Synthetic/external events (payment results, bailouts, moviehouse events)
+    // may not carry the page on the event itself. The conversation's page is
+    // authoritative and stable, so fall back to the persisted state metadata —
+    // otherwise getForm() is called with an undefined pageid and the flow errors.
+    const page = parsedEvent.source.account_id || (state && state.md && state.md.pageid)
+    // A synthetic/external event's source.type is 'synthetic', not a real
+    // platform. Outbound commands must target the conversation's actual platform
+    // or message-worker rejects them as "unsupported platform". Use the persisted
+    // platform if present, else default to messenger (the only platform in use).
+    // TODO(whatsapp): persist md.platform at conversation start so this is exact.
+    const platform = parsedEvent.source.type === 'synthetic'
+      ? ((state && state.md && state.md.platform) || 'messenger')
+      : parsedEvent.source.type
     const output = exec(state, parsedEvent)
     const newState = apply(state, output)
     return { newState, output, page, platform }

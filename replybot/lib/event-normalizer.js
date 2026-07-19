@@ -214,12 +214,13 @@ function parseSyntheticEvent(data, timestamp) {
   const unifiedType = `synthetic_${eventType}`
 
   const userId = data.user_id || data.user || ''
+  const pageId = data.page || data.pageid || data.account_id
 
   return {
     event_id: newEventId(),
     user_id: userId,
     timestamp,
-    source: { type: 'synthetic' },
+    source: { type: 'synthetic', account_id: pageId },
     event_type: unifiedType,
     payload: event.value !== undefined ? event.value : null,
     raw: data
