@@ -1,0 +1,108 @@
+/* Typography for rendered markdown (ticket descriptions and comments).
+   Scoped to .vlab-markdown so it never leaks into the rest of the app. */
+
+.vlab-markdown {
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(0, 0, 0, 0.85);
+  overflow-wrap: break-word;
+}
+
+.vlab-markdown > :first-child {
+  margin-top: 0;
+}
+
+.vlab-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.vlab-markdown p {
+  margin: 0 0 10px;
+}
+
+.vlab-markdown h1,
+.vlab-markdown h2,
+.vlab-markdown h3,
+.vlab-markdown h4,
+.vlab-markdown h5,
+.vlab-markdown h6 {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.vlab-markdown h1 { font-size: 1.45em; }
+.vlab-markdown h2 { font-size: 1.3em; }
+.vlab-markdown h3 { font-size: 1.18em; }
+.vlab-markdown h4,
+.vlab-markdown h5,
+.vlab-markdown h6 { font-size: 1em; }
+
+.vlab-markdown ul,
+.vlab-markdown ol {
+  margin: 0 0 10px;
+  padding-left: 24px;
+}
+
+.vlab-markdown li + li {
+  margin-top: 3px;
+}
+
+.vlab-markdown code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.vlab-markdown pre {
+  background: #f6f8fa;
+  border: 1px solid #eaecef;
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0 0 10px;
+}
+
+.vlab-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.vlab-markdown blockquote {
+  margin: 0 0 10px;
+  padding: 4px 14px;
+  border-left: 3px solid #d9d9d9;
+  background: #fafafa;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.vlab-markdown table {
+  border-collapse: collapse;
+  margin: 0 0 10px;
+}
+
+.vlab-markdown th,
+.vlab-markdown td {
+  border: 1px solid #e8e8e8;
+  padding: 4px 12px;
+}
+
+.vlab-markdown th {
+  background: #fafafa;
+}
+
+.vlab-markdown img {
+  max-width: 100%;
+}
+
+.vlab-markdown a {
+  color: #1890ff;
+}
+
+.vlab-markdown hr {
+  border: none;
+  border-top: 1px solid #e8e8e8;
+  margin: 14px 0;
+}

@@ -1,0 +1,174 @@
+/* Support inbox layout: list pane + detail pane (split on large screens,
+   one pane at a time on small screens). */
+
+.tickets-inbox {
+  display: block;
+}
+
+.tickets-inbox.split {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.tickets-inbox.split .ticket-list-pane {
+  flex: 0 0 360px;
+  width: 360px;
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 64px - 48px); /* viewport minus navbar and padding */
+  display: flex;
+  flex-direction: column;
+}
+
+.tickets-inbox.split .ticket-detail-pane {
+  flex: 1;
+  min-width: 0; /* let long content shrink instead of blowing out the flex row */
+}
+
+/* ---- List pane ---- */
+
+.ticket-list-pane {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ticket-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 0;
+}
+
+.ticket-list-header h3 {
+  margin: 0;
+}
+
+.ticket-list-tabs {
+  padding: 0 16px;
+}
+
+.ticket-list-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.ticket-list-items {
+  overflow-y: auto;
+  border-top: 1px solid #f0f0f0;
+}
+
+.tickets-inbox.split .ticket-list-items {
+  flex: 1;
+  min-height: 0;
+}
+
+.ticket-item {
+  display: block;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ticket-item:hover {
+  background: #fafafa;
+}
+
+.ticket-item.selected {
+  background: #e6f7ff;
+  border-left-color: #1890ff;
+}
+
+.ticket-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ticket-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.ticket-item-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ticket-item-bottom .ant-tag {
+  margin-right: 0;
+}
+
+.ticket-item-time {
+  margin-left: auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Closed tickets are de-emphasized: grayed out, no bold, no color dot. */
+.ticket-item.closed {
+  opacity: 0.55;
+}
+
+.ticket-item.closed .ticket-item-title {
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.ticket-item.closed:hover,
+.ticket-item.closed.selected {
+  opacity: 0.85;
+}
+
+.ticket-list-empty {
+  padding: 40px 0;
+}
+
+/* ---- Detail pane ---- */
+
+.ticket-detail-empty {
+  background: #fff;
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  padding: 80px 24px;
+}
+
+.ticket-detail-meta {
+  margin-top: 4px;
+}
+
+/* Conversation bubbles: the reporter's own messages are tinted so the two
+   sides of the conversation are distinguishable at a glance. */
+.ticket-comment {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.ticket-comment.you {
+  background: #e6f7ff;
+  border-color: #91d5ff;
+}
+
+.ticket-comment-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ticket-comment-meta .comment-time {
+  font-size: 12px;
+}

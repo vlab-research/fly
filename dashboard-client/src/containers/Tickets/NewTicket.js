@@ -115,7 +115,7 @@ const NewTicket = () => {
             <Form.Item
               label="Description"
               name="description"
-              extra="Describe the problem in detail. What happened, what you expected, and any steps to reproduce."
+              extra="Describe the problem in detail. What happened, what you expected, and any steps to reproduce. Markdown formatting (**bold**, lists, links) is supported."
               rules={[
                 { required: true, message: 'Description is required' },
                 { max: MAX_DESCRIPTION, message: `Description must be at most ${MAX_DESCRIPTION} characters` },

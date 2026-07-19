@@ -1,31 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import {
-  Layout, Card, Descriptions, Tag, Alert, Button, Typography, Space,
-  Input, message, Empty,
+  Alert, Button, Card, Empty, Input, message, Space, Spin, Tag, Tooltip, Typography,
 } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
-import { useHistory, useParams } from 'react-router-dom';
+import { ArrowLeftOutlined, ExportOutlined } from '@ant-design/icons';
+import { useParams } from 'react-router-dom';
 import api from '../../services/api';
-import { Loading } from '../../components/UI';
+import Markdown from '../../components/Markdown';
+import { isClosed, tagColor, timeAgo } from './stateMeta';
 
-const { Content } = Layout;
-const { Text, Paragraph, Link: AntLink } = Typography;
+const { Text, Link: AntLink } = Typography;
 const { TextArea } = Input;
-
-const STATE_COLORS = {
-  Backlog: 'default',
-  Triaged: 'blue',
-  'In Progress': 'processing',
-  'In Review': 'cyan',
-  Done: 'success',
-  Canceled: 'default',
-};
-
-function stateTag(state) {
-  const color = STATE_COLORS[state] || 'default';
-  return <Tag color={color}>{state || '—'}</Tag>;
-}
 
 // Strip the trailing reporter marker from a body for display — it's a
 // machine sentinel, not something the user needs to see in the thread.
@@ -36,21 +21,19 @@ function displayBody(body) {
 
 function CommentRow({ comment }) {
   const isYou = !!comment.reporterEmail;
-  const author = isYou ? 'You' : (comment.author || 'Linear');
+  const author = isYou ? 'You' : (comment.author || 'Support');
   return (
-    <Card size="small" style={{ marginBottom: 12 }}>
-      <div style={{ marginBottom: 4 }}>
+    <div className={`ticket-comment${isYou ? ' you' : ''}`}>
+      <div className="ticket-comment-meta">
         <Text strong>{author}</Text>
-        <Text type="secondary" style={{ marginLeft: 8 }}>
-          {comment.createdAt ? new Date(comment.createdAt).toLocaleString() : ''}
-        </Text>
+        <Tooltip title={comment.createdAt ? new Date(comment.createdAt).toLocaleString() : ''}>
+          <Text type="secondary" className="comment-time">
+            {timeAgo(comment.createdAt)}
+          </Text>
+        </Tooltip>
       </div>
-      <Paragraph style={{ marginBottom: 0 }}>
-        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-          {displayBody(comment.body)}
-        </pre>
-      </Paragraph>
-    </Card>
+      <Markdown>{displayBody(comment.body)}</Markdown>
+    </div>
   );
 }
 
@@ -64,8 +47,7 @@ CommentRow.propTypes = {
   }).isRequired,
 };
 
-const TicketDetail = () => {
-  const history = useHistory();
+const TicketDetail = ({ onBack, onActivity }) => {
   const { id } = useParams();
   const [ticket, setTicket] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -111,6 +93,7 @@ const TicketDetail = () => {
       setTicket(prev => (prev ? { ...prev, comments: [...(prev.comments || []), comment] } : prev));
       setReply('');
       message.success('Reply posted');
+      if (onActivity) onActivity();
     } catch (err) {
       let msg = 'Failed to post reply';
       try {
@@ -122,102 +105,114 @@ const TicketDetail = () => {
     }
   };
 
-  if (loading) return <Loading>Loading ticket…</Loading>;
+  if (loading) {
+    return (
+      <div style={{ padding: '80px 0', textAlign: 'center' }}>
+        <Spin />
+      </div>
+    );
+  }
 
   if (notFound) {
     return (
-      <Layout>
-        <Content style={{ padding: '30px' }}>
-          <Alert
-            type="error"
-            message="Ticket not found"
-            description="This ticket does not exist or you do not have access to it."
-            showIcon
-          />
+      <div>
+        {onBack && (
           <Button
-            style={{ marginTop: 16 }}
+            style={{ marginBottom: 16 }}
             icon={<ArrowLeftOutlined />}
-            onClick={() => history.push('/tickets')}
+            onClick={onBack}
           >
-            Back to tickets
+            All tickets
           </Button>
-        </Content>
-      </Layout>
+        )}
+        <Alert
+          type="error"
+          message="Ticket not found"
+          description="This ticket does not exist or you do not have access to it."
+          showIcon
+        />
+      </div>
     );
   }
 
   const comments = Array.isArray(ticket.comments) ? ticket.comments : [];
+  const closed = isClosed(ticket.state);
 
   return (
-    <Layout>
-      <Content style={{ padding: '30px' }}>
-        <Space style={{ marginBottom: 16 }}>
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => history.push('/tickets')}
-          >
-            Back to tickets
+    <div>
+      <Space style={{ marginBottom: 16 }} wrap>
+        {onBack && (
+          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
+            All tickets
           </Button>
-          {ticket.url && (
-            <AntLink href={ticket.url} target="_blank" rel="noopener noreferrer">
-              View in Linear
-            </AntLink>
-          )}
+        )}
+        {ticket.url && (
+          <AntLink href={ticket.url} target="_blank" rel="noopener noreferrer">
+            View in Linear
+            {' '}
+            <ExportOutlined />
+          </AntLink>
+        )}
+      </Space>
+
+      <Card style={{ marginBottom: 24 }}>
+        <Space size="middle" wrap>
+          <Text code>{ticket.identifier}</Text>
+          <Tag color={tagColor(ticket.state)}>{ticket.state || '—'}</Tag>
         </Space>
+        <h3 style={{ margin: '8px 0 4px' }}>{ticket.title}</h3>
+        <Text type="secondary" className="ticket-detail-meta">
+          Opened
+          {' '}
+          {ticket.createdAt ? new Date(ticket.createdAt).toLocaleString() : '—'}
+          {' · '}
+          Last activity
+          {' '}
+          {timeAgo(ticket.updatedAt)}
+        </Text>
+      </Card>
 
-        <Card
-          title={(
-            <Space>
-              <Text code>{ticket.identifier}</Text>
-              <Text>{ticket.title}</Text>
-            </Space>
-          )}
-          style={{ marginBottom: 24 }}
-        >
-          <Descriptions bordered column={1}>
-            <Descriptions.Item label="State">{stateTag(ticket.state)}</Descriptions.Item>
-            <Descriptions.Item label="Created">
-              {ticket.createdAt ? new Date(ticket.createdAt).toLocaleString() : '—'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Updated">
-              {ticket.updatedAt ? new Date(ticket.updatedAt).toLocaleString() : '—'}
-            </Descriptions.Item>
-          </Descriptions>
-        </Card>
+      <Card title="Description" style={{ marginBottom: 24 }}>
+        <Markdown>{displayBody(ticket.description)}</Markdown>
+      </Card>
 
-        <Card title="Description" style={{ marginBottom: 24 }}>
-          <Paragraph>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-              {displayBody(ticket.description)}
-            </pre>
-          </Paragraph>
-        </Card>
+      <Card title={`Conversation (${comments.length})`} style={{ marginBottom: 24 }}>
+        {comments.length === 0 ? (
+          <Empty description="No replies yet. Start the conversation below." />
+        ) : (
+          comments.map(c => <CommentRow key={c.id} comment={c} />)
+        )}
+      </Card>
 
-        <Card title="Conversation" style={{ marginBottom: 24 }}>
-          {comments.length === 0 ? (
-            <Empty description="No replies yet. Start the conversation below." />
-          ) : (
-            comments.map(c => <CommentRow key={c.id} comment={c} />)
-          )}
-        </Card>
-
-        <Card title="Add a reply">
-          <TextArea
-            rows={4}
-            value={reply}
-            onChange={e => setReply(e.target.value)}
-            placeholder="Type your reply…"
-            disabled={replying}
+      <Card title="Add a reply">
+        {closed && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="This ticket is closed, but you can still reply — our support team will see it."
           />
-          <Space style={{ marginTop: 12 }}>
-            <Button type="primary" onClick={onReply} loading={replying} disabled={!reply.trim()}>
-              Post reply
-            </Button>
-          </Space>
-        </Card>
-      </Content>
-    </Layout>
+        )}
+        <TextArea
+          rows={4}
+          value={reply}
+          onChange={e => setReply(e.target.value)}
+          placeholder="Type your reply… Markdown formatting (**bold**, lists, links) is supported."
+          disabled={replying}
+        />
+        <Space style={{ marginTop: 12 }}>
+          <Button type="primary" onClick={onReply} loading={replying} disabled={!reply.trim()}>
+            Post reply
+          </Button>
+        </Space>
+      </Card>
+    </div>
   );
+};
+
+TicketDetail.propTypes = {
+  onBack: PropTypes.func,
+  onActivity: PropTypes.func,
 };
 
 export default TicketDetail;

@@ -103,11 +103,21 @@ The HTTP client uses `r2` (existing dep) and posts JSON `{ query, variables }` w
 
 Routes (in `src/root.js`, all `PrivateRoute`):
 
-- `/tickets` — list view (`Tickets.js`)
+- `/tickets` — support inbox (`Tickets.js`)
 - `/tickets/new` — create form (`NewTicket.js`)
-- `/tickets/:id` — detail + conversation + reply (`TicketDetail.js`)
+- `/tickets/:id` — same inbox with that ticket selected (deep links keep working)
 
 Nav item "Support" added to `Navbar.js`. Containers live in `src/containers/Tickets/` and use the standard `api.fetcher` pattern (no separate service file, matching `MessageTemplates`).
+
+### Inbox layout
+
+The inbox is a **master–detail split** on large screens (`antd Grid.useBreakpoint`, `lg` and up): the ticket list sits in a sticky left pane and the selected ticket's conversation in the right pane, so switching tickets is a single click with no page navigation. On smaller screens only one pane shows at a time — the list at `/tickets`, the detail at `/tickets/:id` with an "All tickets" back button.
+
+The list pane (`TicketList.js`) groups tickets into **Open** and **Closed** tabs with counts (closed = Linear state Done / Canceled / Cancelled / Closed / Duplicate, see `stateMeta.js`). Each row is a whole-item `Link` (cmd-click opens a new tab) showing a status dot, colored state tag, identifier, and relative last-activity time; the selected row is highlighted and closed rows render muted/grayed. Rows sort by `updatedAt` desc so recently active conversations float to the top. A refresh button re-fetches the list; posting a reply also silently refreshes it.
+
+### Markdown rendering
+
+Ticket descriptions and comment bodies are Markdown (authored by users in the dashboard and by support in Linear). They render through a shared `src/components/Markdown/` component (`react-markdown` + `remark-gfm`, styled by `Markdown.css`) instead of raw `<pre>` text — bold, lists, links (opened in a new tab), code blocks, strikethrough, and bare-URL autolinks all display properly. The reporter sentinel is still stripped before rendering.
 
 ## Files
 
@@ -122,7 +132,13 @@ Backend (`dashboard-server`):
 - Tests: `linear.core.test.js`, `tickets.core.test.js`, `tickets.controller.test.js`
 
 Frontend (`dashboard-client`):
-- `src/containers/Tickets/{Tickets,NewTicket,TicketDetail}.js`
+- `src/containers/Tickets/Tickets.js` — inbox shell (split layout, list fetching)
+- `src/containers/Tickets/TicketList.js` — list pane (open/closed tabs, clickable rows)
+- `src/containers/Tickets/TicketDetail.js` — detail pane (header, description, conversation, reply)
+- `src/containers/Tickets/NewTicket.js` — create form
+- `src/containers/Tickets/stateMeta.js` — pure state→color/closed/time helpers
+- `src/containers/Tickets/Tickets.css` — inbox layout + conversation styles
+- `src/components/Markdown/` — shared Markdown renderer (`react-markdown` + `remark-gfm`)
 - `src/containers/Tickets/index.js` (barrel)
 - `src/containers/index.js`, `src/root.js`, `src/components/Navbar/Navbar.js` (wiring)
 
