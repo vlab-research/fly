@@ -37,7 +37,12 @@ function _validateQuestion(r, validValues, messages) {
 
 function validateQuestion(field, messages) {
   const choices = (field.properties && field.properties.choices) || []
-  const validValues = choices.map(c => c.ref || c.label)
+  // Choice fields record the human-readable label as the response value
+  // (owner decision; data-continuous with prod). The generic-translator emits
+  // `value: choice.label`, and the logic engine resolves choice-jump conditions
+  // via getChoiceValue -> choice.label. Validation must therefore accept the
+  // label, not the choice ref, or every ref'd multiple_choice answer is rejected.
+  const validValues = choices.map(c => c.label)
   return r => _validateQuestion(r, validValues, messages)
 }
 
