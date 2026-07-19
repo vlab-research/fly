@@ -101,8 +101,11 @@ export async function startStack(): Promise<Stack> {
   // Load env vars from test env and YAMLs
   const testEnv = loadTestEnv();
 
-  // Build all images in parallel with explicit names
-  const botserverImageName = 'botserver:test';
+  // Build all images in parallel with explicit names.
+  // Hermes (Rust) is the drop-in replacement for the deprecated Node botserver;
+  // it serves the identical /webhooks + /synthetic + /health contract and
+  // publishes the same source-tagged raw events to BOTSERVER_EVENT_TOPIC.
+  const hermesImageName = 'hermes:test';
   console.time('[setup] image builds');
   const replybotImageName = 'replybot:test';
   const scribbleImageName = 'scribble:test';
@@ -113,7 +116,7 @@ export async function startStack(): Promise<Stack> {
   const messageWorkerImageName = 'message-worker:test';
 
   await Promise.all([
-    GenericContainer.fromDockerfile(path.join(repoRoot, 'botserver')).build(botserverImageName),
+    GenericContainer.fromDockerfile(path.join(repoRoot, 'hermes')).build(hermesImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'replybot')).build(replybotImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'scribble')).build(scribbleImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'facebot/receiver')).build(faceBotImageName),
@@ -388,7 +391,9 @@ export async function startStack(): Promise<Stack> {
     .withWaitStrategy(Wait.forLogMessage('starting message processing'))
     .start();
 
-  // Load botserver env from YAML and apply overrides
+  // Hermes reads the same env var names as the old botserver
+  // (BOTSERVER_EVENT_TOPIC, VERIFY_TOKEN, KAFKA_BROKERS, PORT), so we keep
+  // loading the botserver deployment YAML for its values.
   const botserverEnv = loadKubeEnv(
     path.join(repoRoot, 'botserver/kube/deployment.yaml')
   );
@@ -398,8 +403,9 @@ export async function startStack(): Promise<Stack> {
   // Merge in test env for secrets
   const botserverEnvWithSecrets = { ...testEnv, ...botserverEnv };
 
-  // Start botserver
-  const botserver = await new GenericContainer(botserverImageName)
+  // Start Hermes under the `botserver` network alias so every downstream
+  // service (replybot, dean, dinersclub) keeps resolving http://botserver/*.
+  const botserver = await new GenericContainer(hermesImageName)
     .withNetwork(network)
     .withNetworkAliases('botserver')
     .withExposedPorts(80)

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hermes
+description: Rust webhook receiver — drop-in replacement for botserver
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

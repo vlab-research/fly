@@ -9,7 +9,7 @@ npm install
 npm run test:tc
 ```
 
-This boots the full stack locally (database, Kafka, botserver, replybot, facebot, dean) and runs all functional tests. Warm runs take ~30 seconds.
+This boots the full stack locally (database, Kafka, hermes, replybot, facebot, dean) and runs all functional tests. Warm runs take ~30 seconds.
 
 ## Architecture Overview
 
@@ -19,7 +19,7 @@ The primary test mode (`test.tc.ts`) spins up a isolated Docker network with the
 
 - **CockroachDB** (`cockroachdb/cockroach:v24.1.0`) — persists form state, user responses, and dean job history
 - **Redpanda** (`redpandadata/redpanda:v23.3.18`) — Kafka broker; routes messages and responses between services
-- **Botserver** — webhook entry point; receives Facebook messages, publishes to Redpanda
+- **Hermes** — webhook entry point (Rust; drop-in replacement for the deprecated Node botserver); receives Facebook messages and publishes raw `source`-tagged events to Redpanda. Runs under the `botserver` network alias, so downstream `http://botserver/*` URLs are unchanged.
 - **Replybot** — subscribes to user messages, applies form logic, publishes state updates and question-to-send
 - **Scribble (states sink)** — subscribes to state-update topic, writes to CockroachDB
 - **Scribble (responses sink)** — subscribes to responses topic, writes to CockroachDB

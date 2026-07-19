@@ -7,7 +7,7 @@ This document describes the two-tier testing strategy for the Fly chatbot system
 The integration test suite validates the complete message pipeline:
 
 ```
-User (test) → Botserver → Redpanda → Replybot → Redpanda → Scribble → CockroachDB
+User (test) → Hermes → Redpanda → Replybot → Redpanda → Scribble → CockroachDB
                                           ↓
                                     Form logic
                                           ↓
@@ -30,7 +30,7 @@ Dean (on-demand trigger) → Query CockroachDB → Identify overdue messages →
 **When to run**: Every development session, in CI before merge  
 **Command**: `npm run test:tc` from `facebot/testrunner/`
 
-Testcontainers boots a complete, isolated Docker network with every component (database, Kafka, botserver, replybot, facebot, scribble, dean). Each test run is independent—no shared state across developers, no cluster flakiness, no need to wait for external resources.
+Testcontainers boots a complete, isolated Docker network with every component (database, Kafka, hermes, replybot, facebot, scribble, dean). The webhook entry point is **Hermes** — the Rust drop-in replacement for the deprecated Node botserver — running under the `botserver` network alias. Each test run is independent—no shared state across developers, no cluster flakiness, no need to wait for external resources.
 
 **Speed**: Cold start ~60s (rebuilds all images), warm ~30s (containers only)  
 **Dean behavior**: Triggered imperatively per test via `triggerDean()`—no cron waits needed. Timeout tests run in ~2s instead of ~180s.
