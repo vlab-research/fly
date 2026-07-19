@@ -41,7 +41,7 @@ The critical design decision: **the handoff (passing thread control) fires after
    - Synthesized `wait: { type: 'handover' }`
    - `handoff: md.handoff`
 3. **`apply()` transitions state** to `WAIT_EXTERNAL_EVENT` with the synthesized wait.
-4. **`act()` executes the handoff.** It returns `{ messages: [], handoff: _wrapSideEffect(ctx, output.handoff) }`. `transition.js` calls `passThreadControl`, handing thread control to the external app.
+4. **`act()` executes the handoff.** It returns `{ messages: [], handoff: _wrapSideEffect(ctx, output.handoff) }`. `transition.js` emits a `pass_thread_control` command to the Kafka `commands` topic; **message-worker** consumes it and calls Facebook's `pass_thread_control` API, handing thread control to the external app.
 5. **External app completes its interaction** and calls Facebook's `pass_thread_control` API to return control.
 6. **Botserver receives the handover webhook** and forwards it as a `messaging_handovers` event to Kafka.
 7. **Replybot processes the handover event** via `_handleExternalEvent`. The `WAIT_EXTERNAL_EVENT` state's synthesized wait is fulfilled. State transitions to `RESPOND` and the survey resumes from the next question.
@@ -67,11 +67,11 @@ Do not reference `timeout_minutes`, `take_thread_control`, or custom wait condit
 
 ## Receiving Data from External Apps
 
-When external apps return control, they can include metadata that is automatically flattened and stored with the `e_handover_` prefix.
+When external apps return control, they can include metadata that is automatically flattened and stored under the `e_handover_metadata_` prefix.
 
 ### How It Works
 
-External app calls Facebook's `pass_thread_control` API with metadata:
+External app calls Facebook's `pass_thread_control` API with metadata (a JSON **string**, per the Facebook API):
 
 ```json
 {
@@ -84,30 +84,37 @@ External app calls Facebook's `pass_thread_control` API with metadata:
 }
 ```
 
-Flattened metadata in state:
+Flattened metadata in state (the production contract, verified against `main`'s live pipeline):
 
 ```javascript
-e_handover_completion_status: "success"
-e_handover_assessment_results_reading_level: 6
-e_handover_assessment_results_comprehension_score: 82
-e_handover_recommendations_0: "literacy_support"
-e_handover_recommendations_1: "visual_aids"
+e_handover_metadata_completion_status: "success"
+e_handover_metadata_assessment_results_reading_level: 6
+e_handover_metadata_assessment_results_comprehension_score: 82
+e_handover_metadata_recommendations_0: "literacy_support"
+e_handover_metadata_recommendations_1: "visual_aids"
+e_handover_target_app_id: <previous_owner_app_id>
 ```
+
+**Where the `metadata_` segment comes from (important):** replybot's event pipeline (`parseEvent` = `recursiveJSONParser`) pre-parses the `pass_thread_control.metadata` JSON string into an object before `makeEventMetadata` runs. `makeEventMetadata`'s own `JSON.parse(metadata)` then throws on the already-parsed object, and its catch-fallback wraps the object as `{ metadata: <object> }`, which the flattener nests under a `metadata_` level. If the metadata ever reaches the flattener still as a string, the `JSON.parse` succeeds and the keys come out **flat** (`e_handover_completion_status`) — a one-level-shallower, incompatible key set. Any refactor of event parsing/normalization MUST preserve the wrapped `e_handover_metadata_*` keys: they are what production has always served and what live surveys reference. (The platform-abstraction V2 normalizer initially dropped the pre-parse and broke exactly this — see Troubleshooting.)
 
 ### Flattening Rules
 
-- Nested objects: `{user: {age: 25}}` becomes `e_handover_user_age: 25`
-- Arrays: `{tags: ["a", "b"]}` becomes `e_handover_tags_0: "a"`, `e_handover_tags_1: "b"`
+- Nested objects: `{user: {age: 25}}` becomes `e_handover_metadata_user_age: 25`
+- Arrays: `{tags: ["a", "b"]}` becomes `e_handover_metadata_tags_0: "a"`, `e_handover_metadata_tags_1: "b"`
 - All data types preserved: strings, numbers, booleans, null
+- Keys named `type` are dropped at every nesting level; `undefined` values are dropped; camelCase keys are snake_cased
+- Non-JSON plain-string metadata becomes a single field: `e_handover_metadata: "<string>"`
 
 ### Using Returned Data
 
 Access flattened metadata in subsequent questions:
 
 ```
-Based on your reading level of grade {{hidden:e_handover_assessment_results_reading_level}},
+Based on your reading level of grade {{hidden:e_handover_metadata_assessment_results_reading_level}},
 we have prepared appropriate materials for you.
 ```
+
+A missing key renders as an **empty string** — never an error — so a key mismatch shows up as silent empty placeholders in the rendered message.
 
 In logic jumps, use the hidden fields to branch on assessment results.
 
@@ -191,8 +198,9 @@ handoff:
 ### Metadata not appearing in survey
 
 - Is metadata properly JSON-formatted when the external app calls `pass_thread_control`?
-- Are you using the correct field names with the `e_handover_` prefix?
+- Are you using the correct field names with the `e_handover_metadata_` prefix (see "Receiving Data from External Apps" — the `metadata_` segment is part of the production contract)?
 - Check replybot logs to confirm the external event was processed
+- **Survey resumes but placeholders render empty (`""`)**: the handover itself worked (the wait was fulfilled) but the flattened keys don't match the survey's hidden-field names. This exact symptom occurred when the V2 event-normalizer stopped pre-parsing the metadata string, silently shifting keys from `e_handover_metadata_*` to flat `e_handover_*`. To diagnose, inspect the user's state (see `documentation/states-debugging.md`) and check which key set actually landed in `md`.
 
 ### External app never gets control
 
