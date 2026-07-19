@@ -257,6 +257,26 @@ describe('parseMessengerEvent', () => {
     result.payload.source_message_id.should.equal('evt_ref_abc')
     result.payload.interaction_type.should.equal('postback')
   })
+
+  it('parses optin event carrying the subtype in optin_type and the OTN token', () => {
+    const event = {
+      sender: { id: 'user_123' },
+      recipient: { id: 'page_456' },
+      timestamp: 1234567890,
+      optin: {
+        type: 'one_time_notif_req',
+        payload: '{ "ref": "notify_ref" }',
+        one_time_notif_token: 'FOOBAR'
+      }
+    }
+    const result = parseMessengerEvent(event, 1234567890)
+    result.event_type.should.equal('optin')
+    result.payload.type.should.equal('optin')
+    result.payload.optin_type.should.equal('one_time_notif_req')
+    result.payload.token.should.equal('FOOBAR')
+    // the JSON-string payload is parsed so the notify validator can match ref
+    result.payload.payload.ref.should.equal('notify_ref')
+  })
 })
 
 describe('parseEvent', () => {

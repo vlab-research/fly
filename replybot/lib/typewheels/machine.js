@@ -439,7 +439,9 @@ function exec(state, nxt) {
     }
 
     case 'OPTIN': {
-      if (nxt.payload.type !== 'one_time_notif_req') {
+      // payload.type is always 'optin'; the Messenger optin subtype
+      // (e.g. 'one_time_notif_req') lives in payload.optin_type.
+      if (nxt.payload.optin_type !== 'one_time_notif_req') {
         return _noop()
       }
 

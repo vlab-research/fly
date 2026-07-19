@@ -156,7 +156,10 @@ function categorizeMessengerEvent(data) {
         type: 'optin',
         optin_type: data.optin.type,
         token: data.optin.one_time_notif_token,
-        payload: data.optin.payload
+        // Messenger sends the optin payload as a JSON string (the notify
+        // field's {"ref": ...}); parse it like quick_reply/postback payloads
+        // so the notify validator can match the ref.
+        payload: parsePayload(data.optin.payload)
       }
     }
   }

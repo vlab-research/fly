@@ -143,7 +143,8 @@ const optin = {
   source: { type: 'messenger', account_id: PAGE_ID },
   event_type: 'optin',
   payload: {
-    type: 'one_time_notif_req',
+    type: 'optin',
+    optin_type: 'one_time_notif_req',
     token: 'FOOBAR',
     payload: { ref: 'foo' }
   }
