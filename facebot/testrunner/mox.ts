@@ -40,9 +40,12 @@ export interface SyntheticEvent {
   value: Record<string, any>;
 }
 
-export function getFields(path: string): Field[] {
-  const form = JSON.parse(fs.readFileSync(path, 'utf-8'));
+export function fieldsFromForm(form: any): Field[] {
   return form.fields.map(addCustomType).map((f: any) => translator(f).message);
+}
+
+export function getFields(path: string): Field[] {
+  return fieldsFromForm(JSON.parse(fs.readFileSync(path, 'utf-8')));
 }
 
 function baseMessage(userId: string, extra: any, time = Date.now(), pageId = PAGE_ID): any {
@@ -122,6 +125,23 @@ export function makeSynthetic(userId: string, event: SyntheticEvent, pageId = PA
     page: pageId,
     event,
   };
+}
+
+export function makeHandover(
+  userId: string,
+  newOwnerAppId: string,
+  previousOwnerAppId: string,
+  metadata: Record<string, any>,
+  time = Date.now(),
+  pageId = PAGE_ID,
+): any {
+  return baseMessage(userId, {
+    pass_thread_control: {
+      new_owner_app_id: newOwnerAppId,
+      previous_owner_app_id: previousOwnerAppId,
+      metadata: JSON.stringify(metadata),
+    },
+  }, time, pageId);
 }
 
 export function makeNotify(userId: string, payload: string, time = Date.now(), pageId = PAGE_ID): any {

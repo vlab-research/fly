@@ -1,0 +1,66 @@
+{
+  "id": "hiddenInterp",
+  "title": "hidden field interpolation test",
+  "theme": {
+    "href": "https://api.typeform.com/themes/6lPNE6"
+  },
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/WA44hg"
+  },
+  "settings": {
+    "is_public": true,
+    "is_trial": false,
+    "language": "en",
+    "progress_bar": "proportion",
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "meta": {
+      "allow_indexing": false
+    }
+  },
+  "thankyou_screens": [
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "hEGrE3xKfd6a",
+      "title": "Hello {{hidden:greeting_name}}, welcome!",
+      "ref": "3c1e2b8a-0a1a-4f2a-9c1a-1a2b3c4d5e6f",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      },
+      "type": "statement"
+    },
+    {
+      "id": "qX9zPmA1vRk2",
+      "title": "Your code is:{{hidden:missing_code}}",
+      "ref": "4d2f3c9b-1b2b-5a3b-ad2b-2b3c4d5e6f7a",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      },
+      "type": "statement"
+    },
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      },
+      "type": "thankyou_screen"
+    }
+  ],
+  "_links": {
+    "display": "https://nandanrao.typeform.com/to/hiddenInterp"
+  },
+  "custom_messages": {}
+}

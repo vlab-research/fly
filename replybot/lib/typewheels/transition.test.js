@@ -97,6 +97,68 @@ describe('Machine integrated', () => {
     report.publish.should.be.true
   })
 
+  // Locks the replybot-side sendParams (message-tag) contract at the actual
+  // pre-Kafka seam: Machine.run() -> transition() -> actionsResponses() ->
+  // act() -> buildCommands(). A field whose `properties.description` carries
+  // `sendParams: { messaging_type, tag }` gets merged into `field.md` by
+  // `addCustomType` (form.js), survives into the translated message's
+  // `metadata.sendParams` (generic-translator.js), and is still there,
+  // untouched, on the outbound `send_message` command's `message.metadata`.
+  // Message tags are in real production use (97 forms / 3,078 participants,
+  // last 3-6mo) — this is not a legacy/dead path.
+  //
+  // BOUNDARY (documented, not asserted here — that's message-worker's/
+  // facebot's territory, not replybot's): `@vlab-research/translate-typeform`'s
+  // `formatResponse` (translate-fields.js:386) spreads `metadata.sendParams`
+  // onto the *top level* of the object next to `message`
+  // (i.e. `{ messaging_type, tag, message }`), but replybot's actual send
+  // pipeline (`generic-translator.js` + `transition.js`) does not use that
+  // translator and does not perform this promotion — `sendParams` stays
+  // nested under `command.message.metadata.sendParams` all the way to Kafka.
+  // Separately, the V2 Go message-worker's `SendMessageCommand` struct
+  // (message-worker/types/command.go) has no top-level `messaging_type`/`tag`
+  // field, and its outbound `FacebookSendRequest` (messenger_client.go:27)
+  // only carries `{Recipient, Message}` — so even though replybot correctly
+  // emits the tag on the command, it does not currently reach the Facebook
+  // Send API. That gap lives entirely on the message-worker side and is
+  // tracked separately; this test only locks the replybot half (the tag
+  // data survives intact to the edge of replybot's own output).
+  it('carries sendParams (message-tag) through to the outbound command, nested under message.metadata, never promoted to the top level', async () => {
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [{
+        type: 'short_text',
+        title: 'foo',
+        ref: 'foo',
+        properties: { description: '{"sendParams": {"tag": "CONFIRMED_EVENT_UPDATE", "messaging_type": "MESSAGE_TAG"}}' }
+      },
+      { type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: referral.timestamp + 1000 * 60 * 60 * 24
+    }, 'foo'])
+
+    const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', referral)
+    should.not.exist(report.error)
+    report.publish.should.be.true
+    report.commands.should.be.an('array')
+    report.commands.length.should.be.greaterThan(0)
+
+    const command = report.commands[0]
+    command.message.text.should.equal('foo')
+
+    // The contract: sendParams survives, nested under message.metadata.
+    command.message.metadata.sendParams.messaging_type.should.equal('MESSAGE_TAG')
+    command.message.metadata.sendParams.tag.should.equal('CONFIRMED_EVENT_UPDATE')
+
+    // The boundary: replybot never promotes it to the top level of the
+    // command (that's translate-typeform's formatResponse behavior, which
+    // this pipeline does not use) — so downstream consumers relying on a
+    // top-level messaging_type/tag would get nothing.
+    should.not.exist(command.messaging_type)
+    should.not.exist(command.tag)
+  })
+
 
   it('returns a report with payment when given payment to send', async () => {
     const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md } })

@@ -46,6 +46,20 @@ async function send(token: string, json: any): Promise<any> {
   return res;
 }
 
+// Captures the FULL outbound payload the worker POSTed to facebot (not just
+// data.message), then acks it so the worker's HTTP call completes. Use for
+// asserting top-level messaging_type / tag / template shapes that flowMaster
+// (which only ever compares data.message) and mox.getFields (which returns
+// only translator(f).message, stripping messaging_type/tag) don't expose.
+// See facebot/receiver/index.js: GET /sent/:id returns { data, token } where
+// data is the full POST body the worker sent to /me/messages.
+export async function receiveSent(userId: string): Promise<any> {
+  const sent = await receive(userId);         // { data, token } — data is the full POST body
+  if (!sent.data || !sent.token) throw new Error('receiveSent: invalid response');
+  await send(sent.token, { res: 'success' });  // MUST ack or the worker's POST times out (10s)
+  return sent.data;
+}
+
 function canonicalizeJsonString(str: string): string {
   try {
     // Parse the JSON string and re-stringify with sorted keys

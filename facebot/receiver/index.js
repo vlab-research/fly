@@ -44,6 +44,10 @@ app.post('/me/messages', express.json(), async (req, res) => {
   }
 });
 
+app.post('/me/pass_thread_control', express.json(), async (req, res) => {
+  res.json({ success: true })
+});
+
 app.get('/sent/:id', express.json(), async (req, res) => {
   const rec = req.params.id
 

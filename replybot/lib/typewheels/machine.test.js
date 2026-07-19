@@ -207,6 +207,74 @@ describe('makeEventMetadata', () => {
     const md = makeEventMetadata(event)
     md.should.eql({ e_handover_target_app_id: '976665718578167' })
   })
+
+  it('should convert camelCase keys in handover metadata to snake_case', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: JSON.stringify({ echoText: 'hi' })
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_echo_text: 'hi'
+    })
+  })
+
+  it('should drop a key literally named "type" at every nesting level of handover metadata', () => {
+    // _eventMetadata filters out `type` keys before recursing/flattening, so a
+    // `type` key anywhere in the returned metadata tree (top-level or nested)
+    // must never surface as e_handover_metadata_type / e_handover_metadata_*_type.
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: JSON.stringify({
+          type: 'top_level_should_be_dropped',
+          echo_text: 'hello',
+          nested: { type: 'nested_should_be_dropped', value: 'ok' }
+        })
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_echo_text: 'hello',
+      e_handover_metadata_nested_value: 'ok'
+    })
+  })
+
+  // REGRESSION PIN for 826f37fb: production once flattened returned handover
+  // metadata one level too shallow (e_handover_echo_text instead of
+  // e_handover_metadata_echo_text), silently breaking every survey's
+  // {{hidden:e_handover_metadata_*}} references. Keep this assertion explicit
+  // and never "simplify" it back to the shallower shape.
+  it('REGRESSION (826f37fb): flattens returned handover metadata under e_handover_metadata_*, not e_handover_*', () => {
+    const previousOwnerAppId = '976665718578167'
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: previousOwnerAppId,
+        metadata: JSON.stringify({ echo_text: 'hello', smoke_echo: 'ok' })
+      }
+    }
+    const md = makeEventMetadata(event)
+
+    md.e_handover_metadata_echo_text.should.equal('hello')
+    md.e_handover_metadata_smoke_echo.should.equal('ok')
+    md.e_handover_target_app_id.should.equal(previousOwnerAppId)
+
+    // Explicitly assert the bug does NOT reproduce: no shallower e_handover_*
+    // keys for the metadata fields (only the unrelated target_app_id key is
+    // expected directly under e_handover_).
+    should.not.exist(md.e_handover_echo_text)
+    should.not.exist(md.e_handover_smoke_echo)
+  })
 })
 
 describe('getCurrentForm', () => {
