@@ -332,13 +332,18 @@ describe('waitConditionFulfilled', () => {
       })
     })
 
-    it('should normalize raw handover events', () => {
+    // Handover events reach _normalizeEvent already normalized to a
+    // UniversalEvent by event-normalizer.js (event_type: 'handover', with the
+    // raw pass_thread_control fields carried on payload). These tests feed that
+    // normalized shape — the raw pass_thread_control shape no longer reaches
+    // this function in the pipeline (statestore.js normalizes on ingest and
+    // machine.js stores the normalized event in externalEvents).
+    it('should normalize handover events', () => {
       const handoverEvent = {
-        source: 'messenger',
-        sender: { id: 'user123' },
-        recipient: { id: 'page123' },
+        event_type: 'handover',
         timestamp: 1640995200000,
-        pass_thread_control: {
+        payload: {
+          type: 'handover',
           new_owner_app_id: '123456789',
           previous_owner_app_id: '987654321',
           metadata: '{"completion_status": "success", "user_intent": "purchase"}'
@@ -346,7 +351,7 @@ describe('waitConditionFulfilled', () => {
       }
 
       const result = w._normalizeEvent(handoverEvent)
-      
+
       result.should.deep.equal({
         type: 'handover',
         value: {
@@ -360,11 +365,10 @@ describe('waitConditionFulfilled', () => {
 
     it('should handle handover events without metadata', () => {
       const handoverEvent = {
-        source: 'messenger',
-        sender: { id: 'user123' },
-        recipient: { id: 'page123' },
+        event_type: 'handover',
         timestamp: 1640995200000,
-        pass_thread_control: {
+        payload: {
+          type: 'handover',
           new_owner_app_id: '123456789',
           previous_owner_app_id: '987654321'
           // No metadata
@@ -372,7 +376,7 @@ describe('waitConditionFulfilled', () => {
       }
 
       const result = w._normalizeEvent(handoverEvent)
-      
+
       result.should.deep.equal({
         type: 'handover',
         value: {
@@ -384,11 +388,10 @@ describe('waitConditionFulfilled', () => {
 
     it('should handle handover events with invalid metadata gracefully', () => {
       const handoverEvent = {
-        source: 'messenger',
-        sender: { id: 'user123' },
-        recipient: { id: 'page123' },
+        event_type: 'handover',
         timestamp: 1640995200000,
-        pass_thread_control: {
+        payload: {
+          type: 'handover',
           new_owner_app_id: '123456789',
           previous_owner_app_id: '987654321',
           metadata: '{"invalid": json}' // Invalid JSON
@@ -410,11 +413,10 @@ describe('waitConditionFulfilled', () => {
 
     it('should handle plain string metadata (non-JSON)', () => {
       const handoverEvent = {
-        source: 'messenger',
-        sender: { id: '24311852335166032' },
-        recipient: { id: '101435865704727' },
+        event_type: 'handover',
         timestamp: 1761146257000,
-        pass_thread_control: {
+        payload: {
+          type: 'handover',
           metadata: 'End of AI chatbot session – handing back to Virtual Lab'
         }
       }

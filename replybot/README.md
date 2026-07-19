@@ -91,6 +91,16 @@ Notes on specific shapes:
   the field ref). After a timeout fulfils a notify wait, the stored token is
   attached to the outgoing message and message-worker sends it with
   `recipient: { one_time_notif_token }` instead of the user id.
+- **Handover** — Messenger `pass_thread_control` is normalized to
+  `event_type: 'handover'` with `payload: { type: 'handover',
+  previous_owner_app_id, new_owner_app_id, metadata }`. The machine's
+  `HANDOVER_EVENT` case reads `payload.new_owner_app_id`, and the wait/timeout
+  logic (`lib/typewheels/waiting.js`) reads the handover value off the
+  normalized `payload` — it consumes normalized events **only**. (The legacy
+  raw-`pass_thread_control` fallback in `_normalizeEvent` was removed: every
+  event is normalized on ingest by `statestore.js`, and `machine.js` stores the
+  normalized event in `externalEvents`, so a raw handover never reaches
+  `waiting.js`.)
 
 ### Testing
 

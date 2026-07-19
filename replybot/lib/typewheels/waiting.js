@@ -70,36 +70,6 @@ function _normalizeEvent(event) {
     }
   }
 
-  // Handle raw Messenger pass_thread_control events
-  if (event.pass_thread_control) {
-    const value = {}
-
-    if (event.pass_thread_control.new_owner_app_id) {
-      value.target_app_id = String(event.pass_thread_control.new_owner_app_id)
-    }
-
-    if (event.timestamp) {
-      value.timestamp = event.timestamp
-    }
-
-    if (event.pass_thread_control.metadata) {
-      if (typeof event.pass_thread_control.metadata === 'object') {
-        Object.assign(value, event.pass_thread_control.metadata)
-      } else {
-        try {
-          Object.assign(value, JSON.parse(event.pass_thread_control.metadata))
-        } catch (e) {
-          value.metadata = event.pass_thread_control.metadata
-        }
-      }
-    }
-
-    return {
-      type: 'handover',
-      value
-    }
-  }
-
   if (event.event_type === 'synthetic_external') {
     return { type: 'external', value: event.payload }
   }
