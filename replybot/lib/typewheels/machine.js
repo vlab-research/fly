@@ -23,7 +23,12 @@ function makeEventMetadata(event) {
 
     if (metadata) {
       try {
-        parsed = JSON.parse(metadata)
+        // Wrap under `metadata` to preserve the production flattening contract:
+        // main's pipeline (recursiveJSONParser) pre-parsed this string into an
+        // object, so its JSON.parse threw and the catch below wrapped the payload
+        // — flattened keys have always been e_handover_metadata_* in production
+        // and live surveys reference them. Don't flatten one level shallower.
+        parsed = { metadata: JSON.parse(metadata) }
       } catch (e) {
         parsed = { metadata }
       }

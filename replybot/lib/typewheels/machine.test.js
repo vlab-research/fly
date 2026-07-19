@@ -8,6 +8,7 @@ const { followUpMessage, offMessage } = require('../generic-validator')
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
+const { parseEvent } = require('../event-normalizer')
 
 const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md.ref ? md : { ref: md } } })
 
@@ -138,6 +139,73 @@ describe('makeEventMetadata', () => {
       e_existing_event_user_id: '123',
       e_existing_event_already_snake: 'value'
     })
+  })
+
+  it('should flatten handover metadata under e_handover_metadata_* (production key contract)', () => {
+    // The normalizer passes pass_thread_control.metadata through as the raw JSON
+    // string from the webhook. Flattened keys must keep the e_handover_metadata_*
+    // shape that main's production pipeline produced and live surveys reference.
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        new_owner_app_id: '123456789',
+        metadata: '{"smoke_echo":"ok","echo_text":"hello"}'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_smoke_echo: 'ok',
+      e_handover_metadata_echo_text: 'hello'
+    })
+  })
+
+  it('should flatten nested and array handover metadata under e_handover_metadata_', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: '{"assessment_results":{"reading_level":6},"recommendations":["a","b"]}'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_assessment_results_reading_level: 6,
+      e_handover_metadata_recommendations_0: 'a',
+      e_handover_metadata_recommendations_1: 'b'
+    })
+  })
+
+  it('should store plain-string handover metadata as e_handover_metadata', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: 'End of handoff'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata: 'End of handoff'
+    })
+  })
+
+  it('should only set target_app_id when handover has no metadata', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({ e_handover_target_app_id: '976665718578167' })
   })
 })
 
@@ -2367,6 +2435,72 @@ describe('Handoff functionality', () => {
 
     actions.messages[0].metadata.should.deep.equal({ ref: 'after', type: 'short_text' })
     actions.messages[0].text.should.equal('after')
+  })
+
+  it('should render returned handover metadata in hidden fields through the raw event pipeline', () => {
+    // Regression test for the staging smoke-test failure: the events below are
+    // RAW webhook shapes (as botserver forwards them to Kafka) mapped through the
+    // real event-normalizer — mirroring production, where parseEvent runs per
+    // Kafka message. The flattened keys must be e_handover_metadata_* (the
+    // contract main's pipeline produced and deployed surveys reference), not the
+    // one-level-shallower e_handover_*.
+    const form = {
+      logic: [],
+      fields: [
+        {
+          type: 'statement',
+          title: 'foo',
+          ref: 'foo',
+          properties: {
+            description: JSON.stringify({
+              type: 'handoff',
+              handoff: { target_app_id: '976665718578167', mode: 'wait' }
+            })
+          }
+        },
+        {
+          type: 'statement',
+          title: 'Handoff complete! The echo app heard you say "{{hidden:e_handover_metadata_echo_text}}" (status: {{hidden:e_handover_metadata_smoke_echo}}) and handed control back to me.',
+          ref: 'handoff_result'
+        },
+        { type: 'short_text', title: 'after', ref: 'after' }
+      ]
+    }
+
+    const rawReferral = {
+      source: 'messenger',
+      sender: { id: user.id },
+      recipient: { id: '1855355231229529' },
+      timestamp: 1542123799219,
+      referral: { ref: 'form.FOO.foo.bar', source: 'SHORTLINK', type: 'OPEN_THREAD' }
+    }
+    const rawHandoffEcho = {
+      source: 'messenger',
+      sender: { id: '1855355231229529' },
+      recipient: { id: user.id },
+      timestamp: 1542123799225,
+      message: {
+        is_echo: true,
+        metadata: JSON.stringify({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '976665718578167', mode: 'wait' } }),
+        text: 'foo'
+      }
+    }
+    const rawHandover = {
+      source: 'messenger',
+      sender: { id: user.id },
+      recipient: { id: '1855355231229529' },
+      timestamp: 1542123799300,
+      pass_thread_control: {
+        new_owner_app_id: 123456789, // Facebook sends app ids as numbers
+        previous_owner_app_id: 976665718578167,
+        metadata: '{"smoke_echo":"ok","echo_text":"hello"}'
+      }
+    }
+
+    const log = [rawReferral, rawHandoffEcho, rawHandover].map(parseEvent)
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    actions.messages[0].text.should.equal('Handoff complete! The echo app heard you say "hello" (status: ok) and handed control back to me.')
   })
 })
 
