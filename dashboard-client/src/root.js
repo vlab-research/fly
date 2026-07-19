@@ -16,6 +16,7 @@ import Reloadly from './containers/Reloadly';
 import Secrets from './containers/Secrets';
 import Media from './containers/Media';
 import MessageTemplates, { NewMessageTemplate, TemplateDetail } from './containers/MessageTemplates';
+import Tickets, { NewTicket, TicketDetail } from './containers/Tickets';
 
 const handleAuthentication = ({ location }) => {
   if (/access_token|id_token|error/.test(location.hash)) {
@@ -51,6 +52,9 @@ const Root = () => (
         <PrivateRoute exact path="/exports/create-full-messages" component={CreateFullMessagesExport} auth={Auth} />
         <PrivateRoute exact path="/exports/create-chat-log" component={CreateChatLogExport} auth={Auth} />
         <PrivateRoute exact path="/exports/create" component={CreateExport} auth={Auth} />
+        <PrivateRoute exact path="/tickets" component={Tickets} auth={Auth} />
+        <PrivateRoute exact path="/tickets/new" component={NewTicket} auth={Auth} />
+        <PrivateRoute exact path="/tickets/:id" component={TicketDetail} auth={Auth} />
         <Route exact path="/login" render={props => <LoginScreen {...props} auth={Auth} />} />
         <Route
           path="/auth"

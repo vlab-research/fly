@@ -23,6 +23,9 @@ const Navbar = ({ auth }) => {
       <Menu.Item>
         <Link to="/message-templates">Message Templates</Link>
       </Menu.Item>
+      <Menu.Item>
+        <Link to="/tickets">Support</Link>
+      </Menu.Item>
       <Menu.Item style={{ marginLeft: 'auto' }}>
         <Button onClick={isAuth ? auth.logout : auth.login} type="normal" size="large">
           {isAuth ? 'Logout' : 'Login'}

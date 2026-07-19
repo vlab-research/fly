@@ -25,6 +25,9 @@ const envVarsSchema = joi
     KAFKA_BROKERS: joi.string(),
     KAFKA_EXPORTS_TOPIC: joi.string(),
     EXODUS_API_URL: joi.string().optional().empty(''),
+    LINEAR_API_KEY: joi.string().optional().empty(''),
+    LINEAR_TEAM_ID: joi.string().optional().empty(''),
+    LINEAR_API_URL: joi.string().optional().empty(''),
   })
   .unknown()
   .required();
@@ -84,6 +87,11 @@ const config = {
   },
   EXODUS: {
     url: envVars.EXODUS_API_URL || 'http://exodus-api:8080',
+  },
+  LINEAR: {
+    apiKey: envVars.LINEAR_API_KEY || '',
+    teamId: envVars.LINEAR_TEAM_ID || '',
+    url: envVars.LINEAR_API_URL || 'https://api.linear.app/graphql',
   },
 };
 

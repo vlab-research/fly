@@ -4,6 +4,7 @@ const TypeformUtil = require('./typeform');
 const AuthUtil = require('./auth');
 const KafkaUtil = require('./kafka');
 const BailsUtil = require('./bails');
+const LinearUtil = require('./linear');
 
 module.exports = {
   ResponseUtil,
@@ -12,4 +13,5 @@ module.exports = {
   AuthUtil,
   KafkaUtil,
   BailsUtil,
+  LinearUtil,
 };

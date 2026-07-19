@@ -18,6 +18,7 @@ import ApiKeys from './ApiKeys';
 import { BailSystems, BailForm, BailEvents } from './BailSystems';
 import { StatesSummary, StatesList, StateDetail } from './StatesExplorer';
 import Media from './Media';
+import Tickets, { NewTicket, TicketDetail } from './Tickets';
 
 export {
   App,
@@ -44,4 +45,7 @@ export {
   StatesList,
   StateDetail,
   Media,
+  Tickets,
+  NewTicket,
+  TicketDetail,
 };

@@ -11,6 +11,7 @@ router
   .use('/facebook', require('./facebook'))
   .use('/media', require('./media'))
   .use('/message-templates', require('./message-templates'))
+  .use('/tickets', require('./tickets'))
   .use('/auth', require('./auth/auth.routes'))
   .use('/users/:userId/bails', require('./bails'))
   .use('/surveys/:surveyName/states', require('./states'))

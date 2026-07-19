@@ -20,7 +20,7 @@ exporterTopic: &exportertopic "vlab-exports"
 chatLogTopic: &chatlogtopic "vlab-prod-chat-log"
 commandsTopic: &commandstopic "vlab-prod-commands"
 
-versionDashboard: &vdashboard v0.0.64
+versionDashboard: &vdashboard v0.0.65
 versionBotserver: &vbotserver v0.0.12
 versionReplybot: &vreplybot v0.0.203
 versionLinksniffer: &vlinksniffer v0.0.6
@@ -468,6 +468,8 @@ dashboard:
       value: *exportertopic
     - name: EXODUS_API_URL
       value: "http://gbv-exodus-api"
+    - name: LINEAR_TEAM_ID
+      value: '004fb90f-35c7-47dd-afd1-0bc5c71bed67'
 
   resources:
     requests:

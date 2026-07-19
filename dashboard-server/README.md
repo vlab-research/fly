@@ -67,6 +67,7 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/media` | Facebook `message_attachments` uploads (reusable image/video attachments) |
 | `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
+| `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
 
 ### Database and Query Pattern
 
@@ -120,6 +121,7 @@ If the resolution rule in formcentral ever changes (shortcode + timestamp → su
 
 - **Cube.js**: Used for analytics aggregation on the dashboard
 - **Kafka**: Used for async export jobs; export requests are published to Kafka and results are delivered asynchronously
+- **Linear**: Support tickets (`/tickets`) are proxied to Linear's GraphQL API using a service-account API key (`LINEAR_API_KEY`) filing into a single team (`LINEAR_TEAM_ID`). Nothing is stored locally — "my tickets" is scoped by a `vlab-reporter:<email>` sentinel embedded in each issue description. See `documentation/tickets.md`.
 
 ## Testing
 
