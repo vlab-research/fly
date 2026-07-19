@@ -1,4 +1,5 @@
 const emailValidator = require('email-validator')
+const phone = require('phone')
 
 const defaultMessages = {
   'label.error.mustEnter': 'Sorry, that answer is not valid. Please try to answer the question again.',
@@ -54,20 +55,23 @@ function validateLegal(field, messages) {
   return r => _validateQuestion(r, ['I Accept', "I don't Accept", true, false], messages)
 }
 
-function validateRating(field, messages) {
+// opinion_scale/rating render as `steps` numeric quick replies labelled
+// [start .. start+steps-1], where start is 1 unless start_at_one === false
+// (matches translate-typeform translateRatings). Valid answers are those labels.
+function scaleValues(field) {
   const steps = (field.properties && field.properties.steps) || 5
+  const start = (field.properties && field.properties.start_at_one) === false ? 0 : 1
   const validValues = []
-  for (let i = 1; i <= steps; i++) validValues.push(String(i))
-  return r => _validateQuestion(r, validValues, messages)
+  for (let i = 0; i < steps; i++) validValues.push(String(start + i))
+  return validValues
+}
+
+function validateRating(field, messages) {
+  return r => _validateQuestion(r, scaleValues(field), messages)
 }
 
 function validateOpinionScale(field, messages) {
-  const steps = (field.properties && field.properties.steps) || 5
-  const startAtOne = (field.properties && field.properties.start_at_one) !== false
-  const start = startAtOne ? 1 : 0
-  const validValues = []
-  for (let i = start; i <= steps; i++) validValues.push(String(i))
-  return r => _validateQuestion(r, validValues, messages)
+  return r => _validateQuestion(r, scaleValues(field), messages)
 }
 
 function validateWelcomeScreen(field, messages) {
@@ -187,9 +191,12 @@ function validateEmail(field, messages) {
 }
 
 function validatePhone(field, messages) {
+  // Validate real phone numbers (E.164 / dialable), matching the `phone`
+  // package used by normalizePhone for the |e164 pipe. A bare "23345" must be
+  // rejected while "+918888000000" is accepted. Third arg true = allow landline.
   return r => ({
     message: messages['label.error.phoneNumber'],
-    valid: typeof r === 'string' && r.length > 0
+    valid: typeof r === 'string' && phone(r, '', true)[0] != null
   })
 }
 

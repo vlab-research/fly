@@ -82,46 +82,45 @@ function translateLegal(field) {
   }
 }
 
-function translateOpinionScale(field) {
+// opinion_scale/rating render as `steps` numeric quick replies labelled
+// [start .. start+steps-1], where start is 1 unless start_at_one === false
+// (matches translate-typeform translateRatings). `steps` is NOT added to
+// metadata — it is derived from properties, and the expected metadata omits it.
+function scaleOptions(field) {
   const steps = (field.properties && field.properties.steps) || 5
-  const startAtOne = (field.properties && field.properties.start_at_one) !== false
-  const start = startAtOne ? 1 : 0
+  const start = (field.properties && field.properties.start_at_one) === false ? 0 : 1
 
   const options = []
-  for (let i = start; i <= steps; i++) {
-    options.push({ value: String(i), label: String(i), description: null })
+  for (let i = 0; i < steps; i++) {
+    const label = String(start + i)
+    options.push({ value: label, label, description: null })
   }
+  return options
+}
 
+function translateOpinionScale(field) {
   return {
     type: 'question',
     text: null,
     question_text: field.title,
-    options,
+    options: scaleOptions(field),
     media_url: null,
     media_type: null,
     caption: null,
-    metadata: { ...(field.md || {}), ref: field.ref, type: 'opinion_scale', steps }
+    metadata: { ...(field.md || {}), ref: field.ref, type: 'opinion_scale' }
   }
 }
 
 function translateRating(field) {
-  const steps = (field.properties && field.properties.steps) || 5
-
-  const options = []
-  for (let i = 1; i <= steps; i++) {
-    const label = i === 1 ? '1 star' : `${i} stars`
-    options.push({ value: String(i), label, description: null })
-  }
-
   return {
     type: 'question',
     text: null,
     question_text: field.title,
-    options,
+    options: scaleOptions(field),
     media_url: null,
     media_type: null,
     caption: null,
-    metadata: { ...(field.md || {}), ref: field.ref, type: 'rating', steps }
+    metadata: { ...(field.md || {}), ref: field.ref, type: 'rating' }
   }
 }
 
@@ -151,9 +150,15 @@ function translateStatement(field) {
     Object.assign(metadata, field.md)
   }
 
+  // thankyou_screen renders only the first line of its title (the rest is
+  // Typeform's "create your own" boilerplate), matching translate-typeform.
+  const text = field.type === 'thankyou_screen'
+    ? String(field.title).split('\n')[0]
+    : field.title
+
   return {
     type: 'text',
-    text: field.title,
+    text,
     question_text: null,
     options: null,
     media_url: null,
