@@ -26,11 +26,11 @@ versionReplybot: &vreplybot v0.0.207-wa
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.40
+versionDinersclub: &vdinersclub v0.0.41-wa
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.9
 versionExodus: &vexodus v0.2.1
-versionMessageWorker: &vmessageworker v0.1.1
+versionMessageWorker: &vmessageworker v0.1.12-wa
 
 processingAlerts: []
 laggingAlerts: []
