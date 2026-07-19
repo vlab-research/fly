@@ -112,10 +112,16 @@ type Provider interface {
   "id": "payment-789",
   "success": true,
   "timestamp": "2024-01-15T10:30:00Z",
+  "phone": "+918888000000",
   "payment_details": {...},
   "response": {...}
 }
 ```
+
+The optional `phone` field carries the payout phone number. Providers (and the
+fake provider's echoed `result`) can set it so it lands in the user's state
+metadata (e.g. `md.e_payment_fake_phone`), where forms can reference it — the
+replybot flattens every Result key into `md` as `e_<type>_<key>`.
 
 ### Request Flow
 

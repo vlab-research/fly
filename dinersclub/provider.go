@@ -48,6 +48,7 @@ type Result struct {
 	ID             string           `json:"id,omitempty"`
 	Success        bool             `json:"success"`
 	Timestamp      time.Time        `json:"timestamp"`
+	Phone          *string          `json:"phone,omitempty"`
 	Error          *PaymentError    `json:"error,omitempty"`
 	PaymentDetails *json.RawMessage `json:"payment_details,omitempty"`
 	Response       *json.RawMessage `json:"response,omitempty"`

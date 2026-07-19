@@ -78,3 +78,39 @@ func TestFakeProviderPayoutWithValidJSON(t *testing.T) {
 	assert.Equal(t, "test", result.Type)
 	assert.True(t, result.Success)
 }
+
+func TestFakeProviderPayoutEchoesPhoneInResult(t *testing.T) {
+	provider := &FakeProvider{
+		getUserFromPaymentEvent: func(event *PaymentEvent) (*User, error) {
+			return &User{Id: "test-user"}, nil
+		},
+		auth: func(user *User, key string) error {
+			return nil
+		},
+	}
+
+	// Forms can echo the (e164-normalized) payout phone through the fake
+	// result so it lands in state metadata (e_payment_fake_phone).
+	validDetails := json.RawMessage(`{"result": {"type": "payment:fake", "id": "e164test", "phone": "+918888000000", "success": true}}`)
+
+	event := &PaymentEvent{
+		Userid:   "test-user",
+		Pageid:   "test-page",
+		Provider: "fake",
+		Details:  &validDetails,
+	}
+
+	result, err := provider.Payout(event)
+
+	assert.Nil(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, result.Success)
+	assert.NotNil(t, result.Phone)
+	assert.Equal(t, "+918888000000", *result.Phone)
+
+	// The phone must survive re-marshalling (the result is marshalled into
+	// the synthetic external event sent to botserver).
+	b, err := json.Marshal(result)
+	assert.Nil(t, err)
+	assert.Contains(t, string(b), `"phone":"+918888000000"`)
+}
