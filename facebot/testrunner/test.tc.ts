@@ -566,7 +566,12 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, [
         [ok, fields[0], []],
       ]);
-      await waitFor(() => getState(chatbase, userId), 30000);
+      // Dean's followups query only matches current_state = 'QOUT'; waiting for
+      // just any state row races the scribble upsert and dean finds 0 users.
+      await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state === 'QOUT' ? s : null;
+      }, 30000);
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'followups');
       await snooze(5000);
       // Bot sends the followup message and continues
