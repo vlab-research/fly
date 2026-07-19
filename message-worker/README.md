@@ -202,14 +202,26 @@ Handoff commands for conversation transfer
 
 ### Messenger
 
-| Message Type | Translation |
+The `text` message type is dispatched further by the field type carried in
+`metadata.type`, because several Typeform field types are platform-agnostic
+"text" but render on Messenger as template attachments.
+
+| Message Type (`metadata.type`) | Translation |
 |-------------|-------------|
-| Text | `text` field |
-| Question (≤13 options) | `text` + `quick_replies` |
+| Text — short_text/long_text/number/date/**email/phone_number**/upload/wait/stitch | `text` field only (no quick reply) |
+| Text — `webview` | `attachment` button template: single `web_url` button (`webview_height_ratio:"full"`, `messenger_extensions` from `metadata.extensions`, default true) |
+| Text — `notify` | `attachment` `one_time_notif_req` template (`title` + `payload:{"ref":…}`) |
+| Text — `notification_messages` | `attachment` `notification_messages` template (`title`, timezone, cta_text, `payload:{"ref":…}`) |
+| Question (≤13 options) | `text` + `quick_replies`; each payload `{"value":<label>,"ref":<fieldRef>}` |
 | Question (>13 options) | Error: `ErrTooManyOptions` |
-| Media | `attachment` with type and URL |
+| Media | `attachment` with type and URL (`is_reusable: true`) |
 | Native (phase 1) | Bypass translation, send raw payload |
 | Pass Thread Control | Call `/me/pass_thread_control` endpoint |
+
+These shapes mirror `@vlab-research/translate-typeform` (the reference the
+facebot integration tests assert against). `Attachment.Payload` is `interface{}`
+so it can hold either an `AttachmentPayload` (media) or a `TemplatePayload`
+(button / one_time_notif_req / notification_messages).
 
 ### WhatsApp
 

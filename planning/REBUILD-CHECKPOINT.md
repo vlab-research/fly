@@ -153,6 +153,41 @@ The facebot integration test suite runs the full pipeline on v2 (v2 inherits mai
 
 ---
 
+## RESUME PROGRESS — Session 2 (2026-07-18)
+
+> **NEXT AGENT: read `planning/HANDOFF.md` first** — it is the current start-here (status, all changes,
+> the 2 remaining failures fully triaged, cleanup + roadmap). This section is background.
+
+**Feedback loop / spec source of truth**: The facebot test's `getFields()` (mox.ts) computes each EXPECTED message by running `@vlab-research/translate-typeform`'s `translator` (node_modules/@vlab-research/translate-typeform/translate-fields.js). That library IS the fidelity spec: v2's replybot generic-translator + message-worker translator must reproduce its per-field-type output exactly (canonicalized for JSON key order). Field→Messenger rendering per the spec:
+- short_text/long_text/number/date/**email/phone**/upload/wait/stitch → plain `{text}` (NO quick reply)
+- multiple_choice/dropdown/yes_no/legal/welcome_screen → `quick_replies`, payload `{"value":<label>,"ref":<fieldRef>}`
+- **opinion_scale/rating** → `steps` numeric quick replies labelled `[start .. start+steps-1]` (start=1 unless `start_at_one:false` → 0)
+- **webview** → button template (`web_url` button, `webview_height_ratio:"full"`, `messenger_extensions` default true)
+- **notify** → `one_time_notif_req` template; **notification_messages** → `notification_messages` template
+- button_choice → button/postback template (≤3); picture_choice → generic carousel; share → element_share button (NOT yet implemented in v2 — add if a test needs them)
+
+### Root cause #1 (LINCHPIN) — RESOLVED & CONFIRMED ON STACK
+Choice answers rejected because `generic-validator.js validateQuestion` built valid values from `c.ref || c.label` (UUIDs) while the translator emits `value: choice.label` and the logic engine (`form.js getChoiceValue`) resolves choice-jumps to `choice.label`. All three must key on **label**. **Fix**: `validValues = choices.map(c => c.label)`. Confirmed via instrumented stack run: `response="Foodafone" validValues=["4127a919…"] valid=false` → after fix `valid=true`; the Multi-part integration test now passes end-to-end.
+
+### Additional systemic bugs found once flows advanced (all fixed, unit-green)
+- **Synthetic-event page/platform crash (caused most timeouts)**: `event-normalizer.parseSyntheticEvent` returned `source:{type:'synthetic'}` with NO `account_id`; `transition.js` then called `getForm(undefined, shortcode, ts)` → TypeError → state ERROR right after a flow advanced (e.g. SNomCIYT reached payment-success then died). Fix: parseSyntheticEvent now carries `account_id` from event `page`/`pageid`; `transition.js` falls back `page = source.account_id || state.md.pageid`, and maps synthetic `platform` → `state.md.platform || 'messenger'` (message-worker rejects `platform:'synthetic'`). TODO(whatsapp): persist `md.platform` at conversation start.
+- **email** emitted a `user_email` quick reply → now plain text (message-worker `translateMessengerText`); updated the Go unit test that asserted the old shape. **Owner-confirmed** (consistent with the phone plain-text decision).
+- **opinion_scale** off-by-one for `start_at_one:false` + extra `steps` metadata key; **rating** used `"N stars"` labels → both now use `scaleOptions`/`scaleValues` numeric `[start..start+steps-1]`, no `steps` in metadata.
+- **webview/notify/notification_messages templates**: implemented in message-worker (`translateMessengerWebview/Notify/NotificationMessages`); `Attachment.Payload` changed to `interface{}` + new `TemplatePayload`/`Button` types. Dispatched via `metadata.type` inside the text case (MessageContent unchanged). Unit tests added.
+
+### Test baselines this session
+- replybot `npm test`: **298 passing / 0 failing**; message-worker `go test ./...`: **pass** (incl. new webview/notify/email cases).
+- facebot integration: **0/26 → 1 (linchpin) → 12 (shapes) → 22 (synthetic fix) → 24/26** (thankyou + error-status). Remaining 2 (phoneE164 #13 — also fails on prod; notify/OTN #21) triaged in `HANDOFF.md §4`.
+
+### Instrumentation to strip before final commit
+- `stack.ts` `withLogConsumer` on replybot + message-worker (error-filtered; test-harness only).
+- (Code-level DEBUG logs already removed.)
+
+### Remaining / to verify on next full run
+Validation-error tests (10,11), stitched forms (12–14), translated responses (15), bailout (1), timeout/follow-up/retry (19–25). Re-run full suite with all fixes, then triage residual; then strip instrumentation → `-wa` staging deploy → WhatsApp P0.
+
+---
+
 **Checkpoint created**: 2026-07-18  
-**Branch**: `feature/platform-abstraction-v2` (HEAD: eecbd72)  
-**Status**: Paused at owner request; ready to resume once root cause #1 is diagnosed and fixed.
+**Branch**: `feature/platform-abstraction-v2` (HEAD: eecbd72 + uncommitted session-2 fixes)  
+**Status**: Linchpin resolved & confirmed on stack; driving full facebot suite to green.
