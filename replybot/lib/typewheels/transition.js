@@ -168,13 +168,17 @@ class Machine {
 
     } catch (e) {
       const tag = (e instanceof MachineIOError) ? e.tag : 'STATE_ACTIONS'
+      // Preserve MachineIOError details (e.g. status:404 for FORM_NOT_FOUND) on
+      // the published error, matching main. The error report is fed back through
+      // the machine, which transitions the user to the ERROR state.
+      const details = (e instanceof MachineIOError && e.details) ? e.details : {}
       return {
         publish: true,
         timestamp,
         user,
         page,
         newState,
-        error: { tag, message: e.message, stack: e.stack }
+        error: { ...details, tag, message: e.message, stack: e.stack }
       }
     }
   }
