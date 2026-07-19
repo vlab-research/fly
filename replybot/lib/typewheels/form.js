@@ -1,9 +1,14 @@
 const mustache = require('mustache')
-const util = require('util')
 const _ = require('lodash')
 const { hash } = require('./utils')
-const { translator, addCustomType: baseAddCustomType, parseNumber, normalizePhone } = require('@vlab-research/translate-typeform')
+const { translateTypeformField } = require('../generic-translator')
+const { parseNumber } = require('../generic-validator')
 const yaml = require('js-yaml')
+const phone = require('phone')
+
+function normalizePhone(number, country, mobile) {
+  return phone('' + number, country || '', !mobile)[0] || null
+}
 
 class FieldError extends Error { }
 
@@ -145,7 +150,7 @@ function interpolateField(ctx, qa, field) {
 }
 
 function translateField(ctx, qa, field) {
-  return translator(addCustomType(interpolateField(ctx, qa, field)))
+  return translateTypeformField(addCustomType(interpolateField(ctx, qa, field)))
 }
 
 function getField({ form, user }, ref, index = false) {
@@ -303,8 +308,54 @@ function getVar(ctx, qa, ref, v, vars) {
 }
 
 
+const mdLinkPattern = /\[([^\]]*)\]\(([^)]+)\)/
+
+function _removeMdLinks(s) {
+  if (typeof s === 'string' || s instanceof String) {
+    return s.replace(mdLinkPattern, "$2")
+  }
+  return s
+}
+
+function _cleanStrings(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(_cleanStrings)
+  }
+
+  if (obj !== null && typeof obj === 'object') {
+    for (let k in obj) {
+      obj[k] = _cleanStrings(obj[k])
+    }
+    return obj
+  }
+
+  return _removeMdLinks(obj)
+}
+
 function addCustomType(field) {
-  return baseAddCustomType(field)
+  if (field.properties && field.properties.description) {
+    let d = field.properties.description.trim()
+
+    try {
+      let params = yaml.safeLoad(d)
+      params = _cleanStrings(params)
+
+      if (typeof params !== 'object') {
+        return field
+      }
+
+      if (params && params.type) {
+        return { ...field, type: params.type, md: { ...field.md, ...params } }
+      }
+      if (params) {
+        return { ...field, md: { ...field.md, ...params } }
+      }
+    }
+    catch (e) {
+      return field
+    }
+  }
+  return field
 }
 
 module.exports = {

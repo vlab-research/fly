@@ -1,0 +1,89 @@
+{
+  "id": "multi-part-attachment",
+  "title": "Multi-part attachment test",
+  "theme": {
+    "href": "https://api.typeform.com/themes/6lPNE6"
+  },
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/WA44hg"
+  },
+  "settings": {
+    "is_public": true,
+    "is_trial": false,
+    "language": "en",
+    "progress_bar": "percentage",
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "meta": {
+      "allow_indexing": false
+    }
+  },
+  "welcome_screens": [
+    {
+      "ref": "26c6851e-abd3-443c-8743-e486312598f2",
+      "title": "",
+      "properties": {
+        "show_button": true,
+        "button_text": "Start"
+      }
+    }
+  ],
+  "thankyou_screens": [
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "attachment_field_1",
+      "title": "Here is an important image",
+      "ref": "attachment_ref_1",
+      "properties": {
+        "description": "type: attachment\nattachment:\n  url: https://via.placeholder.com/300x200?text=Test+Image\n  type: image\nkeepMoving: true"
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "attachment"
+    },
+    {
+      "id": "multiple_choice_field_1",
+      "title": "Did you see the image?",
+      "ref": "multiple_choice_ref_1",
+      "properties": {
+        "choices": [
+          {
+            "ref": "choice_yes",
+            "label": "Yes"
+          },
+          {
+            "ref": "choice_no",
+            "label": "No"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      },
+      "type": "thankyou_screen"
+    }
+  ],
+  "_links": {
+    "display": "https://nandanrao.typeform.com/to/multi-part-attachment"
+  },
+  "custom_messages": {}
+}

@@ -1,7 +1,6 @@
 const { pipeline } = require('stream')
 const { Machine } = require('../typewheels/transition')
 const { StateStore } = require('../typewheels/statestore')
-const { TokenStore } = require('../typewheels/tokenstore')
 
 class SpineSupervisor {
   constructor(numSpines, maxRestarts = 5, timeWindow = 5 * 60 * 1000, chatbase = null, BotSpineCtor = null) {
@@ -34,8 +33,7 @@ class SpineSupervisor {
   }
 
   setupPipeline(spine, spineIndex, processor) {
-    const tokenStore = new TokenStore(this.chatbase.pool)
-    const machine = new Machine(process.env.REPLYBOT_MACHINE_TTL || '60m', tokenStore)
+    const machine = new Machine(process.env.REPLYBOT_MACHINE_TTL || '60m')
 
     const handleSpineError = (err) => {
       console.error(`Spine ${spineIndex} error:`, err)

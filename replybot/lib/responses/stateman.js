@@ -4,15 +4,13 @@ const { pipeline } = require('stream')
 const { BotSpine } = require('@vlab-research/botspine')
 const { Machine } = require('../typewheels/transition')
 const { StateStore } = require('../typewheels/statestore')
-const { TokenStore } = require('../typewheels/tokenstore')
 const Chatbase = require(process.env.CHATBASE_BACKEND)
 
 class Stateman {
   constructor(chatbase) {
     this.chatbase = chatbase
     this.stateStore = new StateStore(chatbase)
-    this.tokenStore = new TokenStore(chatbase.pool)
-    this.machine = new Machine('600s', this.tokenStore)
+    this.machine = new Machine('600s')
   }
 
   async write({ key: userId, value }) {

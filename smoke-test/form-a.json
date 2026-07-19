@@ -165,6 +165,20 @@
       }
     },
     {
+      "type": "multiple_choice",
+      "ref": "utility_message",
+      "title": "Now testing utility template messages. This should arrive as a Facebook UTILITY template (not plain text).",
+      "properties": {
+        "description": "{\"type\":\"utility_message\",\"template\":\"recontact\",\"language\":\"en_US\",\"params\":[\"300 NGN\"]}",
+        "choices": [
+          { "label": "Continue", "ref": "choice_utility_continue" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
       "type": "statement",
       "ref": "stitch_statement",
       "title": "Now testing stitch to Part B...",
@@ -379,7 +393,7 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "stitch_statement" }
+            "to": { "type": "field", "value": "utility_message" }
           },
           "condition": {
             "op": "always",

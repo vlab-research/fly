@@ -9,7 +9,6 @@ import (
 	"github.com/vlab-research/fly/message-worker/types"
 )
 
-// Helper function
 func stringPtr(s string) *string {
 	return &s
 }
@@ -18,7 +17,6 @@ func mediaTypePtr(m types.MediaType) *types.MediaType {
 	return &m
 }
 
-// Example: Basic text message translation
 func ExampleTranslateToMessenger_text() {
 	cmd := types.SendMessageCommand{
 		CommandID:      "cmd_123",
@@ -36,7 +34,6 @@ func ExampleTranslateToMessenger_text() {
 		log.Fatal(err)
 	}
 
-	// Output the translated message
 	jsonBytes, _ := json.MarshalIndent(msg, "", "  ")
 	fmt.Println(string(jsonBytes))
 
@@ -46,7 +43,6 @@ func ExampleTranslateToMessenger_text() {
 	// }
 }
 
-// Example: Question with options for Messenger
 func ExampleTranslateToMessenger_question() {
 	cmd := types.SendMessageCommand{
 		CommandID:      "cmd_124",
@@ -57,9 +53,9 @@ func ExampleTranslateToMessenger_question() {
 			Type:         types.MessageTypeQuestion,
 			QuestionText: stringPtr("What is your gender?"),
 			Options: []types.Option{
-				{Value: "male", Label: "Male"},
-				{Value: "female", Label: "Female"},
-				{Value: "other", Label: "Other"},
+				{Value: json.RawMessage(`"male"`), Label: "Male"},
+				{Value: json.RawMessage(`"female"`), Label: "Female"},
+				{Value: json.RawMessage(`"other"`), Label: "Other"},
 			},
 		},
 	}
@@ -95,7 +91,6 @@ func ExampleTranslateToMessenger_question() {
 	// }
 }
 
-// Example: WhatsApp question with buttons (≤3 options)
 func ExampleTranslateToWhatsApp_buttons() {
 	cmd := types.SendMessageCommand{
 		CommandID:      "cmd_125",
@@ -106,8 +101,8 @@ func ExampleTranslateToWhatsApp_buttons() {
 			Type:         types.MessageTypeQuestion,
 			QuestionText: stringPtr("Do you agree to participate?"),
 			Options: []types.Option{
-				{Value: "yes", Label: "Yes, I agree"},
-				{Value: "no", Label: "No, thanks"},
+				{Value: json.RawMessage(`"yes"`), Label: "Yes, I agree"},
+				{Value: json.RawMessage(`"no"`), Label: "No, thanks"},
 			},
 		},
 	}
@@ -150,7 +145,6 @@ func ExampleTranslateToWhatsApp_buttons() {
 	// }
 }
 
-// Example: WhatsApp question with list (4-10 options)
 func ExampleTranslateToWhatsApp_list() {
 	cmd := types.SendMessageCommand{
 		CommandID:      "cmd_126",
@@ -161,11 +155,11 @@ func ExampleTranslateToWhatsApp_list() {
 			Type:         types.MessageTypeQuestion,
 			QuestionText: stringPtr("What is your age range?"),
 			Options: []types.Option{
-				{Value: "18-24", Label: "18-24"},
-				{Value: "25-34", Label: "25-34"},
-				{Value: "35-44", Label: "35-44"},
-				{Value: "45-54", Label: "45-54"},
-				{Value: "55+", Label: "55+"},
+				{Value: json.RawMessage(`"18-24"`), Label: "18-24"},
+				{Value: json.RawMessage(`"25-34"`), Label: "25-34"},
+				{Value: json.RawMessage(`"35-44"`), Label: "35-44"},
+				{Value: json.RawMessage(`"45-54"`), Label: "45-54"},
+				{Value: json.RawMessage(`"55+"`), Label: "55+"},
 			},
 		},
 	}
@@ -219,7 +213,6 @@ func ExampleTranslateToWhatsApp_list() {
 	// }
 }
 
-// Example: Image message with caption for WhatsApp
 func ExampleTranslateToWhatsApp_image() {
 	cmd := types.SendMessageCommand{
 		CommandID:      "cmd_127",
@@ -252,7 +245,6 @@ func ExampleTranslateToWhatsApp_image() {
 	// }
 }
 
-// Example: Error handling for too many options
 func ExampleTranslateToMessenger_tooManyOptions() {
 	cmd := types.SendMessageCommand{
 		CommandID:      "cmd_128",
@@ -263,20 +255,20 @@ func ExampleTranslateToMessenger_tooManyOptions() {
 			Type:         types.MessageTypeQuestion,
 			QuestionText: stringPtr("Select a month:"),
 			Options: []types.Option{
-				{Value: "1", Label: "January"},
-				{Value: "2", Label: "February"},
-				{Value: "3", Label: "March"},
-				{Value: "4", Label: "April"},
-				{Value: "5", Label: "May"},
-				{Value: "6", Label: "June"},
-				{Value: "7", Label: "July"},
-				{Value: "8", Label: "August"},
-				{Value: "9", Label: "September"},
-				{Value: "10", Label: "October"},
-				{Value: "11", Label: "November"},
-				{Value: "12", Label: "December"},
-				{Value: "13", Label: "Not sure"},
-				{Value: "14", Label: "Prefer not to say"}, // 14th option - too many!
+				{Value: json.RawMessage(`"1"`), Label: "January"},
+				{Value: json.RawMessage(`"2"`), Label: "February"},
+				{Value: json.RawMessage(`"3"`), Label: "March"},
+				{Value: json.RawMessage(`"4"`), Label: "April"},
+				{Value: json.RawMessage(`"5"`), Label: "May"},
+				{Value: json.RawMessage(`"6"`), Label: "June"},
+				{Value: json.RawMessage(`"7"`), Label: "July"},
+				{Value: json.RawMessage(`"8"`), Label: "August"},
+				{Value: json.RawMessage(`"9"`), Label: "September"},
+				{Value: json.RawMessage(`"10"`), Label: "October"},
+				{Value: json.RawMessage(`"11"`), Label: "November"},
+				{Value: json.RawMessage(`"12"`), Label: "December"},
+				{Value: json.RawMessage(`"13"`), Label: "Not sure"},
+				{Value: json.RawMessage(`"14"`), Label: "Prefer not to say"},
 			},
 		},
 	}
@@ -290,20 +282,17 @@ func ExampleTranslateToMessenger_tooManyOptions() {
 	// Error: too many options for platform: Messenger supports max 13 quick replies, got 14
 }
 
-// Example: Platform switching
 func Example_platformSwitching() {
-	// Same message content
 	messageContent := types.MessageContent{
 		Type:         types.MessageTypeQuestion,
 		QuestionText: stringPtr("What is your gender?"),
 		Options: []types.Option{
-			{Value: "male", Label: "Male"},
-			{Value: "female", Label: "Female"},
-			{Value: "other", Label: "Other"},
+			{Value: json.RawMessage(`"male"`), Label: "Male"},
+			{Value: json.RawMessage(`"female"`), Label: "Female"},
+			{Value: json.RawMessage(`"other"`), Label: "Other"},
 		},
 	}
 
-	// Translate for Messenger
 	messengerCmd := types.SendMessageCommand{
 		CommandID:      "cmd_129",
 		ConversationID: "conv_456",
@@ -314,7 +303,6 @@ func Example_platformSwitching() {
 	messengerMsg, _ := messageworker.TranslateToMessenger(messengerCmd)
 	fmt.Printf("Messenger: %d quick_replies\n", len(messengerMsg.QuickReplies))
 
-	// Translate for WhatsApp
 	whatsappCmd := types.SendMessageCommand{
 		CommandID:      "cmd_130",
 		ConversationID: "conv_456",
@@ -327,7 +315,6 @@ func Example_platformSwitching() {
 		whatsappMsg.Interactive.Type,
 		len(whatsappMsg.Interactive.Action.Buttons))
 
-	// Translate for Instagram
 	instagramCmd := types.SendMessageCommand{
 		CommandID:      "cmd_131",
 		ConversationID: "conv_456",

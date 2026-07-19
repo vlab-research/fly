@@ -202,14 +202,84 @@ Handoff commands for conversation transfer
 
 ### Messenger
 
-| Message Type | Translation |
+The `text` message type is dispatched further by the field type carried in
+`metadata.type`, because several Typeform field types are platform-agnostic
+"text" but render on Messenger as template attachments.
+
+| Message Type (`metadata.type`) | Translation |
 |-------------|-------------|
-| Text | `text` field |
-| Question (≤13 options) | `text` + `quick_replies` |
+| Text — short_text/long_text/number/date/**email/phone_number**/upload/wait/stitch | `text` field only (no quick reply) |
+| Text — `webview` | `attachment` button template: single `web_url` button (`webview_height_ratio:"full"`, `messenger_extensions` from `metadata.extensions`, default true) |
+| Text — `notify` | `attachment` `one_time_notif_req` template (`title` + `payload:{"ref":…}`) |
+| Text — `notification_messages` | `attachment` `notification_messages` template (`title`, timezone, cta_text, `payload:{"ref":…}`) |
+| Text/Question — `metadata.type == "utility_message"` | `message.template` (Meta message template) — see below. Dispatched ahead of the base-type switch since replybot emits this as base type `question` when the field has choices and `text` when it doesn't. |
+| Question (≤13 options) | `text` + `quick_replies`; each payload `{"value":<label>,"ref":<fieldRef>}` |
 | Question (>13 options) | Error: `ErrTooManyOptions` |
-| Media | `attachment` with type and URL |
+| Media | `attachment` with type and URL (`is_reusable: true`) |
 | Native (phase 1) | Bypass translation, send raw payload |
 | Pass Thread Control | Call `/me/pass_thread_control` endpoint |
+
+These shapes mirror `@vlab-research/translate-typeform` (the reference the
+facebot integration tests assert against). `Attachment.Payload` is `interface{}`
+so it can hold either an `AttachmentPayload` (media) or a `TemplatePayload`
+(button / one_time_notif_req / notification_messages).
+
+#### Utility templates (`utility_message`) and message tags (`sendParams`)
+
+Two Facebook Send API fields — `messaging_type` and `tag` — ride at the
+**top level** of the outbound request, as siblings of `"message"`, not
+nested inside it. `TranslateToMessenger` only builds the message body
+(`types.MessengerMessage`), so these two fields are derived separately by
+`getMessengerSendParams(cmd)` (`translator.go`) and carried alongside the
+message in `types.MessengerSendRequest`, which `worker.go`'s
+`processSendMessage` constructs for the Messenger platform and
+`MessengerClient.SendMessage` (`messenger_client.go`) unwraps onto
+`FacebookSendRequest{MessagingType, Tag, Message}`.
+
+- **`utility_message`** (`metadata.type == "utility_message"`): the
+  go-forward re-contact mechanism — a Meta-approved message template rather
+  than free-form text/question, required once a conversation falls outside
+  Messenger's normal messaging window. `template`/`language`/`params` come
+  from the field's metadata (populated from its parsed YAML description in
+  replybot); buttons come from the field's own choices — one
+  `{type: "POSTBACK", payload: <field ref>}` per choice (same ref value
+  repeated for every button, matching the reference translator). `params`
+  always produces a `body` component (even if empty); a `buttons` component
+  is added only when there are choices. `messaging_type` is hardcoded to
+  `"UTILITY"` by `getMessengerSendParams` — replybot's current pipeline
+  (`generic-translator.js`) does not set this itself, unlike the older
+  `@vlab-research/translate-typeform` reference translator.
+
+  ```json
+  { "recipient": {...},
+    "messaging_type": "UTILITY",
+    "message": { "template": {
+      "name": "<template>",
+      "language": { "code": "<language>" },
+      "components": [
+        { "type": "body",    "parameters": [ { "type": "text", "text": "<param>" }, ... ] },
+        { "type": "buttons", "parameters": [ { "type": "POSTBACK", "payload": "<field ref>" }, ... ] }
+      ] } } }
+  ```
+
+- **Message tags** (`message.metadata.sendParams.{messaging_type,tag}`):
+  replybot's `transition.js` `buildCommands` nests a field's `sendParams`
+  (from its parsed description, e.g. `{"sendParams":{"tag":"CONFIRMED_EVENT_UPDATE","messaging_type":"MESSAGE_TAG"}}`)
+  under `command.message.metadata.sendParams`, and never promotes it to the
+  top level (see `replybot/lib/typewheels/transition.test.js`). Tags are in
+  active production use (recontact outside the standard messaging window
+  for non-utility content, e.g. `CONFIRMED_EVENT_UPDATE`). `getMessengerSendParams`
+  reads `sendParams.messaging_type`/`sendParams.tag` straight off
+  `cmd.Message.Metadata` for any message type — the message body itself is
+  translated exactly as it would be without a tag (plain text/question),
+  only the top-level `messaging_type`/`tag` change.
+
+  ```json
+  { "recipient": {...}, "messaging_type": "MESSAGE_TAG", "tag": "CONFIRMED_EVENT_UPDATE", "message": { "text": "..." } }
+  ```
+
+  `utility_message` always wins over `sendParams` for `messaging_type`/`tag`
+  (a utility field is never also tagged) — see `getMessengerSendParams`.
 
 ### WhatsApp
 

@@ -78,7 +78,7 @@ describe('getFromMetadata', () => {
   it('works with unicode url values', () => {
     const name = '小飼弾'
     const uni = encodeURIComponent(name)
-    const ref2 = { ...referral, referral: { ...referral.referral, ref: `form.BAR.foo.${uni}` } }
+    const ref2 = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: `form.BAR.foo.${uni}` } } }
     const md = getMetadata(ref2)
 
     const ctx = { md, user: { name: 'Foo Bazzle' } }
@@ -140,7 +140,7 @@ describe('interpolateField', () => {
   it('works with hidden fields from referral', () => {
     const name = '小飼弾'
     const uni = encodeURIComponent(name)
-    const ref2 = { ...referral, referral: { ...referral.referral, ref: `form.BAR.foo.${uni}` } }
+    const ref2 = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: `form.BAR.foo.${uni}` } } }
     const md = getMetadata(ref2)
     const ctx = { md, user: { name: 'Foo Bazzle' } }
     const i = f.interpolateField(ctx, [], { title: 'hello {{hidden:foo}}' })
@@ -291,9 +291,8 @@ describe('translateField', () => {
     }
     const ctx = { log: [], user: {} }
     const out = f.translateField(ctx, [], field)
-    out.message.text.should.equal('Handing off to support...')
-    const md = JSON.parse(out.message.metadata)
-    md.should.deep.equal({ type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait', metadata: { check: 'test' } }, ref: 'my_handoff' })
+    out.text.should.equal('Handing off to support...')
+    out.metadata.should.deep.equal({ type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait', metadata: { check: 'test' } }, ref: 'my_handoff' })
   })
 })
 

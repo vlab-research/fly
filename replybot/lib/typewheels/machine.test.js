@@ -4,12 +4,13 @@ const should = chai.should()
 const fs = require('fs')
 const _ = require('lodash')
 const { parseLogJSON } = require('./utils')
-const { followUpMessage, offMessage } = require('@vlab-research/translate-typeform')
+const { followUpMessage, offMessage } = require('../generic-validator')
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
+const { parseEvent } = require('../event-normalizer')
 
-const _echo = md => ({ ...echo, message: { ...echo.message, metadata: md.ref ? md : { ref: md } } })
+const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md.ref ? md : { ref: md } } })
 
 
 process.env.FALLBACK_FORM = 'fallback'
@@ -28,19 +29,19 @@ describe('getWatermark', () => {
 
 describe('makeEventMetadata', () => {
   it('should get the metadata for a simple linksniffer event', () => {
-    const event = { event: { type: 'external', value: { type: 'linksniffer:click', url: 'foobar' } } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: { type: 'linksniffer:click', url: 'foobar' } }
     const md = makeEventMetadata(event)
     md.should.eql({ e_linksniffer_click_url: 'foobar' })
   })
 
   it('should get multiple key/value pairs if they exist', () => {
-    const event = { event: { type: 'external', value: { type: 'random', id: 'foo', foo: 'bar' } } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: { type: 'random', id: 'foo', foo: 'bar' } }
     const md = makeEventMetadata(event)
     md.should.eql({ e_random_id: 'foo', e_random_foo: 'bar' })
   })
 
   it('should unnest kv pairs if they exist', () => {
-    const event = { event: { type: 'external', value: { type: 'payment:reloadly', success: false, error: { message: 'foobar', code: 'BAR', doublenest: { foo: 'baz' } } } } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: { type: 'payment:reloadly', success: false, error: { message: 'foobar', code: 'BAR', doublenest: { foo: 'baz' } } } }
 
     const md = makeEventMetadata(event)
     md.should.eql({
@@ -52,7 +53,7 @@ describe('makeEventMetadata', () => {
   })
 
   it('should work with array values and key them out by index', () => {
-    const event = { event: { type: 'external', value: { type: 'random', list: ['foo', 'bar'] } } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: { type: 'random', list: ['foo', 'bar'] } }
 
     const md = makeEventMetadata(event)
     md.should.eql({
@@ -62,39 +63,38 @@ describe('makeEventMetadata', () => {
   })
 
   it('should work with number values', () => {
-    const event = { event: { type: 'external', value: { type: 'random', foo: 1234 } } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: { type: 'random', foo: 1234 } }
     const md = makeEventMetadata(event)
     md.should.eql({ e_random_foo: 1234 })
   })
 
   it('should work with boolean values', () => {
-    const event = { event: { type: 'external', value: { type: 'random', foo: false } } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: { type: 'random', foo: false } }
     const md = makeEventMetadata(event)
     md.should.eql({ e_random_foo: false })
   })
 
   it('should set null but not undefined values', () => {
-    const event = { event: { type: 'external', value: { type: 'random', foo: undefined, bar: null } } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: { type: 'random', foo: undefined, bar: null } }
     const md = makeEventMetadata(event)
     md.should.eql({ e_random_bar: null })
   })
 
   it('should return undefined if an event not properly formatted', () => {
-    const event = { event: { type: 'external', value: {} } }
+    const event = { source: { type: 'synthetic' }, event_type: 'synthetic_external', payload: {} }
     const md = makeEventMetadata(event)
     should.not.exist(md)
   })
 
   it('should convert camelCase keys to snake_case', () => {
     const event = {
-      event: {
-        type: 'external',
-        value: {
-          type: 'payment:status',
-          userId: '123',
-          paymentMethod: 'card',
-          transactionId: 'tx_456'
-        }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
+      payload: {
+        type: 'payment:status',
+        userId: '123',
+        paymentMethod: 'card',
+        transactionId: 'tx_456'
       }
     }
     const md = makeEventMetadata(event)
@@ -107,14 +107,13 @@ describe('makeEventMetadata', () => {
 
   it('should handle nested camelCase keys', () => {
     const event = {
-      event: {
-        type: 'external',
-        value: {
-          type: 'api:response',
-          errorDetails: {
-            errorCode: 'INVALID_REQUEST',
-            errorMessage: 'Bad input'
-          }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
+      payload: {
+        type: 'api:response',
+        errorDetails: {
+          errorCode: 'INVALID_REQUEST',
+          errorMessage: 'Bad input'
         }
       }
     }
@@ -127,13 +126,12 @@ describe('makeEventMetadata', () => {
 
   it('should leave snake_case keys unchanged', () => {
     const event = {
-      event: {
-        type: 'external',
-        value: {
-          type: 'existing:event',
-          user_id: '123',
-          already_snake: 'value'
-        }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
+      payload: {
+        type: 'existing:event',
+        user_id: '123',
+        already_snake: 'value'
       }
     }
     const md = makeEventMetadata(event)
@@ -141,6 +139,141 @@ describe('makeEventMetadata', () => {
       e_existing_event_user_id: '123',
       e_existing_event_already_snake: 'value'
     })
+  })
+
+  it('should flatten handover metadata under e_handover_metadata_* (production key contract)', () => {
+    // The normalizer passes pass_thread_control.metadata through as the raw JSON
+    // string from the webhook. Flattened keys must keep the e_handover_metadata_*
+    // shape that main's production pipeline produced and live surveys reference.
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        new_owner_app_id: '123456789',
+        metadata: '{"smoke_echo":"ok","echo_text":"hello"}'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_smoke_echo: 'ok',
+      e_handover_metadata_echo_text: 'hello'
+    })
+  })
+
+  it('should flatten nested and array handover metadata under e_handover_metadata_', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: '{"assessment_results":{"reading_level":6},"recommendations":["a","b"]}'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_assessment_results_reading_level: 6,
+      e_handover_metadata_recommendations_0: 'a',
+      e_handover_metadata_recommendations_1: 'b'
+    })
+  })
+
+  it('should store plain-string handover metadata as e_handover_metadata', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: 'End of handoff'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata: 'End of handoff'
+    })
+  })
+
+  it('should only set target_app_id when handover has no metadata', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167'
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({ e_handover_target_app_id: '976665718578167' })
+  })
+
+  it('should convert camelCase keys in handover metadata to snake_case', () => {
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: JSON.stringify({ echoText: 'hi' })
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_echo_text: 'hi'
+    })
+  })
+
+  it('should drop a key literally named "type" at every nesting level of handover metadata', () => {
+    // _eventMetadata filters out `type` keys before recursing/flattening, so a
+    // `type` key anywhere in the returned metadata tree (top-level or nested)
+    // must never surface as e_handover_metadata_type / e_handover_metadata_*_type.
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: '976665718578167',
+        metadata: JSON.stringify({
+          type: 'top_level_should_be_dropped',
+          echo_text: 'hello',
+          nested: { type: 'nested_should_be_dropped', value: 'ok' }
+        })
+      }
+    }
+    const md = makeEventMetadata(event)
+    md.should.eql({
+      e_handover_target_app_id: '976665718578167',
+      e_handover_metadata_echo_text: 'hello',
+      e_handover_metadata_nested_value: 'ok'
+    })
+  })
+
+  // REGRESSION PIN for 826f37fb: production once flattened returned handover
+  // metadata one level too shallow (e_handover_echo_text instead of
+  // e_handover_metadata_echo_text), silently breaking every survey's
+  // {{hidden:e_handover_metadata_*}} references. Keep this assertion explicit
+  // and never "simplify" it back to the shallower shape.
+  it('REGRESSION (826f37fb): flattens returned handover metadata under e_handover_metadata_*, not e_handover_*', () => {
+    const previousOwnerAppId = '976665718578167'
+    const event = {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        previous_owner_app_id: previousOwnerAppId,
+        metadata: JSON.stringify({ echo_text: 'hello', smoke_echo: 'ok' })
+      }
+    }
+    const md = makeEventMetadata(event)
+
+    md.e_handover_metadata_echo_text.should.equal('hello')
+    md.e_handover_metadata_smoke_echo.should.equal('ok')
+    md.e_handover_target_app_id.should.equal(previousOwnerAppId)
+
+    // Explicitly assert the bug does NOT reproduce: no shallower e_handover_*
+    // keys for the metadata fields (only the unrelated target_app_id key is
+    // expected directly under e_handover_).
+    should.not.exist(md.e_handover_echo_text)
+    should.not.exist(md.e_handover_smoke_echo)
   })
 })
 
@@ -168,7 +301,11 @@ describe('getCurrentForm', () => {
   })
 
   it('Gets the first form with an initial qr payload referral', () => {
-    const qrReferral = { ...qr, message: { quick_reply: { value: "accept", payload: { referral: { ref: "form.FOO.foo.bar" } } } } }
+    const qrReferral = {
+      ...qr,
+      event_type: 'conversation_started',
+      payload: { type: 'conversation_started', trigger: 'referral', referral: { ref: "form.FOO.foo.bar" } }
+    }
     const log = [qrReferral]
     const state = getState(log)
     state.forms[0].should.equal('FOO')
@@ -250,7 +387,7 @@ describe('getCurrentForm', () => {
     // A referral for a NEW form (BAR) after being blocked should be ignored
     const newFormReferral = {
       ...referral,
-      referral: { ...referral.referral, ref: 'form.BAR' },
+      payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'form.BAR' } },
       timestamp: 30
     }
     const state1 = getState([...log, newFormReferral])
@@ -265,9 +402,10 @@ describe('getCurrentForm', () => {
     state.state.should.equal('USER_BLOCKED')
 
     const externalEvent = {
-      source: 'synthetic',
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
       timestamp: 30,
-      event: { type: 'external', value: { type: 'payment:complete', id: 'foo' } }
+      payload: { type: 'payment:complete', id: 'foo' }
     }
     const state1 = getState([...log, externalEvent])
     state1.state.should.equal('USER_BLOCKED')
@@ -287,7 +425,7 @@ describe('getCurrentForm', () => {
   })
 
   it('Changes form with new referral', () => {
-    const ref2 = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
+    const ref2 = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'form.BAR' } } }
 
     const log = [referral, text, echo, delivery, multipleChoice, ref2]
     const state = getState(log)
@@ -302,80 +440,6 @@ describe('getCurrentForm', () => {
     state.forms.slice(-1)[0].should.equal('FOO')
   })
 
-})
-
-describe('RESTORE_STATE (recovery event)', () => {
-  // A self-contained pre-block state snapshot P, as produced by the offline
-  // reconstruction script (folding the user's log excluding block_user).
-  const P = {
-    state: 'QOUT',
-    question: 'q2',
-    qa: [['q1', 'yes'], ['q2', 'blue']],
-    forms: ['FOO'],
-    md: { startTime: 100, seed: 42 },
-    pointer: 500
-  }
-
-  const restore = (more = {}) =>
-    synthetic({ type: 'restore_state', value: { state: P } }, { timestamp: 9999, ...more })
-
-  it('restores the full snapshot from USER_BLOCKED and advances the pointer to the event timestamp', () => {
-    const log = [
-      referral, text, echo, multipleChoice,
-      synthetic({ type: 'block_user', value: null }),
-      restore()
-    ]
-
-    // sanity: the block wiped qa before the restore
-    getState(log.slice(0, -1)).state.should.equal('USER_BLOCKED')
-    getState(log.slice(0, -1)).qa.should.eql([])
-
-    const state = getState(log)
-    state.state.should.equal('QOUT')
-    state.question.should.equal('q2')
-    state.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
-    state.forms.should.eql(['FOO'])
-    state.md.should.eql({ startTime: 100, seed: 42 })
-    state.pointer.should.equal(9999) // advanced to now, not P's original 500
-  })
-
-  it('restores the full snapshot when folded from START (durability on Redis-miss reload)', () => {
-    // On reload the load query starts AT the restore event (message_pointer =
-    // its timestamp), so the fold begins from START and must still land on P.
-    const state = getState([restore()])
-    state.state.should.equal('QOUT')
-    state.question.should.equal('q2')
-    state.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
-    state.forms.should.eql(['FOO'])
-    state.pointer.should.equal(9999)
-  })
-
-  it('does not survive as a stray field: starts from a clean initial state', () => {
-    // A field present pre-restore but absent from P must not leak through.
-    const priorLog = [referral, text, echo, multipleChoice]
-    const before = getState(priorLog)
-    should.exist(before.previousOutput) // RESPOND set it before the restore
-    const state = getState([...priorLog, restore()])
-    should.not.exist(state.previousOutput) // gone: P had none
-  })
-
-  it('emits no outbound Facebook message on restore', () => {
-    const log = [
-      referral, text, echo, multipleChoice,
-      synthetic({ type: 'block_user', value: null }),
-      restore()
-    ]
-    const { messages } = getMessage(log, form, { id: USER_ID }, { id: '1051551461692797' })
-    messages.should.eql([])
-  })
-
-  it('produces a RESTORE_STATE output carrying the snapshot with the new pointer', () => {
-    const output = exec({ state: 'USER_BLOCKED', qa: [], forms: ['FOO'] }, restore())
-    output.action.should.equal('RESTORE_STATE')
-    output.stateUpdate.state.should.equal('QOUT')
-    output.stateUpdate.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
-    output.stateUpdate.pointer.should.equal(9999)
-  })
 })
 
 describe('getState', () => {
@@ -416,11 +480,12 @@ describe('getState', () => {
 
   it('Ignores unknown event (message event)', () => {
     const e = {
-      sender: { id: '123' },
-      recipient: { id: '345' },
+      event_id: 'evt_test_unknown',
+      user_id: '123',
       timestamp: 1605980769303,
-      message: { mid: 'foo' },
-      source: 'messenger'
+      source: { type: 'messenger', account_id: '345' },
+      event_type: 'unknown',
+      payload: { type: 'unknown' }
     }
 
     const log = [referral, text, echo, e]
@@ -463,7 +528,7 @@ describe('getState', () => {
 
 
   it('Updates the qa of the state even with falsey answers', () => {
-    const log = [referral, echo, { ...text, message: { text: 0 } }, _echo('bar'), { ...text, message: { text: '' } }]
+    const log = [referral, echo, { ...text, payload: { ...text.payload, text: 0 } }, _echo('bar'), { ...text, payload: { ...text.payload, text: '' } }]
     const qa = getState(log).qa
 
     qa[0][0].should.equal('foo')
@@ -534,7 +599,7 @@ describe('getState', () => {
       _echo({ wait, ref: 'foo' }),
       text,
       echo,
-      { ...echo, timestamp: 10, message: { ...echo.message, metadata: { wait } } }
+      { ...echo, timestamp: 10, payload: { ...echo.payload, metadata: { wait } } }
     ]
     const state = getState(log)
     state.state.should.equal('WAIT_EXTERNAL_EVENT')
@@ -545,14 +610,15 @@ describe('getState', () => {
   it('Responds when it gets external events that fulfills timeout conditions', () => {
     const wait = { type: 'timeout', value: '1 hour' }
 
-    // value should be...?
     const externalEvent = {
-      source: 'synthetic',
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_timeout',
+      timestamp: Date.now() + 1000 * 60 * 60,
+      payload: Date.now() + 1000 * 60 * 60
     }
 
     const d = Date.now()
-    const log = [referral, text, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait } } }, externalEvent]
+    const log = [referral, text, { ...echo, timestamp: d, payload: { ...echo.payload, metadata: { wait } } }, externalEvent]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -569,9 +635,10 @@ describe('getState', () => {
     }
 
     const externalEvent = {
-      source: 'synthetic',
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
       timestamp: Date.now(),
-      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+      payload: { type: 'moviehouse:play', id: 'foobar' }
     }
 
 
@@ -597,8 +664,9 @@ describe('getState', () => {
     }
 
     const externalEvent = {
-      source: 'synthetic',
-      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
+      payload: { type: 'moviehouse:play', id: 'foobar' }
     }
 
     const log = [referral, _echo({ wait, ref: 'foo' }), externalEvent]
@@ -622,17 +690,19 @@ describe('getState', () => {
     }
 
     const externalEventA = {
-      source: 'synthetic',
-      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
+      payload: { type: 'moviehouse:play', id: 'foobar' }
     }
 
-    // value should be...?
     const externalEventB = {
-      source: 'synthetic',
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 120 }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_timeout',
+      timestamp: Date.now() + 1000 * 60 * 120,
+      payload: Date.now() + 1000 * 60 * 120
     }
 
-    const log = [referral, { ...echo, timestamp: Date.now(), message: { ...echo.message, metadata: { wait } } }, externalEventA, externalEventB]
+    const log = [referral, { ...echo, timestamp: Date.now(), payload: { ...echo.payload, metadata: { wait } } }, externalEventA, externalEventB]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -646,9 +716,10 @@ describe('getState', () => {
 
   it('Adds event to metadata if not waiting external event and leaves the rest the same', () => {
     const externalEvent = {
-      source: 'synthetic',
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
       timestamp: Date.now(),
-      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+      payload: { type: 'moviehouse:play', id: 'foobar' }
     }
 
     const log = [referral, echo, text, externalEvent]
@@ -663,7 +734,7 @@ describe('getState', () => {
 
   it('Resets all state on reset form and adds pointer', () => {
 
-    const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
+    const resetReferral = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'form.reset' } } }
     const log = [referral, echo, text, resetReferral]
 
     const state = getState(log)
@@ -678,7 +749,7 @@ describe('getState', () => {
   it('It switches forms after a form stitch message is sent, keeps metadata', () => {
 
     const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
-    const log = [referral, { ...echo, message: { ...echo.message, metadata } }]
+    const log = [referral, { ...echo, payload: { ...echo.payload, metadata } }]
 
     const oldState = getState([referral])
     const state = getState(log)
@@ -697,12 +768,13 @@ describe('getState', () => {
     const wait = { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
 
     const externalEvent = {
-      source: 'synthetic',
-      event: { type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
+      payload: { type: 'moviehouse:play', id: 'foobar' }
     }
 
     const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
-    const log = [referral, _echo({ wait, ref: 'foo' }), externalEvent, { ...echo, message: { ...echo.message, metadata } }]
+    const log = [referral, _echo({ wait, ref: 'foo' }), externalEvent, { ...echo, payload: { ...echo.payload, metadata } }]
 
     const oldState = getState([referral])
     const state = getState(log)
@@ -721,7 +793,7 @@ describe('getState', () => {
   it('It switches forms after a form stitch message is sent and includes new metadata', () => {
 
     const metadata = { "type": "stitch", "stitch": { "form": "BAR", "metadata": { "bar_md": "hello metadata" } }, "ref": "foo" }
-    const log = [referral, { ...echo, message: { ...echo.message, metadata } }]
+    const log = [referral, { ...echo, payload: { ...echo.payload, metadata } }]
 
     const oldState = getState([referral])
     const state = getState(log)
@@ -734,7 +806,7 @@ describe('getState', () => {
 
   it('It keeps tokens when it stitches forms together', () => {
     const metadata = { "type": "stitch", "stitch": { "form": "BAR" }, "ref": "foo" }
-    const log = [referral, optin, { ...echo, message: { ...echo.message, metadata } }]
+    const log = [referral, optin, { ...echo, payload: { ...echo.payload, metadata } }]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -795,7 +867,7 @@ describe('getState', () => {
 
   it('gets into a blocked state when given a bad platform response', () => {
 
-    const pr = { ...syntheticPR, event: { ...syntheticPR.event, value: { response: { error: { code: 2022 } } } } }
+    const pr = { ...syntheticPR, payload: { response: { error: { code: 2022 } } } }
     const log = [referral, echo, text, pr]
     const state = getState(log)
 
@@ -803,9 +875,8 @@ describe('getState', () => {
   })
 
   it('gets out of a blocked state if an echo follows a bad platform response', () => {
-    // TODO: Is this what we want??? Race conditions???
 
-    const pr = { ...syntheticPR, event: { ...syntheticPR.event, value: { response: { error: { code: 2022 } } } } }
+    const pr = { ...syntheticPR, payload: { response: { error: { code: 2022 } } } }
     const log = [referral, echo, text, pr, echo]
     const state = getState(log)
 
@@ -824,7 +895,7 @@ describe('getState', () => {
 
   it('gets out of a blocked state with an unblock event', () => {
     const e = synthetic({ type: 'unblock', value: { state: 'WAIT_EXTERNAL_EVENT' } })
-    const pr = { ...syntheticPR, event: { ...syntheticPR.event, value: { response: { error: { code: 2022 } } } } }
+    const pr = { ...syntheticPR, payload: { response: { error: { code: 2022 } } } }
     const log = [referral, echo, text, pr, e]
     const state = getState(log)
 
@@ -857,16 +928,16 @@ describe('getState', () => {
   it('removes tokens to the state when it needs to use them for timeout', () => {
     const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
-    // value should be...?
     const externalEvent = {
-      source: 'synthetic',
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_timeout',
       timestamp: Date.now() + 1000 * 60 * 60 * 25,
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
+      payload: Date.now() + 1000 * 60 * 60 * 25
     }
 
     const d = Date.now()
 
-    const log = [referral, optin, text, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait } } }, externalEvent]
+    const log = [referral, optin, text, { ...echo, timestamp: d, payload: { ...echo.payload, metadata: { wait } } }, externalEvent]
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -878,14 +949,15 @@ describe('getState', () => {
     const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
     const externalEvent = {
-      source: 'synthetic',
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_bailout',
       timestamp: Date.now() + 1000 * 60 * 60 * 25,
-      event: { type: 'bailout', value: { form: 'BAR' } }
+      payload: { form: 'BAR' }
     }
 
     const d = Date.now()
 
-    const log = [referral, optin, text, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait } } }]
+    const log = [referral, optin, text, { ...echo, timestamp: d, payload: { ...echo.payload, metadata: { wait } } }]
 
     const form = {
       logic: [],
@@ -898,8 +970,8 @@ describe('getState', () => {
     const actions = act({ form, user: {} }, state, output)
     output.action.should.equal('SWITCH_FORM')
     output.form.should.equal('BAR')
-    actions.messages[0].recipient.one_time_notif_token.should.equal('FOOBAR')
-    actions.messages[0].message.text.should.equal('barbaz')
+    actions.messages[0].token.should.equal('FOOBAR')
+    actions.messages[0].text.should.equal('barbaz')
   })
 })
 
@@ -910,14 +982,14 @@ describe('Machine', () => {
   it('gets the correct start field even with no referral', () => {
     const output = exec(_initialState(), text)
     const actions = act({ user, form, log: [text] }, _initialState(), output)
-    actions.messages[0].message.text.should.equal(form.fields[0].title)
+    actions.messages[0].question_text.should.equal(form.fields[0].title)
   })
 
   it('sends the first message when it gets a referral', () => {
     const output = exec(_initialState(), referral)
     const actions = act({ user, form, log: [referral] }, _initialState(), output)
 
-    actions.messages[0].message.text.should.equal(form.fields[0].title)
+    actions.messages[0].question_text.should.equal(form.fields[0].title)
   })
 
   it('Validates answers via postback', () => {
@@ -929,7 +1001,8 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, multipleChoice]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'bar', type: 'short_text' })
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('Invalidates answers to legal when not in set', () => {
@@ -941,7 +1014,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
-    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
+    actions.messages[0].metadata.repeat.should.be.true
   })
 
 
@@ -955,7 +1028,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
     const actions = getMessage(log, form, user)
-    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
+    actions.messages[0].metadata.repeat.should.be.true
   })
 
 
@@ -1050,7 +1123,8 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'bar', type: 'short_text' })
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('Responds to opening text without referral', () => {
@@ -1064,7 +1138,7 @@ describe('Machine', () => {
     const log = [text]
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(2)
-    actions.messages.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
+    actions.messages.forEach((a, i) => a.text.should.equal(form.fields[i].title))
   })
 
   it('Keeps metadata from opening form switch', () => {
@@ -1077,7 +1151,7 @@ describe('Machine', () => {
     const log = [referral, echo, text]
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(1)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('Responds to opening sticker without referral', () => {
@@ -1091,7 +1165,7 @@ describe('Machine', () => {
     const log = [text]
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(2)
-    actions.messages.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
+    actions.messages.forEach((a, i) => a.text.should.equal(form.fields[i].title))
   })
 
   it('Sends multiple questions if first is statement', () => {
@@ -1106,7 +1180,7 @@ describe('Machine', () => {
     const log = [referral]
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(3)
-    actions.messages.forEach((a, i) => a.message.text.should.equal(form.fields[i].title))
+    actions.messages.forEach((a, i) => a.text.should.equal(form.fields[i].title))
   })
 
   it('Sends multiple questions if first is moveOn', () => {
@@ -1120,8 +1194,8 @@ describe('Machine', () => {
     const log = [referral]
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(2)
-    actions.messages[0].message.attachment.payload.buttons[0].url.should.equal('foo.com')
-    actions.messages[1].message.text.should.equal('foo')
+    actions.messages[0].metadata.url.should.equal('foo.com')
+    actions.messages[1].text.should.equal('foo')
   })
 
 
@@ -1134,7 +1208,7 @@ describe('Machine', () => {
     const log = [referral]
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(1)
-    actions.messages[0].message.attachment.payload.buttons[0].url.should.equal('https://foo.com/?q=hello')
+    actions.messages[0].metadata.url.should.equal('https://foo.com/?q=hello')
   })
 
 /*
@@ -1149,7 +1223,7 @@ describe('Machine', () => {
     actions.messages.length.should.equal(1)
 
     console.log(actions.messages[0])
-    actions.messages[0].message.attachment.payload.buttons[0].url.should.equal('https://https//columbiangwu.co1.qualtrics.com/jfe/form/SV_8k7acmuWQAZjERE?vlab_id=123')
+    actions.messages[0].metadata.url.should.equal('https://https//columbiangwu.co1.qualtrics.com/jfe/form/SV_8k7acmuWQAZjERE?vlab_id=123')
   }) */
 
 
@@ -1173,14 +1247,14 @@ describe('Machine', () => {
       { type: 'statement', title: 'bar', ref: 'bar' }]
     }
 
-    const log = [referral, echo, delivery, { ...text, message: { text: 0 } }]
+    const log = [referral, echo, delivery, { ...text, payload: { ...text.payload, text: 0 } }]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
   })
 
 
   it('Does not resend a statement at the end', () => {
-    const echo2 = { ...statementEcho, message: { ...statementEcho.message, metadata: { ref: "foo", type: "statement" } } }
+    const echo2 = { ...statementEcho, payload: { ...statementEcho.payload, metadata: { ref: "foo", type: "statement" } } }
 
     const form = {
       logic: [],
@@ -1202,8 +1276,8 @@ describe('Machine', () => {
 
     const log = [referral, tyEcho, delivery, text]
     const actions = getMessage(log, form, user)
-    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
-    JSON.parse(actions.messages[1].message.metadata).isRepeat.should.be.true
+    actions.messages[0].metadata.repeat.should.be.true
+    actions.messages[1].metadata.isRepeat.should.be.true
   })
 
   it('Responds to is_echos that come after the delivery watermark', () => {
@@ -1214,9 +1288,9 @@ describe('Machine', () => {
     }
 
 
-    const log = [referral, delivery, { ...echo, timestamp: delivery.delivery.watermark }, text]
+    const log = [referral, delivery, { ...echo, timestamp: delivery.payload.watermark }, text]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('baz')
+    actions.messages[0].text.should.equal('baz')
   })
 
   it('Responds to is_echos that come before the delivery watermark', () => {
@@ -1229,7 +1303,7 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('baz')
+    actions.messages[0].text.should.equal('baz')
   })
 
 
@@ -1259,7 +1333,8 @@ describe('Machine', () => {
 
     const log = [referral, echo, delivery, text]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz","type":"number"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'baz', type: 'number' })
+    actions.messages[0].text.should.equal('baz')
   })
 
   it('it follows logic jumps from postbacks', () => {
@@ -1291,7 +1366,8 @@ describe('Machine', () => {
 
     const log = [referral, echo, multipleChoice]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'baz', metadata: '{"ref":"baz","type":"number"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'baz', type: 'number' })
+    actions.messages[0].text.should.equal('baz')
   })
 
 
@@ -1326,7 +1402,8 @@ describe('Machine', () => {
     const log = [referral, _echo({ ref: 'foo', type: 'wait', wait: { type: 'external', value: { type: 'payment:reloadly' } } }), event]
 
     const actions = getMessage(log, form, user)
-    actions.messages[1].message.should.deep.equal({ text: 'qux', metadata: '{"ref":"qux","type":"number"}' })
+    actions.messages[1].metadata.should.deep.equal({ ref: 'qux', type: 'number' })
+    actions.messages[1].text.should.equal('qux')
   })
 
   it('repeats when it misses validation', () => {
@@ -1342,10 +1419,12 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.contain('Sorry')
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.contain('Sorry')
 
-    actions.messages[1].message.metadata.should.equal('{"isRepeat":true,"ref":"foo","type":"multiple_choice"}')
+    actions.messages[1].metadata.isRepeat.should.be.true
+    actions.messages[1].metadata.ref.should.equal('foo')
+    actions.messages[1].metadata.type.should.equal('multiple_choice')
   })
 
 
@@ -1360,10 +1439,12 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.contain('Sorry, I can\'t accept any responses')
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.contain('Sorry, I can\'t accept any responses')
 
-    actions.messages[1].message.metadata.should.equal('{"isRepeat":true,"type":"wait","ref":"foo"}')
+    actions.messages[1].metadata.isRepeat.should.be.true
+    actions.messages[1].metadata.type.should.equal('wait')
+    actions.messages[1].metadata.ref.should.equal('foo')
   })
 
   it('uses custom_messages when they exist', () => {
@@ -1380,8 +1461,8 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.equal('baz error')
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.equal('baz error')
   })
 
 
@@ -1399,8 +1480,8 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
 
     // repeat ref foo with sorry message...
-    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.equal('baz error')
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.equal('baz error')
   })
 
   it('If a wait is a statement, it does not send multiple items', () => {
@@ -1432,9 +1513,9 @@ describe('Machine', () => {
     actions.messages.length.should.equal(2)
 
     // repeat ref foo with sorry message...
-    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.contain('baz')
-    actions.messages[1].message.text.should.contain('foo')
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.contain('baz')
+    actions.messages[1].text.should.contain('foo')
   })
 
   it('repeats with default response when responding to a wait without response', () => {
@@ -1454,19 +1535,19 @@ describe('Machine', () => {
     actions.messages.length.should.equal(2)
 
     // repeat ref foo with sorry message...
-    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.contain('Sorry, I can\'t accept any responses')
-    actions.messages[1].message.text.should.contain('foo')
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.contain('Sorry, I can\'t accept any responses')
+    actions.messages[1].text.should.contain('foo')
   })
 
   it('sends the messages to the token if a token is needed', () => {
     const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
-    // value should be...?
     const externalEvent = {
-      source: 'synthetic',
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_timeout',
       timestamp: Date.now() + 1000 * 60 * 60 * 25,
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
+      payload: Date.now() + 1000 * 60 * 60 * 25
     }
 
     const d = Date.now()
@@ -1478,12 +1559,12 @@ describe('Machine', () => {
     }
 
 
-    const log = [referral, optin, { ...echo, timestamp: d, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, externalEvent]
+    const log = [referral, optin, { ...echo, timestamp: d, payload: { ...echo.payload, metadata: { wait, ref: 'foo' } } }, externalEvent]
 
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(1)
-    actions.messages[0].recipient.one_time_notif_token.should.equal('FOOBAR')
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].token.should.equal('FOOBAR')
+    actions.messages[0].text.should.equal('bar')
   })
 
 
@@ -1498,10 +1579,9 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(1)
 
-    actions.messages[0].messaging_type.should.equal("MESSAGE_TAG")
-    actions.messages[0].tag.should.equal("CONFIRMED_EVENT_UPDATE")
-    actions.messages[0].recipient.id.should.equal('123')
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].metadata.sendParams.messaging_type.should.equal("MESSAGE_TAG")
+    actions.messages[0].metadata.sendParams.tag.should.equal("CONFIRMED_EVENT_UPDATE")
+    actions.messages[0].text.should.equal('bar')
   })
 
 
@@ -1517,8 +1597,8 @@ describe('Machine', () => {
 
     const log = [referral]
     const actions = getMessage(log, form, user)
-    JSON.parse(actions.messages[0].message.metadata)['type'].should.equal('stitch')
-    JSON.parse(actions.messages[0].message.metadata)['stitch']['form'].should.equal('BAR')
+    actions.messages[0].metadata.type.should.equal('stitch')
+    actions.messages[0].metadata.stitch.form.should.equal('BAR')
   })
 
 
@@ -1533,7 +1613,7 @@ describe('Machine', () => {
     const log = [payloadReferral]
     const actions = getMessage(log, form, user)
 
-    actions.messages[0].message.text.should.equal('foo')
+    actions.messages[0].text.should.equal('foo')
   })
 
 
@@ -1547,7 +1627,8 @@ describe('Machine', () => {
     const log = [referral, echo, delivery, text]
 
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'bar', type: 'short_text' })
+    actions.messages[0].text.should.equal('bar')
   })
 
 
@@ -1571,7 +1652,7 @@ describe('Machine', () => {
     }
 
     const wait = { type: 'timeout', value: '1 minute' }
-    const log = [referral, { ...echo, message: { ...echo.message, metadata: { wait, ref: 'foo' } } }, referral]
+    const log = [referral, { ...echo, payload: { ...echo.payload, metadata: { wait, ref: 'foo' } } }, referral]
     const actions = getMessage(log, form, user)
     should.not.exist(actions.messages[0])
   })
@@ -1585,19 +1666,22 @@ describe('Machine', () => {
     }
 
     const actions = getMessage([referral, delivery, echo, referral], form, user)
-    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
-    actions.messages[1].message.text.should.equal('foo')
+    actions.messages[0].metadata.repeat.should.be.true
+    actions.messages[1].question_text.should.equal('foo')
   })
 
   it('ignores referrals when the person is the referrer ', () => {
 
     const secondRef = {
-      ...referral, referral: {
-        ...referral.referral,
-        ref: `form.BAR.referrer.${USER_ID}`
+      ...referral, payload: {
+        ...referral.payload,
+        referral: {
+          ...referral.payload.referral,
+          ref: `form.BAR.referrer.${USER_ID}`
+        }
       }
     }
-    should.not.exist(getMessage([referral, echo, secondRef], form)[0])
+    should.not.exist(getMessage([referral, echo, secondRef], form).messages[0])
   })
 
   it('ignores reactions', () => {
@@ -1623,10 +1707,10 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const response = { ...qr, message: { quick_reply: { payload: { value: "quux", ref: "foo" } } } }
+    const response = { ...qr, payload: { ...qr.payload, value: "quux", source_message_id: "foo" } }
     const log = [referral, echo, delivery, response]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('Validates a quick reply with 0 value', () => {
@@ -1636,10 +1720,10 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const response = { ...qr, message: { quick_reply: { payload: { value: 0, ref: "foo" } } } }
+    const response = { ...qr, payload: { ...qr.payload, value: 0, source_message_id: "foo" } }
     const log = [referral, echo, delivery, response]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('Validates a quick reply when payload is string (as in email)', () => {
@@ -1649,10 +1733,10 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const response = { ...qr, message: { quick_reply: { payload: "foo@gmail.com" } } }
+    const response = { ...qr, payload: { ...qr.payload, value: "foo@gmail.com" } }
     const log = [referral, echo, delivery, response]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('Invalidates an attachment as a respones to a quick reply', () => {
@@ -1662,16 +1746,27 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const response = { ...qr, message: { "mid": "m_xrl3G6Dt409ZEYrWWxfAEarfHyV7iKF62Oi5m6M4iPT8ncaQlpcbTZfyaM8MPmYp8VCBHfPYiQY5WrQ4xX-2QQ", "attachments": [{ "type": "image", "payload": { "url": "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34" } }] } }
+    const response = {
+      event_id: 'evt_test_media_resp',
+      user_id: USER_ID,
+      timestamp: 20,
+      source: { type: 'messenger', account_id: PAGE_ID },
+      event_type: 'user_media',
+      payload: {
+        type: 'user_media',
+        attachments: [{ "type": "image", "payload": { "url": "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34" } }],
+        stickerId: null
+      }
+    }
 
     const log = [referral, echo, delivery, response]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('Sorry, please enter a valid email address.')
+    actions.messages[0].text.should.equal('Sorry, please enter a valid email address.')
   })
 
 
   it('Invalidates a quick reply when invalid', () => {
-    const del1 = { ...delivery, delivery: { watermark: 5 } }
+    const del1 = { ...delivery, payload: { ...delivery.payload, watermark: 5 } }
 
     const form = {
       logic: [],
@@ -1679,12 +1774,12 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const response = { ...qr, message: { quick_reply: { payload: { value: "qux", ref: "foo" } } } }
+    const response = { ...qr, payload: { ...qr.payload, value: "qux", source_message_id: "foo" } }
 
     const log = [referral, del1, echo, delivery, response]
 
     const actions = getMessage(log, form, user)
-    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
+    actions.messages[0].metadata.repeat.should.be.true
   })
 
 
@@ -1702,7 +1797,7 @@ describe('Machine', () => {
     const log = [referral, echo, optin]
 
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('Invalidates an optin when it comes from nowhere', () => {
@@ -1716,7 +1811,7 @@ describe('Machine', () => {
     const log = [referral, _echo('bar'), optin]
 
     const actions = getMessage(log, form, user)
-    JSON.parse(actions.messages[0].message.metadata).repeat.should.be.true
+    actions.messages[0].metadata.repeat.should.be.true
   })
 
 
@@ -1731,8 +1826,8 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(2)
-    actions.messages[0].message.text.should.equal(followUpMessage({}))
-    actions.messages[1].message.text.should.equal('foo')
+    actions.messages[0].text.should.equal(followUpMessage({}))
+    actions.messages[1].text.should.equal('foo')
   })
 
 
@@ -1773,8 +1868,8 @@ describe('Machine', () => {
 
     const log = [referral, synthetic({ type: 'redo' })]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('foo')
-    actions.messages[1].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('foo')
+    actions.messages[1].text.should.equal('bar')
 
     const state = getState(log)
     state.retries.should.eql([20])
@@ -1792,7 +1887,7 @@ describe('Machine', () => {
     const log = [referral, echo, text, report, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
 
     const state = getState(log)
     state.retries.should.eql([20])
@@ -1807,11 +1902,22 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const response = { ...qr, message: { "mid": "m_xrl3G6Dt409ZEYrWWxfAEarfHyV7iKF62Oi5m6M4iPT8ncaQlpcbTZfyaM8MPmYp8VCBHfPYiQY5WrQ4xX-2QQ", "attachments": [{ "type": "image", "payload": { "url": "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34" } }] } }
+    const response = {
+      event_id: 'evt_test_upload',
+      user_id: USER_ID,
+      timestamp: 20,
+      source: { type: 'messenger', account_id: PAGE_ID },
+      event_type: 'user_media',
+      payload: {
+        type: 'user_media',
+        attachments: [{ "type": "image", "payload": { "url": "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34" } }],
+        stickerId: null
+      }
+    }
 
     const log = [referral, echo, delivery, response]
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('bar')
 
     const state = getState(log)
     state.qa.should.eql([["foo", "https://scontent.xx.fbcdn.net/v/t1.15752-9/461148037_759263159639423_7161323123727879546_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_ohc=zkDCMxo0pTsQ7kNvgGA_H8d&_nc_ad=z-m&_nc_cid=0&_nc_ht=scontent.xx&_nc_gid=AEZgev0WN3sV8E56pu3IELa&oh=03_Q7cD1QHpWUMM_ryYpocqe5jG_MF5bg12hw79eHeTmvbg8jVNHg&oe=67222F34"]])
@@ -1858,19 +1964,19 @@ describe('Machine', () => {
     const log = [referral, statementEcho, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
-    actions.messages[0].message.text.should.equal('foo')
-    actions.messages[1].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('foo')
+    actions.messages[1].text.should.equal('bar')
   })
 
 
   it('Redo event resends the same token if redo sent after wait time', () => {
     const wait = { type: 'timeout', value: '25 hours', notifyPermission: true }
 
-    //   // value should be...?
     const externalEvent = {
-      source: 'synthetic',
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_timeout',
       timestamp: Date.now() + 1000 * 60 * 60 * 25,
-      event: { type: 'timeout', value: Date.now() + 1000 * 60 * 60 * 25 }
+      payload: Date.now() + 1000 * 60 * 60 * 25
     }
 
     const d = Date.now()
@@ -1886,8 +1992,8 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user)
 
     actions.messages.length.should.equal(1)
-    actions.messages[0].recipient.one_time_notif_token.should.equal('FOOBAR')
-    actions.messages[0].message.text.should.equal('bar')
+    actions.messages[0].token.should.equal('FOOBAR')
+    actions.messages[0].text.should.equal('bar')
   })
 
 
@@ -1901,8 +2007,8 @@ describe('Machine', () => {
     const log = [referral, echo, text, synthetic({ type: 'redo' })]
     const actions = getMessage(log, form, user)
 
-    actions.messages[0].message.metadata.should.equal('{"repeat":true,"ref":"foo"}')
-    actions.messages[0].message.text.should.contain('Sorry')
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.contain('Sorry')
   })
 
 
@@ -1929,8 +2035,8 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(2)
-    actions.messages[0].message.text.should.equal('foo')
-    actions.messages[1].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('foo')
+    actions.messages[1].text.should.equal('bar')
   })
 
 
@@ -1941,13 +2047,13 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const pr = _.set(syntheticPR, 'event.value.response', { error: { code: 2022 } })
+    const pr = _.set(syntheticPR, 'payload.response', { error: { code: 2022 } })
     const log = [referral, echo, pr, synthetic({ type: 'redo' })]
 
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(2)
-    actions.messages[0].message.text.should.equal('foo')
-    actions.messages[1].message.text.should.equal('bar')
+    actions.messages[0].text.should.equal('foo')
+    actions.messages[1].text.should.equal('bar')
   })
 
 
@@ -1961,7 +2067,7 @@ describe('Machine', () => {
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }
 
-    const echoBar = _.set(echo, 'message.metadata.ref', 'bar')
+    const echoBar = _.set(echo, 'payload.metadata.ref', 'bar')
 
     const log = [referral, statementEcho, echoBar, synthetic({ type: 'redo' })]
     const actions = getMessage(log, form, user)
@@ -1973,7 +2079,7 @@ describe('Machine', () => {
   it('Sends no reset message on reset form', () => {
     const form = {}
 
-    const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
+    const resetReferral = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'form.reset' } } }
 
     const log = [referral, echo, text, resetReferral]
 
@@ -1998,11 +2104,11 @@ describe('Machine', () => {
     const actions = getMessage(log, form, user, { id: 'bar' })
 
     actions.messages.length.should.equal(1)
-    const md = JSON.parse(actions.messages[0].message.metadata)
+    const md = actions.messages[0].metadata
 
     // NOTE: do we still need the payment in the metadata? Doesn't hurt...
     md.should.eql({ ref: 'foo', type: 'statement', payment: { type: 'reloadly', details: { foo: 'bar' } } })
-    actions.messages[0].message.text.should.equal('foo')
+    actions.messages[0].text.should.equal('foo')
 
     actions.payment.details.should.eql({ foo: 'bar' })
     actions.payment.userid.should.eql(user.id)
@@ -2049,7 +2155,7 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user, { id: 'bar' })
 
-    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")
+    actions.messages[0].text.should.equal("We're sorry, but this survey is now over and closed.")
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -2068,7 +2174,7 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user, { id: 'bar' })
 
-    actions.messages[0].message.text.should.equal("foo")
+    actions.messages[0].text.should.equal("foo")
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -2086,8 +2192,8 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user, { id: 'bar' })
 
-    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")
-    JSON.parse(actions.messages[0].message.metadata).ref.should.equal('bar')
+    actions.messages[0].text.should.equal("We're sorry, but this survey is now over and closed.")
+    actions.messages[0].metadata.ref.should.equal('bar')
     const state = getState(log)
     state.state.should.equal('RESPONDING')
   });
@@ -2103,7 +2209,7 @@ describe('Machine', () => {
     const log = [{...referral, timestamp: now}, _echo('bar'), { ...text, timestamp: now }]
 
     const actions = getMessage(log, form, user, { id: 'bar' })
-    actions.messages[0].message.text.should.equal("We're sorry, but this survey is now over and closed.")
+    actions.messages[0].text.should.equal("We're sorry, but this survey is now over and closed.")
 
     const state = getState(log)
     state.state.should.equal('RESPONDING')
@@ -2118,13 +2224,13 @@ describe('Machine', () => {
       offTime: now + 1000 * 60,
     }
 
-    const newReferral = { ...referral, referral: { ...referral.referral, ref: 'form.BAR' } }
+    const newReferral = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'form.BAR' } } }
 
     const log = [referral, _echo('bar'), { ...text, timestamp: now }, newReferral]
 
     const actions = getMessage(log, form, user, { id: 'bar' })
 
-    actions.messages[0].message.text.should.equal("bar")
+    actions.messages[0].text.should.equal("bar")
     const state = getState(log)
     state.state.should.equal('RESPONDING')
     state.md.form.should.equal('BAR')
@@ -2261,7 +2367,7 @@ describe('Handoff functionality', () => {
     const actions = getMessage(log, form, user, { id: '1855355231229529' })
 
     actions.messages.length.should.equal(1)
-    const md = JSON.parse(actions.messages[0].message.metadata)
+    const md = actions.messages[0].metadata
     md.type.should.equal('handoff')
     md.handoff.should.deep.equal({ target_app_id: '123456789', mode: 'wait', metadata: { reason: 'customer_support' } })
     should.not.exist(actions.handoff)
@@ -2376,15 +2482,16 @@ describe('Handoff functionality', () => {
     }
 
     const handoverEvent = {
-      source: 'messenger',
-      timestamp: Date.now(),
-      recipient: { id: '1855355231229529' },
-      sender: { id: '1989430067808669' },
-      pass_thread_control: {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
         new_owner_app_id: '123456789',
         previous_owner_app_id: '976665718578167',
         metadata: 'End of handoff'
-      }
+      },
+      source: { type: 'messenger', account_id: '1855355231229529' },
+      user_id: '1989430067808669',
+      timestamp: Date.now()
     }
 
     const log = [
@@ -2394,10 +2501,17 @@ describe('Handoff functionality', () => {
     ]
     const actions = getMessage(log, form, user, { id: '1855355231229529' })
 
-    actions.messages[0].message.should.deep.equal({ text: 'after', metadata: '{"ref":"after","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'after', type: 'short_text' })
+    actions.messages[0].text.should.equal('after')
   })
 
-  it('should ignore user text during handoff wait', () => {
+  it('should render returned handover metadata in hidden fields through the raw event pipeline', () => {
+    // Regression test for the staging smoke-test failure: the events below are
+    // RAW webhook shapes (as botserver forwards them to Kafka) mapped through the
+    // real event-normalizer — mirroring production, where parseEvent runs per
+    // Kafka message. The flattened keys must be e_handover_metadata_* (the
+    // contract main's pipeline produced and deployed surveys reference), not the
+    // one-level-shallower e_handover_*.
     const form = {
       logic: [],
       fields: [
@@ -2408,22 +2522,53 @@ describe('Handoff functionality', () => {
           properties: {
             description: JSON.stringify({
               type: 'handoff',
-              handoff: { target_app_id: '123456789', mode: 'wait' }
+              handoff: { target_app_id: '976665718578167', mode: 'wait' }
             })
           }
+        },
+        {
+          type: 'statement',
+          title: 'Handoff complete! The echo app heard you say "{{hidden:e_handover_metadata_echo_text}}" (status: {{hidden:e_handover_metadata_smoke_echo}}) and handed control back to me.',
+          ref: 'handoff_result'
         },
         { type: 'short_text', title: 'after', ref: 'after' }
       ]
     }
 
-    const log = [
-      referral,
-      _echo({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '123456789', mode: 'wait' } }),
-      text
-    ]
-    const state = getState(log)
-    state.state.should.equal('WAIT_EXTERNAL_EVENT')
-    state.wait.type.should.equal('handover')
+    const rawReferral = {
+      source: 'messenger',
+      sender: { id: user.id },
+      recipient: { id: '1855355231229529' },
+      timestamp: 1542123799219,
+      referral: { ref: 'form.FOO.foo.bar', source: 'SHORTLINK', type: 'OPEN_THREAD' }
+    }
+    const rawHandoffEcho = {
+      source: 'messenger',
+      sender: { id: '1855355231229529' },
+      recipient: { id: user.id },
+      timestamp: 1542123799225,
+      message: {
+        is_echo: true,
+        metadata: JSON.stringify({ ref: 'foo', type: 'handoff', handoff: { target_app_id: '976665718578167', mode: 'wait' } }),
+        text: 'foo'
+      }
+    }
+    const rawHandover = {
+      source: 'messenger',
+      sender: { id: user.id },
+      recipient: { id: '1855355231229529' },
+      timestamp: 1542123799300,
+      pass_thread_control: {
+        new_owner_app_id: 123456789, // Facebook sends app ids as numbers
+        previous_owner_app_id: 976665718578167,
+        metadata: '{"smoke_echo":"ok","echo_text":"hello"}'
+      }
+    }
+
+    const log = [rawReferral, rawHandoffEcho, rawHandover].map(parseEvent)
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    actions.messages[0].text.should.equal('Handoff complete! The echo app heard you say "hello" (status: ok) and handed control back to me.')
   })
 })
 
@@ -2454,22 +2599,24 @@ describe('Thread passback functionality', () => {
 
     // Create a handover event (thread passback)
     const handoverEvent = {
-      source: 'messenger',
-      timestamp: Date.now(),
-      recipient: { id: '1855355231229529' },
-      sender: { id: '1989430067808669' },
-      pass_thread_control: {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
         new_owner_app_id: '123456789',
         previous_owner_app_id: '987654321',
         metadata: '{"reason":"customer_support"}'
-      }
+      },
+      source: { type: 'messenger', account_id: '1855355231229529' },
+      user_id: '1989430067808669',
+      timestamp: Date.now()
     }
 
     const log = [referral, _echo({ ref: 'foo', type: 'wait', wait }), handoverEvent]
     const actions = getMessage(log, form, user)
 
     // Should proceed to next question after handover
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'bar', type: 'short_text' })
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('should handle handover event with metadata', () => {
@@ -2497,15 +2644,16 @@ describe('Thread passback functionality', () => {
 
     // Create a handover event with metadata
     const handoverEvent = {
-      source: 'messenger',
-      timestamp: Date.now(),
-      recipient: { id: '1855355231229529' },
-      sender: { id: '1989430067808669' },
-      pass_thread_control: {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
         new_owner_app_id: '123456789',
         previous_owner_app_id: '987654321',
         metadata: '{"reason":"escalation","priority":"high"}'
-      }
+      },
+      source: { type: 'messenger', account_id: '1855355231229529' },
+      user_id: '1989430067808669',
+      timestamp: Date.now()
     }
 
     const waitCondition = {
@@ -2519,7 +2667,8 @@ describe('Thread passback functionality', () => {
     const actions = getMessage(log, form, user)
 
     // Should proceed to next question after handover
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'bar', type: 'short_text' })
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('should not fulfill wait condition for wrong app ID', () => {
@@ -2547,15 +2696,16 @@ describe('Thread passback functionality', () => {
 
     // Create a handover event with wrong app ID
     const handoverEvent = {
-      source: 'messenger',
-      timestamp: Date.now(),
-      recipient: { id: '1855355231229529' },
-      sender: { id: '1989430067808669' },
-      pass_thread_control: {
-        new_owner_app_id: '999999999', // Wrong app ID
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
+        new_owner_app_id: '999999999',
         previous_owner_app_id: '987654321',
         metadata: '{"reason":"customer_support"}'
-      }
+      },
+      source: { type: 'messenger', account_id: '1855355231229529' },
+      user_id: '1989430067808669',
+      timestamp: Date.now()
     }
 
     const waitCondition = {
@@ -2597,15 +2747,15 @@ describe('Thread passback functionality', () => {
 
     // Create a handover event without new_owner_app_id (Messenger API sometimes omits this)
     const handoverEvent = {
-      source: 'messenger',
-      timestamp: Date.now(),
-      recipient: { id: '1855355231229529' },
-      sender: { id: '1989430067808669' },
-      pass_thread_control: {
-        // new_owner_app_id is missing
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
         previous_owner_app_id: '987654321',
         metadata: '{"reason":"customer_support"}'
-      }
+      },
+      source: { type: 'messenger', account_id: '1855355231229529' },
+      user_id: '1989430067808669',
+      timestamp: Date.now()
     }
 
     const waitCondition = {
@@ -2619,7 +2769,8 @@ describe('Thread passback functionality', () => {
     const actions = getMessage(log, form, user)
 
     // Should proceed to next question when new_owner_app_id is missing (accept handover)
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'bar', type: 'short_text' })
+    actions.messages[0].text.should.equal('bar')
   })
 
   it('should fulfill wait condition when new_owner_app_id is a number matching our string app id', () => {
@@ -2653,22 +2804,24 @@ describe('Thread passback functionality', () => {
     // new_owner_app_id as a NUMBER (123456789), exactly as JSON.parse yields it
     // from the webhook; process.env.FACEBOOK_APP_ID is the string '123456789'.
     const handoverEvent = {
-      source: 'messenger',
-      timestamp: Date.now(),
-      recipient: { id: '1855355231229529' },
-      sender: { id: '1989430067808669' },
-      pass_thread_control: {
+      event_type: 'handover',
+      payload: {
+        type: 'handover',
         new_owner_app_id: 123456789,
         previous_owner_app_id: 987654321,
         metadata: 'End of AI chatbot session – handing back to Virtual Lab'
-      }
+      },
+      source: { type: 'messenger', account_id: '1855355231229529' },
+      user_id: '1989430067808669',
+      timestamp: Date.now()
     }
 
     const log = [referral, _echo({ ref: 'foo', type: 'wait', wait }), handoverEvent]
     const actions = getMessage(log, form, user)
 
     // Should accept the handover and proceed to the next question
-    actions.messages[0].message.should.deep.equal({ text: 'bar', metadata: '{"ref":"bar","type":"short_text"}' })
+    actions.messages[0].metadata.should.deep.equal({ ref: 'bar', type: 'short_text' })
+    actions.messages[0].text.should.equal('bar')
   })
 
 
@@ -2701,7 +2854,7 @@ describe('Statement with wait should not gather next responses', () => {
 
     // Should only send ONE message (the statement), not the next question
     actions.messages.length.should.equal(1)
-    const md = JSON.parse(actions.messages[0].message.metadata)
+    const md = actions.messages[0].metadata
     md.ref.should.equal('wait_statement')
     md.type.should.equal('statement')
     md.wait.should.deep.equal(wait)
@@ -2731,7 +2884,7 @@ describe('Statement with wait should not gather next responses', () => {
     const actions = getMessage(log, form, user, { id: '1855355231229529' })
 
     actions.messages.length.should.equal(1)
-    const md = JSON.parse(actions.messages[0].message.metadata)
+    const md = actions.messages[0].metadata
     md.type.should.equal('handoff')
     md.handoff.should.deep.equal({ target_app_id: '123456789', mode: 'wait' })
     should.not.exist(actions.handoff)

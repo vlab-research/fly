@@ -16,7 +16,7 @@
   "license": "ISC",
   "dependencies": {
     "@vlab-research/chatbase-postgres": "0.0.3",
-    "@vlab-research/translate-typeform": "^0.2.16",
+    "@vlab-research/translate-typeform": "^0.2.17",
     "@vlab-research/utils": "0.0.10",
     "chai": "^4.2.0",
     "dotenv": "^8.1.0",

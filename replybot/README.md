@@ -69,24 +69,37 @@ alias kubelog=kube-logs.sh
 kubelog gbv-replybot 1
 ```
 
-## Chat Log Publisher
+## Event Normalization (UniversalEvent)
 
-The `lib/chat-log/publisher.js` module publishes chat log entries to a Kafka topic for every visible message in a conversation (both bot echoes and user messages). This feeds the `chat_log` database table via a downstream scribble sink.
+All events entering the replybot are normalized by `lib/event-normalizer.js`
+into a `UniversalEvent` (`{ event_id, user_id, timestamp, source, event_type,
+payload, raw }`) before the state machine sees them. The machine
+(`lib/typewheels/machine.js`) switches only on `event_type` and reads typed
+`payload` objects — it never touches raw Messenger fields.
 
-### Architecture
+Notes on specific shapes:
 
-The module follows a functional core / imperative shell pattern:
+- **Payload parsing** — Messenger delivers `quick_reply`, `postback`, and
+  `optin` payloads as JSON strings; the normalizer parses them to objects
+  (`parsePayload`), falling back to the raw string when not valid JSON.
+- **Optin** — normalized to `event_type: 'optin'` with
+  `payload: { type: 'optin', optin_type: <messenger optin.type, e.g.
+  'one_time_notif_req'>, token: <one_time_notif_token>, payload: <parsed
+  notify-field ref object> }`. The machine's OPTIN case checks
+  `payload.optin_type`, stores the token in `state.tokens`, and answers the
+  pending `notify` field (the validator matches `payload.payload.ref` against
+  the field ref). After a timeout fulfils a notify wait, the stored token is
+  attached to the outgoing message and message-worker sends it with
+  `recipient: { one_time_notif_token }` instead of the user id.
 
-- **`extractChatLogEntry(event, state)`** -- Pure function. Given a parsed Facebook webhook event and the current state machine state, returns a chat log entry object or `null`. Uses `categorizeEvent()` from `machine.js` to classify the event. Only ECHO, TEXT, QUICK_REPLY, and POSTBACK events produce entries; all other event types (synthetic events, watermarks, referrals, reactions, etc.) return `null`.
+### Testing
 
-- **`publishChatLog(produce, topic, rawEvent, state)`** -- Thin IO wrapper. Parses the raw event, calls `extractChatLogEntry`, and if the result is non-null, publishes to Kafka using the same `produce()` helper used for state/response/payment topics.
+`npm test` runs the full mocha suite via the quoted glob `'lib/**/*.test.js'`
+(mocha expands it; unquoted, the shell would skip top-level `lib/*.test.js`
+files like `event-normalizer.test.js` and `generic-translator.test.js`).
+Test fixtures for UniversalEvents live in `lib/typewheels/events.test.js` and
+must mirror the normalizer's real output shapes.
 
-### Integration
-
-The publisher is called in the `processor()` function in `lib/index.js`, after `machine.run()` completes and all other publish operations (state, responses, payment) have run. It only activates when the `VLAB_CHAT_LOG_TOPIC` environment variable is set -- if not configured, the publisher is silently skipped (graceful degradation).
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `VLAB_CHAT_LOG_TOPIC` | Kafka topic for chat log entries (e.g., `vlab-prod-chat-log`). If not set, chat logging is disabled. |
+(The former chat-log publisher — `lib/chat-log/publisher.js` and
+`VLAB_CHAT_LOG_TOPIC` — was removed with the platform abstraction; see
+`documentation/chat-message-logging.md`.)

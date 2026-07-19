@@ -1,6 +1,10 @@
 const _ = require('lodash')
 const parse = require('parse-duration')
-const { getTimeoutDate } = require('@vlab-research/utils')
+const chrono = require('chrono-node')
+
+function getTimeoutDate(timestamp, duration) {
+  return chrono.parseDate(duration, new Date(timestamp))
+}
 
 function _waitFulfilled(value, events, waitStart) {
   const now = _(events).map(e => new Date(e.value)).max()
@@ -29,38 +33,35 @@ function _matches(v1, v2) {
 }
 
 function _normalizeEvent(event) {
-  // Handle null/undefined events
   if (!event) {
     return null
   }
 
-  // Handle different event structures
   if (event.event) {
-    // Synthetic events (timeout, external)
     return event.event
-  } else if (event.pass_thread_control) {
-    // Raw handover events
-    const value = {
-      timestamp: event.timestamp
+  }
+
+  if (event.event_type === 'handover') {
+    const value = {}
+
+    if (event.payload.new_owner_app_id) {
+      value.target_app_id = String(event.payload.new_owner_app_id)
     }
 
-    // Parse metadata if present - handle both JSON and plain strings
-    if (event.pass_thread_control.metadata) {
-      try {
-        const parsed = JSON.parse(event.pass_thread_control.metadata)
-        Object.assign(value, parsed)
-      } catch (e) {
-        // Metadata is a plain string, not JSON - store it as-is
-        value.metadata = event.pass_thread_control.metadata
+    if (event.timestamp) {
+      value.timestamp = event.timestamp
+    }
+
+    if (event.payload.metadata) {
+      if (typeof event.payload.metadata === 'object') {
+        Object.assign(value, event.payload.metadata)
+      } else {
+        try {
+          Object.assign(value, JSON.parse(event.payload.metadata))
+        } catch (e) {
+          value.metadata = event.payload.metadata
+        }
       }
-    }
-
-    // Only include target_app_id if new_owner_app_id is present.
-    // Coerce to a string: the webhook can send it as a number or a string, and
-    // wait-condition target_app_id values are authored as strings -- normalizing
-    // here keeps the comparison in _matches type-safe regardless of source format.
-    if (event.pass_thread_control.new_owner_app_id) {
-      value.target_app_id = String(event.pass_thread_control.new_owner_app_id)
     }
 
     return {
@@ -68,6 +69,45 @@ function _normalizeEvent(event) {
       value
     }
   }
+
+  // Handle raw Messenger pass_thread_control events
+  if (event.pass_thread_control) {
+    const value = {}
+
+    if (event.pass_thread_control.new_owner_app_id) {
+      value.target_app_id = String(event.pass_thread_control.new_owner_app_id)
+    }
+
+    if (event.timestamp) {
+      value.timestamp = event.timestamp
+    }
+
+    if (event.pass_thread_control.metadata) {
+      if (typeof event.pass_thread_control.metadata === 'object') {
+        Object.assign(value, event.pass_thread_control.metadata)
+      } else {
+        try {
+          Object.assign(value, JSON.parse(event.pass_thread_control.metadata))
+        } catch (e) {
+          value.metadata = event.pass_thread_control.metadata
+        }
+      }
+    }
+
+    return {
+      type: 'handover',
+      value
+    }
+  }
+
+  if (event.event_type === 'synthetic_external') {
+    return { type: 'external', value: event.payload }
+  }
+
+  if (event.event_type === 'synthetic_timeout') {
+    return { type: 'timeout', value: event.payload }
+  }
+
   return null
 }
 

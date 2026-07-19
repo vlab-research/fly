@@ -5,7 +5,6 @@ import (
 	"fmt"
 )
 
-// PlatformType represents the chat platform
 type PlatformType string
 
 const (
@@ -15,29 +14,38 @@ const (
 	PlatformTelegram  PlatformType = "telegram"
 )
 
-// SendMessageCommand represents the platform-agnostic message command
 type SendMessageCommand struct {
-	CommandID         string       `json:"command_id"`
-	IssuedAt          int64        `json:"issued_at"`
-	ConversationID    string       `json:"conversation_id"`
-	UserID            string       `json:"user_id"`
-	Platform          PlatformType `json:"platform"`
-	PlatformAccountID string       `json:"platform_account_id"`
-	Message           MessageContent `json:"message"`
+	Type              string          `json:"type,omitempty"`
+	CommandID         string          `json:"command_id"`
+	IssuedAt          int64           `json:"issued_at"`
+	ConversationID    string          `json:"conversation_id"`
+	UserID            string          `json:"user_id"`
+	Platform          PlatformType    `json:"platform"`
+	PlatformAccountID string          `json:"platform_account_id"`
+	Message           MessageContent  `json:"message"`
+	PlatformContext   json.RawMessage `json:"platform_context,omitempty"`
 }
 
-// MessageType represents the type of message content
+type HandoffCommand struct {
+	Type              string          `json:"type"`
+	CommandID         string          `json:"command_id"`
+	IssuedAt          int64           `json:"issued_at"`
+	ConversationID    string          `json:"conversation_id"`
+	UserID            string          `json:"user_id"`
+	Platform          PlatformType    `json:"platform"`
+	PlatformAccountID string          `json:"platform_account_id"`
+	TargetAppID       string          `json:"target_app_id"`
+	Metadata          json.RawMessage `json:"metadata,omitempty"`
+}
+
 type MessageType string
 
 const (
-	MessageTypeText             MessageType = "text"
-	MessageTypeQuestion         MessageType = "question"
-	MessageTypeMedia            MessageType = "media"
-	MessageTypeNative           MessageType = "native"
-	MessageTypePassThreadControl MessageType = "pass_thread_control"
+	MessageTypeText     MessageType = "text"
+	MessageTypeQuestion MessageType = "question"
+	MessageTypeMedia    MessageType = "media"
 )
 
-// MediaType represents the type of media content
 type MediaType string
 
 const (
@@ -47,86 +55,117 @@ const (
 	MediaTypeFile  MediaType = "file"
 )
 
-// MessageContent represents platform-agnostic message content with type discrimination
 type MessageContent struct {
-	Type MessageType `json:"type"` // "text", "question", "media", "native", "pass_thread_control"
+	Type MessageType `json:"type"`
 
-	// For text messages
 	Text *string `json:"text,omitempty"`
 
-	// For question messages
 	QuestionText *string  `json:"question_text,omitempty"`
 	Options      []Option `json:"options,omitempty"`
 
-	// For media messages
 	MediaType *MediaType `json:"media_type,omitempty"`
 	MediaURL  *string    `json:"media_url,omitempty"`
 	Caption   *string    `json:"caption,omitempty"`
 
-	// For native passthrough messages (type: "native")
-	// Pre-formatted platform-specific payload that bypasses translation
-	NativePayload json.RawMessage `json:"native_payload,omitempty"`
-
-	// For pass_thread_control messages (type: "pass_thread_control")
-	TargetAppID      string `json:"target_app_id,omitempty"`     // App to hand off to
-	HandoffMetadata  string `json:"handoff_metadata,omitempty"` // JSON string context for handoff
-
-	// Metadata for tracking (contains ref for question matching)
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
-// Option represents a choice option in a question
 type Option struct {
-	// Value can be a string, boolean, or number depending on field type:
-	// - yes_no/legal: boolean (true/false)
-	// - multiple_choice: string (the choice ref or label)
-	// - rating/opinion_scale: string number ("1", "2", etc.)
-	Value interface{} `json:"value"` // The actual value/payload
-	Label string      `json:"label"` // What the user sees
+	Value       json.RawMessage `json:"value"`
+	Label       string          `json:"label"`
+	Description *string         `json:"description,omitempty"`
 }
 
-// ValueAsString returns the Value as a string for platforms that need string payloads
-// - strings are returned as-is
-// - booleans are returned as "true" or "false"
-// - numbers are formatted as their string representation
 func (o *Option) ValueAsString() string {
-	switch v := o.Value.(type) {
-	case string:
-		return v
-	case bool:
-		if v {
+	if len(o.Value) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(o.Value, &s); err == nil {
+		return s
+	}
+	var b bool
+	if err := json.Unmarshal(o.Value, &b); err == nil {
+		if b {
 			return "true"
 		}
 		return "false"
-	case float64:
-		// JSON numbers are float64
-		if v == float64(int64(v)) {
-			return fmt.Sprintf("%d", int64(v))
-		}
-		return fmt.Sprintf("%v", v)
-	default:
-		return fmt.Sprintf("%v", v)
 	}
+	var f float64
+	if err := json.Unmarshal(o.Value, &f); err == nil {
+		if f == float64(int64(f)) {
+			return fmt.Sprintf("%d", int64(f))
+		}
+		return fmt.Sprintf("%v", f)
+	}
+	return string(o.Value)
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling to handle type discrimination
+func (mc *MessageContent) GetMetadataString() string {
+	if len(mc.Metadata) == 0 {
+		return ""
+	}
+	return string(mc.Metadata)
+}
+
+func (mc *MessageContent) GetRefFromMetadata() string {
+	if len(mc.Metadata) == 0 {
+		return ""
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(mc.Metadata, &m); err != nil {
+		return ""
+	}
+	if ref, ok := m["ref"]; ok {
+		if refStr, ok := ref.(string); ok {
+			return refStr
+		}
+	}
+	return ""
+}
+
+func (mc *MessageContent) GetTypeFromMetadata() string {
+	if len(mc.Metadata) == 0 {
+		return ""
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(mc.Metadata, &m); err != nil {
+		return ""
+	}
+	if t, ok := m["type"]; ok {
+		if tStr, ok := t.(string); ok {
+			return tStr
+		}
+	}
+	return ""
+}
+
+func (cmd *SendMessageCommand) GetOTNToken() string {
+	if len(cmd.PlatformContext) == 0 {
+		return ""
+	}
+	var pc struct {
+		OneTimeNotifToken string `json:"one_time_notif_token"`
+	}
+	if err := json.Unmarshal(cmd.PlatformContext, &pc); err != nil {
+		return ""
+	}
+	return pc.OneTimeNotifToken
+}
+
 func (mc *MessageContent) UnmarshalJSON(data []byte) error {
-	// First unmarshal into a temporary struct to get all fields
 	type Alias MessageContent
 	aux := &struct {
 		*Alias
 	}{
 		Alias: (*Alias)(mc),
 	}
-
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-
 	return nil
 }
 
-// Validate checks if the message content is valid
 func (mc *MessageContent) Validate() error {
 	switch mc.Type {
 	case MessageTypeText:
@@ -146,14 +185,6 @@ func (mc *MessageContent) Validate() error {
 		}
 		if mc.MediaURL == nil || *mc.MediaURL == "" {
 			return ErrMissingMediaURL
-		}
-	case MessageTypeNative:
-		if len(mc.NativePayload) == 0 {
-			return fmt.Errorf("native_payload is required for type 'native'")
-		}
-	case MessageTypePassThreadControl:
-		if mc.TargetAppID == "" {
-			return fmt.Errorf("target_app_id is required for type 'pass_thread_control'")
 		}
 	default:
 		return ErrUnsupportedMessageType

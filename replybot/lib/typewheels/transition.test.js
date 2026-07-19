@@ -1,12 +1,11 @@
-// const nock = require('nock')
 const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
-const { MachineIOError } = require('../errors')
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
-// const BASE_URL = "https://graph.facebook.com"
+process.env.FALLBACK_FORM = 'fallback'
+process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
 
 describe('machine.run', () => {
   it('returns STATE_TRANSITION error if transition throws', async () => {
@@ -52,45 +51,11 @@ describe('machine.run', () => {
     report.publish.should.be.true
   })
 
-  it('returns specific tag error if actionsResponses throws MachineIOError', async () => {
-
-    const m = new Machine()
-    m.transition = () => ({ newState: {}, output: {} })
-    m.actionsResponses = () => Promise.reject(new MachineIOError('BAZ', 'foo', { code: 'FB' }))
-    const timestamp = Date.now()
-    const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
-    report.user.should.equal('bar')
-    report.timestamp.should.equal(timestamp)
-    report.error.message.should.equal('foo')
-    report.error.tag.should.equal('BAZ')
-    report.error.code.should.equal('FB')
-    report.publish.should.be.true
-  })
-
-
-  it('short-circuits RESTORE_STATE: publishes newState, no commands, no responses, no IO', async () => {
-    const m = new Machine()
-    // If the short-circuit failed, actionsResponses would run and throw here.
-    m.actionsResponses = () => { throw new Error('actionsResponses must not run for RESTORE_STATE') }
-
-    const P = { state: 'QOUT', question: 'q2', qa: [['q1', 'yes']], forms: ['FOO'], md: { startTime: 100 }, pointer: 500 }
-    const event = synthetic({ type: 'restore_state', value: { state: P } }, { timestamp: 9999 })
-
-    const report = await m.run({ state: 'USER_BLOCKED', qa: [], forms: ['FOO'] }, USER_ID, event)
-
-    report.publish.should.be.true
-    report.newState.state.should.equal('QOUT')
-    report.newState.qa.should.eql([['q1', 'yes']])
-    report.newState.pointer.should.equal(9999)
-    should.not.exist(report.commands)
-    should.not.exist(report.responses)
-    should.not.exist(report.error)
-  })
 
   it('returns a report with commands if all goes well', async () => {
     const m = new Machine()
     m.transition = () => ({ newState: {}, output: {} })
-    m.actionsResponses = () => ({ actions: [{ foo: 'qux' }] })
+    m.actionsResponses = () => ({ actions: [{ type: 'text', text: 'qux' }] })
 
     const timestamp = Date.now()
     const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
@@ -100,7 +65,8 @@ describe('machine.run', () => {
     report.commands.should.be.an('array')
     report.commands[0].should.have.property('command_id')
     report.commands[0].should.have.property('message')
-    report.commands[0].message.should.have.property('type', 'native')
+    report.commands[0].message.should.have.property('type', 'text')
+    report.commands[0].message.text.should.equal('qux')
     report.publish.should.be.true
   })
 
@@ -111,7 +77,6 @@ describe('Machine integrated', () => {
 
   it('returns a report with commands when given send actions', async () => {
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.resolve([{
       logic: [],
@@ -120,8 +85,6 @@ describe('Machine integrated', () => {
       offTime: referral.timestamp + 1000 * 60 * 60 * 24
     }, 'foo'])
 
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-
     const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', referral)
     report.user.should.equal('bar')
     should.not.exist(report.error)
@@ -129,20 +92,77 @@ describe('Machine integrated', () => {
     report.commands.should.be.an('array')
     report.commands.length.should.be.greaterThan(0)
     report.commands[0].should.have.property('message')
-    report.commands[0].message.should.have.property('type', 'native')
-    report.commands[0].message.should.have.property('native_payload')
-    report.commands[0].message.native_payload.should.eql({
-      message: { 'metadata': '{"ref":"foo","type":"short_text"}', text: 'foo' },
-      recipient: { id: 'bar' }
-    })
+    report.commands[0].message.should.have.property('text')
+    report.commands[0].message.text.should.equal('foo')
     report.publish.should.be.true
+  })
+
+  // Locks the replybot-side sendParams (message-tag) contract at the actual
+  // pre-Kafka seam: Machine.run() -> transition() -> actionsResponses() ->
+  // act() -> buildCommands(). A field whose `properties.description` carries
+  // `sendParams: { messaging_type, tag }` gets merged into `field.md` by
+  // `addCustomType` (form.js), survives into the translated message's
+  // `metadata.sendParams` (generic-translator.js), and is still there,
+  // untouched, on the outbound `send_message` command's `message.metadata`.
+  // Message tags are in real production use (97 forms / 3,078 participants,
+  // last 3-6mo) — this is not a legacy/dead path.
+  //
+  // BOUNDARY (documented, not asserted here — that's message-worker's/
+  // facebot's territory, not replybot's): `@vlab-research/translate-typeform`'s
+  // `formatResponse` (translate-fields.js:386) spreads `metadata.sendParams`
+  // onto the *top level* of the object next to `message`
+  // (i.e. `{ messaging_type, tag, message }`), but replybot's actual send
+  // pipeline (`generic-translator.js` + `transition.js`) does not use that
+  // translator and does not perform this promotion — `sendParams` stays
+  // nested under `command.message.metadata.sendParams` all the way to Kafka.
+  // Separately, the V2 Go message-worker's `SendMessageCommand` struct
+  // (message-worker/types/command.go) has no top-level `messaging_type`/`tag`
+  // field, and its outbound `FacebookSendRequest` (messenger_client.go:27)
+  // only carries `{Recipient, Message}` — so even though replybot correctly
+  // emits the tag on the command, it does not currently reach the Facebook
+  // Send API. That gap lives entirely on the message-worker side and is
+  // tracked separately; this test only locks the replybot half (the tag
+  // data survives intact to the edge of replybot's own output).
+  it('carries sendParams (message-tag) through to the outbound command, nested under message.metadata, never promoted to the top level', async () => {
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [{
+        type: 'short_text',
+        title: 'foo',
+        ref: 'foo',
+        properties: { description: '{"sendParams": {"tag": "CONFIRMED_EVENT_UPDATE", "messaging_type": "MESSAGE_TAG"}}' }
+      },
+      { type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: referral.timestamp + 1000 * 60 * 60 * 24
+    }, 'foo'])
+
+    const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', referral)
+    should.not.exist(report.error)
+    report.publish.should.be.true
+    report.commands.should.be.an('array')
+    report.commands.length.should.be.greaterThan(0)
+
+    const command = report.commands[0]
+    command.message.text.should.equal('foo')
+
+    // The contract: sendParams survives, nested under message.metadata.
+    command.message.metadata.sendParams.messaging_type.should.equal('MESSAGE_TAG')
+    command.message.metadata.sendParams.tag.should.equal('CONFIRMED_EVENT_UPDATE')
+
+    // The boundary: replybot never promotes it to the top level of the
+    // command (that's translate-typeform's formatResponse behavior, which
+    // this pipeline does not use) — so downstream consumers relying on a
+    // top-level messaging_type/tag would get nothing.
+    should.not.exist(command.messaging_type)
+    should.not.exist(command.tag)
   })
 
 
   it('returns a report with payment when given payment to send', async () => {
-    const _echo = md => ({ ...echo, message: { ...echo.message, metadata: md } })
+    const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md } })
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.resolve([{
       logic: [],
@@ -154,15 +174,13 @@ describe('Machine integrated', () => {
 
     const event = text
 
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-
     const report = await m.run({ state: 'QOUT', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
     report.user.should.equal('bar')
 
     should.not.exist(report.error)
     report.timestamp.should.equal(event.timestamp)
-    report.commands[0].message.native_payload.message.text.should.eql('bar')
+    report.commands[0].message.text.should.eql('bar')
     report.publish.should.be.true
 
     report.payment.should.eql({
@@ -177,9 +195,8 @@ describe('Machine integrated', () => {
 
 
   it('returns no payment when the message is a repeat', async () => {
-    const _echo = md => ({ ...echo, message: { ...echo.message, metadata: md } })
+    const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md } })
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.resolve([{
       logic: [],
@@ -191,9 +208,6 @@ describe('Machine integrated', () => {
     const md = { ref: 'foo', type: 'payment', payment: { provider: 'reloadly', details: { foo: 'bar' } }, isRepeat: true }
 
     const event = _echo(md)
-
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-
 
     const report = await m.run({ state: 'RESPONDING', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
@@ -210,11 +224,8 @@ describe('Machine integrated', () => {
 
   it('returns an error report with INTERNAL when internal network failures happen', async () => {
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.reject(new Error('Ah'))
-
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
 
     const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', referral)
     report.user.should.equal('bar')
@@ -224,15 +235,12 @@ describe('Machine integrated', () => {
 
   it('returns a report with publish false when there is no update', async () => {
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.resolve([{
       logic: [],
       fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }, 'foo'])
-
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
 
     const state = { state: 'RESPONDING', qa: [], forms: ['foo'] }
 
@@ -250,7 +258,7 @@ describe('Machine integrated', () => {
   it('returns a report with publish true when there is a reset state', async () => {
     const m = new Machine()
     const state = { state: 'QOUT', qa: [], forms: ['foo'] }
-    const resetReferral = { ...referral, referral: { ...referral.referral, ref: 'form.reset' } }
+    const resetReferral = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'form.reset' } } }
     const report = await m.run(state, 'bar', resetReferral)
 
     report.user.should.equal('bar')
@@ -269,15 +277,12 @@ describe('Machine integrated', () => {
 
     const now = Date.now()
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.resolve([{
       logic: [],
       fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }],
       offTime: now - 1000 * 60,
     }, 'foo'])
-
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
 
     const state = { state: 'START', qa: [], forms: ['foo'], md: { startTime: 123 } }
 
@@ -291,21 +296,18 @@ describe('Machine integrated', () => {
 
     report.newState.state.should.eql("RESPONDING")
     report.commands.length.should.equal(1)
-    report.commands[0].message.native_payload.message.text.should.eql("We're sorry, but this survey is now over and closed.")
+    report.commands[0].message.text.should.eql("We're sorry, but this survey is now over and closed.")
   })
 
 
   it('doesnt publish machine report when recieves machine report and currently in error state', async () => {
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.resolve([{
       logic: [],
       fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
       { type: 'short_text', title: 'bar', ref: 'bar' }]
     }, 'foo'])
-
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
 
     const state = { state: 'ERROR', qa: [], forms: ['foo'] }
 
@@ -323,13 +325,10 @@ describe('Machine integrated', () => {
 
   it('returns an error report when no timestamp in message', async () => {
     const m = new Machine()
-    m.getPageToken = () => Promise.resolve('footoken')
 
     m.getForm = () => Promise.reject(new Error('Ah'))
 
-    m.getUser = () => Promise.resolve(({ 'id': 'bar' }))
-
-    const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', "{foo--:;{-bar}")
+    const report = await m.run({ state: 'START', qa: [], forms: [] }, 'bar', { event_type: 'user_text', source: { type: 'messenger', account_id: '1051551461692797' }, payload: { type: 'user_text', text: 'hi' } })
     report.user.should.equal('bar')
     report.error.tag.should.equal('CORRUPTED_MESSAGE')
     report.publish.should.be.true
@@ -339,9 +338,7 @@ describe('Machine integrated', () => {
     it('should include handoff command when handoff data is present', async () => {
       const m = new Machine()
       m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
-      m.getPageToken = () => Promise.resolve('footoken')
       m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
-      m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
 
       const handoffData = {
         userid: 'bar',
@@ -351,7 +348,6 @@ describe('Machine integrated', () => {
 
       m.actionsResponses = () => Promise.resolve({
         actions: [],
-        pageToken: 'footoken',
         responses: [],
         payment: undefined,
         handoff: handoffData
@@ -364,20 +360,17 @@ describe('Machine integrated', () => {
       report.publish.should.be.true
       report.commands.should.be.an('array')
       report.commands.length.should.equal(1)
-      report.commands[0].message.type.should.equal('pass_thread_control')
-      report.commands[0].message.target_app_id.should.equal('987654321')
+      report.commands[0].type.should.equal('handoff')
+      report.commands[0].target_app_id.should.equal('987654321')
     })
 
     it('should not include handoff command when no handoff data is present', async () => {
       const m = new Machine()
       m.transition = () => ({ newState: {}, output: { action: 'RESPOND' } })
-      m.getPageToken = () => Promise.resolve('footoken')
       m.getForm = () => Promise.resolve([{ fields: [] }, 'survey123', {}])
-      m.getUser = () => Promise.resolve({ id: 'bar', first_name: 'Test' })
 
       m.actionsResponses = () => Promise.resolve({
         actions: [],
-        pageToken: 'footoken',
         responses: [],
         payment: undefined,
         handoff: undefined

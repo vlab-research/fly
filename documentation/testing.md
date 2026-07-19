@@ -50,7 +50,13 @@ Smoke tests run a minimal suite against the real dev cluster. They verify:
 **Speed**: Slower; depends on cluster state and real cron scheduling  
 **Dean behavior**: Waits for real CronJob execution (~180s)
 
-The k8s suite is intentionally kept minimal. Full functional coverage lives in Testcontainers.
+The k8s suite (`test.ts`) is a genuinely minimal ~4-test deployment smoke subset, not a functional clone of the testcontainers suite. It covers only what testcontainers structurally cannot:
+1. Referral → first-question, proving real service DNS/secrets/ConfigMaps wire up (botserver → replybot → worker → facebot) in the dev cluster.
+2. A real dean **CronJob** timeout — this test uses no `triggerDean()`; it relies entirely on the deployed cron firing on schedule and blocks (up to the mocha timeout) until it does.
+3. Delivery-error → `BLOCKED` state.
+4. A stitched-forms flow.
+
+(Historical note: `test.ts` used to be a ~24-of-26-test clone of `test.tc.ts`, duplicating almost all functional coverage against the live cluster. It has since been trimmed down to the minimal deployment-smoke role described above and in its own file header.)
 
 ## Why This Works
 
@@ -60,7 +66,7 @@ The k8s suite is intentionally kept minimal. Full functional coverage lives in T
 2. **Speed**: Container startup is milliseconds; dean triggers are imperative (2s vs. 180s cron wait)
 3. **Isolation**: Failed tests don't corrupt the dev cluster; test containers are destroyed on completion
 4. **Offline**: Run locally, in CI, anywhere Docker works—no cluster dependency
-5. **Debugging**: Inspect database/logs via `docker exec`, not `kubectl`; stack persists if test fails (comment out `afterAll()`)
+5. **Debugging**: Inspect database/logs via `docker exec`, not `kubectl`; set `KEEP_STACK=1` to leave the stack running after the run instead of tearing it down (see "Debugging Failed Tests" below — do not comment out `afterAll()`, it now also closes the DB pool)
 
 ### k8s Smoke Tests Purpose
 
@@ -110,10 +116,19 @@ Each `triggerDean()` call starts a fresh dean container, waits for it to finish 
 
 See `facebot/testrunner/README.md` for detailed test writing patterns. Key points:
 
-- **`flowMaster(userId, expectedInteractions)`**: Assert message exchanges without waiting for real time
+- **`flowMaster(userId, expectedInteractions)`**: Assert message exchanges without waiting for real time. On every non-error interaction it also sends a synthetic echo of the message back into the pipeline (`makeEcho`), which is what arms replybot's `WAIT_EXTERNAL_EVENT` state for tests that need it (e.g. handoff/handover flows) — you don't need to send that echo yourself.
 - **`triggerDean(...)`**: Run dean on-demand for timeout/followup tests
 - **`sendMessage(...)`**: Inject a message into the pipeline
+- **`fieldsFromForm(formObject)`** (in `mox.ts`): Object-based variant of `getFields(path)` for forms built or interpolated in memory (e.g. `{{hidden:...}}` substitution via `mustache`) rather than read from a fixture file. Tests use this instead of writing a `temp*.json` scratch file to disk and re-reading it.
+- **`makeHandover(userId, newOwnerAppId, previousOwnerAppId, metadata)`** (in `mox.ts`): Builds a `pass_thread_control` webhook payload — the return leg of the Handoff Protocol, simulating an external app (e.g. a human-handoff or bot-to-bot echo service) returning thread control with metadata. See `replybot/HANDOFF_PROTOCOL.md` for the protocol this drives.
 - **Test forms** in `forms/*.json`: Define question sequences as JSON
+
+### Cross-cutting harness gotchas
+
+- **`KEEP_STACK=1`** is the supported way to keep the testcontainers stack alive for manual inspection after a run — set it as an env var when invoking `npm run test:tc`. It is checked in the suite's `after()` hook, which then awaits a promise that never resolves (Ctrl-C to tear down). This replaces any older advice to comment out `afterAll()`/`after()` in the test file.
+- **Only the `Basic Functionality` block runs in parallel** (via `mocha.parallel`). The `Timeouts` and `Phone normalization` blocks in `test.tc.ts`, and `Timeouts` in `test.ts`, run serially — don't assume parallel execution semantics apply suite-wide.
+- **Dean/`QOUT` race**: dean's followups query matches only rows with `current_state = 'QOUT'`. A test that triggers a followup must `waitFor` that exact state before calling `triggerDean(...)`; waiting for "any state row" races the scribble upsert and dean will find zero overdue users. See the inline comment above the followups test in `test.tc.ts`.
+- **`mox.ts` builds expected messages via `@vlab-research/translate-typeform`** (the older Facebook-native message translator) specifically so tests can cross-check message-worker's `TranslateToMessenger` output against an independent implementation of the same typeform-to-Messenger shape. This is an intentional equivalence check between two translators, not legacy code left over to clean up.
 
 Example timeout test:
 
@@ -133,11 +148,19 @@ it('sends followup after timeout', async () => {
 });
 ```
 
+## Coverage Highlights
+
+Beyond the basic question/answer flow, the testcontainers suite (`test.tc.ts`) specifically covers:
+
+- **Runtime `{{hidden:...}}` interpolation**: a test (`forms/hiddenInterp.json`) delivers a hidden value through the referral's extra ref segments (e.g. `hiddenInterp.greeting_name.Nandan`) rather than pre-substituting the placeholder in the form JSON, forcing replybot's real `interpolateField`/`getFromMetadata` engine to render the text at send time. It also asserts a *missing* hidden field renders as an empty string, never an error.
+- **Full handoff/handover round trip**, with no real Facebook involved: a user answers a question, the bot sends a handoff statement (`forms/handoffTest.json`), the test's own echo (via `flowMaster`'s auto-echo) arms `WAIT_EXTERNAL_EVENT`, `makeHandover(...)` simulates the external app returning thread control with metadata, and the survey resumes with the metadata interpolated into the next message via the flattened `e_handover_metadata_*` keys. The facebot mock (`facebot/receiver/index.js`) implements a `POST /me/pass_thread_control` route so the message-worker's handoff command succeeds during this flow. See `replybot/HANDOFF_PROTOCOL.md` for the full protocol.
+- **`replybot/lib/typewheels/machine.test.js`** carries unit-level micro-tests locking the `makeEventMetadata` handover-flattening contract: camelCase→snake_case key conversion, dropping a literal `type` key at any nesting level, array indexing (`_0`, `_1`, ...), and an explicit regression pin asserting metadata keys land at `e_handover_metadata_*` and never the shallower, buggy `e_handover_*` shape from production bug commit `826f37fb`. This is unit coverage of the pure flattening function; the integration test above exercises the same contract end-to-end.
+
 ## Debugging Failed Tests
 
 ### Testcontainers Failures
 
-Containers persist after test failure (comment out `afterAll()` to keep them longer):
+Containers persist after test failure. Set `KEEP_STACK=1` when running the suite to keep them running deliberately (see "Cross-cutting harness gotchas" above) rather than commenting out lifecycle hooks in the test file:
 
 ```bash
 # View test logs
@@ -168,8 +191,14 @@ kubectl exec pod/cockroach-0 -- cockroach sql --insecure -e "SELECT * FROM forms
 
 - **`facebot/testrunner/README.md`**: How-to guide for writing and running tests
 - **`facebot/testrunner/test.tc.ts`**: Primary test suite (testcontainers)
-- **`facebot/testrunner/test.ts`**: k8s smoke tests (minimal)
+- **`facebot/testrunner/test.ts`**: k8s smoke tests (minimal — ~4 deployment-focused tests, see "Tier 2" above)
+- **`facebot/testrunner/mox.ts`**: Fixture/message builders — `getFields`/`fieldsFromForm`, `makeReferral`, `makeHandover`, `makeEcho`, etc.
+- **`facebot/testrunner/responses.ts`**: Reads response/state rows back from CockroachDB for assertions
+- **`facebot/testrunner/utils.ts`**: `snooze` and `waitFor` polling helpers
 - **`facebot/testrunner/stack.ts`**: Boots the testcontainers Docker network
 - **`facebot/testrunner/dean-trigger.ts`**: One-shot dean container orchestration
+- **`facebot/receiver/index.js`**: Facebot mock — queues outbound messages for `flowMaster` to poll and answer `POST /me/pass_thread_control` for handoff tests
+- **`replybot/HANDOFF_PROTOCOL.md`**: The handoff/handover protocol exercised by the handoff integration test and by `machine.test.js`'s `makeEventMetadata` unit tests
+- **`replybot/lib/typewheels/machine.test.js`**: Unit tests for the pure state-machine/event-metadata functions, including the handover-flattening contract
 - **`dean/kube-dev/dev.yaml`**: dean environment config (loaded into testcontainers)
 - **`devops/testing/.test-env`**: Test secrets (DB credentials, API keys)
