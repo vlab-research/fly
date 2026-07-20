@@ -36,6 +36,13 @@ const DOTS = {
 
 export const dotProps = state => DOTS[state] || { status: 'default' };
 
+// Initials for comment avatars ("Nandan Kumar" → "NK", "You" → "Y").
+export const initials = (name) => {
+  if (!name) return '?';
+  const words = name.trim().split(/\s+/).slice(0, 2);
+  return words.map(w => w[0].toUpperCase()).join('');
+};
+
 // Short relative time for list rows and comment headers ("5m ago"), falling
 // back to a plain date for anything older than a month.
 export const timeAgo = (iso) => {

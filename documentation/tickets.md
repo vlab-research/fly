@@ -59,6 +59,15 @@ The server assembles these into the Linear issue description as a labeled **Cont
 
 Linear comments can be nested (replies to comments). The dashboard **flattens** all comments into a single chronological thread (oldest first) so the user sees a simple single-lane conversation. User replies are always created as top-level comments (no parent), keeping the thread flat.
 
+### Comment attribution (agents vs. reporter)
+
+A comment reaches an issue through exactly two paths, so the dashboard can classify authorship reliably with no extra Linear data:
+
+- **Reporter** — posted via the dashboard. The body carries the `*vlab-reporter:<email>*` sentinel (`formatComment` surfaces it as `reporterEmail`). Rendered as **"You"** with a blue bubble.
+- **Support agent** — written directly in Linear by a workspace member (no sentinel). Rendered with the agent's Linear display name, a **"Support"** tag, initials avatar, and a green bubble.
+
+Caveat on the Linear side: every dashboard-posted comment is authored by the single `LINEAR_API_KEY` owner, so in Linear those comments appear under that account regardless of which dashboard user wrote them — the sentinel at the bottom of the body is the only record of the real author. Linear's schema does expose full author identity (`Comment.user { name, email, avatarUrl, admin }`, `Comment.botActor` for app/bot posts, `Comment.externalUser`), so agent identity is always accurate; only dashboard-originated comments are masked behind the service account. See "Open questions / future work" for ways to give the dashboard its own bot identity in Linear.
+
 ## Configuration
 
 Required `dashboard-server` env vars:
@@ -151,6 +160,7 @@ Frontend (`dashboard-client`):
 
 ## Open questions / future work
 
+- **Bot identity for dashboard posts** — dashboard-posted comments currently appear in Linear under the `LINEAR_API_KEY` owner. Options: (a) a dedicated service-account seat (e.g. "VLab Support") whose key goes in `LINEAR_API_KEY`; (b) a Linear OAuth app authorized with `actor=app`, which posts as the app itself (`Comment.botActor`, own name/icon, no seat cost) but requires replacing the personal API key with OAuth token management in `dashboard-server`.
 - **Smarter context fields** — the impacted-survey dropdown is the first structured field; add impacted-form (shortcode) selection and user-id validation against `states` in a later iteration.
 - **Ticket categories** — v1 is a single generic "support ticket". Add Bug / Support / Question categories mapped to Linear labels when needed.
 - **Status polling** — the list/detail views do not auto-refresh; a user must reload to see new replies. Add polling if real-time feel is wanted.

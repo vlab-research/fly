@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import {
-  Alert, Button, Card, Empty, Input, message, Space, Spin, Tag, Tooltip, Typography,
+  Alert, Avatar, Button, Card, Empty, Input, message, Space, Spin, Tag, Tooltip, Typography,
 } from 'antd';
 import { ArrowLeftOutlined, ExportOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom';
 import api from '../../services/api';
 import Markdown from '../../components/Markdown';
-import { isClosed, tagColor, timeAgo } from './stateMeta';
+import {
+  initials, isClosed, tagColor, timeAgo,
+} from './stateMeta';
 
 const { Text, Link: AntLink } = Typography;
 const { TextArea } = Input;
@@ -19,13 +21,24 @@ function displayBody(body) {
   return body.replace(/\n\n\*vlab-reporter:[^\s*]+\*$/g, '').trim();
 }
 
+// Comments arrive from two disjoint paths: reporter-authored ones are posted
+// via the dashboard and carry the reporter sentinel (shown as "You"), and
+// everything else was written by a workspace member in Linear — i.e. the
+// support team. Render the two sides distinctly.
 function CommentRow({ comment }) {
   const isYou = !!comment.reporterEmail;
   const author = isYou ? 'You' : (comment.author || 'Support');
   return (
-    <div className={`ticket-comment${isYou ? ' you' : ''}`}>
+    <div className={`ticket-comment ${isYou ? 'you' : 'support'}`}>
       <div className="ticket-comment-meta">
+        <Avatar
+          size="small"
+          style={{ backgroundColor: isYou ? '#1890ff' : '#52c41a', flex: 'none' }}
+        >
+          {initials(author)}
+        </Avatar>
         <Text strong>{author}</Text>
+        {!isYou && <Tag color="green">Support</Tag>}
         <Tooltip title={comment.createdAt ? new Date(comment.createdAt).toLocaleString() : ''}>
           <Text type="secondary" className="comment-time">
             {timeAgo(comment.createdAt)}

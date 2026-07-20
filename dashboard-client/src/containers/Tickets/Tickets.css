@@ -147,8 +147,9 @@
   margin-top: 4px;
 }
 
-/* Conversation bubbles: the reporter's own messages are tinted so the two
-   sides of the conversation are distinguishable at a glance. */
+/* Conversation bubbles: the reporter's own messages are blue-tinted and
+   support-agent messages are green-tinted so the two sides of the
+   conversation are distinguishable at a glance. */
 .ticket-comment {
   background: #fff;
   border: 1px solid #f0f0f0;
@@ -162,9 +163,14 @@
   border-color: #91d5ff;
 }
 
+.ticket-comment.support {
+  background: #f6ffed;
+  border-color: #b7eb8f;
+}
+
 .ticket-comment-meta {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   margin-bottom: 4px;
 }
