@@ -31,6 +31,7 @@ jobs:
             replybot)       CTX=replybot           ; IMG=replybot         ;;
             dashboard)      CTX=dashboard-server   ; IMG=dashboard        ;;
             botserver)      CTX=botserver          ; IMG=botserver        ;;
+            hermes)         CTX=hermes             ; IMG=hermes           ;;
             dean)           CTX=dean               ; IMG=dean             ;;
             dinersclub)     CTX=dinersclub         ; IMG=dinersclub       ;;
             scribble)       CTX=scribble           ; IMG=scribble         ;;
