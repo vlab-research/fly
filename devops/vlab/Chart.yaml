@@ -90,3 +90,11 @@ dependencies:
     condition: redis.enabled
     tags:
       - redis
+
+  # Hermes — Rust webhook ingester (drop-in for botserver). Vendored from the
+  # in-repo chart; gated off by default so it only renders where hermes.enabled
+  # is set true (staging), never in production.
+  - name: hermes
+    version: 0.1.0
+    repository: "file://../../hermes/chart"
+    condition: hermes.enabled

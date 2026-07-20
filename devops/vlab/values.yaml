@@ -1,6 +1,11 @@
 # empty, use deploy values
 #
 #
+# Hermes off by default; staging.yaml sets hermes.enabled: true. This keeps the
+# staging-only -wa ingester from ever rendering in production.
+hermes:
+  enabled: false
+
 cockroachdb:
   enabled: true
 

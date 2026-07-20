@@ -22,7 +22,8 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 
 versionDashboard: &vdashboard v0.0.64
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.207-wa
+versionHermes: &vhermes v0.0.1-wa
+versionReplybot: &vreplybot v0.0.208-wa
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.41
 versionScribble: &vscribble v0.0.32
@@ -30,7 +31,7 @@ versionDinersclub: &vdinersclub v0.0.41-wa
 versionFormcentral: &vformcentral v0.0.12
 versionExporter: &vexporter v0.6.9
 versionExodus: &vexodus v0.2.1
-versionMessageWorker: &vmessageworker v0.1.13-wa
+versionMessageWorker: &vmessageworker v0.1.14-wa
 
 processingAlerts: []
 laggingAlerts: []
@@ -525,6 +526,63 @@ botserver:
     value: "80"
   - name: DASHBOARD_URL
     value: "http://gbv-dashboard"
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+
+  # External webhook ingress moved to hermes (the Rust ingester). botserver
+  # keeps its ClusterIP service for the internal /synthetic sink
+  # (replybot/dean/dinersclub still POST to http://gbv-botserver/synthetic) but
+  # no longer receives external webhooks. Rollback: set this back to enabled:
+  # true and set hermes.ingress.enabled=false (and hermes.enabled=false).
+  ingress:
+    enabled: false
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
+    hosts:
+      - host: staging.fly-botserver.vlab.digital
+        paths:
+          - path: '/'
+            pathType: Prefix
+    tls:
+      - secretName: gbv-botserver-cert
+        hosts:
+          - staging.fly-botserver.vlab.digital
+
+  service:
+    type: ClusterIP
+    port: 80
+
+# Hermes — Rust webhook ingester, drop-in for botserver. Owns the external
+# webhook host and serves Messenger /webhooks + WhatsApp /whatsapp + /synthetic
+# + /health, publishing raw source-tagged events to the chat topic. Gated by
+# hermes.enabled (false by default in the umbrella chart) so it never renders in
+# production while carrying the -wa staging image.
+hermes:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/vlab-research/hermes
+    tag: *vhermes
+    pullPolicy: Always
+
+  envFrom: *botenvs
+
+  env:
+    - name: BOTSERVER_EVENT_TOPIC
+      value: *topic
+    - name: KAFKA_BROKERS
+      value: *kb
+    - name: PORT
+      value: "80"
+    - name: DASHBOARD_URL
+      value: "http://gbv-dashboard"
+    # WHATSAPP_VERIFY_TOKEN is intentionally unset until the Meta WhatsApp
+    # webhook is provisioned; GET /whatsapp verification returns 401 until then.
 
   resources:
     requests:
