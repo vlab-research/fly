@@ -160,7 +160,7 @@ Frontend (`dashboard-client`):
 
 ## Open questions / future work
 
-- **Bot identity for dashboard posts** — dashboard-posted comments currently appear in Linear under the `LINEAR_API_KEY` owner. Options: (a) a dedicated service-account seat (e.g. "VLab Support") whose key goes in `LINEAR_API_KEY`; (b) a Linear OAuth app authorized with `actor=app`, which posts as the app itself (`Comment.botActor`, own name/icon, no seat cost) but requires replacing the personal API key with OAuth token management in `dashboard-server`.
+- **Bot identity for dashboard posts** — dashboard-posted comments currently appear in Linear under the `LINEAR_API_KEY` owner. Options: (a) a dedicated service-account seat (e.g. "VLab Support") whose key goes in `LINEAR_API_KEY` — free on the Free plan (unlimited members, but 250-issue cap) and free as a *guest* restricted to the Virtual Lab team on Business+ plans, otherwise a paid member seat; (b) a Linear OAuth app authorized with `actor=app`, which posts as the app itself (`Comment.botActor`, own name/icon, free on all plans, no seat at all) but requires replacing the personal API key with OAuth token management in `dashboard-server`.
 - **Smarter context fields** — the impacted-survey dropdown is the first structured field; add impacted-form (shortcode) selection and user-id validation against `states` in a later iteration.
 - **Ticket categories** — v1 is a single generic "support ticket". Add Bug / Support / Question categories mapped to Linear labels when needed.
 - **Status polling** — the list/detail views do not auto-refresh; a user must reload to see new replies. Add polling if real-time feel is wanted.
