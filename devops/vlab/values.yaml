@@ -6,6 +6,11 @@
 hermes:
   enabled: false
 
+# botserver on by default (production still runs it); staging.yaml sets
+# botserver.enabled: false because hermes fully replaces it there.
+botserver:
+  enabled: true
+
 cockroachdb:
   enabled: true
 

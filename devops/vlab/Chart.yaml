@@ -10,6 +10,7 @@ dependencies:
   - name: botserver
     version: 0.0.2
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+    condition: botserver.enabled
   - name: linksniffer
     version: 0.0.2
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts

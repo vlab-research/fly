@@ -98,7 +98,7 @@ dinersclub:
     - name: RELOADLY_SANDBOX
       value: "false"
     - name: BOTSERVER_URL
-      value: "http://gbv-botserver/synthetic"
+      value: "http://gbv-hermes/synthetic"
     - name: CHATBASE_DATABASE
       value: "chatroach"
     - name: CHATBASE_HOST
@@ -146,7 +146,7 @@ dean:
   - name: CHATBASE_PORT
     value: "26257"
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver/synthetic"
+    value: "http://gbv-hermes/synthetic"
   - name: DEAN_ERROR_TAGS
     value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
@@ -348,7 +348,7 @@ replybot:
   - name: KAFKA_COMMANDS_TOPIC
     value: *commandstopic
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver"
+    value: "http://gbv-hermes"
   - name: FACEBOOK_GRAPH_URL
     value: "https://graph.facebook.com/v25.0"
   - name: FORMCENTRAL_URL
@@ -405,7 +405,7 @@ linksniffer:
 
   env:
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver/synthetic"
+    value: "http://gbv-hermes/synthetic"
 
   resources:
     requests:
@@ -507,60 +507,20 @@ dashboard:
     port: 80
 
 
+# botserver is fully replaced by hermes on staging. Disabled via the
+# botserver.enabled condition (default true in the umbrella chart for prod), so
+# its Deployment, Service, and Ingress are removed; every internal /synthetic
+# caller now targets http://gbv-hermes. Rollback: set enabled: true here and
+# hermes.enabled: false, and restore the BOTSERVER_URL values to gbv-botserver.
 botserver:
-  replicaCount: 1
+  enabled: false
 
-  image:
-    repository: vlabresearch/botserver
-    tag: *vbotserver
-    pullPolicy: Always
-
-  envFrom: *botenvs
-
-  env:
-  - name: BOTSERVER_EVENT_TOPIC
-    value: *topic
-  - name: KAFKA_BROKERS
-    value: *kb
-  - name: PORT
-    value: "80"
-  - name: DASHBOARD_URL
-    value: "http://gbv-dashboard"
-
-  resources:
-    requests:
-      cpu: 10m
-      memory: 128Mi
-
-  # External webhook ingress moved to hermes (the Rust ingester). botserver
-  # keeps its ClusterIP service for the internal /synthetic sink
-  # (replybot/dean/dinersclub still POST to http://gbv-botserver/synthetic) but
-  # no longer receives external webhooks. Rollback: set this back to enabled:
-  # true and set hermes.ingress.enabled=false (and hermes.enabled=false).
-  ingress:
-    enabled: false
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-prod
-      kubernetes.io/ingress.class: nginx
-    hosts:
-      - host: staging.fly-botserver.vlab.digital
-        paths:
-          - path: '/'
-            pathType: Prefix
-    tls:
-      - secretName: gbv-botserver-cert
-        hosts:
-          - staging.fly-botserver.vlab.digital
-
-  service:
-    type: ClusterIP
-    port: 80
-
-# Hermes — Rust webhook ingester, drop-in for botserver. Owns the external
-# webhook host and serves Messenger /webhooks + WhatsApp /whatsapp + /synthetic
-# + /health, publishing raw source-tagged events to the chat topic. Gated by
-# hermes.enabled (false by default in the umbrella chart) so it never renders in
-# production while carrying the -wa staging image.
+# Hermes — Rust webhook ingester that fully replaces botserver on staging. It is
+# the single ingestion service: external Messenger /webhooks + WhatsApp
+# /whatsapp on the public host, and internal /synthetic for replybot/dean/
+# dinersclub — all publishing raw source-tagged events to the chat topic. Gated
+# by hermes.enabled (false by default in the umbrella chart) so it never renders
+# in production while carrying the -wa staging image.
 hermes:
   enabled: true
   replicaCount: 1
@@ -644,7 +604,7 @@ exodus:
   - name: CHATBASE_PORT
     value: "26257"
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver/synthetic"
+    value: "http://gbv-hermes/synthetic"
   - name: DRY_RUN
     value: "false"
   - name: EXODUS_RATE_LIMIT
@@ -693,7 +653,7 @@ message-worker:
   - name: DATABASE_URL
     value: "postgresql://chatroach@gbv-cockroachdb-public:26257/chatroach?sslmode=disable"
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver"
+    value: "http://gbv-hermes"
   - name: FACEBOOK_GRAPH_URL
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
