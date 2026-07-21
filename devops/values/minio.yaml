@@ -22,5 +22,6 @@ extraEnvVars:
     value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
 persistence:
   storageClass: standard-rwo
+  size: 25Gi
 auth:
   existingSecret: minio-auth

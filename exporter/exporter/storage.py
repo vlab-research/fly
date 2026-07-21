@@ -6,6 +6,13 @@ from typing import Optional
 import pandas as pd
 from google.cloud import storage
 from minio import Minio
+from minio.commonconfig import ENABLED, Filter
+from minio.lifecycleconfig import (
+    AbortIncompleteMultipartUpload,
+    Expiration,
+    LifecycleConfig,
+    Rule,
+)
 from pydantic import BaseSettings, Field, ValidationError, validator
 
 from .log import log
@@ -92,7 +99,40 @@ class S3StorageBackend(BaseStorageBackend):
         if not found:
             client.make_bucket(self.bucket_name)
 
+        self._ensure_lifecycle(client)
+
         return client
+
+    def _ensure_lifecycle(self, client):
+        """Declaratively (re)apply the temp-storage expiry policy on exports/.
+
+        Export objects are transient: the presigned download link expires after
+        7 hours (see generate_link), but the objects themselves are never
+        deleted by the app. Without expiry they accumulate forever and fill the
+        MinIO volume. This lifecycle rule deletes exports/ objects 3 days after
+        creation and aborts abandoned multipart uploads 1 day after initiation,
+        so cleanup is enforced server-side by MinIO rather than by any manual or
+        cron step. set_bucket_lifecycle is idempotent, so re-applying on every
+        call is safe. Best-effort: a lifecycle API error is logged but never
+        fails an export.
+        """
+        config = LifecycleConfig(
+            [
+                Rule(
+                    ENABLED,
+                    rule_id="expire-exports-3d",
+                    rule_filter=Filter(prefix="exports/"),
+                    expiration=Expiration(days=3),
+                    abort_incomplete_multipart_upload=AbortIncompleteMultipartUpload(
+                        days_after_initiation=1
+                    ),
+                )
+            ]
+        )
+        try:
+            client.set_bucket_lifecycle(self.bucket_name, config)
+        except Exception as e:
+            log.warning(f"Could not apply exports lifecycle policy: {e}")
 
     def save_to_csv(self, df: pd.DataFrame):
         client = self._ensure_client()
