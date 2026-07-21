@@ -1,0 +1,54 @@
+# Default values for sql-exporter.
+replicaCount: 1
+
+# Keep resource names as plain "sql-exporter" (not "sql-exporter-sql-exporter").
+fullnameOverride: sql-exporter
+nameOverride: ""
+
+image:
+  repository: burningalchemist/sql_exporter
+  # Pin to a released tag (never :latest) so a schema change can't
+  # silently break every health metric alert. Bump deliberately.
+  # v0.24.3 is the latest security release (July 9, 2026).
+  tag: "0.24.3"
+  pullPolicy: IfNotPresent
+
+# CockroachDB connection for study health metrics.
+# READ-ONLY — sql_exporter only runs SELECTs. Uses the existing chatroach user.
+database:
+  # Postgres wire protocol DSN: gbv-cockroachdb-public svc in vprod namespace,
+  # reachable from monitoring namespace at the FQDN below.
+  # sslmode=disable matches the CockroachDB insecure cluster setup.
+  dataSourceName: "postgres://chatroach@gbv-cockroachdb-public.vprod.svc.cluster.local:26257/chatroach?sslmode=disable"
+  # Protect the DB: run collectors at most every 60s (even if Prometheus scrapes faster).
+  minInterval: 60
+
+exporter:
+  port: 9399
+
+service:
+  type: ClusterIP
+  port: 9399
+
+prometheus:
+  serviceMonitor:
+    enabled: true
+    # ServiceMonitor lives in the monitoring namespace (where Prometheus runs)
+    # and selects the sql-exporter Service in this release's namespace.
+    namespace: monitoring
+    # Scrape every 60s (matches collector min_interval).
+    interval: "60s"
+    additionalLabels:
+      app: sql-exporter
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

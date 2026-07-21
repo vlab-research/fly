@@ -1,0 +1,11 @@
+apiVersion: v2
+name: kminion
+description: >-
+  Redpanda kminion — actively-maintained Kafka consumer-group / topic
+  exporter. Replaces the unmaintained kafka-lag-exporter and complements
+  danielqsj/kafka-exporter by exposing committed-offset-sum and consumer-group
+  member/state metrics used for stuck-consumer and drain-time alerting.
+type: application
+version: 0.1.0
+appVersion: "v2.3.3"
+home: https://github.com/redpanda-data/kminion

@@ -33,8 +33,9 @@ versionExporter: &vexporter v0.6.9
 versionExodus: &vexodus v0.2.1
 versionMessageWorker: &vmessageworker v0.1.14-wa
 
-processingAlerts: []
-laggingAlerts: []
+# Kafka consumer-group lag/health alerting is NOT defined here — it lives at the
+# infra level (one rule set for the shared cluster, covering both envs) in
+# devops/kafka-consumer-health/, deployed once into the monitoring namespace.
 
 kafkaTopics:
   - name: *topic

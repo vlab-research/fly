@@ -1,0 +1,48 @@
+# Kafka consumer-group health alerting — ONE definition for the shared cluster.
+#
+# There is a single Kafka cluster (kafka-headless.default) serving both prod and
+# staging, a single kminion scraping all of it, and a single Prometheus watching
+# every namespace. So this is one rule set, deployed once into `monitoring`.
+# Production and staging are distinguished purely by the (group, topic) pair and
+# the `env` label — NOT by which namespace/release the rule lives in.
+#
+# Each row emits three topic-scoped alerts (keyed on BOTH group_id AND
+# topic_name, because prod and staging reuse the same consumer-group names while
+# consuming different topics):
+#   KafkaConsumerStuck         committed offset flat while backlog > 0 (wedged)
+#   KafkaConsumerDrainSLOBreach estimated time-to-drain exceeds drainSeconds
+#   KafkaConsumerGroupAbsent   the group/topic lag series vanished entirely
+
+runbookUrl: "https://github.com/vlab-research/fly/blob/main/documentation/kafka-consumer-lag-alerting.md"
+
+defaults:
+  drainSeconds: 600
+  stuckWindow: "10m"
+  for: "10m"
+  severity: warning
+
+groups:
+  # ---- production (vlab-prod-* topics) --------------------------------------
+  # replybot is the user-facing hot path → tight SLO, page.
+  - { env: production, group: replybot,           topic: vlab-prod-chat-events, drainSeconds: 120,  severity: critical }
+  # payments: stuck matters more than drain (retries are slow/batchy) → page.
+  - { env: production, group: dinersclub,         topic: vlab-prod-payment,     drainSeconds: 1800, severity: critical }
+  - { env: production, group: scribble-messages,  topic: vlab-prod-chat-events, drainSeconds: 600,  severity: warning }
+  - { env: production, group: scribble-states,    topic: vlab-prod-state,       drainSeconds: 600,  severity: warning }
+  - { env: production, group: scribble-responses, topic: vlab-prod-response,    drainSeconds: 600,  severity: warning }
+  - { env: production, group: scribble-chat-log,  topic: vlab-prod-chat-log,    drainSeconds: 600,  severity: warning }
+  # NOTE: message-worker is NOT listed for prod — it is replicaCount 0 there
+  # (platform-abstraction worker is staging-only); including it would fire a
+  # permanent ConsumerGroupAbsent. loki (vlab-prod-payment) is the log pipeline,
+  # not an app consumer, so it is excluded too.
+
+  # ---- staging (vlab-staging-* topics) --------------------------------------
+  # All warning: staging must never page once severity routing exists.
+  # message-worker IS included here — it is the Hermes-cutover path we validate.
+  - { env: staging, group: replybot,           topic: vlab-staging-chat-events, drainSeconds: 300,  severity: warning }
+  - { env: staging, group: message-worker,     topic: vlab-staging-commands,    drainSeconds: 300,  severity: warning }
+  - { env: staging, group: dinersclub,         topic: vlab-staging-payment,     drainSeconds: 1800, severity: warning }
+  - { env: staging, group: scribble-messages,  topic: vlab-staging-chat-events, drainSeconds: 600,  severity: warning }
+  - { env: staging, group: scribble-states,    topic: vlab-staging-state,       drainSeconds: 600,  severity: warning }
+  - { env: staging, group: scribble-responses, topic: vlab-staging-response,    drainSeconds: 600,  severity: warning }
+  - { env: staging, group: scribble-chat-log,  topic: vlab-staging-chat-log,    drainSeconds: 600,  severity: warning }

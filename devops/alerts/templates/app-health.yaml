@@ -1,0 +1,33 @@
+{{- if .Values.app.enabled }}
+{{- $runbook := .Values.runbookUrl }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vlab-app-health
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: vlab-alerts
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: vlab-app-health
+      interval: 1m
+      rules:
+        # Rescued from the never-applied prometheus/rules/replybot.yaml. Fires
+        # when a replybot container restarts repeatedly (crash loop). The
+        # namespace label distinguishes prod (vprod) from staging (vstag).
+        - alert: ReplyBotCrashing
+          expr: |
+            delta(kube_pod_container_status_restarts_total{container="replybot", job="kube-state-metrics"}[10m]) > {{ .Values.app.replybotRestartThreshold }}
+          for: 1m
+          labels:
+            severity: warning
+            component: replybot
+          annotations:
+            summary: "replybot is crash-looping in {{`{{ $labels.namespace }}`}} ({{`{{ $value }}`}} restarts/10m)"
+            description: >-
+              A replybot container restarted more than {{ .Values.app.replybotRestartThreshold }}
+              times in 10 minutes — it is crash-looping. The bot is dropping or
+              delaying user messages while it restarts.
+            runbook_url: "{{ $runbook }}#replybotcrashing"
+{{- end }}

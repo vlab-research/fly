@@ -1,0 +1,98 @@
+{{- /*
+Single PrometheusRule for the shared Kafka cluster, deployed into `monitoring`.
+Covers every (group, topic) pair across prod and staging. See values.yaml.
+*/}}
+{{- $d := .Values.defaults | default dict }}
+{{- $runbook := .Values.runbookUrl }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kafka-consumer-health
+  labels:
+    {{- /* release: prometheus is the historical label; ruleSelector is {} so
+           it is not required, but kept for consistency with kafka-alerts. */}}
+    release: prometheus
+    app.kubernetes.io/name: kafka-consumer-health
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: kafka-consumer-health.recording
+      interval: 30s
+      rules:
+        # Estimated seconds to clear the current backlog at the current consume
+        # rate. clamp_min avoids divide-by-zero when a group is fully stopped.
+        # One series per (group_id, topic_name).
+        - record: kafka:consumergroup_drain_seconds
+          expr: |
+            kminion_kafka_consumer_group_topic_lag
+            /
+            clamp_min(rate(kminion_kafka_consumer_group_topic_offset_sum[5m]), 1)
+    - name: kafka-consumer-health.alerts
+      interval: 30s
+      rules:
+      {{- range .Values.groups }}
+      {{- $drain := .drainSeconds | default $d.drainSeconds | default 600 }}
+      {{- $stuckWindow := .stuckWindow | default $d.stuckWindow | default "10m" }}
+      {{- $for := .for | default $d.for | default "10m" }}
+      {{- $sev := .severity | default $d.severity | default "warning" }}
+      {{- $env := .env | default "unknown" }}
+        - alert: KafkaConsumerStuck
+          expr: |
+            (
+              rate(kminion_kafka_consumer_group_topic_offset_sum{group_id="{{ .group }}", topic_name="{{ .topic }}"}[{{ $stuckWindow }}]) == 0
+            )
+            and
+            (
+              kminion_kafka_consumer_group_topic_lag{group_id="{{ .group }}", topic_name="{{ .topic }}"} > 0
+            )
+          for: {{ $for }}
+          labels:
+            severity: {{ $sev }}
+            env: {{ $env }}
+            consumergroup: "{{ .group }}"
+            topic: "{{ .topic }}"
+          annotations:
+            summary: "[{{ $env }}] Kafka consumer '{{ .group }}' is STUCK on {{ .topic }}"
+            description: >-
+              Committed offset for group '{{ .group }}' on topic '{{ .topic }}'
+              has not advanced for {{ $stuckWindow }} while a backlog remains.
+              The consumer is wedged (poison message, deadlock, or rebalance
+              loop) — NOT the same as high-but-moving lag.
+            runbook_url: "{{ $runbook }}#kafkaconsumerstuck"
+            dashboard: "Kafka Consumer Health"
+        - alert: KafkaConsumerDrainSLOBreach
+          expr: |
+            kafka:consumergroup_drain_seconds{group_id="{{ .group }}", topic_name="{{ .topic }}"} > {{ $drain }}
+          for: {{ $for }}
+          labels:
+            severity: {{ $sev }}
+            env: {{ $env }}
+            consumergroup: "{{ .group }}"
+            topic: "{{ .topic }}"
+          annotations:
+            summary: "[{{ $env }}] Kafka consumer '{{ .group }}' drain time > {{ $drain }}s on {{ .topic }}"
+            description: >-
+              Estimated time to clear the backlog for group '{{ .group }}' on
+              topic '{{ .topic }}' exceeds its {{ $drain }}s SLO at the current
+              consume rate. Messages are waiting too long.
+            runbook_url: "{{ $runbook }}#kafkaconsumerdrainslobreach"
+            dashboard: "Kafka Consumer Health"
+        - alert: KafkaConsumerGroupAbsent
+          expr: |
+            absent(kminion_kafka_consumer_group_topic_lag{group_id="{{ .group }}", topic_name="{{ .topic }}"})
+          for: {{ $for }}
+          labels:
+            severity: {{ $sev }}
+            env: {{ $env }}
+            consumergroup: "{{ .group }}"
+            topic: "{{ .topic }}"
+          annotations:
+            summary: "[{{ $env }}] Kafka consumer '{{ .group }}' / {{ .topic }} has DISAPPEARED"
+            description: >-
+              No lag series exists for group '{{ .group }}' on topic
+              '{{ .topic }}'. The group has no committed offsets (never started,
+              offsets expired, or the consumer has been gone long enough to be
+              dropped).
+            runbook_url: "{{ $runbook }}#kafkaconsumergroupabsent"
+            dashboard: "Kafka Consumer Health"
+      {{- end }}

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: vlab-alerts
+description: >-
+  Hand-authored, version-controlled alert rules for the vlab platform, deployed
+  once into the monitoring namespace. Home for cluster/broker health and app
+  health alerts. (Kafka *consumer-lag* alerting is its own focused sibling chart,
+  devops/kafka-consumer-health/.) Everything here is ours to edit, override, or
+  delete — no orphaned operator defaults.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/vlab-research/fly

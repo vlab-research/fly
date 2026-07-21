@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-broker-app-health-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  kafka-broker-app-health.json: |-
+{{ .Files.Get "kafka-broker-app-health.json" | indent 4 }}

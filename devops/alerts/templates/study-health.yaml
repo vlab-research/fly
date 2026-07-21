@@ -1,0 +1,182 @@
+{{- if .Values.studyHealth.enabled }}
+{{- $runbook := .Values.runbookUrl }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vlab-study-health
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: vlab-alerts
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: vlab-study-health-recordings
+      interval: 1m
+      rules:
+        # Recording rule: error ratio per form (1h window).
+        # Denominator clamped to 1 to prevent div-by-zero for inactive forms.
+        - record: survey:error_ratio:1h
+          expr: |
+            sum by (form) (survey_error_states)
+            /
+            clamp_min(sum by (form) (survey_active_users), 1)
+
+    - name: vlab-study-health-alerts
+      interval: 1m
+      rules:
+        # Platform-wide internal errors (INTERNAL, STATE_ACTIONS, NETWORK) indicate
+        # a platform regression (DB, state machine, network, infra). Rare and always
+        # actionable. Pages immediately.
+        - alert: PlatformInternalErrors
+          expr: |
+            sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"}) >= {{ .Values.studyHealth.platformInternalErrorsThreshold }}
+          for: {{ .Values.studyHealth.platformInternalErrorsFor }}
+          labels:
+            severity: critical
+            component: study-health
+          annotations:
+            summary: "Platform internal errors detected ({{`{{ $value }}`}} in last hour)"
+            description: >-
+              {{`{{ $value }}`}} survey users hit INTERNAL, STATE_ACTIONS, or NETWORK
+              errors in the past hour. These errors are never expected and indicate a
+              platform regression (database issues, state machine bugs, network failures,
+              or infrastructure problems). Threshold: {{ .Values.studyHealth.platformInternalErrorsThreshold }}
+              (v1, tunable — current traffic is ~8 active users/hr total).
+            runbook_url: "{{ $runbook }}#platforminternalerrors"
+
+        # Facebook API rate-limiting our pages. When this fires, Facebook is actively
+        # throttling us across surveys. Immediate platform issue requiring action.
+        - alert: PlatformRateLimited
+          expr: |
+            sum(survey_blocked_states{category="rate_limit"}) >= {{ .Values.studyHealth.platformRateLimitThreshold }}
+          for: {{ .Values.studyHealth.platformRateLimitFor }}
+          labels:
+            severity: critical
+            component: study-health
+          annotations:
+            summary: "Facebook rate-limiting detected ({{`{{ $value }}`}} users blocked in last hour)"
+            description: >-
+              {{`{{ $value }}`}} survey users were blocked by Facebook rate-limiting (code 2022)
+              in the past hour. This indicates the platform is hitting Meta's API limits.
+              Threshold: {{ .Values.studyHealth.platformRateLimitThreshold }}
+              (v1, tunable — current traffic is ~8 active users/hr total).
+            runbook_url: "{{ $runbook }}#platformratelimited"
+
+        # A single study's Meta template is missing or unapproved (code 100). This is
+        # a study configuration issue, not platform-wide. Create a ticket for that study.
+        - alert: SurveyTemplateMissing
+          expr: |
+            sum by (form) (survey_blocked_states{category="template_missing"}) >= {{ .Values.studyHealth.surveyTemplateMissingThreshold }}
+          for: {{ .Values.studyHealth.surveyTemplateMissingFor }}
+          labels:
+            severity: warning
+            component: study-health
+          annotations:
+            summary: "Survey form {{`{{ $labels.form }}`}} missing Meta template ({{`{{ $value }}`}} users blocked)"
+            description: >-
+              {{`{{ $value }}`}} users in survey {{`{{ $labels.form }}`}} were blocked by Facebook
+              code 100 (template_missing) in the past hour. The study's Meta message template
+              is missing or not approved. This is a study-level configuration issue.
+              Threshold: {{ .Values.studyHealth.surveyTemplateMissingThreshold }}
+              (v1, tunable — current per-form traffic is ~0-3 users/hr).
+            runbook_url: "{{ $runbook }}#surveytemplateMissing"
+
+        # A single active study is experiencing a high error rate (>50% of users hitting
+        # errors). Requires minimum volume to avoid noise on low-traffic forms. Creates
+        # a ticket for that study.
+        - alert: SurveyErrorSpike
+          expr: |
+            (
+              survey:error_ratio:1h{form!="{{ .Values.studyHealth.fallbackForm }}"} > {{ .Values.studyHealth.surveyErrorRatioThreshold }}
+            )
+            and on(form)
+            (
+              sum by (form) (survey_error_states) >= {{ .Values.studyHealth.surveyErrorMinErrors }}
+            )
+            and on(form)
+            (
+              sum by (form) (survey_active_users) >= {{ .Values.studyHealth.surveyErrorMinActiveUsers }}
+            )
+          for: {{ .Values.studyHealth.surveyErrorSpikeFor }}
+          labels:
+            severity: warning
+            component: study-health
+          annotations:
+            summary: "Survey form {{`{{ $labels.form }}`}} error spike ({{`{{ printf \"%.1f\" $value }}`}} error ratio)"
+            description: >-
+              Survey {{`{{ $labels.form }}`}} has an error ratio of {{`{{ printf "%.1f" $value }}`}}
+              (threshold >0.5) with sufficient volume (≥{{ .Values.studyHealth.surveyErrorMinActiveUsers }}
+              active users and ≥{{ .Values.studyHealth.surveyErrorMinErrors }} errors). This is a
+              study-level issue (bad form configuration, broken question logic, or study-specific
+              integration problem). Form 305 (fallback) is excluded. Thresholds are v1, tunable —
+              current per-form traffic is ~0-3 users/hr.
+            runbook_url: "{{ $runbook }}#surveyerrorspike"
+
+        # Three or more active studies erroring simultaneously (>30% error rate each) with
+        # sufficient volume. This pattern indicates a platform regression, not study issues.
+        # Pages immediately.
+        - alert: MultiSurveyErrorRegression
+          expr: |
+            count(
+              (
+                survey:error_ratio:1h{form!="{{ .Values.studyHealth.fallbackForm }}"} > {{ .Values.studyHealth.multiSurveyErrorRatioThreshold }}
+              )
+              and on(form)
+              (
+                sum by (form) (survey_active_users) >= {{ .Values.studyHealth.multiSurveyErrorMinActiveUsers }}
+              )
+            ) >= {{ .Values.studyHealth.multiSurveyErrorCount }}
+          for: {{ .Values.studyHealth.multiSurveyErrorFor }}
+          labels:
+            severity: critical
+            component: study-health
+          annotations:
+            summary: "Multiple surveys erroring simultaneously ({{`{{ $value }}`}} surveys with >0.3 error ratio)"
+            description: >-
+              {{`{{ $value }}`}} surveys are experiencing error ratios above 0.3
+              simultaneously (minimum {{ .Values.studyHealth.multiSurveyErrorMinActiveUsers }}
+              active users per survey). When ≥{{ .Values.studyHealth.multiSurveyErrorCount }}
+              studies degrade at once, this indicates a platform regression rather than
+              study-specific issues. Form 305 (fallback) is excluded. Thresholds are v1,
+              tunable — current per-form traffic is ~0-3 users/hr.
+            runbook_url: "{{ $runbook }}#multisurveyerrorregression"
+
+        # Users stuck on a single question (validation loop or confusing form). This is
+        # a study UX issue (bad validation logic, impossible-to-answer question). Create
+        # a ticket for that study.
+        - alert: SurveyStuckUsersSpike
+          expr: |
+            survey_stuck_users >= {{ .Values.studyHealth.surveyStuckUsersThreshold }}
+          for: {{ .Values.studyHealth.surveyStuckUsersFor }}
+          labels:
+            severity: warning
+            component: study-health
+          annotations:
+            summary: "Survey form {{`{{ $labels.form }}`}} has {{`{{ $value }}`}} stuck users"
+            description: >-
+              Survey {{`{{ $labels.form }}`}} has {{`{{ $value }}`}} users stuck on a single
+              question for the past hour. This typically indicates a validation loop (form
+              rejects every answer) or a confusing/impossible question. This is a study UX issue.
+              Threshold: {{ .Values.studyHealth.surveyStuckUsersThreshold }}
+              (v1, tunable — current per-form stuck count is 0-2).
+            runbook_url: "{{ $runbook }}#surveystuckusersspike"
+
+        # Users in WAIT_EXTERNAL_EVENT state past timeout. Dean (external event processor)
+        # is not clearing timeouts. Platform issue requiring investigation.
+        - alert: DeanExpiredWaits
+          expr: |
+            sum(survey_expired_waits) >= {{ .Values.studyHealth.deanExpiredWaitsThreshold }}
+          for: {{ .Values.studyHealth.deanExpiredWaitsFor }}
+          labels:
+            severity: warning
+            component: study-health
+          annotations:
+            summary: "{{`{{ $value }}`}} survey users stuck in expired WAIT_EXTERNAL_EVENT"
+            description: >-
+              {{`{{ $value }}`}} survey users are in WAIT_EXTERNAL_EVENT state past their
+              timeout in the past hour. Dean (the external event processor) is not clearing
+              these timeouts. This is a platform issue (Dean not running, not processing
+              events, or integration failure). Threshold: {{ .Values.studyHealth.deanExpiredWaitsThreshold }}
+              (v1, tunable — current expired waits are 0-2 total).
+            runbook_url: "{{ $runbook }}#deanexpiredwaits"
+{{- end }}

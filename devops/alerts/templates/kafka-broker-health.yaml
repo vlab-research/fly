@@ -1,0 +1,103 @@
+{{- if .Values.kafkaBroker.enabled }}
+{{- $kb := .Values.kafkaBroker }}
+{{- $runbook := .Values.runbookUrl }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kafka-broker-health
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: vlab-alerts
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: kafka-broker-health
+      interval: 30s
+      rules:
+        # Offline partitions = data is unavailable for produce/consume. The
+        # single most serious Kafka signal. Only the active controller reports
+        # a non-zero value, so take the max across brokers.
+        - alert: KafkaOfflinePartitions
+          expr: |
+            max(kafka_controller_kafkacontroller_offlinepartitionscount) by (kafka_cr, namespace) > 0
+          for: 2m
+          labels:
+            severity: critical
+            component: kafka-broker
+          annotations:
+            summary: "Kafka has {{`{{ $value }}`}} offline partition(s)"
+            description: >-
+              One or more Kafka partitions are offline — no leader available, so
+              produce/consume on them fails. Usually a broker down or a disk
+              failure. Users may be blocked.
+            runbook_url: "{{ $runbook }}#kafkaofflinepartitions"
+
+        # Exactly one active controller should exist cluster-wide. 0 = no
+        # controller (cluster can't manage leadership); >1 = split brain.
+        - alert: KafkaControllerCountAbnormal
+          expr: |
+            sum(kafka_controller_kafkacontroller_activecontrollercount) by (kafka_cr, namespace) != 1
+          for: 3m
+          labels:
+            severity: critical
+            component: kafka-broker
+          annotations:
+            summary: "Kafka active-controller count is {{`{{ $value }}`}} (should be 1)"
+            description: >-
+              The cluster does not have exactly one active controller (0 = no
+              controller electing leaders; >1 = split brain). Leadership and
+              partition management are impaired.
+            runbook_url: "{{ $runbook }}#kafkacontrollercountabnormal"
+
+        # Under-replicated partitions: ISR is below the configured replication
+        # factor. Transient during rolling restarts (hence the long `for`),
+        # sustained means a broker is unhealthy or falling behind.
+        - alert: KafkaUnderReplicatedPartitions
+          expr: |
+            max(kafka_server_replicamanager_underreplicatedpartitions) by (kafka_cr, namespace) > 0
+          for: {{ $kb.underReplicatedFor }}
+          labels:
+            severity: warning
+            component: kafka-broker
+          annotations:
+            summary: "Kafka has {{`{{ $value }}`}} under-replicated partition(s) for {{ $kb.underReplicatedFor }}"
+            description: >-
+              Partitions have fewer in-sync replicas than their replication
+              factor for a sustained period. Durability is reduced; a further
+              broker loss could cause data loss or offline partitions.
+            runbook_url: "{{ $runbook }}#kafkaunderreplicatedpartitions"
+
+        - alert: KafkaBrokerDiskSpaceCritical
+          expr: |
+            min(
+              kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"kafka-.*"}
+              / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"kafka-.*"} * 100
+            ) by (persistentvolumeclaim) < {{ $kb.diskCritPercentFree }}
+          for: 5m
+          labels:
+            severity: critical
+            component: kafka-broker
+          annotations:
+            summary: "Kafka PVC {{`{{ $labels.persistentvolumeclaim }}`}} has < {{ $kb.diskCritPercentFree }}% disk free"
+            description: >-
+              A Kafka broker's data volume is nearly full. A full log dir takes
+              the broker offline. Expand the PVC or reduce retention now.
+            runbook_url: "{{ $runbook }}#kafkabrokerdiskspace"
+
+        - alert: KafkaBrokerDiskSpaceLow
+          expr: |
+            min(
+              kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"kafka-.*"}
+              / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"kafka-.*"} * 100
+            ) by (persistentvolumeclaim) < {{ $kb.diskWarnPercentFree }}
+          for: 10m
+          labels:
+            severity: warning
+            component: kafka-broker
+          annotations:
+            summary: "Kafka PVC {{`{{ $labels.persistentvolumeclaim }}`}} has < {{ $kb.diskWarnPercentFree }}% disk free"
+            description: >-
+              A Kafka broker's data volume is filling up. Plan a PVC expansion or
+              retention reduction before it becomes critical.
+            runbook_url: "{{ $runbook }}#kafkabrokerdiskspace"
+{{- end }}

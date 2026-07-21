@@ -1,0 +1,70 @@
+# Default values for kminion.
+replicaCount: 1
+
+# Keep resource names as plain "kminion" (not "kminion-kminion").
+fullnameOverride: kminion
+nameOverride: ""
+
+image:
+  repository: redpandadata/kminion
+  # Pin to a released tag (never :latest) so a metric-name change can't
+  # silently break every consumer-lag alert. Bump deliberately.
+  tag: "v2.3.3"
+  pullPolicy: IfNotPresent
+
+# Kafka brokers kminion connects to. Same shared cluster that serves both the
+# production (vlab-prod-*) and staging (vlab-staging-*) topics — one kminion
+# instance scrapes every consumer group on the cluster.
+kafka:
+  brokers:
+    - kafka-headless:29092
+  # SASL/TLS are disabled on this internal cluster; enable here if that changes.
+  sasl:
+    enabled: false
+  tls:
+    enabled: false
+
+# Which kminion "minions" (metric collectors) to run.
+minion:
+  consumerGroups:
+    enabled: true
+    # adminApi reads group offsets via the Kafka admin API (works without the
+    # consumer needing to be a kminion member). offsetsTopic is the alternative.
+    scrapeMode: adminApi
+  topics:
+    enabled: true
+    granularity: partition
+  # End-to-end probes (kminion produces + consumes its own topic to measure
+  # broker round-trip). Off for now — it creates a probe topic and extra config
+  # surface; revisit once consumer-group lag alerting is proven.
+  endToEnd:
+    enabled: false
+
+exporter:
+  port: 8080
+
+service:
+  type: ClusterIP
+  port: 8080
+
+prometheus:
+  serviceMonitor:
+    enabled: true
+    # ServiceMonitor lives in the monitoring namespace (where Prometheus runs)
+    # but selects the kminion Service in this release's namespace.
+    namespace: monitoring
+    interval: "30s"
+    additionalLabels:
+      app: kminion
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 192Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

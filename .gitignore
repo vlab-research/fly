@@ -1,3 +1,6 @@
 .DS_Store
 tmp/
 scripts/.env
+
+# AlertManager secrets (never commit real secrets)
+devops/alertmanager/secret.yaml

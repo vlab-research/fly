@@ -32,41 +32,12 @@ versionExporter: &vexporter v0.6.9
 versionExodus: &vexodus v0.2.2
 versionMessageWorker: &vmessageworker v0.1.1
 
-processingAlerts:
-  - consumergroup: replybot
-    topic: *topic
-    window: "8h"
-    limit: "1"
-
-laggingAlerts:
-  - consumergroup: replybot
-    alertname: LaggingConsumerReplybot
-    window: "5m"
-    limit: "20"
-  - consumergroup: scribble-responses
-    alertname: LaggingConsumerScribbleResponses
-    window: "5m"
-    limit: "200"
-  - consumergroup: scribble-states
-    alertname: LaggingConsumerScribbleStates
-    window: "5m"
-    limit: "200"
-  - consumergroup: scribble-messages
-    alertname: LaggingConsumerScribbleMessages
-    window: "5m"
-    limit: "200"
-  - consumergroup: scribble-chat-log
-    alertname: LaggingConsumerScribbleChatLog
-    window: "5m"
-    limit: "200"
-  - consumergroup: dinersclub
-    alertname: LaggingConsumerDinersclub
-    window: "5m"
-    limit: "100"
-  - consumergroup: message-worker
-    alertname: LaggingConsumerMessageWorker
-    window: "5m"
-    limit: "20"
+# Kafka consumer-group lag/health alerting is NOT defined here anymore. The
+# Kafka cluster, Prometheus and kminion are singletons shared by prod+staging,
+# so their alerting is a single infra-level rule set deployed once into the
+# monitoring namespace. See devops/kafka-consumer-health/ (Helm release
+# 'kafka-consumer-health'). The old laggingAlerts/processingAlerts values and
+# their vlab umbrella templates have been retired.
 
 kafkaTopics:
   - name: *topic

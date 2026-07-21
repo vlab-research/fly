@@ -69,3 +69,23 @@ kubectl apply -f ./kafka-operator/prod
 # https://github.com/danielqsj/kafka_exporter
 sleep 30
 helm install kafka-exporter kafka-exporter -f ./kafka-operator/exporter-values.yaml
+
+# kminion — maintained Kafka consumer-group/topic exporter. Backs the
+# consumer-lag alerts (offset-sum + member/state metrics kafka-exporter lacks).
+helm install kminion kminion --namespace default
+
+# sql_exporter — exports CockroachDB study health metrics (error/blocked/stuck/
+# expired states by form) into Prometheus for alerting on survey degradation.
+helm install sql-exporter sql-exporter --namespace monitoring
+
+# Kafka consumer-group health alerts — a single PrometheusRule for the shared
+# cluster (both prod + staging). See documentation/kafka-consumer-lag-alerting.md
+helm install kafka-consumer-health kafka-consumer-health --namespace monitoring
+
+# Hand-authored cluster/app alerts (Kafka broker health, replybot crash loop).
+# Replaces the retired koperator default kafka-alerts. See documentation/alerting.md
+helm install vlab-alerts alerts --namespace monitoring
+
+# Grafana dashboards provisioned as code via ConfigMaps. The Grafana sidecar watches
+# for ConfigMaps labeled grafana_dashboard=1 and loads them automatically.
+helm install grafana-dashboards grafana-dashboards --namespace monitoring

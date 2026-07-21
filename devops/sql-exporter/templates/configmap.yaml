@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sql-exporter.fullname" . }}
+  labels:
+    {{- include "sql-exporter.labels" . | nindent 4 }}
+data:
+  config.yml: |
+    # Global connection configuration for CockroachDB study health metrics.
+    target:
+      data_source_name: {{ .Values.database.dataSourceName | quote }}
+      # Protect the DB: run collectors at most every min_interval (60s).
+      collectors:
+        - study_health
+
+    # Study health collector: 6 queries exposing survey error/blocked/stuck/expired/active states
+    # as Prometheus gauges. All queries window on updated > NOW() - INTERVAL '1 hour' to surface
+    # recent activity; labels are ONLY form + tag/category/state — NO user-identifying data.
+    collectors:
+      - collector_name: study_health
+        min_interval: {{ .Values.database.minInterval }}s
+        metrics:
+          # survey_error_states{form,error_tag}
+          # Gauges ERROR state counts by form and error_tag (1h window).
+          - metric_name: survey_error_states
+            type: gauge
+            help: "Count of users in ERROR state by form and error_tag (1h window)"
+            key_labels:
+              - form
+              - error_tag
+            values:
+              - value
+            query: |
+              SELECT
+                current_form AS form,
+                COALESCE(error_tag, 'none') AS error_tag,
+                COUNT(*) AS value
+              FROM states
+              WHERE current_state = 'ERROR'
+                AND updated > NOW() - INTERVAL '1 hour'
+                AND current_form IS NOT NULL
+              GROUP BY current_form, error_tag;
+
+          # survey_blocked_states{form,category}
+          # Gauges BLOCKED state counts by form and bucketed fb_error_code category (1h window).
+          # Bucketing keeps cardinality bounded (~form×5): attrition / template_missing / rate_limit / unsupported / other.
+          - metric_name: survey_blocked_states
+            type: gauge
+            help: "Count of users in BLOCKED state by form and fb_error_code category (1h window)"
+            key_labels:
+              - form
+              - category
+            values:
+              - value
+            query: |
+              SELECT
+                current_form AS form,
+                CASE
+                  WHEN fb_error_code IN ('10', '190', '551') THEN 'attrition'
+                  WHEN fb_error_code = '100' THEN 'template_missing'
+                  WHEN fb_error_code = '2022' THEN 'rate_limit'
+                  WHEN fb_error_code = '200' THEN 'unsupported'
+                  ELSE 'other'
+                END AS category,
+                COUNT(*) AS value
+              FROM states
+              WHERE current_state = 'BLOCKED'
+                AND updated > NOW() - INTERVAL '1 hour'
+                AND current_form IS NOT NULL
+              GROUP BY current_form, category;
+
+          # survey_stuck_users{form}
+          # Gauges count of users with stuck_on_question IS NOT NULL (1h window).
+          - metric_name: survey_stuck_users
+            type: gauge
+            help: "Count of users stuck on a question by form (1h window)"
+            key_labels:
+              - form
+            values:
+              - value
+            query: |
+              SELECT
+                current_form AS form,
+                COUNT(*) AS value
+              FROM states
+              WHERE stuck_on_question IS NOT NULL
+                AND updated > NOW() - INTERVAL '1 hour'
+                AND current_form IS NOT NULL
+              GROUP BY current_form;
+
+          # survey_expired_waits{form}
+          # Gauges count of users in WAIT_EXTERNAL_EVENT with expired timeout_date (1h window).
+          - metric_name: survey_expired_waits
+            type: gauge
+            help: "Count of users in WAIT_EXTERNAL_EVENT with expired timeout_date by form (1h window)"
+            key_labels:
+              - form
+            values:
+              - value
+            query: |
+              SELECT
+                current_form AS form,
+                COUNT(*) AS value
+              FROM states
+              WHERE current_state = 'WAIT_EXTERNAL_EVENT'
+                AND timeout_date < NOW()
+                AND updated > NOW() - INTERVAL '1 hour'
+                AND current_form IS NOT NULL
+              GROUP BY current_form;
+
+          # survey_active_users{form}
+          # Gauges count of all users updated in the last hour (DENOMINATOR for error proportion).
+          - metric_name: survey_active_users
+            type: gauge
+            help: "Count of active users by form (1h window, denominator for error/blocked rates)"
+            key_labels:
+              - form
+            values:
+              - value
+            query: |
+              SELECT
+                current_form AS form,
+                COUNT(*) AS value
+              FROM states
+              WHERE updated > NOW() - INTERVAL '1 hour'
+                AND current_form IS NOT NULL
+              GROUP BY current_form;
+
+          # survey_state_total{form,state}
+          # Gauges snapshot of current_state counts by form (1h window to match other metrics and reduce load).
+          - metric_name: survey_state_total
+            type: gauge
+            help: "Snapshot of current_state counts by form (1h window)"
+            key_labels:
+              - form
+              - state
+            values:
+              - value
+            query: |
+              SELECT
+                current_form AS form,
+                current_state AS state,
+                COUNT(*) AS value
+              FROM states
+              WHERE updated > NOW() - INTERVAL '1 hour'
+                AND current_form IS NOT NULL
+              GROUP BY current_form, current_state;

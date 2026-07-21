@@ -1,0 +1,13 @@
+apiVersion: v2
+name: kafka-consumer-health
+description: >-
+  Infrastructure-level Kafka consumer-group health alerts (PrometheusRule) for
+  the single shared Kafka cluster that serves both production (vlab-prod-*) and
+  staging (vlab-staging-*). Deployed ONCE into the monitoring namespace — the
+  cluster, Prometheus, AlertManager and kminion are all singletons, so their
+  alerting definition is a singleton too. prod-vs-staging is an `env`/`topic`
+  label here, not a deployment boundary. Built on kminion metrics.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/vlab-research/fly

@@ -1,0 +1,82 @@
+# Hand-authored alert rules for the vlab platform (release: vlab-alerts,
+# namespace: monitoring). Edit freely — this is ours, not an operator default.
+#
+# Runbooks: documentation/alerting.md (anchors match each alert name).
+# Kafka consumer-lag alerting lives in the sibling kafka-consumer-health chart
+# (documentation/kafka-consumer-lag-alerting.md).
+
+runbookUrl: "https://github.com/vlab-research/fly/blob/main/documentation/alerting.md"
+
+# ---- Kafka broker / cluster health -----------------------------------------
+# Replaces the retired banzaicloud koperator default rule set (`kafka-alerts`),
+# which shipped stale static thresholds (BrokerOverLoaded > 30 req/s,
+# PartitionCountHigh > 100) that fired permanently and trained everyone to
+# ignore the channel. Here we alert only on real "the cluster is actually
+# unhealthy" signals.
+kafkaBroker:
+  enabled: true
+  # % of the PVC free below which we warn / page. Kafka PVCs currently sit at
+  # ~80% free; koperator's old rule warned at <30% free which is reasonable, but
+  # we split into warn/crit.
+  diskWarnPercentFree: 20
+  diskCritPercentFree: 10
+  # Under-replication is normal + transient during a rolling restart, so hold it
+  # a while before alerting.
+  underReplicatedFor: "15m"
+
+# ---- Application health -----------------------------------------------------
+app:
+  enabled: true
+  # ReplyBotCrashing: rescued from the never-applied prometheus/rules/replybot.yaml.
+  # Fires when a replybot container restarts more than N times in 10m.
+  replybotRestartThreshold: 2
+
+# ---- Study health (survey error/blocked/stuck states) -----------------------
+# Metrics from sql_exporter in monitoring namespace, querying CockroachDB for
+# recent survey state patterns (1h window). All thresholds are v1 — calibrated
+# to current low traffic (~8 active users/hr total, 0-3 per form) and WILL NEED
+# TUNING as traffic grows. See documentation/study-error-alerting.md.
+studyHealth:
+  enabled: true
+  # Form 305 is the fallback form (permanent FORM_NOT_FOUND errors) — excluded
+  # from per-study alerts.
+  fallbackForm: "305"
+
+  # PlatformInternalErrors: INTERNAL/STATE_ACTIONS/NETWORK error tags (never
+  # expected, always actionable platform regression). Pages immediately.
+  platformInternalErrorsThreshold: 5
+  platformInternalErrorsFor: "10m"
+
+  # PlatformRateLimited: Facebook rate-limiting (code 2022) across all surveys.
+  # Platform hitting Meta API limits. Pages immediately.
+  platformRateLimitThreshold: 10
+  platformRateLimitFor: "10m"
+
+  # SurveyTemplateMissing: Facebook code 100 (template_missing) for a single study.
+  # Study configuration issue (Meta template missing/unapproved). Ticket.
+  surveyTemplateMissingThreshold: 5
+  surveyTemplateMissingFor: "15m"
+
+  # SurveyErrorSpike: single active study with high error ratio. Requires minimum
+  # volume to avoid noise on low-traffic forms. Ticket.
+  surveyErrorRatioThreshold: 0.5   # >50% of users erroring
+  surveyErrorMinErrors: 5           # AND ≥5 errors total
+  surveyErrorMinActiveUsers: 10     # AND ≥10 active users (avoid noise)
+  surveyErrorSpikeFor: "15m"
+
+  # MultiSurveyErrorRegression: ≥3 active studies erroring at once (>30% each).
+  # Pattern indicates platform regression, not study issues. Pages immediately.
+  multiSurveyErrorRatioThreshold: 0.3   # >30% error rate
+  multiSurveyErrorMinActiveUsers: 10    # Minimum active users per survey
+  multiSurveyErrorCount: 3              # ≥3 surveys degrading
+  multiSurveyErrorFor: "10m"
+
+  # SurveyStuckUsersSpike: users stuck on a question (validation loop / bad form UX).
+  # Study-level issue. Ticket.
+  surveyStuckUsersThreshold: 10
+  surveyStuckUsersFor: "20m"
+
+  # DeanExpiredWaits: WAIT_EXTERNAL_EVENT past timeout (Dean not processing).
+  # Platform issue (Dean down / broken). Warning.
+  deanExpiredWaitsThreshold: 10
+  deanExpiredWaitsFor: "15m"

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: sql-exporter
+description: >-
+  burningalchemist/sql_exporter — exports CockroachDB study health metrics
+  (error states, blocked users, stuck users, expired waits, active users by form)
+  into Prometheus for alerting on survey degradation and user flow bottlenecks.
+type: application
+version: 0.1.0
+appVersion: "0.24.3"
+home: https://github.com/burningalchemist/sql_exporter
