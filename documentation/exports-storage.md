@@ -54,10 +54,22 @@ There is intentionally **no** standalone `mc` command, Kubernetes Job, or CronJo
 maintaining this — the policy lives with the code that writes the objects and is
 applied on deploy.
 
-## Volume sizing
+## Deployment & volume sizing
 
-The MinIO PVC size is set in `devops/values/minio.yaml`
-(`persistence.size`) and applied via `helm upgrade` on `standard-rwo`
-(GKE `pd.csi`, online-expandable). It is sized for headroom over the 3-day
-retention window, since individual `*_full_messages.csv` exports can reach ~1.6G
-and several may coexist within the window.
+MinIO is a hand-rolled single-node deployment using the upstream `minio/minio`
+image (not the Bitnami helm chart). Its manifests live in `devops/minio/`
+(Deployment, PVC, Services, Ingresses) and are applied directly:
+
+```
+kubectl apply -f devops/minio/
+```
+
+The `minio-auth` Secret (root credentials) is managed out-of-band and is not in
+the repo. The two `devops/values/minio*.yaml` Bitnami-style values files are
+**not** used by this deployment (they predate it / relate to a possible future
+chart migration).
+
+The PVC size (`devops/minio/minio.yaml`, 25Gi) is sized for headroom over the
+3-day retention window, since individual `*_full_messages.csv` exports can reach
+~1.6G and several may coexist within the window. `standard-rwo` (GKE `pd.csi`)
+supports online expansion, so growing it is a non-destructive apply.

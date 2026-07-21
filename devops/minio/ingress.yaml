@@ -1,0 +1,60 @@
+# Ingresses for MinIO. TLS certs are issued by cert-manager (letsencrypt-prod)
+# into the minio-api-tls / minio-console-tls secrets. Applying these over the
+# existing ingresses reuses those cert secrets, so no re-issuance occurs.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minio-api
+  namespace: minio
+  labels:
+    app.kubernetes.io/instance: minio
+    app.kubernetes.io/name: minio
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Large exports upload through this ingress; raise the body-size cap.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - storage-api.vlab.digital
+      secretName: minio-api-tls
+  rules:
+    - host: storage-api.vlab.digital
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port:
+                  number: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minio-console
+  namespace: minio
+  labels:
+    app.kubernetes.io/instance: minio
+    app.kubernetes.io/name: minio
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - storage.vlab.digital
+      secretName: minio-console-tls
+  rules:
+    - host: storage.vlab.digital
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio-console
+                port:
+                  number: 9090
