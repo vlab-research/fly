@@ -4,3 +4,5 @@ scripts/.env
 
 # AlertManager secrets (never commit real secrets)
 devops/alertmanager/secret.yaml
+devops/alertmanager/secret.env
+devops/alertmanager/*.live-backup.yaml

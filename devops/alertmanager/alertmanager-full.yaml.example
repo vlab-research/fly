@@ -1,0 +1,162 @@
+global:
+  resolve_timeout: 5m
+  # SMTP settings (defaults; auth per receiver via *_file)
+  smtp_from: 'alerts@vlab-research.org'
+  smtp_smarthost: 'smtp.example.com:587'  # PLACEHOLDER: update with real SMTP host
+  smtp_require_tls: true
+
+# Main routing tree: severity-based fanout
+route:
+  receiver: fyi  # default for unknown/untagged alerts
+  group_by: ['alertname', 'env', 'consumergroup', 'survey']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 24h  # default for FYI; overridden per severity below
+
+  routes:
+    # Dead-man's switch: Watchdog always fires; silence = monitoring is down
+    - match:
+        alertname: Watchdog
+      receiver: deadmans-switch
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+      continue: false  # don't propagate to other routes
+
+    # CRITICAL: page immediately
+    - match:
+        severity: critical
+      receiver: page
+      group_wait: 10s       # fast grouping for critical
+      group_interval: 2m
+      repeat_interval: 1h   # re-page hourly if not resolved
+      continue: true        # ALSO send to slack for visibility
+
+    # CRITICAL → also route to Slack #vlab-alerts-critical for visibility
+    - match:
+        severity: critical
+      receiver: slack-critical
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 1h
+      continue: false
+
+    # WARNING: ticket/notification (preserves current #vlab-alerts behavior)
+    - match:
+        severity: warning
+      receiver: slack
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h  # current production repeat
+      continue: false
+
+    # FYI / informational (no severity or severity=info) → catch-all
+    # Already routed by default receiver above
+
+# Inhibition rules: platform-wide critical mutes per-survey/component warnings
+inhibit_rules:
+  # A critical Kafka broker issue mutes warnings about specific consumer lag
+  - source_match:
+      severity: critical
+      component: kafka-broker
+    target_match:
+      severity: warning
+    equal: ['env']  # same environment
+
+  # A critical controller/partition issue mutes under-replication warnings
+  - source_match:
+      severity: critical
+      alertname: KafkaOfflinePartitions
+    target_match:
+      severity: warning
+      alertname: KafkaUnderReplicatedPartitions
+    equal: ['env']
+
+  # Platform-wide critical (no survey/consumergroup label) mutes per-survey warnings
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ['env']
+    # Only inhibit if source lacks survey/consumergroup (platform-wide)
+    source_matchers:
+      - survey=""
+      - consumergroup=""
+
+receivers:
+  # PagerDuty: critical alerts → on-call rotation
+  - name: page
+    pagerduty_configs:
+      - routing_key_file: '/etc/alertmanager/secrets/alertmanager-secrets/pagerduty-routing-key'
+        severity: 'critical'
+        # PLACEHOLDER: PagerDuty Integration Key needed
+        # Create PagerDuty service integration (Events API v2) and provision routing key to k8s secret
+
+  # Slack #vlab-alerts-critical: critical visibility (ALSO receives critical)
+  - name: slack-critical
+    slack_configs:
+      - send_resolved: true
+        api_url_file: '/etc/alertmanager/secrets/alertmanager-secrets/slack-critical-webhook'
+        # PLACEHOLDER: create #vlab-alerts-critical channel, provision webhook to k8s secret
+        channel: '#vlab-alerts-critical'
+        title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |-
+          *Severity:* {{ .GroupLabels.severity | toUpper }}
+          *Environment:* {{ .GroupLabels.env }}
+          {{ if .GroupLabels.consumergroup }}*Consumer Group:* {{ .GroupLabels.consumergroup }}{{ end }}
+          {{ if .GroupLabels.survey }}*Survey:* {{ .GroupLabels.survey }}{{ end }}
+
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          {{ if .Annotations.summary }}*Summary:* {{ .Annotations.summary }}{{ end }}
+          {{ if .Annotations.description }}*Description:* {{ .Annotations.description }}{{ end }}
+          {{ if .Annotations.message }}{{ .Annotations.message }}{{ end }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+
+  # Slack #vlab-alerts: warnings + current behavior (PRESERVES existing)
+  - name: slack
+    slack_configs:
+      - send_resolved: true
+        api_url_file: '/etc/alertmanager/secrets/alertmanager-secrets/slack-webhook'
+        # Secret mount will provide the existing webhook at this path
+        channel: '#vlab-alerts'
+        text: |-
+          {{ range .Alerts }}{{ .Annotations.message }}
+          {{ end }}
+        # Matches current production behavior exactly
+
+  # Dead-man's switch: heartbeat to external monitor (healthchecks.io / PagerDuty)
+  - name: deadmans-switch
+    webhook_configs:
+      - url_file: '/etc/alertmanager/secrets/alertmanager-secrets/deadmans-switch-webhook'
+        # PLACEHOLDER: provision a heartbeat monitor (healthchecks.io / PagerDuty / Cronitor)
+        # Expects a check-in every ~2 minutes; alerts if silent (monitoring is down)
+        send_resolved: false  # only "firing" matters for liveness
+
+  # FYI: email for low-priority / informational alerts
+  - name: fyi
+    email_configs:
+      - to: 'team@vlab-research.org'  # PLACEHOLDER: update with real email
+        # NOTE: AlertManager email_configs doesn't support *_file for auth
+        # Use env vars SMTP_AUTH_USERNAME / SMTP_AUTH_PASSWORD or mount secrets differently
+        # For now, leave auth fields commented; provision via env vars in Helm
+        # auth_username: set via env var
+        # auth_password: set via env var
+        headers:
+          Subject: '[VLAB Alert - FYI] {{ .GroupLabels.alertname }}'
+        html: |-
+          <h3>Alert: {{ .GroupLabels.alertname }}</h3>
+          <p><strong>Environment:</strong> {{ .GroupLabels.env }}</p>
+          {{ if .GroupLabels.consumergroup }}<p><strong>Consumer Group:</strong> {{ .GroupLabels.consumergroup }}</p>{{ end }}
+          {{ if .GroupLabels.survey }}<p><strong>Survey:</strong> {{ .GroupLabels.survey }}</p>{{ end }}
+          <hr>
+          {{ range .Alerts }}
+          <p><strong>Status:</strong> {{ .Status }}</p>
+          {{ if .Annotations.summary }}<p><strong>Summary:</strong> {{ .Annotations.summary }}</p>{{ end }}
+          {{ if .Annotations.description }}<p><strong>Description:</strong> {{ .Annotations.description }}</p>{{ end }}
+          {{ if .Annotations.message }}<p>{{ .Annotations.message }}</p>{{ end }}
+          <p><em>Fired at: {{ .StartsAt }}</em></p>
+          {{ end }}
+
+templates: []
