@@ -115,6 +115,7 @@ const WhatsAppEmbedded = () => {
         body: {
           code: authCode,
           phone_number_id: phoneId.phoneId,
+          waba_id: phoneId.wabaId,
         },
       });
 
