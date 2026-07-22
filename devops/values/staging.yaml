@@ -542,8 +542,18 @@ hermes:
       value: "80"
     - name: DASHBOARD_URL
       value: "http://gbv-dashboard"
-    # WHATSAPP_VERIFY_TOKEN is intentionally unset until the Meta WhatsApp
-    # webhook is provisioned; GET /whatsapp verification returns 401 until then.
+    # Enables X-Hub-Signature-256 enforcement on POST /webhooks and
+    # POST /whatsapp (hermes reads FB_APP_SECRET; the secret stores it as
+    # FACEBOOK_APP_SECRET, hence the explicit mapping — envFrom alone won't
+    # surface it under the name hermes expects).
+    - name: FB_APP_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: gbv-bot-envs
+          key: FACEBOOK_APP_SECRET
+    # WHATSAPP_VERIFY_TOKEN comes from the gbv-bot-envs secret via envFrom
+    # (same pattern as VERIFY_TOKEN). Until the key is added to the secret,
+    # GET /whatsapp verification returns 401.
 
   resources:
     requests:

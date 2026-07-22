@@ -1,11 +1,9 @@
 use axum::{body::Body, http::{Request, StatusCode}};
 use hermes::{
     config::Config,
-    handlers::{
-        AppState, handle_synthetic, handle_webhook, handle_whatsapp, health, verify_token,
-        verify_token_whatsapp,
-    },
+    handlers::{build_router, AppState},
     producer::EventProducer,
+    signature::sign_sha256,
 };
 use http_body_util::BodyExt;
 use serde_json::json;
@@ -53,21 +51,19 @@ fn make_config() -> Config {
     }
 }
 
-fn make_app(producer: Arc<MockProducer>) -> axum::Router {
-    use axum::routing::{get, post};
+fn make_app_with_config(producer: Arc<MockProducer>, config: Config) -> axum::Router {
     let state = AppState {
         producer: producer as Arc<dyn EventProducer>,
-        config: Arc::new(make_config()),
+        config: Arc::new(config),
         http_client: reqwest::Client::new(),
     };
-    axum::Router::new()
-        .route("/webhooks", get(verify_token))
-        .route("/webhooks", post(handle_webhook))
-        .route("/whatsapp", get(verify_token_whatsapp))
-        .route("/whatsapp", post(handle_whatsapp))
-        .route("/synthetic", post(handle_synthetic))
-        .route("/health", get(health))
-        .with_state(state)
+    // Production routing — exercises the same router (and signature
+    // middleware wiring) that main.rs serves.
+    build_router(state)
+}
+
+fn make_app(producer: Arc<MockProducer>) -> axum::Router {
+    make_app_with_config(producer, make_config())
 }
 
 fn json_post(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -514,4 +510,141 @@ async fn health_returns_200_when_ready() {
     let req = Request::builder().method("GET").uri("/health").body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+}
+
+// --- X-Hub-Signature-256 enforcement (FB_APP_SECRET set) ---
+
+fn make_config_with_secret() -> Config {
+    Config { fb_app_secret: Some("app-secret".into()), ..make_config() }
+}
+
+fn wa_message_payload() -> serde_json::Value {
+    json!({
+        "entry": [{
+            "id": "WABA_ID",
+            "changes": [{
+                "field": "messages",
+                "value": {
+                    "messaging_product": "whatsapp",
+                    "metadata": { "phone_number_id": "PHONE_ID_1" },
+                    "messages": [{
+                        "from": "27123456789",
+                        "id": "wamid.sig",
+                        "timestamp": "1640995200",
+                        "type": "text",
+                        "text": { "body": "hi" }
+                    }]
+                }
+            }]
+        }]
+    })
+}
+
+fn signed_json_post(uri: &str, body: serde_json::Value, secret: &str) -> Request<Body> {
+    let bytes = body.to_string();
+    let sig = sign_sha256(secret, bytes.as_bytes());
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("x-hub-signature-256", sig)
+        .body(Body::from(bytes))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn signed_whatsapp_post_with_valid_signature_produces() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app_with_config(producer.clone(), make_config_with_secret());
+
+    let resp = app
+        .oneshot(signed_json_post("/whatsapp", wa_message_payload(), "app-secret"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(producer.get_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn unsigned_whatsapp_post_rejected_when_secret_configured() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app_with_config(producer.clone(), make_config_with_secret());
+
+    let resp = app.oneshot(json_post("/whatsapp", wa_message_payload())).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(producer.get_calls().len(), 0);
+}
+
+#[tokio::test]
+async fn wrongly_signed_whatsapp_post_rejected() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app_with_config(producer.clone(), make_config_with_secret());
+
+    let resp = app
+        .oneshot(signed_json_post("/whatsapp", wa_message_payload(), "wrong-secret"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(producer.get_calls().len(), 0);
+}
+
+#[tokio::test]
+async fn signed_messenger_post_with_valid_signature_produces() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app_with_config(producer.clone(), make_config_with_secret());
+
+    let payload = json!({
+        "entry": [{
+            "id": "page123",
+            "messaging": [{
+                "sender": { "id": "user123" },
+                "recipient": { "id": "page123" },
+                "timestamp": 1_640_995_200_000_i64,
+                "message": { "text": "Hello bot!" }
+            }]
+        }]
+    });
+
+    let resp = app
+        .oneshot(signed_json_post("/webhooks", payload, "app-secret"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(producer.get_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn unsigned_messenger_post_rejected_when_secret_configured() {
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app_with_config(producer.clone(), make_config_with_secret());
+
+    let payload = json!({ "entry": [] });
+    let resp = app.oneshot(json_post("/webhooks", payload)).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(producer.get_calls().len(), 0);
+}
+
+#[tokio::test]
+async fn verify_handshake_and_synthetic_bypass_signature_check() {
+    // Meta does not sign the GET handshake; /synthetic is internal injection.
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app_with_config(producer.clone(), make_config_with_secret());
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/whatsapp?hub.verify_token=test-wa-token&hub.challenge=ok")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let synthetic = json!({ "user": "u1", "event": "external" });
+    let resp = app.oneshot(json_post("/synthetic", synthetic)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(producer.get_calls().len(), 1);
 }

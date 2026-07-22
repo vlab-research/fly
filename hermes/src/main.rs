@@ -1,13 +1,6 @@
-use axum::{
-    routing::{get, post},
-    Router,
-};
 use hermes::{
     config::Config,
-    handlers::{
-        AppState, handle_synthetic, handle_webhook, handle_whatsapp, health, verify_token,
-        verify_token_whatsapp,
-    },
+    handlers::{build_router, AppState},
     producer::KafkaProducer,
 };
 use std::sync::Arc;
@@ -48,16 +41,9 @@ async fn main() {
         http_client: reqwest::Client::new(),
     };
 
-    let app = Router::new()
-        .route("/webhooks", get(verify_token))
-        .route("/webhooks", post(handle_webhook))
-        .route("/whatsapp", get(verify_token_whatsapp))
-        .route("/whatsapp", post(handle_whatsapp))
-        .route("/synthetic", post(handle_synthetic))
-        .route("/health", get(health))
+    let app = build_router(state)
         .layer(CorsLayer::permissive())
-        .layer(RequestBodyLimitLayer::new(5 * 1024 * 1024))
-        .with_state(state);
+        .layer(RequestBodyLimitLayer::new(5 * 1024 * 1024));
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
