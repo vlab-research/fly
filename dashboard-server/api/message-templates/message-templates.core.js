@@ -123,6 +123,55 @@ function buildFacebookCreatePayload({ name, language, body, buttons, examples })
   };
 }
 
+// buildWhatsAppCreatePayload builds the WABA-level create payload. It differs
+// from buildFacebookCreatePayload in exactly one way: buttons are
+// QUICK_REPLY (WhatsApp's shape) instead of POSTBACK, and carry NO payload —
+// WhatsApp quick-reply buttons bake in only the visible text at approval
+// time; the payload delivered back on tap is supplied per-send by
+// message-worker's template translator. BODY examples are REQUIRED by
+// WhatsApp whenever the body has {{N}} placeholders (enforced upstream by
+// validateCreateInput, which is shared across platforms).
+function buildWhatsAppCreatePayload({ name, language, body, buttons, examples }) {
+  const bodyComponent = { type: 'BODY', text: body };
+  if (Array.isArray(examples) && examples.length > 0) {
+    bodyComponent.example = { body_text: [examples.map(String)] };
+  }
+  const components = [bodyComponent];
+  if (Array.isArray(buttons) && buttons.length > 0) {
+    components.push({
+      type: 'BUTTONS',
+      buttons: buttons.map(b => ({
+        type: 'QUICK_REPLY',
+        text: b.label,
+      })),
+    });
+  }
+  return {
+    name,
+    language,
+    category: 'UTILITY',
+    components,
+  };
+}
+
+// resolveWabaId extracts the WABA id from a whatsapp_business credential.
+// Fail fast: a credential without details.waba_id cannot manage templates
+// (template CRUD is a WABA-level API), so surface an actionable error
+// instead of a silent fallback. Org-number ("Track A") credentials MUST
+// include waba_id in details.
+function resolveWabaId(credential) {
+  const details = (credential && credential.details) || {};
+  if (!details.waba_id) {
+    return {
+      ok: false,
+      error: 'whatsapp_business credential is missing details.waba_id — '
+        + 'reconnect the WhatsApp number (or add waba_id to the credential details) '
+        + 'before managing templates',
+    };
+  }
+  return { ok: true, wabaId: details.waba_id };
+}
+
 function parseCreateResponse(fbResponseBody) {
   if (!fbResponseBody) {
     return { ok: false, error: { message: 'Empty response from Facebook' } };
@@ -194,6 +243,8 @@ module.exports = {
   validateButtons,
   validateCreateInput,
   buildFacebookCreatePayload,
+  buildWhatsAppCreatePayload,
+  resolveWabaId,
   parseCreateResponse,
   parseListResponse,
   matchFbEntry,

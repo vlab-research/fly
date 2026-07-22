@@ -8,6 +8,8 @@ const {
   validateButtons,
   validateCreateInput,
   buildFacebookCreatePayload,
+  buildWhatsAppCreatePayload,
+  resolveWabaId,
   parseCreateResponse,
   parseListResponse,
   matchFbEntry,
@@ -265,6 +267,85 @@ describe('message-templates.core', () => {
       // Facebook rejects a BUTTONS component with zero buttons; skip it entirely.
       const payload = buildFacebookCreatePayload({ name: 'x', language: 'en', body: 'b', buttons: [] });
       payload.components.should.have.length(1);
+    });
+  });
+
+  // -------------------------------------------------------
+  // buildWhatsAppCreatePayload — WABA-level template shape
+  // -------------------------------------------------------
+  describe('buildWhatsAppCreatePayload', () => {
+    it('builds the canonical UTILITY template shape', () => {
+      const payload = buildWhatsAppCreatePayload({ name: 'prize', language: 'en_US', body: 'No placeholders.' });
+      payload.should.deep.equal({
+        name: 'prize',
+        language: 'en_US',
+        category: 'UTILITY',
+        components: [{ type: 'BODY', text: 'No placeholders.' }],
+      });
+    });
+
+    it('attaches example.body_text when placeholder examples are supplied', () => {
+      // WhatsApp REQUIRES sample values for every {{N}} placeholder —
+      // templates without them are rejected at creation.
+      const payload = buildWhatsAppCreatePayload({
+        name: 'prize', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'],
+      });
+      payload.components[0].should.deep.equal({
+        type: 'BODY',
+        text: 'Hi {{1}}',
+        example: { body_text: [['Alice']] },
+      });
+    });
+
+    it('uses QUICK_REPLY buttons with no payload (unlike Messenger POSTBACK)', () => {
+      // WhatsApp quick-reply buttons bake in only the visible text at
+      // approval time; the tap payload is supplied per-send by
+      // message-worker's template translator. Baking a payload here (the
+      // Messenger POSTBACK pattern) is rejected by the WABA endpoint.
+      const payload = buildWhatsAppCreatePayload({
+        name: 'x', language: 'en_US', body: 'b',
+        buttons: [{ label: 'Yes' }, { label: 'No' }],
+      });
+      payload.components.should.have.length(2);
+      payload.components[1].should.deep.equal({
+        type: 'BUTTONS',
+        buttons: [
+          { type: 'QUICK_REPLY', text: 'Yes' },
+          { type: 'QUICK_REPLY', text: 'No' },
+        ],
+      });
+    });
+
+    it('omits the BUTTONS component when buttons array is empty (text-only template)', () => {
+      const payload = buildWhatsAppCreatePayload({ name: 'x', language: 'en', body: 'b', buttons: [] });
+      payload.components.should.have.length(1);
+    });
+
+    it('always sets category to UTILITY', () => {
+      buildWhatsAppCreatePayload({ name: 'x', language: 'fr', body: 'b' }).category.should.equal('UTILITY');
+    });
+  });
+
+  // -------------------------------------------------------
+  // resolveWabaId — fail-fast WABA resolution from credential details
+  // -------------------------------------------------------
+  describe('resolveWabaId', () => {
+    it('extracts waba_id from credential details', () => {
+      const r = resolveWabaId({ details: { id: 'PHONE_1', waba_id: 'WABA_9', access_token: 't' } });
+      r.should.deep.equal({ ok: true, wabaId: 'WABA_9' });
+    });
+
+    it('fails with an actionable error when waba_id is missing', () => {
+      // Track A (org-number) credentials MUST include details.waba_id —
+      // template CRUD is a WABA-level API and there is no fallback.
+      const r = resolveWabaId({ details: { id: 'PHONE_1', access_token: 't' } });
+      r.ok.should.equal(false);
+      r.error.should.include('waba_id');
+    });
+
+    it('fails when details are absent entirely', () => {
+      resolveWabaId({}).ok.should.equal(false);
+      resolveWabaId(null).ok.should.equal(false);
     });
   });
 

@@ -7,6 +7,9 @@ const {
   facebookCreateTemplate,
   facebookGetTemplatesByName,
   facebookDeleteTemplateByHsmId,
+  whatsappCreateTemplate,
+  whatsappGetTemplatesByName,
+  whatsappDeleteTemplateByHsmId,
 } = require('./message-templates.facebook');
 
 const handlers = makeHandlers({
@@ -16,6 +19,11 @@ const handlers = makeHandlers({
     createTemplate: facebookCreateTemplate,
     getTemplatesByName: facebookGetTemplatesByName,
     deleteTemplateByHsmId: facebookDeleteTemplateByHsmId,
+  },
+  whatsappClient: {
+    createTemplate: whatsappCreateTemplate,
+    getTemplatesByName: whatsappGetTemplatesByName,
+    deleteTemplateByHsmId: whatsappDeleteTemplateByHsmId,
   },
 });
 

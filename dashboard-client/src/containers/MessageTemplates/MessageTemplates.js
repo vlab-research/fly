@@ -10,6 +10,7 @@ import { useHistory } from 'react-router-dom';
 import api from '../../services/api';
 import { Loading } from '../../components/UI';
 import LOCALES from './locales';
+import fetchMessagingAccounts from './accounts';
 
 const { Content } = Layout;
 const { Text } = Typography;
@@ -57,13 +58,13 @@ const MessageTemplates = () => {
 
     (async () => {
       try {
-        const [data, pagesData] = await Promise.all([
+        const [data, accountsData] = await Promise.all([
           loadTemplates(),
-          api.fetcher({ path: '/media/pages' }).then(r => r.json()),
+          fetchMessagingAccounts(),
         ]);
         if (cancelled) return;
         setTemplates(data);
-        setPageMap(pagesData.reduce((acc, p) => ({ ...acc, [p.id]: p.name }), {}));
+        setPageMap(accountsData.reduce((acc, p) => ({ ...acc, [p.id]: p.name }), {}));
         if (Array.isArray(data) && data.some(r => r.status === 'PENDING')) {
           pollRef.current = setInterval(refresh, POLL_INTERVAL_MS);
         }
@@ -142,7 +143,7 @@ const MessageTemplates = () => {
       title: 'Language', dataIndex: 'language', key: 'language', render: renderLanguage,
     },
     {
-      title: 'Page', dataIndex: 'account_id', key: 'page', render: id => pageMap[id] || id,
+      title: 'Account', dataIndex: 'account_id', key: 'page', render: id => pageMap[id] || id,
     },
     {
       title: 'Buttons', dataIndex: 'buttons', key: 'buttons', render: renderButtons,

@@ -8,6 +8,7 @@ import { useHistory } from 'react-router-dom';
 import api from '../../services/api';
 import { Loading } from '../../components/UI';
 import LOCALES from './locales';
+import fetchMessagingAccounts from './accounts';
 
 const { Content } = Layout;
 const { Option } = Select;
@@ -44,12 +45,11 @@ const NewMessageTemplate = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.fetcher({ path: '/media/pages' });
-        const data = await res.json();
+        const data = await fetchMessagingAccounts();
         setPages(data);
         if (data.length === 1) setSelectedPage(data[0].id);
       } catch (err) {
-        message.error('Failed to load pages');
+        message.error('Failed to load accounts');
         console.error(err);
       } finally {
         setLoading(false);
@@ -98,7 +98,10 @@ const NewMessageTemplate = () => {
     }
   };
 
-  if (loading) return <Loading>Loading pages...</Loading>;
+  if (loading) return <Loading>Loading accounts...</Loading>;
+
+  const selectedAccount = pages.find(p => p.id === selectedPage);
+  const isWhatsApp = !!selectedAccount && selectedAccount.platform === 'whatsapp';
 
   return (
     <Layout>
@@ -107,12 +110,16 @@ const NewMessageTemplate = () => {
 
         {pages.length === 0 ? (
           <Alert
-            message="No Facebook pages connected"
+            message="No messaging accounts connected"
             description={(
               <span>
                 Please
                 {' '}
                 <a href="/connect/facebook-messenger">connect a Facebook page</a>
+                {' '}
+                or
+                {' '}
+                <a href="/connect/whatsapp">connect a WhatsApp Business number</a>
                 {' '}
 before creating templates.
               </span>
@@ -126,7 +133,7 @@ before creating templates.
               <Col span={12}>
                 <Select
                   showSearch
-                  placeholder="Select page"
+                  placeholder="Select account"
                   value={selectedPage}
                   onChange={setSelectedPage}
                   style={{ width: '100%' }}
@@ -138,6 +145,27 @@ before creating templates.
                 </Select>
               </Col>
             </Row>
+
+            {isWhatsApp && (
+              <Alert
+                style={{ marginBottom: 16 }}
+                type="info"
+                showIcon
+                message="WhatsApp template"
+                description={(
+                  <span>
+                    This template will be created on the WhatsApp Business Account
+                    linked to this number and reviewed by WhatsApp.
+                    Sample values are
+                    {' '}
+                    <b>required</b>
+                    {' '}
+                    for every placeholder, and buttons are sent as WhatsApp
+                    quick replies.
+                  </span>
+                )}
+              />
+            )}
 
             <Form
               form={form}
