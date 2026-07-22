@@ -204,6 +204,16 @@ export function makeWhatsAppText(userId: string, text: string, time = Date.now()
   }, phoneNumberId);
 }
 
+export function makeWhatsAppTextStart(userId: string, formId: string, time = Date.now(), phoneNumberId = WA_PHONE_NUMBER_ID): any {
+  return waEnvelope(userId, {
+    from: userId,
+    id: uuidv4(),
+    timestamp: Math.floor(time / 1000),
+    type: 'text',
+    text: { body: `form.${formId}` },
+  }, phoneNumberId);
+}
+
 // Answer a multiple-choice field via a WhatsApp interactive reply. The reply
 // title must be the field's choice LABEL — the machine validates choice answers
 // against labels, and the normalizer maps button_reply.title to payload.value.

@@ -258,6 +258,34 @@ function categorizeWhatsAppEvent(data) {
     }
   }
 
+  // Bare-text entry fallback: if there is no referral and the message is plain
+  // text, test it against a strict full-match pattern for form refs. This allows
+  // wa.me/<number>?text=form.<shortcode> links and real-phone smoke tests to
+  // start surveys without Click-to-WhatsApp ads. The pattern is STRICT
+  // (full-match, anchored) to prevent mid-survey free-text answers from
+  // accidentally re-triggering a referral — an existing user answering a
+  // question must not be interrupted by a ref token in their text reply.
+  // On match, synthesize a referral shape so machine.js's REFERRAL logic
+  // (no-retake, ignore rules) applies identically to both entry paths.
+  if (data.type === 'text' && !data.referral) {
+    const body = (data.text && data.text.body) || ''
+    const trimmed = body.trim()
+    const refPattern = /^(?:start\s+)?form\.([A-Za-z0-9_-]+)$/i
+    const match = trimmed.match(refPattern)
+    if (match) {
+      // Preserve shortcode case exactly as typed; prefix is always lowercase
+      const shortcode = match[1]
+      return {
+        event_type: 'conversation_started',
+        payload: {
+          type: 'conversation_started',
+          trigger: 'referral',
+          referral: { ref: `form.${shortcode}` }
+        }
+      }
+    }
+  }
+
   // Synthetic echo emitted by the message-worker after a successful WhatsApp
   // send (WhatsApp has no native message echo). Carries the outbound message's
   // metadata so the ECHO handler can advance the conversation, exactly like a

@@ -446,6 +446,93 @@ describe('categorizeWhatsAppEvent', () => {
     const { event_type } = categorizeWhatsAppEvent({ type: 'location' })
     event_type.should.equal('unknown')
   })
+
+  describe('bare-text form ref entry (wa.me links, smoke tests)', () => {
+    it('starts conversation when bare text matches form.<shortcode>', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.KAvzEUWn' } })
+      event_type.should.equal('conversation_started')
+      payload.type.should.equal('conversation_started')
+      payload.trigger.should.equal('referral')
+      payload.referral.ref.should.equal('form.KAvzEUWn')
+    })
+
+    it('starts conversation with optional start prefix', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'start form.KAvzEUWn' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.KAvzEUWn')
+    })
+
+    it('matches case-insensitively but preserves shortcode case', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'START FORM.abc' } })
+      event_type.should.equal('conversation_started')
+      // "abc" should be preserved exactly as typed (all lowercase)
+      payload.referral.ref.should.equal('form.abc')
+    })
+
+    it('matches case-insensitively with mixed-case shortcode', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'START form.AbCdEf' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.AbCdEf')
+    })
+
+    it('tolerates leading and trailing whitespace', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: '  form.abc  ' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.abc')
+    })
+
+    it('rejects mid-survey free-text answer containing a ref token', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'I filled form.abc yesterday' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('rejects bare form. without a shortcode', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('rejects plain numeric answer', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: '590' } })
+      event_type.should.equal('user_text')
+      payload.text.should.equal('590')
+    })
+
+    it('still uses referral object when present (fallback not consulted)', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'form.XYZ' },
+        referral: { ref: 'form.ABC123', source: 'ctwa' }
+      })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.ABC123')
+    })
+
+    it('accepts underscore and hyphen in shortcode', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc_def-123' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.abc_def-123')
+    })
+
+    it('rejects shortcode with invalid characters', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc@def' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('handles empty text body gracefully', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: '' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('handles null text body gracefully', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: null } })
+      event_type.should.equal('user_text')
+    })
+
+    it('handles missing text object gracefully', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text' })
+      event_type.should.equal('user_text')
+    })
+  })
 })
 
 describe('parseWhatsAppEvent', () => {
