@@ -140,6 +140,87 @@ path be wired up. Pre-normalized UniversalEvents injected through
 `/synthetic` (parseEvent passes objects with an `event_type` straight
 through) DO start conversations and carry their own `source.type`.
 
+## WhatsApp Entry Points
+
+WhatsApp conversations are initiated via three distinct paths, all reaching the same referral-based survey start logic in `machine.js`:
+
+### Entry Point 1: Click-to-WhatsApp (CTWA) Referral Object
+
+Production path for ad-driven conversions. User clicks a Click-to-WhatsApp ad or promotional link that includes a referral object.
+
+**Flow:**
+1. User clicks a CTWA ad (configured on Meta's Ad Manager, or a direct click-to-WhatsApp link with referral data)
+2. User's first inbound message arrives at Hermes (`POST /whatsapp`) with `messages[].referral: { ref: "form.<SHORTCODE>" }`
+3. Replybot's event-normalizer (`categorizeWhatsAppEvent`, line 248-259) recognizes the referral object
+4. Returns `event_type: 'conversation_started'`, `payload.referral.ref: "form.flysmoke"`
+5. Machine's REFERRAL case calls `getForm(phone_number_id, "flysmoke")` → formcentral resolves user and survey
+6. Survey starts with no-retake enforcement
+
+**Key:** The referral object is a Meta-level webhook field; it comes ONLY from CTWA ads or explicit Meta referral links, not from plain wa.me links or manual user typing.
+
+### Entry Point 2: Bare-Text Reference Token
+
+Fallback path for testing and direct wa.me links. Any plain text message matching a specific pattern triggers survey entry.
+
+**Pattern:** Message body (trimmed) must exactly match `/^(?:start\s+)?form\.([A-Za-z0-9_-]+)$/i` (case-insensitive).
+- Valid: `form.flysmoke`, `FORM.FLYSMOKE`, `start form.myform`, ` form.flysmoke ` (surrounding whitespace is trimmed before matching)
+- Invalid: `tell me form.flysmoke` (extra text—no match), `form.` (no shortcode)
+
+**Flow:**
+1. User sends plain text via wa.me link (e.g., `https://wa.me/1023456789?text=form.flysmoke`), manual SMS-like typing, or smoke testing
+2. Inbound message arrives with `messages[].text.body = "form.flysmoke"` and NO `referral` field
+3. Replybot's event-normalizer (`categorizeWhatsAppEvent`, line 270-287) tests the text against the pattern
+4. On match, synthesizes `event_type: 'conversation_started'`, `payload.referral.ref: "form.flysmoke"`
+5. Machine's REFERRAL case processes it identically to the CTWA referral path
+6. Survey starts with no-retake enforcement
+
+**Why strict full-match:** Prevents mid-survey user replies from accidentally re-triggering a survey entry. An existing user answering a question must not be interrupted if their answer happens to be "form.myform". The pattern is STRICT (anchored, full-match) to ensure only explicit form tokens at message start trigger entry.
+
+**e2e-tested paths:**
+- `form.<shortcode>` typed manually or via wa.me?text= prefill
+- `start form.<shortcode>` (user explicitly says "start")
+- Case-insensitive (user types FORM.MYFORM or Form.MyForm)
+
+### Entry Point 3: Pre-Normalized UniversalEvent (/synthetic)
+
+Staging and testing path. No Meta webhook required; inject a fully-formed UniversalEvent directly.
+
+**Flow:**
+1. POST a pre-normalized UniversalEvent JSON to `POST /synthetic` (hermes endpoint)
+2. Event includes `source.type: 'whatsapp'`, `event_type: 'conversation_started'`, `payload.referral.ref: "form.<SHORTCODE>"`
+3. Hermes publishes to Kafka as-is (no re-parsing needed; `parseEvent` recognizes pre-formed events)
+4. Replybot consumes and routes to REFERRAL handler
+5. Machine calls `getForm` with WhatsApp account_id and shortcode
+6. Survey starts
+
+**Example payload:**
+```json
+{
+  "event_id": "evt_test_001",
+  "user_id": "27123456789",
+  "timestamp": 1721678400000,
+  "source": { "type": "whatsapp", "account_id": "1023456789" },
+  "event_type": "conversation_started",
+  "payload": {
+    "type": "conversation_started",
+    "trigger": "referral",
+    "referral": { "ref": "form.testform" }
+  },
+  "raw": {}
+}
+```
+
+**Use case:** Repeatable testing without Meta webhook setup or CTWA ad configuration.
+
+### Non-Entry: Plain Text Not Matching Reference Pattern
+
+A WhatsApp user sending plain text that does NOT match the form ref pattern (e.g., "hi", "help", "how do I join") with no referral object:
+- Normalizes as `event_type: 'user_text'`
+- Machine's TEXT handler finds no active conversation and ignores the message (no-op)
+- User receives no bot reply
+
+This is intentional: WhatsApp is a customer-service platform, not a broadcast tool. Users must explicitly request a survey via an entry point (CTWA ad, form-ref link, or /synthetic), not stumble into one via casual text. Unlike Messenger (which has a "Get Started" button offering opt-in), WhatsApp conversations are always user-initiated and require explicit entry.
+
 ### Testing
 
 `npm test` runs the full mocha suite via the quoted glob `'lib/**/*.test.js'`

@@ -21,6 +21,8 @@ dashboard-client, translate-typeform, and replybot. Meta's API docs were the
 primary design input — see [References](#references) at the bottom for the
 specific pages consulted.
 
+**Note:** WhatsApp has an analogous template system with a slightly different API shape. See [`documentation/whatsapp-templates.md`](./whatsapp-templates.md) for WhatsApp-specific details; this document focuses on Messenger's implementation and their differences are noted where relevant.
+
 ---
 
 ## Identity model
