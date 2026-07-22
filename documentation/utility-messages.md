@@ -25,15 +25,20 @@ specific pages consulted.
 
 ## Identity model
 
-> **A template is uniquely identified by the tuple `(facebook_page_id, name, language)`.**
+> **A template is uniquely identified by the tuple `(account_id, name, language)`.**
+
+(`account_id` was named `facebook_page_id` before migration 22 renamed it as part of
+the platform abstraction — it holds the messaging account id matching `credentials.key`,
+i.e. the page id for Messenger.)
 
 Read that again. The same `name` can exist in multiple languages — each is a separate
 record, approved by Facebook independently. This is Facebook's own model and it flows
 through every layer:
 
-- **DB schema** — `UNIQUE (facebook_page_id, name, language)`
+- **DB schema** — `UNIQUE (account_id, name, language)`
 - **Dashboard UI** — one row per (name, language); name help-text calls this out
-- **API** — `POST` rejects duplicate `(pageId, name, language)` with 409
+- **API** — `POST` rejects duplicate `(accountId, name, language)` with 409
+  (legacy `pageId` param still accepted)
 - **Survey JSON** — both `template` and `language` are required, no defaults
 - **Translator** — throws if either is missing; passes `language.code` through
   to the Facebook Send API so FB picks the right approved variant
@@ -53,7 +58,7 @@ requires both values explicitly.
      → row inserted with status=PENDING, fb_template_id stored
 
 2. Dashboard (polling)
-   GET /api/v1/message-templates?pageId=X every 4 s while any row is PENDING
+   GET /api/v1/message-templates?accountId=X (legacy pageId accepted) every 4 s while any row is PENDING
      → for PENDING rows, server calls GET /{pageId}/message_templates?name=X
        and updates status + rejection_reason in the DB
      → polling stops automatically when no rows are PENDING
@@ -276,6 +281,10 @@ CREATE TABLE chatroach.message_templates(
     INDEX (facebook_page_id, status)
 );
 ```
+
+`devops/migrations/22-account-id-rename.sql` later renames `facebook_page_id` to
+`account_id` (platform-agnostic messaging account id, matching `credentials.key`);
+the unique constraint and indexes track the rename automatically.
 
 `devops/migrations/14-message-templates-buttons.sql` adds quick-reply buttons:
 
