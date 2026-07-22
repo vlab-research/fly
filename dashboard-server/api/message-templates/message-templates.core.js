@@ -47,8 +47,9 @@ function validateButtons(buttons) {
   return { valid: true, normalized };
 }
 
-function validateCreateInput({ pageId, name, language, body, buttons, examples }) {
-  if (!pageId) return { valid: false, error: 'pageId is required' };
+function validateCreateInput({ accountId, pageId, name, language, body, buttons, examples }) {
+  const idValue = accountId || pageId;
+  if (!idValue) return { valid: false, error: 'accountId is required' };
   if (!name) return { valid: false, error: 'name is required' };
   if (name.length > NAME_MAX_LENGTH) return { valid: false, error: `name exceeds ${NAME_MAX_LENGTH} characters` };
   if (!NAME_PATTERN.test(name)) {
@@ -170,7 +171,7 @@ function matchFbEntry(row, fbEntries) {
 function formatRecord(row) {
   return {
     id: row.id,
-    facebook_page_id: row.facebook_page_id,
+    account_id: row.account_id,
     fb_template_id: row.fb_template_id,
     name: row.name,
     language: row.language,

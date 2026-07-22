@@ -18,21 +18,21 @@ function mockRes() {
 
 describe('message-templates.controller (makeHandlers)', () => {
   const email = 'test@vlab.com';
-  const pageId = 'page1';
-  const validBody = { pageId, name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}' };
+  const accountId = 'page1';
+  const validBody = { accountId, name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}' };
   const validReq = { user: { email }, body: validBody };
 
   // Default mocks — all happy-path, overridden per test as needed
   const defaultCredentialQuery = {
     getOne: async () => ({
-      entity: 'facebook_page', key: pageId,
-      details: { id: pageId, name: 'Test Page', access_token: 'tok123' },
+      entity: 'facebook_page', key: accountId,
+      details: { id: accountId, name: 'Test Page', access_token: 'tok123' },
     }),
   };
   const defaultTemplateQuery = {
     create: async (record) => ({
       id: 'uuid-new',
-      facebook_page_id: record.facebookPageId,
+      account_id: record.accountId,
       fb_template_id: record.fbTemplateId,
       name: record.name,
       language: record.language,
@@ -45,7 +45,7 @@ describe('message-templates.controller (makeHandlers)', () => {
     list: async () => [],
     get: async ({ id }) => ({
       id,
-      facebook_page_id: pageId,
+      account_id: accountId,
       fb_template_id: 'fb_abc',
       name: 'prize_ready',
       language: 'en_US',
@@ -170,7 +170,7 @@ describe('message-templates.controller (makeHandlers)', () => {
           createTemplate: async (pid, token) => { captured = { pid, token }; return { id: 'fb', status: 'APPROVED' }; },
         },
       }).create(validReq, mockRes());
-      captured.pid.should.equal(pageId);
+      captured.pid.should.equal(accountId);
       captured.token.should.equal('tok123');
     });
 
@@ -220,18 +220,11 @@ describe('message-templates.controller (makeHandlers)', () => {
   // list
   // -------------------------------------------------------
   describe('list', () => {
-    const listReq = { user: { email }, query: { pageId } };
+    const listReq = { user: { email }, query: { accountId } };
 
-    it('returns 400 when pageId query param is missing', async () => {
-      const res = mockRes();
-      await makeTestHandlers().list({ user: { email }, query: {} }, res);
-      res.statusCode.should.equal(400);
-      res.body.error.should.include('pageId');
-    });
-
-    it('returns 200 with the formatted row list', async () => {
+    it('returns 200 with the formatted row list (no accountId filter)', async () => {
       const rows = [{
-        id: 'u1', facebook_page_id: pageId, fb_template_id: 'fb1',
+        id: 'u1', account_id: accountId, fb_template_id: 'fb1',
         name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',
         rejection_reason: null, created: 't', updated: 't',
       }];
@@ -251,7 +244,7 @@ describe('message-templates.controller (makeHandlers)', () => {
       await makeTestHandlers({
         templateQuery: {
           ...defaultTemplateQuery,
-          list: async () => [{ id: '1', name: 'p', language: 'en_US', status: 'APPROVED', facebook_page_id: pageId }],
+          list: async () => [{ id: '1', name: 'p', language: 'en_US', status: 'APPROVED', account_id: accountId }],
         },
         facebookClient: { ...defaultFacebookClient, getTemplatesByName: async () => { called = true; return { data: [] }; } },
       }).list(listReq, mockRes());
@@ -260,7 +253,7 @@ describe('message-templates.controller (makeHandlers)', () => {
 
     it('refreshes PENDING rows from Facebook and updates matching (name, language) entries', async () => {
       const row = {
-        id: 'u1', facebook_page_id: pageId, fb_template_id: null,
+        id: 'u1', account_id: accountId, fb_template_id: null,
         name: 'prize', language: 'en_US', status: 'PENDING',
       };
       let updateArgs;
@@ -289,8 +282,8 @@ describe('message-templates.controller (makeHandlers)', () => {
       // Two PENDING rows with the same name but different languages. FB's response
       // carries both variants. Each row must receive ITS OWN language\'s status.
       const rows = [
-        { id: 'u-en', facebook_page_id: pageId, name: 'prize', language: 'en_US', status: 'PENDING' },
-        { id: 'u-es', facebook_page_id: pageId, name: 'prize', language: 'es_LA', status: 'PENDING' },
+        { id: 'u-en', account_id: accountId, name: 'prize', language: 'en_US', status: 'PENDING' },
+        { id: 'u-es', account_id: accountId, name: 'prize', language: 'es_LA', status: 'PENDING' },
       ];
       const updates = [];
       await makeTestHandlers({
@@ -317,7 +310,7 @@ describe('message-templates.controller (makeHandlers)', () => {
     });
 
     it('still returns the row list even when FB refresh throws (graceful degradation)', async () => {
-      const row = { id: 'u1', facebook_page_id: pageId, name: 'prize', language: 'en_US', status: 'PENDING' };
+      const row = { id: 'u1', account_id: accountId, name: 'prize', language: 'en_US', status: 'PENDING' };
       const res = mockRes();
       await makeTestHandlers({
         templateQuery: { ...defaultTemplateQuery, list: async () => [row] },
@@ -366,7 +359,7 @@ describe('message-templates.controller (makeHandlers)', () => {
         },
       }).remove(delReq, mockRes());
       captured.hsm.should.equal('fb_abc');
-      captured.pid.should.equal(pageId);
+      captured.pid.should.equal(accountId);
       captured.token.should.equal('tok123');
     });
 
@@ -411,7 +404,7 @@ describe('message-templates.controller (makeHandlers)', () => {
       await makeTestHandlers({
         templateQuery: {
           ...defaultTemplateQuery,
-          get: async () => ({ id: 'uuid-abc', facebook_page_id: pageId, fb_template_id: null, name: 'x', language: 'en_US' }),
+          get: async () => ({ id: 'uuid-abc', account_id: accountId, fb_template_id: null, name: 'x', language: 'en_US' }),
         },
         facebookClient: {
           ...defaultFacebookClient,

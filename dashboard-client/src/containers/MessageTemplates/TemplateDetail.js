@@ -109,7 +109,7 @@ const TemplateDetail = () => {
             </Descriptions.Item>
             <Descriptions.Item label="Language">{languageLabel}</Descriptions.Item>
             <Descriptions.Item label="Page">
-              {pageMap[template.facebook_page_id] || template.facebook_page_id}
+              {pageMap[template.account_id] || template.account_id}
             </Descriptions.Item>
             <Descriptions.Item label="Status">{statusTag(template.status)}</Descriptions.Item>
             <Descriptions.Item label="Submitted">

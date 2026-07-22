@@ -73,7 +73,7 @@ const NewMessageTemplate = () => {
         path: '/message-templates',
         method: 'POST',
         body: {
-          pageId: selectedPage,
+          accountId: selectedPage,
           name: values.name,
           language: values.language,
           body: values.body,

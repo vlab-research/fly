@@ -17,62 +17,72 @@ describe('media.core', () => {
   describe('validateUploadInput', () => {
     const validFile = { buffer: Buffer.from('x'), originalname: 'pic.jpg', mimetype: 'image/jpeg', size: 1024 };
 
-    it('accepts complete, correct input', () => {
+    it('accepts complete, correct input with accountId', () => {
+      validateUploadInput({ file: validFile, accountId: '123', mediaType: 'image' })
+        .should.deep.equal({ valid: true });
+    });
+
+    it('accepts complete, correct input with legacy pageId', () => {
       validateUploadInput({ file: validFile, pageId: '123', mediaType: 'image' })
         .should.deep.equal({ valid: true });
     });
 
-    it('rejects missing pageId', () => {
-      const result = validateUploadInput({ file: validFile, pageId: undefined, mediaType: 'image' });
-      result.valid.should.equal(false);
-      result.error.should.include('pageId');
+    it('accepts accountId when both accountId and pageId are provided (accountId takes priority)', () => {
+      validateUploadInput({ file: validFile, accountId: '456', pageId: '123', mediaType: 'image' })
+        .should.deep.equal({ valid: true });
     });
 
-    it('rejects empty-string pageId (falsy but not undefined)', () => {
-      const result = validateUploadInput({ file: validFile, pageId: '', mediaType: 'image' });
+    it('rejects missing accountId and pageId', () => {
+      const result = validateUploadInput({ file: validFile, accountId: undefined, pageId: undefined, mediaType: 'image' });
+      result.valid.should.equal(false);
+      result.error.should.include('accountId');
+    });
+
+    it('rejects empty-string accountId (falsy but not undefined)', () => {
+      const result = validateUploadInput({ file: validFile, accountId: '', mediaType: 'image' });
       result.valid.should.equal(false);
     });
 
     it('rejects an unrecognized mediaType', () => {
-      const result = validateUploadInput({ file: validFile, pageId: '123', mediaType: 'audio' });
+      const result = validateUploadInput({ file: validFile, accountId: '123', mediaType: 'audio' });
       result.valid.should.equal(false);
       result.error.should.include('mediaType');
     });
 
     it('rejects missing mediaType', () => {
-      const result = validateUploadInput({ file: validFile, pageId: '123', mediaType: undefined });
+      const result = validateUploadInput({ file: validFile, accountId: '123', mediaType: undefined });
       result.valid.should.equal(false);
     });
 
     it('accepts "video" as a valid mediaType', () => {
-      validateUploadInput({ file: validFile, pageId: '123', mediaType: 'video' })
+      validateUploadInput({ file: validFile, accountId: '123', mediaType: 'video' })
         .should.deep.equal({ valid: true });
     });
 
     it('rejects null file', () => {
-      const result = validateUploadInput({ file: null, pageId: '123', mediaType: 'image' });
+      const result = validateUploadInput({ file: null, accountId: '123', mediaType: 'image' });
       result.valid.should.equal(false);
       result.error.should.include('file');
     });
 
     it('rejects file exceeding the size limit', () => {
       const bigFile = { ...validFile, size: MAX_FILE_SIZE + 1 };
-      const result = validateUploadInput({ file: bigFile, pageId: '123', mediaType: 'image' });
+      const result = validateUploadInput({ file: bigFile, accountId: '123', mediaType: 'image' });
       result.valid.should.equal(false);
       result.error.should.include('size');
     });
 
     it('accepts file at exactly the size limit (boundary)', () => {
       const maxFile = { ...validFile, size: MAX_FILE_SIZE };
-      validateUploadInput({ file: maxFile, pageId: '123', mediaType: 'image' })
+      validateUploadInput({ file: maxFile, accountId: '123', mediaType: 'image' })
         .should.deep.equal({ valid: true });
     });
 
-    it('checks pageId before file — missing pageId reported even when file is also null', () => {
+    it('checks accountId before file — missing accountId reported even when file is also null', () => {
       // Validates that the function short-circuits in a predictable order.
-      // Users who forgot to select a page should see the pageId error first.
-      const result = validateUploadInput({ file: null, pageId: '', mediaType: 'image' });
-      result.error.should.include('pageId');
+      // Users who forgot to select a page should see the accountId error first.
+      const result = validateUploadInput({ file: null, accountId: '', mediaType: 'image' });
+      result.error.should.include('accountId');
     });
   });
 

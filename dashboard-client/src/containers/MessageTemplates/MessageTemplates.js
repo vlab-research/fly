@@ -142,7 +142,7 @@ const MessageTemplates = () => {
       title: 'Language', dataIndex: 'language', key: 'language', render: renderLanguage,
     },
     {
-      title: 'Page', dataIndex: 'facebook_page_id', key: 'page', render: id => pageMap[id] || id,
+      title: 'Page', dataIndex: 'account_id', key: 'page', render: id => pageMap[id] || id,
     },
     {
       title: 'Buttons', dataIndex: 'buttons', key: 'buttons', render: renderButtons,

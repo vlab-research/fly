@@ -28,9 +28,11 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
 
   async function create(req, res) {
     const { email } = req.user;
-    const { pageId, name, language, body, buttons, examples } = req.body;
+    // Support both accountId (new) and legacy pageId parameter for deploy safety
+    const accountId = req.body.accountId || req.body.pageId;
+    const { name, language, body, buttons, examples } = req.body;
 
-    const validation = validateCreateInput({ pageId, name, language, body, buttons, examples });
+    const validation = validateCreateInput({ accountId, pageId: req.body.pageId, name, language, body, buttons, examples });
     if (!validation.valid) {
       return res.status(400).json({ error: validation.error });
     }
@@ -38,7 +40,7 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
     const normalizedExamples = validation.examples || [];
 
     try {
-      const pageToken = await getPageToken(email, pageId);
+      const pageToken = await getPageToken(email, accountId);
       if (!pageToken) {
         return res.status(404).json({ error: 'Page not found or not connected' });
       }
@@ -46,7 +48,7 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
       const payload = buildFacebookCreatePayload({
         name, language, body, buttons: normalizedButtons, examples: normalizedExamples,
       });
-      const fbResponse = await createTemplate(pageId, pageToken, payload);
+      const fbResponse = await createTemplate(accountId, pageToken, payload);
       const parsed = parseCreateResponse(fbResponse);
 
       if (!parsed.ok) {
@@ -55,7 +57,7 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
 
       const saved = await templateQuery.create({
         email,
-        facebookPageId: pageId,
+        accountId,
         fbTemplateId: parsed.fbTemplateId,
         name,
         language,
@@ -84,16 +86,16 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
     const pending = rows.filter(r => r.status === 'PENDING');
     if (pending.length === 0) return;
 
-    const pageIds = [...new Set(pending.map(r => r.facebook_page_id))];
-    for (const pid of pageIds) {
-      const pageToken = await getPageToken(email, pid);
+    const accountIds = [...new Set(pending.map(r => r.account_id))];
+    for (const aid of accountIds) {
+      const pageToken = await getPageToken(email, aid);
       if (!pageToken) continue;
-      const namesToRefresh = [...new Set(pending.filter(r => r.facebook_page_id === pid).map(r => r.name))];
+      const namesToRefresh = [...new Set(pending.filter(r => r.account_id === aid).map(r => r.name))];
       for (const name of namesToRefresh) {
         try {
-          const fbResponse = await getTemplatesByName(pid, pageToken, name);
+          const fbResponse = await getTemplatesByName(aid, pageToken, name);
           const fbEntries = parseListResponse(fbResponse);
-          const rowsWithName = pending.filter(r => r.facebook_page_id === pid && r.name === name);
+          const rowsWithName = pending.filter(r => r.account_id === aid && r.name === name);
           for (const row of rowsWithName) {
             const entry = matchFbEntry(row, fbEntries);
             if (entry && entry.status !== row.status) {
@@ -115,11 +117,12 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
 
   async function list(req, res) {
     const { email } = req.user;
-    const { pageId } = req.query;
+    // Support both accountId (new) and legacy pageId parameter for deploy safety
+    const accountId = req.query.accountId || req.query.pageId;
 
     try {
-      const rows = pageId
-        ? await templateQuery.list({ email, facebookPageId: pageId })
+      const rows = accountId
+        ? await templateQuery.list({ email, accountId })
         : await templateQuery.listAll({ email });
 
       await refreshTemplateStatus(rows, email);
@@ -140,13 +143,13 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
         return res.status(404).json({ error: 'Template not found' });
       }
 
-      const pageToken = await getPageToken(email, row.facebook_page_id);
+      const pageToken = await getPageToken(email, row.account_id);
       if (!pageToken) {
         return res.status(404).json({ error: 'Page not found or not connected' });
       }
 
       if (row.fb_template_id) {
-        const fbResponse = await deleteTemplateByHsmId(row.facebook_page_id, pageToken, row.fb_template_id);
+        const fbResponse = await deleteTemplateByHsmId(row.account_id, pageToken, row.fb_template_id);
         if (fbResponse && fbResponse.error) {
           const code = fbResponse.error.code;
           // 100 = template not found; ignore so the local row can be cleaned up

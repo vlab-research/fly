@@ -40,10 +40,15 @@ describe('message-templates.core', () => {
   // validateCreateInput — branching validation logic
   // -------------------------------------------------------
   describe('validateCreateInput', () => {
-    const valid = { pageId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
+    const valid = { accountId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
+    const validLegacy = { pageId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
 
-    it('accepts complete, correct input', () => {
+    it('accepts complete, correct input with accountId', () => {
       validateCreateInput(valid).should.deep.equal({ valid: true, buttons: [], examples: ['Alice'] });
+    });
+
+    it('accepts complete, correct input with legacy pageId', () => {
+      validateCreateInput(validLegacy).should.deep.equal({ valid: true, buttons: [], examples: ['Alice'] });
     });
 
     it('accepts a body without placeholders and no examples', () => {
@@ -82,14 +87,14 @@ describe('message-templates.core', () => {
       r.error.should.match(/no \{\{N\}\} placeholders/);
     });
 
-    it('rejects missing pageId', () => {
-      const r = validateCreateInput({ ...valid, pageId: undefined });
+    it('rejects missing accountId and pageId', () => {
+      const r = validateCreateInput({ ...valid, accountId: undefined, pageId: undefined });
       r.valid.should.equal(false);
-      r.error.should.include('pageId');
+      r.error.should.include('accountId');
     });
 
-    it('rejects empty-string pageId', () => {
-      validateCreateInput({ ...valid, pageId: '' }).valid.should.equal(false);
+    it('rejects empty-string accountId', () => {
+      validateCreateInput({ ...valid, accountId: '' }).valid.should.equal(false);
     });
 
     it('rejects missing name', () => {
@@ -140,10 +145,10 @@ describe('message-templates.core', () => {
       r.should.deep.equal({ valid: true, buttons: [], examples: [] });
     });
 
-    it('reports pageId error before name when both are missing', () => {
+    it('reports accountId error before name when both are missing', () => {
       // Predictable short-circuit order: authors see the first missing field first
-      const r = validateCreateInput({ pageId: '', name: '', language: 'en_US', body: 'x' });
-      r.error.should.include('pageId');
+      const r = validateCreateInput({ accountId: '', name: '', language: 'en_US', body: 'x' });
+      r.error.should.include('accountId');
     });
   });
 
@@ -400,7 +405,7 @@ describe('message-templates.core', () => {
   describe('formatRecord', () => {
     it('keeps the snake_case wire shape expected by the client', () => {
       const row = {
-        id: 'u1', facebook_page_id: 'p1', fb_template_id: 'fb1',
+        id: 'u1', account_id: 'p1', fb_template_id: 'fb1',
         name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',
         rejection_reason: null, created: 't1', updated: 't2',
         userid: 'should_be_stripped',
@@ -408,7 +413,7 @@ describe('message-templates.core', () => {
       const out = formatRecord(row);
       out.should.not.have.property('userid');
       out.should.have.property('id', 'u1');
-      out.should.have.property('facebook_page_id', 'p1');
+      out.should.have.property('account_id', 'p1');
       out.should.have.property('fb_template_id', 'fb1');
       out.should.have.property('language', 'en_US');
     });
