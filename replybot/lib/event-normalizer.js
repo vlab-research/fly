@@ -219,11 +219,21 @@ function parseSyntheticEvent(data, timestamp) {
   const userId = data.user_id || data.user || ''
   const pageId = data.page || data.pageid || data.account_id
 
+  // Synthetic events may carry the conversation's real platform as an
+  // optional top-level field ("platform": "messenger" | "whatsapp") — dean
+  // sends it and hermes/botserver pass it through. Surface it as
+  // source.platform so downstream consumers can recover the real platform;
+  // source.type stays 'synthetic'.
+  const source = { type: 'synthetic', account_id: pageId }
+  if (data.platform) {
+    source.platform = data.platform
+  }
+
   return {
     event_id: newEventId(),
     user_id: userId,
     timestamp,
-    source: { type: 'synthetic', account_id: pageId },
+    source,
     event_type: unifiedType,
     payload: event.value !== undefined ? event.value : null,
     raw: data

@@ -36,6 +36,42 @@ func TestGenericGetUserResolvesWhatsAppCredential(t *testing.T) {
 	assert.Equal(t, "00000000-0000-0000-0000-000000000000", user.Id)
 }
 
+// A payment event carrying Platform resolves the credential via the natural
+// key (entity, key) — no reliance on the key-only fallback.
+func TestGenericGetUserWithPlatformResolvesViaEntityKey(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+
+	insertUserSql := `
+		INSERT INTO users(id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+	`
+	mustExec(t, pool, insertUserSql)
+
+	insertWhatsAppSql := `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'whatsapp_business', 'wa-phone-id', '{"id": "wa-phone-id"}');
+	`
+	mustExec(t, pool, insertWhatsAppSql)
+
+	pe := &PaymentEvent{Pageid: "wa-phone-id", Platform: "whatsapp"}
+	user, err := GenericGetUser(pool, pe)
+
+	assert.Nil(t, err)
+	assert.Equal(t, "00000000-0000-0000-0000-000000000000", user.Id)
+
+	// The entity filter is real: asking for the same account id under the
+	// wrong platform finds nothing.
+	peWrong := &PaymentEvent{Pageid: "wa-phone-id", Platform: "messenger"}
+	userWrong, err := GenericGetUser(pool, peWrong)
+
+	assert.Nil(t, err)
+	assert.Nil(t, userWrong)
+}
+
 func TestHandleJSONUnmarshalError(t *testing.T) {
 	// Create a sample JSON details
 	details := json.RawMessage(`{"test": "data"}`)

@@ -73,6 +73,54 @@ func TestGetRespondingsGetsOnlyThoseInGivenInterval(t *testing.T) {
 
 }
 
+func TestEventsCarryPlatformFromStateWithMessengerDefault(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	// WhatsApp conversation: md.platform is persisted in state_json, and the
+	// states.platform computed column exposes it.
+	mustExec(t, pool, insertQuery,
+		"wa-user",
+		"wa-page",
+		time.Now().Add(-2*time.Hour),
+		"RESPONDING",
+		`{"state": "RESPONDING", "md": {"platform": "whatsapp"}}`)
+
+	// Legacy conversation: no md.platform, so states.platform is NULL and
+	// COALESCE yields 'messenger'.
+	mustExec(t, pool, insertQuery,
+		"legacy-user",
+		"legacy-page",
+		time.Now().Add(-2*time.Hour),
+		"RESPONDING",
+		`{"state": "RESPONDING"}`)
+
+	cfg := &Config{RespondingInterval: "4 hours", RespondingGrace: "1 hour", RetryMaxAttempts: 20}
+	ch := Respondings(cfg, pool)
+	events := getEvents(ch)
+
+	assert.Equal(t, 2, len(events))
+
+	platforms := map[string]string{}
+	for _, e := range events {
+		platforms[e.User] = e.Platform
+	}
+	assert.Equal(t, "whatsapp", platforms["wa-user"])
+	assert.Equal(t, "messenger", platforms["legacy-user"])
+
+	// The platform field must ride along in the JSON body sent to botserver.
+	for _, e := range events {
+		b, err := json.Marshal(e)
+		assert.Nil(t, err)
+		if e.User == "wa-user" {
+			assert.Contains(t, string(b), `"platform":"whatsapp"`)
+		} else {
+			assert.Contains(t, string(b), `"platform":"messenger"`)
+		}
+	}
+}
+
 func TestGetRespondingsOnlyGetsThoseOutsideOfGracePeriod(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()

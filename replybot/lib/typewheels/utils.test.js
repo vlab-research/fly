@@ -1,6 +1,6 @@
 const u = require('./utils')
 
-const { getStarted, echo, statementEcho, delivery, read, qr, text, multipleChoice, referral } = require('./events.test')
+const { getStarted, echo, statementEcho, delivery, read, qr, text, multipleChoice, referral, whatsappReferral, WA_PHONE_NUMBER_ID } = require('./events.test')
 
 
 
@@ -53,7 +53,8 @@ describe('getMetadata', () => {
           foo: 'bar',
           seed: 4001850155,
           startTime: referral.timestamp,
-          pageid: '1051551461692797'
+          pageid: '1051551461692797',
+          platform: 'messenger'
         }
       )
   })
@@ -65,9 +66,54 @@ describe('getMetadata', () => {
           form: 'fallback',
           seed: 2378635558,
           startTime: echo.timestamp,
-          pageid: '1051551461692797'
+          pageid: '1051551461692797',
+          platform: 'messenger'
         }
       )
+  })
+
+  it('persists platform whatsapp from a whatsapp conversation start', () => {
+    const md = u.getMetadata(whatsappReferral)
+    md.platform.should.equal('whatsapp')
+    md.pageid.should.equal(WA_PHONE_NUMBER_ID)
+    md.form.should.equal('FOO')
+  })
+
+  it('persists platform from a synthetic referral carrying a platform hint, never synthetic', () => {
+    const syntheticReferral = {
+      ...whatsappReferral,
+      source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID, platform: 'whatsapp' }
+    }
+    const md = u.getMetadata(syntheticReferral)
+    md.platform.should.equal('whatsapp')
+  })
+
+  it('defaults platform to messenger on a synthetic referral without a hint', () => {
+    const syntheticReferral = {
+      ...referral,
+      source: { type: 'synthetic', account_id: referral.source.account_id }
+    }
+    const md = u.getMetadata(syntheticReferral)
+    md.platform.should.equal('messenger')
+  })
+})
+
+describe('eventPlatform', () => {
+  it('returns source.type for real platform events', () => {
+    u.eventPlatform({ source: { type: 'messenger', account_id: 'x' } }).should.equal('messenger')
+    u.eventPlatform({ source: { type: 'whatsapp', account_id: 'x' } }).should.equal('whatsapp')
+  })
+
+  it('returns the platform hint for synthetic events', () => {
+    u.eventPlatform({ source: { type: 'synthetic', account_id: 'x', platform: 'whatsapp' } }).should.equal('whatsapp')
+    u.eventPlatform({ source: { type: 'synthetic', account_id: 'x', platform: 'messenger' } }).should.equal('messenger')
+  })
+
+  it('never returns synthetic — defaults to messenger', () => {
+    u.eventPlatform({ source: { type: 'synthetic', account_id: 'x' } }).should.equal('messenger')
+    u.eventPlatform({ source: { type: 'synthetic', platform: 'synthetic' } }).should.equal('messenger')
+    u.eventPlatform({ source: {} }).should.equal('messenger')
+    u.eventPlatform({}).should.equal('messenger')
   })
 })
 

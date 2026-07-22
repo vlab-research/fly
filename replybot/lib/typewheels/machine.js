@@ -682,7 +682,7 @@ function act(ctx, state, output) {
 
     case 'MAKE_PAYMENT': {
       const qa = state.qa
-      const payment = _wrapSideEffect(ctx, getPayment(ctx, qa, output.question))
+      const payment = _wrapPayment(ctx, getPayment(ctx, qa, output.question))
       return {
         messages: [],
         payment
@@ -717,16 +717,25 @@ function _wrapSideEffect(ctx, data) {
   }
 }
 
-function getSideEffectFromMessage(ctx, message, type) {
-  const metadata = message.metadata
-  if (metadata && metadata[type]) {
-    return _wrapSideEffect(ctx, metadata[type])
+// Payment events are published off-pipeline (VLAB_PAYMENT_TOPIC, consumed by
+// dinersclub) and carry the conversation's platform so downstream consumers
+// can route/report by platform. ctx.platform is threaded from
+// actionsResponses (transition.js), which reads the persisted md.platform;
+// 'messenger' is exact for anything predating that persistence.
+function _wrapPayment(ctx, payment) {
+  if (!payment) return
+  return {
+    ..._wrapSideEffect(ctx, payment),
+    platform: ctx.platform || 'messenger'
   }
-  return undefined
 }
 
 function getPaymentFromMessage(ctx, message) {
-  return getSideEffectFromMessage(ctx, message, 'payment')
+  const metadata = message.metadata
+  if (metadata && metadata.payment) {
+    return _wrapPayment(ctx, metadata.payment)
+  }
+  return undefined
 }
 
 function updateQA(qa, u) {

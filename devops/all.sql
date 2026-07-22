@@ -284,3 +284,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS unique_messaging_account
   ON chatroach.credentials (key)
   STORING (details, userid)
   WHERE entity IN ('facebook_page', 'whatsapp_business');
+
+-- 21-states-platform.sql: conversation platform from state_json md (NULL predates md.platform persistence; COALESCE to 'messenger')
+ALTER TABLE chatroach.states ADD COLUMN IF NOT EXISTS platform VARCHAR AS (state_json->'md'->>'platform') STORED;

@@ -1,7 +1,48 @@
 const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
-const { parseEvent, parsePayload, categorizeMessengerEvent, parseMessengerEvent, parseWhatsAppEvent, categorizeWhatsAppEvent } = require('./event-normalizer')
+const { parseEvent, parsePayload, categorizeMessengerEvent, parseMessengerEvent, parseWhatsAppEvent, categorizeWhatsAppEvent, parseSyntheticEvent } = require('./event-normalizer')
+
+describe('parseSyntheticEvent - platform hint', () => {
+  it('surfaces an optional top-level platform field as source.platform', () => {
+    const result = parseSyntheticEvent({
+      user: 'user123',
+      page: 'page456',
+      platform: 'whatsapp',
+      event: { type: 'timeout', value: 1234 }
+    }, 1711100000000)
+
+    result.event_type.should.equal('synthetic_timeout')
+    result.source.type.should.equal('synthetic')
+    result.source.account_id.should.equal('page456')
+    result.source.platform.should.equal('whatsapp')
+  })
+
+  it('omits source.platform when the payload carries no platform', () => {
+    const result = parseSyntheticEvent({
+      user: 'user123',
+      page: 'page456',
+      event: { type: 'timeout', value: 1234 }
+    }, 1711100000000)
+
+    result.source.should.not.have.property('platform')
+  })
+
+  it('passes the platform hint through parseEvent for raw synthetic kafka events', () => {
+    const result = parseEvent(JSON.stringify({
+      user: 'user123',
+      page: 'page456',
+      source: 'synthetic',
+      platform: 'whatsapp',
+      timestamp: 1711100000000,
+      event: { type: 'follow_up', value: null }
+    }))
+
+    result.event_type.should.equal('synthetic_follow_up')
+    result.source.type.should.equal('synthetic')
+    result.source.platform.should.equal('whatsapp')
+  })
+})
 
 describe('parsePayload', () => {
   it('parses JSON string to object', () => {

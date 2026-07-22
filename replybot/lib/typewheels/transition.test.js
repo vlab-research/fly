@@ -2,7 +2,7 @@ const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 
 process.env.FALLBACK_FORM = 'fallback'
 process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
@@ -188,11 +188,145 @@ describe('Machine integrated', () => {
       pageid: '1051551461692797',
       timestamp: event.timestamp,
       provider: 'reloadly',
-      details: { foo: 'bar' }
+      details: { foo: 'bar' },
+      platform: 'messenger'
     })
   })
 
 
+
+  it('persists md.platform and emits whatsapp commands on a whatsapp conversation start', async () => {
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: whatsappReferral.timestamp + 1000 * 60 * 60 * 24
+    }, 'foo'])
+
+    const report = await m.run({ state: 'START', qa: [], forms: [] }, WA_USER_ID, whatsappReferral)
+
+    should.not.exist(report.error)
+    report.publish.should.be.true
+
+    // The platform is persisted with the state so synthetic re-entry events
+    // can recover it (the state_json is what scribble writes to the DB).
+    report.newState.md.platform.should.equal('whatsapp')
+    report.newState.md.pageid.should.equal(WA_PHONE_NUMBER_ID)
+
+    report.commands[0].platform.should.equal('whatsapp')
+    report.commands[0].platform_account_id.should.equal(WA_PHONE_NUMBER_ID)
+  })
+
+  it('persists md.platform from a synthetic referral carrying platform whatsapp — never synthetic', async () => {
+    // Synthetic conversation starts (Track A staging testing) carry
+    // source.type 'synthetic' plus an optional platform hint surfaced by the
+    // event-normalizer as source.platform. md.platform must hold the real
+    // platform, never 'synthetic'.
+    const syntheticReferral = {
+      ...whatsappReferral,
+      source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID, platform: 'whatsapp' }
+    }
+
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }],
+      offTime: syntheticReferral.timestamp + 1000 * 60 * 60 * 24
+    }, 'foo'])
+
+    const report = await m.run({ state: 'START', qa: [], forms: [] }, WA_USER_ID, syntheticReferral)
+
+    should.not.exist(report.error)
+    report.newState.md.platform.should.equal('whatsapp')
+    report.commands[0].platform.should.equal('whatsapp')
+  })
+
+  // Regression test for the wrong-platform bug: synthetic re-entry events
+  // (dean timeouts / follow-ups) carry source.type 'synthetic', so the
+  // outbound platform must come from the persisted md.platform — before that
+  // was persisted, WhatsApp conversations got 'messenger' send commands.
+  it('produces whatsapp commands for a synthetic timeout on a state with md.platform whatsapp', async () => {
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }],
+      offTime: Date.now() + 1000 * 60 * 60 * 24
+    }, 'foo'])
+
+    const now = Date.now()
+    const state = {
+      state: 'WAIT_EXTERNAL_EVENT',
+      question: 'foo',
+      wait: { type: 'timeout', value: '1 hour' },
+      waitStart: now - 1000 * 60 * 61,
+      externalEvents: [],
+      forms: ['FOO'],
+      qa: [],
+      md: { form: 'FOO', startTime: now - 1000 * 60 * 61, pageid: WA_PHONE_NUMBER_ID, platform: 'whatsapp' }
+    }
+
+    const timeoutEvent = {
+      event_id: 'evt_test_wa_timeout',
+      user_id: WA_USER_ID,
+      timestamp: now,
+      source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID },
+      event_type: 'synthetic_timeout',
+      payload: now
+    }
+
+    const report = await m.run(state, WA_USER_ID, timeoutEvent)
+
+    should.not.exist(report.error)
+    report.publish.should.be.true
+    report.commands.length.should.be.greaterThan(0)
+    report.commands.forEach(c => {
+      c.platform.should.equal('whatsapp')
+      c.platform_account_id.should.equal(WA_PHONE_NUMBER_ID)
+    })
+  })
+
+  it('includes platform whatsapp on payment events from a whatsapp conversation', async () => {
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'foo', ref: 'foo' },
+        { type: 'short_text', title: 'bar', ref: 'bar', properties: { description: JSON.stringify({ payment: { provider: 'reloadly', details: { foo: 'bar' } } }) } }
+      ]
+    }, 'foo'])
+
+    const waText = {
+      ...text,
+      user_id: WA_USER_ID,
+      source: { type: 'whatsapp', account_id: WA_PHONE_NUMBER_ID }
+    }
+
+    const state = {
+      state: 'QOUT',
+      md: { platform: 'whatsapp', pageid: WA_PHONE_NUMBER_ID },
+      question: 'foo',
+      qa: [],
+      forms: ['someform']
+    }
+
+    const report = await m.run(state, WA_USER_ID, waText)
+
+    should.not.exist(report.error)
+    report.payment.should.eql({
+      userid: WA_USER_ID,
+      pageid: WA_PHONE_NUMBER_ID,
+      timestamp: waText.timestamp,
+      provider: 'reloadly',
+      details: { foo: 'bar' },
+      platform: 'whatsapp'
+    })
+  })
 
   it('returns no payment when the message is a repeat', async () => {
     const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md } })

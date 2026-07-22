@@ -28,13 +28,14 @@ export const WHATSAPP_PHONE_NUMBER_ID = '106540352242922';
 
 async function whatsapp(pool: Pool, userid: string): Promise<void> {
   const token = 'test';
-  // The message-worker token store resolves access tokens via the
-  // facebook_page_id computed column, which is only populated for
-  // entity='facebook_page' (details->>'id'). Seed the WhatsApp phone-number-id
-  // token the same way so GetToken(phone_number_id) resolves it. (A dedicated
-  // whatsapp_business credential type is a production concern, deferred.)
+  // First-class WhatsApp credential: entity='whatsapp_business' with
+  // key = phone_number_id (credentials.key holds the platform account id;
+  // uniqueness across platforms enforced by the unique_messaging_account
+  // partial index — see devops/migrations/20-messaging-account-unique.sql).
+  // Consumers resolve it via (entity, key) when platform is known, or
+  // key + entity IN (...) otherwise.
   const query = `INSERT INTO credentials(userid, entity, key, details) VALUES($1, $2, $3, $4) ON CONFLICT DO NOTHING`;
-  await pool.query(query, [userid, 'facebook_page', WHATSAPP_PHONE_NUMBER_ID, JSON.stringify({token, id: WHATSAPP_PHONE_NUMBER_ID, name: 'Test WhatsApp'})]);
+  await pool.query(query, [userid, 'whatsapp_business', WHATSAPP_PHONE_NUMBER_ID, JSON.stringify({token, id: WHATSAPP_PHONE_NUMBER_ID, name: 'Test WhatsApp'})]);
 }
 
 async function reloadly(pool: Pool, userid: string): Promise<void> {

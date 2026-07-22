@@ -25,8 +25,14 @@ func (t *JSTimestamp) UnmarshalJSON(b []byte) error {
 // Add id for payment??? hash of userid/pageid/timestamp? question ref? id field in description?
 // Add shortcode to payment event - to associate different reloadly accounts with different surveys?
 type PaymentEvent struct {
-	Userid    string           `json:"userid" validate:"required"`
-	Pageid    string           `json:"pageid" validate:"required"`
+	Userid string `json:"userid" validate:"required"`
+	Pageid string `json:"pageid" validate:"required"`
+	// Platform is the messaging platform of the conversation that produced
+	// the payment ('messenger' | 'whatsapp'). Optional: replybot only
+	// recently started emitting it, so in-flight events may lack it — in
+	// that case credential lookup falls back to key-only (see
+	// GenericGetUser).
+	Platform  string           `json:"platform"`
 	Timestamp *JSTimestamp     `json:"timestamp" validate:"required"`
 	Provider  string           `json:"provider" validate:"required"`
 	Key       string           `json:"key"`
@@ -63,14 +69,31 @@ type Provider interface {
 type GetUserFromPaymentEvent func(event *PaymentEvent) (*User, error)
 type Auth func(user *User, key string) error
 
+// platformToEntity maps a messaging platform name to its credentials entity
+// type — the credentials natural key is (entity, key).
+var platformToEntity = map[string]string{
+	"messenger": "facebook_page",
+	"whatsapp":  "whatsapp_business",
+}
+
 // GenericGetUser resolves the researcher owning the account that received the
 // payment event. event.Pageid holds the platform account id (Facebook page id
-// for Messenger, phone_number_id for WhatsApp), which equals credentials.key for
-// messaging entities. Uniqueness is enforced by the unique_messaging_account
-// partial index.
+// for Messenger, phone_number_id for WhatsApp), which equals credentials.key
+// for messaging entities. When event.Platform maps to a known entity, the
+// lookup uses the credentials natural key (entity, key). When Platform is
+// absent or unmapped (old in-flight events), it falls back to key-only across
+// messaging entities — safe because the unique_messaging_account partial index
+// keeps account ids globally unique across messaging platforms.
 func GenericGetUser(pool *pgxpool.Pool, event *PaymentEvent) (*User, error) {
-	query := `SELECT userid FROM credentials WHERE key=$1 AND entity IN ('facebook_page', 'whatsapp_business') LIMIT 1`
-	row := pool.QueryRow(context.Background(), query, event.Pageid)
+	var row pgx.Row
+	if entity, ok := platformToEntity[event.Platform]; ok {
+		query := `SELECT userid FROM credentials WHERE entity=$1 AND key=$2 LIMIT 1`
+		row = pool.QueryRow(context.Background(), query, entity, event.Pageid)
+	} else {
+		query := `SELECT userid FROM credentials WHERE key=$1 AND entity IN ('facebook_page', 'whatsapp_business') LIMIT 1`
+		row = pool.QueryRow(context.Background(), query, event.Pageid)
+	}
+
 	var u User
 	err := row.Scan(&u.Id)
 

@@ -1,4 +1,5 @@
 const { exec, apply, act, update } = require('./machine')
+const { eventPlatform } = require('./utils')
 const { getForm } = require('./ourform')
 const { responseVals } = require('../responses/responser')
 const { parseEvent } = require('../event-normalizer')
@@ -26,11 +27,14 @@ class Machine {
     const page = parsedEvent.source.account_id || (state && state.md && state.md.pageid)
     // A synthetic/external event's source.type is 'synthetic', not a real
     // platform. Outbound commands must target the conversation's actual platform
-    // or message-worker rejects them as "unsupported platform". Use the persisted
-    // platform if present, else default to messenger (the only platform in use).
-    // TODO(whatsapp): persist md.platform at conversation start so this is exact.
+    // or message-worker rejects them as "unsupported platform". md.platform is
+    // persisted at conversation start (utils.js getMetadata), so the state is
+    // authoritative. For states predating that persistence, fall back to the
+    // event's own platform hint when present (source.platform, sent by dean and
+    // surfaced by the event-normalizer), else 'messenger' — exact for all
+    // conversations predating WhatsApp support.
     const platform = parsedEvent.source.type === 'synthetic'
-      ? ((state && state.md && state.md.platform) || 'messenger')
+      ? ((state && state.md && state.md.platform) || eventPlatform(parsedEvent))
       : parsedEvent.source.type
     const output = exec(state, parsedEvent)
     const newState = apply(state, output)
@@ -51,7 +55,12 @@ class Machine {
 
     const user = { id: userId }
 
-    const { messages, payment, handoff } = act({ form, user, page: { id: pageId }, timestamp }, state, output)
+    // Payment events are consumed off-pipeline (dinersclub) and carry the
+    // conversation's platform. newState.md.platform is persisted at
+    // conversation start; 'messenger' is exact for states predating that.
+    const platform = (newState.md && newState.md.platform) || 'messenger'
+
+    const { messages, payment, handoff } = act({ form, user, page: { id: pageId }, timestamp, platform }, state, output)
 
     const responses = responseVals(newState, upd, form, surveyId, pageId, user, timestamp)
 

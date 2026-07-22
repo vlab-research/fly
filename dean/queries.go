@@ -15,9 +15,15 @@ type Event struct {
 }
 
 type ExternalEvent struct {
-	User  string `json:"user"`
-	Page  string `json:"page"`
-	Event *Event `json:"event"`
+	User string `json:"user"`
+	Page string `json:"page"`
+	// Platform is the messaging platform of the conversation
+	// ('messenger' | 'whatsapp'), read as COALESCE(states.platform,
+	// 'messenger') — legacy state rows without md.platform report
+	// 'messenger'. Botserver's /synthetic endpoint passes unknown
+	// fields through, so this rides along to replybot untouched.
+	Platform string `json:"platform,omitempty"`
+	Event    *Event `json:"event"`
 }
 
 type EventMaker func(pgx.Rows) *ExternalEvent
@@ -42,28 +48,28 @@ func get(conn *pgxpool.Pool, fn EventMaker, query string, args ...interface{}) <
 }
 
 func getRedo(rows pgx.Rows) *ExternalEvent {
-	var userid, pageid string
-	err := rows.Scan(&userid, &pageid)
+	var userid, pageid, platform string
+	err := rows.Scan(&userid, &pageid, &platform)
 	handle(err)
 
-	return &ExternalEvent{userid, pageid, &Event{"redo", nil}}
+	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"redo", nil}}
 }
 
 func getTimeout(rows pgx.Rows) *ExternalEvent {
 	var waitStart int64
-	var userid, pageid string
-	err := rows.Scan(&waitStart, &userid, &pageid)
+	var userid, pageid, platform string
+	err := rows.Scan(&waitStart, &userid, &pageid, &platform)
 	handle(err)
 
 	b, _ := json.Marshal(waitStart)
 	value := json.RawMessage(b)
 
-	return &ExternalEvent{userid, pageid, &Event{"timeout", &value}}
+	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"timeout", &value}}
 }
 
 func getPayment(rows pgx.Rows) *ExternalEvent {
-	var userid, pageid, question string
-	err := rows.Scan(&userid, &pageid, &question)
+	var userid, pageid, question, platform string
+	err := rows.Scan(&userid, &pageid, &question, &platform)
 	handle(err)
 
 	v := struct {
@@ -75,32 +81,32 @@ func getPayment(rows pgx.Rows) *ExternalEvent {
 	b, _ := json.Marshal(v)
 	value := json.RawMessage(b)
 
-	return &ExternalEvent{userid, pageid, &Event{"repeat_payment", &value}}
+	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"repeat_payment", &value}}
 }
 
 func getFollowUp(rows pgx.Rows) *ExternalEvent {
 	var question string
-	var userid, pageid string
-	err := rows.Scan(&question, &userid, &pageid)
+	var userid, pageid, platform string
+	err := rows.Scan(&question, &userid, &pageid, &platform)
 	handle(err)
 
 	b, _ := json.Marshal(question)
 	value := json.RawMessage(b)
 
-	return &ExternalEvent{userid, pageid, &Event{"follow_up", &value}}
+	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"follow_up", &value}}
 }
 
 func getBlockUser(rows pgx.Rows) *ExternalEvent {
-	var userid, pageid string
-	err := rows.Scan(&userid, &pageid)
+	var userid, pageid, platform string
+	err := rows.Scan(&userid, &pageid, &platform)
 	handle(err)
 
 	value := json.RawMessage([]byte(`null`))
-	return &ExternalEvent{userid, pageid, &Event{"block_user", &value}}
+	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"block_user", &value}}
 }
 
 func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
-	query := `SELECT userid, pageid
+	query := `SELECT userid, pageid, COALESCE(platform, 'messenger')
               FROM states
               WHERE
                 current_state = 'RESPONDING' AND
@@ -114,7 +120,7 @@ func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
 func Errored(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
-	query := `SELECT userid, pageid
+	query := `SELECT userid, pageid, COALESCE(platform, 'messenger')
               FROM states
               WHERE
                 current_state = 'ERROR' AND
@@ -129,7 +135,7 @@ func Errored(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
 func Blocked(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
-	query := `SELECT userid, pageid
+	query := `SELECT userid, pageid, COALESCE(platform, 'messenger')
               FROM states
               WHERE
                 current_state = 'BLOCKED' AND
@@ -144,7 +150,7 @@ func Blocked(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 
 func Payments(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `
-	      SELECT userid, pageid, state_json->>'question' as question
+	      SELECT userid, pageid, state_json->>'question' as question, COALESCE(platform, 'messenger')
 	      FROM states
 	      WHERE current_state = 'WAIT_EXTERNAL_EVENT'
 	      AND state_json->'wait'->>'type' != 'timeout'
@@ -173,6 +179,7 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 SELECT
                   s.userid,
                   s.pageid,
+                  COALESCE(s.platform, 'messenger') AS platform,
                   s.current_form,
                   (state_json->>'waitStart')::int as waitStart,
                   CASE
@@ -191,7 +198,7 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                   current_state = 'WAIT_EXTERNAL_EVENT' AND
                   jsonb_array_length(COALESCE(s.state_json->'externalEvents','[]'::jsonb)) < $3
               )
-              SELECT waitStart, userid, pageid
+              SELECT waitStart, userid, pageid, platform
               FROM timeout_dates
               WHERE
                 calculated_timeout_date < $1 AND
@@ -216,7 +223,7 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `WITH x AS
                 (WITH t AS
-                  (SELECT state_json->>'question' as question, states.userid, states.pageid, surveys.shortcode, has_followup, surveys.created
+                  (SELECT state_json->>'question' as question, states.userid, states.pageid, COALESCE(states.platform, 'messenger') AS platform, surveys.shortcode, has_followup, surveys.created
 				  FROM states
                                   INNER JOIN credentials c
                                     ON pageid = c.key AND c.entity IN ('facebook_page', 'whatsapp_business')
@@ -234,7 +241,7 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY userid, pageid, shortcode ORDER BY created DESC)
                 FROM t
               )
-              SELECT question, userid, pageid
+              SELECT question, userid, pageid, platform
               FROM x
               WHERE
                 row_number = 1 AND
@@ -248,7 +255,7 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 // or if the user has too many externalEvents (OOM prevention).
 func Spammers(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `
-              SELECT s.userid, s.pageid
+              SELECT s.userid, s.pageid, COALESCE(s.platform, 'messenger')
               FROM states s
               WHERE
                 s.current_state != 'USER_BLOCKED'
