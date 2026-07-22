@@ -213,7 +213,52 @@ staging (`vstag`).
 
 ---
 
-## 6. Agent-checkable monitoring
+## 6. CronJob health — runbooks
+
+Defined in `devops/alerts/templates/cronjob-health.yaml`. Thresholds in
+`devops/alerts/values.yaml` (`cronjob:`).
+
+**Philosophy:** a single failed cronjob run is expected noise and is **not**
+alerted on. The kube-prometheus-stack default `KubeJobFailed` (fires on *any*
+failed Job object, and lingers until that object is deleted — that's how failed
+jobs sat firing for 79 days) and `KubeJobNotCompleted` are **null-routed in
+AlertManager**. We alert only on *repeated* failure, via two complementary rules
+keyed on `kube_job_owner` (Job → owning CronJob) and the cronjob status metrics.
+Both are **warning** → `#vlab-alerts`, and the `namespace` label shows prod
+(`vprod`) vs staging (`vstag`).
+
+### CronJobRepeatedlyFailing
+`>= 3` distinct failed runs of one cronjob within a rolling `6h` window (Rule A).
+Uses `max_over_time(kube_job_failed{condition="true"}[6h])`, so it counts from
+Prometheus history and **still works after `ttlSecondsAfterFinished` deletes the
+Job object**. Covers frequent crons (sub-hourly … hourly). One or two transient
+failures never trip it.
+1. `kubectl -n <ns> get jobs | grep <cronjob-name>` — see the recent runs.
+2. `kubectl -n <ns> logs job/<most-recent-failed-job> --tail=200` — root cause.
+3. Fix the underlying issue (dependency down, bad image, auth/creds, upstream API).
+4. The alert self-resolves once the window rolls past the failures (≤ 6h) or the
+   cron starts succeeding.
+
+### CronJobNotSucceeding
+`(now - last_successful_time) > 50h` **AND** `(now - last_schedule_time) < 26h`
+(Rule B). Absolute-time, **not** period-relative — KSM's `next_schedule_time`
+gives unreliable periods for daily/seasonal crons. The 50h floor means a single
+missed daily run can't trip it (only ~2+ consecutive misses can); the 26h
+schedule-recency gate **excludes seasonal / yearly crons** (e.g. the `bailer-*`
+crons, whose last schedule is months ago). Covers slow (daily) crons that Rule
+A's 6h window can't see.
+1. `kubectl -n <ns> get cronjob <name>` — confirm `LAST SCHEDULE`; it *is* running.
+2. `kubectl -n <ns> get jobs | grep <name>` then `logs job/<latest>` — why no success.
+3. Self-resolves on the next successful run.
+
+> Not covered by design: crons scheduled less often than daily (weekly+) are
+> excluded by the 26h gate to keep seasonal crons quiet. If a weekly cron needs
+> coverage later, widen `activeWithinHours` carefully (re-check it doesn't
+> re-admit the seasonal `bailer-*` crons).
+
+---
+
+## 7. Agent-checkable monitoring
 
 The `/study-health` skill provides an end-to-end health check that agents can invoke to assess platform + study health. It queries Prometheus, AlertManager, and CockroachDB and returns a structured JSON verdict identifying:
 
@@ -245,13 +290,16 @@ port-forward:
 
 ---
 
-## 7. Other alert sources (aware, not yet curated)
+## 8. Other alert sources (aware, not yet curated)
 
 - **kube-prometheus-stack default rules** are enabled (`defaultRules` in
-  `devops/prometheus/values.yaml`). Several fire today and want triage so they
-  don't re-pollute the channel: **`KubeJobFailed` (×23)**, `KubeProxyDown`,
-  `CPUThrottlingHigh`, `KubeJobNotCompleted`. `Watchdog` is an always-on
-  liveness signal (expected); `InfoInhibitor` is plumbing.
+  `devops/prometheus/values.yaml`). Triage status:
+  - `KubeProxyDown` — **resolved**: GKE false positive (kube-proxy healthy, metrics
+    not scrapeable). `kubeProxy.enabled: false` added to `devops/prometheus/values.yaml`
+    (matching `kubeScheduler`/`kubeControllerManager`); live rule/ServiceMonitor removed.
+  - `KubeJobFailed` / `KubeJobNotCompleted` — **replaced**: null-routed in
+    `devops/alertmanager/alertmanager.yaml`; superseded by the cronjob-health rules
+    in §6 (alert on *repeated* failure only). Rules remain in Prometheus for debugging.
+  - `CPUThrottlingHigh` (info, kminion) — left as-is (low-priority noise).
+  - `Watchdog` is an always-on liveness signal (expected); `InfoInhibitor` is plumbing.
 - **Redis** alerts ship with the redis subchart (`vlab/charts/redis`).
-
-These are the next cleanup targets after severity routing.

@@ -23,9 +23,6 @@ dependencies:
 - name: scribble
   repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.1
-- name: dumper
-  repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
-  version: 0.0.3
 - name: exporter
   repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.1.0
@@ -53,5 +50,8 @@ dependencies:
 - name: redis
   repository: oci://registry-1.docker.io/bitnamicharts
   version: 18.0.0
-digest: sha256:50e18f033f050d6544b131d5c44a05cce50fd2c3dc53bb1dfe225b22ca0449e5
-generated: "2026-05-11T22:51:45.159452811-04:00"
+- name: hermes
+  repository: file://../../hermes/chart
+  version: 0.1.0
+digest: sha256:a1f4a212218c7e5b5df762ec38e1af5a5b07d6c9d5bb1aeb51dfc27b6bcf3999
+generated: "2026-07-21T20:05:55.836772035-04:00"

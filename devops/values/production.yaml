@@ -300,32 +300,9 @@ scribble:
       - name: SCRIBBLE_STRICT_MODE
         value: "false"
 
-dumper:
-  image:
-    repository: vlabresearch/dumper
-    tag: 0.0.12
-    pullPolicy: IfNotPresent
-
-  completions: 1
-  parallelism: 1
-  backoffLimit: 8
-
-  schedule: "0 0 * * *"
-  resources:
-    requests:
-      cpu: 750m
-      memory: 250Mi
-
-  storage:
-    storageClass: standard
-    size: 200Gi
-
-  keySecret: gbv-dumper-keys
-  env:
-  - name: CHATBASE_HOST
-    value: *host
-  - name: DUMPER_LOCATION
-    value: "gs://vlab-research-backups/gbv-india/"
+# dumper: RETIRED 2026-07-21. The legacy `cockroach dump` → GCS CronJob is
+# replaced by CockroachDB native scheduled BACKUP (see documentation/backups.md).
+# Removed here + as a chart dependency in devops/vlab/Chart.yaml.
 
 formcentral:
   replicaCount: 3

@@ -35,11 +35,6 @@ dependencies:
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
     tags:
       - scribble
-  - name: dumper
-    version: 0.0.3
-    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
-    tags:
-      - backup
   - name: exporter
     version: 0.1.0
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts

@@ -31,6 +31,31 @@ app:
   # Fires when a replybot container restarts more than N times in 10m.
   replybotRestartThreshold: 2
 
+# ---- CronJob health ---------------------------------------------------------
+# We alert on cronjobs that are REPEATEDLY failing, never on a single failed run
+# (that's expected noise — the default KubeJobFailed is null-routed for exactly
+# that reason). Two complementary rules; see templates/cronjob-health.yaml.
+cronjob:
+  enabled: true
+
+  # Rule A — CronJobRepeatedlyFailing (frequent crons, sub-hourly..hourly).
+  # Counts distinct failed runs in a rolling window; survives ttlSecondsAfterFinished
+  # because the failure history lives in Prometheus, not the cluster.
+  repeatedFailureWindow: "6h"     # rolling lookback for counting failed runs
+  repeatedFailureThreshold: 3     # >= N failed runs in the window before firing
+  repeatedFailureFor: "15m"
+
+  # Rule B — CronJobNotSucceeding (slow / daily crons whose failures are too far
+  # apart to accumulate a count in Rule A's window). Absolute-time, not
+  # period-relative (KSM's next_schedule_time gives unreliable periods for
+  # daily/seasonal crons).
+  notSucceedingHours: 50          # no successful run in > 50h (~2+ missed daily
+                                  #   runs — a single missed run cannot trip this)
+  activeWithinHours: 26           # ...AND scheduled in the last 26h. This gate
+                                  #   excludes seasonal / yearly crons (bailers)
+                                  #   whose last schedule is months ago.
+  notSucceedingFor: "30m"
+
 # ---- Study health (survey error/blocked/stuck states) -----------------------
 # Metrics from sql_exporter in monitoring namespace, querying CockroachDB for
 # recent survey state patterns (1h window). All thresholds are v1 — calibrated

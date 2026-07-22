@@ -6,6 +6,10 @@
 #   severity=critical      -> #vlab-alerts-critical   (e.g. KubeProxyDown, our *page* rules)
 #   severity=warning/info  -> #vlab-alerts            (default)
 #   Watchdog               -> silenced (null receiver; no dead-man's-switch yet)
+#   KubeJobFailed          -> silenced (fires on ANY single failed Job; replaced
+#   KubeJobNotCompleted       by our CronJobRepeatedlyFailing / CronJobNotSucceeding
+#                             rules in the vlab-alerts chart, which alert only on
+#                             REPEATED failure. Rules stay in Prometheus for debugging.)
 #
 # Webhooks are injected at apply time from a gitignored secret.env by apply.sh —
 # NEVER commit real hooks.slack.com URLs. To add real paging later (ntfy /
@@ -20,6 +24,10 @@ route:
   repeat_interval: 12h
   routes:
     - matchers: [ 'alertname="Watchdog"' ]
+      receiver: 'null'
+    # Default kube-prometheus-stack job alerts: replaced by the vlab-alerts
+    # cronjob-health rules (repeated-failure only). Kept in Prometheus, muted here.
+    - matchers: [ 'alertname=~"KubeJobFailed|KubeJobNotCompleted"' ]
       receiver: 'null'
     - matchers: [ 'severity="critical"' ]
       receiver: 'slack-critical'

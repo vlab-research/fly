@@ -1,0 +1,84 @@
+{{- if .Values.cronjob.enabled }}
+{{- $runbook := .Values.runbookUrl }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vlab-cronjob-health
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: vlab-alerts
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: vlab-cronjob-health
+      interval: 1m
+      rules:
+        # A single cronjob run failing is NORMAL and expected (transient network
+        # blip, a flaky upstream). We deliberately do NOT alert on that — the
+        # kube-prometheus-stack default `KubeJobFailed` (which fires on ANY failed
+        # Job object) is null-routed in AlertManager precisely because it is that
+        # noise. We alert only when a cronjob is REPEATEDLY failing / cannot
+        # succeed, across two complementary rules:
+        #
+        #   A. CronJobRepeatedlyFailing — for frequent crons (sub-hourly..hourly):
+        #      counts DISTINCT failed runs in a rolling window. Uses max_over_time
+        #      so it still works after `ttlSecondsAfterFinished` deletes the Job
+        #      object — the failure history lives in Prometheus, not the cluster.
+        #      kube_job_owner rolls each Job up to its owning CronJob.
+        #
+        #   B. CronJobNotSucceeding — for slow crons (daily) whose failures are too
+        #      far apart to accumulate a count in Rule A's window. Absolute-time,
+        #      NOT period-relative: kube_cronjob_status_next_schedule_time yields
+        #      unreliable periods for daily/seasonal crons, so we gate on
+        #      "scheduled recently" (excludes seasonal/rare crons) AND "no success
+        #      in > N hours" (long enough that a single missed daily run cannot
+        #      trip it — only multiple can).
+        - alert: CronJobRepeatedlyFailing
+          expr: |
+            count by (namespace, owner_name) (
+              max by (namespace, job_name) (
+                max_over_time(kube_job_failed{condition="true"}[{{ .Values.cronjob.repeatedFailureWindow }}]) == 1
+              )
+              * on (namespace, job_name) group_left(owner_name)
+                max by (namespace, job_name, owner_name) (
+                  kube_job_owner{owner_kind="CronJob"}
+                )
+            ) >= {{ .Values.cronjob.repeatedFailureThreshold }}
+          for: {{ .Values.cronjob.repeatedFailureFor }}
+          labels:
+            severity: warning
+            component: cronjob-health
+          annotations:
+            summary: "CronJob {{`{{ $labels.namespace }}`}}/{{`{{ $labels.owner_name }}`}} failed {{`{{ $value }}`}} runs in {{ .Values.cronjob.repeatedFailureWindow }}"
+            description: >-
+              CronJob {{`{{ $labels.namespace }}`}}/{{`{{ $labels.owner_name }}`}} has had
+              {{`{{ $value }}`}} failed runs in the last {{ .Values.cronjob.repeatedFailureWindow }}
+              (threshold: {{ .Values.cronjob.repeatedFailureThreshold }}). One-off failures are
+              expected and ignored; repeated failures mean the job is genuinely broken and has
+              not been succeeding. Check the most recent Job's pod logs
+              (`kubectl logs -n {{`{{ $labels.namespace }}`}} job/<name>`).
+            runbook_url: "{{ $runbook }}#cronjobrepeatedlyfailing"
+
+        - alert: CronJobNotSucceeding
+          expr: |
+            (
+              (time() - kube_cronjob_status_last_successful_time) > {{ .Values.cronjob.notSucceedingHours }} * 3600
+            )
+            and on (namespace, cronjob)
+            (
+              (time() - kube_cronjob_status_last_schedule_time) < {{ .Values.cronjob.activeWithinHours }} * 3600
+            )
+          for: {{ .Values.cronjob.notSucceedingFor }}
+          labels:
+            severity: warning
+            component: cronjob-health
+          annotations:
+            summary: "CronJob {{`{{ $labels.namespace }}`}}/{{`{{ $labels.cronjob }}`}} has not succeeded in over {{ .Values.cronjob.notSucceedingHours }}h"
+            description: >-
+              CronJob {{`{{ $labels.namespace }}`}}/{{`{{ $labels.cronjob }}`}} was scheduled within
+              the last {{ .Values.cronjob.activeWithinHours }}h but its last SUCCESSFUL run was over
+              {{ .Values.cronjob.notSucceedingHours }}h ago — it has missed multiple consecutive runs.
+              (Seasonal / rarely-scheduled crons are excluded by the schedule-recency gate.) Investigate
+              why the job is not completing.
+            runbook_url: "{{ $runbook }}#cronjobnotsucceeding"
+{{- end }}

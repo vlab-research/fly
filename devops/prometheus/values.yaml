@@ -32,6 +32,13 @@ kubeControllerManager:
 kubeScheduler:
   enabled: false
 
+# GKE manages kube-proxy and does not expose its metrics endpoint
+# (binds to 127.0.0.1:10249), so the KubeProxyDown rule is a false
+# positive even though kube-proxy is healthy. Disable like the other
+# managed control-plane components above.
+kubeProxy:
+  enabled: false
+
 alertmanager:
   enabled: true
   alertmanagerSpec:
