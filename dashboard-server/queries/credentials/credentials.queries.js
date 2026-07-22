@@ -31,39 +31,18 @@ async function getOne ({email, entity, key}) {
   return rows[0]
 }
 
-// Maps messaging entity types to their first-class (platform, account_id)
-// keying (see documentation/platform-abstraction.md and
-// devops/migrations/20-platform-abstraction.sql). Non-messaging entities
-// (facebook_ad_user, typeform_token, ...) have no platform and stay NULL.
-function platformKeys (entity, details) {
-  const d = typeof details === 'string' ? JSON.parse(details) : (details || {})
-
-  switch (entity) {
-    case 'facebook_page':
-      return { platform: 'messenger', accountId: d.id || null }
-    case 'whatsapp_business':
-      return { platform: 'whatsapp', accountId: d.id || d.phone_number_id || null }
-    default:
-      return { platform: null, accountId: null }
-  }
-}
-
 // TURN INTO UPSERT?
 async function update ({entity, key, details, email}) {
-  // Also (re-)stamps platform/account_id so legacy rows created before the
-  // platform keying migration get backfilled on their next token refresh.
-  const { platform, accountId } = platformKeys(entity, details)
-
   const q = `
     UPDATE credentials
-    SET (details, created, platform, account_id) = ($4, CURRENT_TIMESTAMP, $5, $6)
+    SET (details, created) = ($4, CURRENT_TIMESTAMP)
     WHERE entity = $1
     AND key = $2
     AND userid = (SELECT id FROM users WHERE email = $3)
     RETURNING *
   `
 
-  const values = [entity, key, email, details, platform, accountId]
+  const values = [entity, key, email, details]
   const {rows} = await this.query(q, values)
   return rows[0]
 }
@@ -71,15 +50,14 @@ async function update ({entity, key, details, email}) {
 
 
 async function create ({entity, key, details, email}) {
-  const { platform, accountId } = platformKeys(entity, details)
 
   const q = `
-    INSERT INTO credentials (entity, key, details, userid, platform, account_id)
-    VALUES ($1, $2, $3, (SELECT id FROM users WHERE email = $4), $5, $6)
+    INSERT INTO credentials (entity, key, details, userid)
+    VALUES ($1, $2, $3, (SELECT id FROM users WHERE email = $4))
     RETURNING *
   `
 
-  const values = [entity, key, details, email, platform, accountId]
+  const values = [entity, key, details, email]
   const {rows} = await this.query(q, values)
   return rows[0]
 }

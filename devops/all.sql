@@ -276,14 +276,11 @@ ALTER TABLE chatroach.states ADD COLUMN next_retry TIMESTAMP AS ((FLOOR((POWER(2
 CREATE INDEX ON chatroach.states (current_state, error_tag, updated, next_retry);
 CREATE INDEX ON chatroach.states (current_state, fb_error_code, updated, next_retry);
 
--- 20-platform-abstraction.sql: first-class (platform, account_id) keying
--- for credentials (WhatsApp + future platforms). Nullable on purpose:
--- non-messaging credentials (facebook_ad_user, typeform_token) stay NULL.
-ALTER TABLE chatroach.credentials ADD COLUMN IF NOT EXISTS platform VARCHAR;
-ALTER TABLE chatroach.credentials ADD COLUMN IF NOT EXISTS account_id VARCHAR;
-UPDATE chatroach.credentials
-SET platform = 'messenger', account_id = details->>'id'
-WHERE entity = 'facebook_page' AND details->>'id' IS NOT NULL AND platform IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS unique_platform_account
-  ON chatroach.credentials (platform, account_id)
-  STORING (details, key, userid, entity);
+-- 20-messaging-account-unique.sql: messaging account ID global uniqueness
+-- Account IDs are globally unique across messaging platforms. For messaging
+-- entities, key holds the platform account ID; partial index enforces uniqueness
+-- and serves account→credential lookup. See planning/whatsapp-plan.md.
+CREATE UNIQUE INDEX IF NOT EXISTS unique_messaging_account
+  ON chatroach.credentials (key)
+  STORING (details, userid)
+  WHERE entity IN ('facebook_page', 'whatsapp_business');

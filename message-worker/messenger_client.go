@@ -60,7 +60,7 @@ type FacebookError struct {
 func (c *MessengerClient) SendMessage(ctx context.Context, platformAccountID, userID string, message interface{}, platformContext json.RawMessage) (*SendMessageResponse, error) {
 	fmt.Printf("[MESSENGER-CLIENT] SendMessage called for user %s, platform_account %s\n", userID, platformAccountID)
 
-	token, err := c.tokenStore.GetToken(ctx, string(types.PlatformMessenger), platformAccountID)
+	token, err := c.tokenStore.GetToken(ctx, platformAccountID)
 	if err != nil {
 		fmt.Printf("[MESSENGER-CLIENT] Failed to get token: %v\n", err)
 		return nil, &PlatformError{
@@ -201,7 +201,7 @@ func isRetriableFacebookError(code int) bool {
 func (c *MessengerClient) PassThreadControl(ctx context.Context, userID, platformAccountID, targetAppID, metadata string) error {
 	fmt.Printf("[MESSENGER-CLIENT] PassThreadControl called for user %s, target_app_id %s\n", userID, targetAppID)
 
-	token, err := c.tokenStore.GetToken(ctx, string(types.PlatformMessenger), platformAccountID)
+	token, err := c.tokenStore.GetToken(ctx, platformAccountID)
 	if err != nil {
 		fmt.Printf("[MESSENGER-CLIENT] Failed to get token: %v\n", err)
 		return &PlatformError{

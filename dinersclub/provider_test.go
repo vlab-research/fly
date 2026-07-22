@@ -7,11 +7,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Legacy-shaped credentials (no platform/account_id) are covered by the
-// reloadly/giftcards tests via the facebook_page_id dual-read fallback.
-// This covers the new first-class (platform, account_id) pattern
-// (see devops/migrations/20-platform-abstraction.sql).
-func TestGenericGetUserResolvesFirstClassPlatformCredential(t *testing.T) {
+// Facebook and WhatsApp credentials are covered by the reloadly/giftcards tests.
+// This test exercises the uniform key-based lookup pattern via WhatsApp.
+// See devops/migrations/20-messaging-account-unique.sql.
+func TestGenericGetUserResolvesWhatsAppCredential(t *testing.T) {
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
@@ -25,8 +24,8 @@ func TestGenericGetUserResolvesFirstClassPlatformCredential(t *testing.T) {
 	mustExec(t, pool, insertUserSql)
 
 	insertWhatsAppSql := `
-		INSERT INTO credentials(userid, entity, key, platform, account_id, details)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'whatsapp_business', 'wa-phone-id', 'whatsapp', 'wa-phone-id', '{"id": "wa-phone-id"}');
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'whatsapp_business', 'wa-phone-id', '{"id": "wa-phone-id"}');
 	`
 	mustExec(t, pool, insertWhatsAppSql)
 

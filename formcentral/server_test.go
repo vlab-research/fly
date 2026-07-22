@@ -29,18 +29,17 @@ const (
 		INSERT INTO surveys(id, userid, form, translation_conf, formid, shortcode, title, created)
 		VALUES ($1, $2, $3, $4, 'test-form-id', 'test-sc', 'test-title', NOW());
 	`
-	// Legacy-shaped credential (no platform/account_id): exercises the
-	// facebook_page_id dual-read fallback in getSurveyByParams.
+	// Credential with key holding the account id (platform convention).
 	insertCredentialsSql = `
  		INSERT INTO credentials(userid, entity, key, details)
- 		VALUES ($1, 'facebook_page', '', '{"id": "page-test"}');
+ 		VALUES ($1, 'facebook_page', 'page-test', '{"id": "page-test"}');
  	`
 
-	// First-class platform credential: exercises the new account_id query
-	// pattern (see devops/migrations/20-platform-abstraction.sql).
+	// WhatsApp credential with key holding the phone_number_id (uniform key lookup).
+	// See devops/migrations/20-messaging-account-unique.sql.
 	insertWhatsAppCredentialsSql = `
- 		INSERT INTO credentials(userid, entity, key, platform, account_id, details)
- 		VALUES ($1, 'whatsapp_business', 'wa-test', 'whatsapp', 'wa-test', '{"id": "wa-test"}');
+ 		INSERT INTO credentials(userid, entity, key, details)
+ 		VALUES ($1, 'whatsapp_business', 'wa-test', '{"id": "wa-test"}');
  	`
 
 	insertSurveySettingsSql = `

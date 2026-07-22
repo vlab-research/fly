@@ -65,24 +65,14 @@ type Auth func(user *User, key string) error
 
 // GenericGetUser resolves the researcher owning the account that received the
 // payment event. event.Pageid holds the platform account id (Facebook page id
-// for Messenger, phone_number_id for WhatsApp); PaymentEvent carries no
-// platform field, so the lookup is by account_id alone, with a dual-read
-// fallback to the legacy facebook_page_id computed column during the
-// migration window (planning/whatsapp-plan.md CHUNK 1). Remove the fallback
-// in Phase 3.
+// for Messenger, phone_number_id for WhatsApp), which equals credentials.key for
+// messaging entities. Uniqueness is enforced by the unique_messaging_account
+// partial index.
 func GenericGetUser(pool *pgxpool.Pool, event *PaymentEvent) (*User, error) {
-	query := `SELECT userid FROM credentials WHERE account_id=$1 LIMIT 1`
+	query := `SELECT userid FROM credentials WHERE key=$1 AND entity IN ('facebook_page', 'whatsapp_business') LIMIT 1`
 	row := pool.QueryRow(context.Background(), query, event.Pageid)
 	var u User
 	err := row.Scan(&u.Id)
-
-	if err == pgx.ErrNoRows {
-		// Dual-read fallback: credential may predate the platform/account_id
-		// backfill (or have been written without the new columns).
-		query = `SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1`
-		row = pool.QueryRow(context.Background(), query, event.Pageid)
-		err = row.Scan(&u.Id)
-	}
 
 	if err == pgx.ErrNoRows {
 		return nil, nil

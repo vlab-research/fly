@@ -48,7 +48,7 @@ type WhatsAppSendResponse struct {
 }
 
 func (c *WhatsAppClient) SendMessage(ctx context.Context, platformAccountID, userID string, message interface{}, platformContext json.RawMessage) (*SendMessageResponse, error) {
-	token, err := c.tokenStore.GetToken(ctx, string(types.PlatformWhatsApp), platformAccountID)
+	token, err := c.tokenStore.GetToken(ctx, platformAccountID)
 	if err != nil {
 		return nil, &PlatformError{
 			StatusCode: 0,

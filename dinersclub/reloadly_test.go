@@ -80,7 +80,7 @@ func TestReloadlyReportsSuccessResult(t *testing.T) {
 	mustExec(t, pool, insertUserSql)
 	insertFbPageSql := `
 		INSERT INTO credentials(userid, entity, key, details)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'facebook_page', 'test-key', '{"id": "page"}');
+		VALUES ('00000000-0000-0000-0000-000000000000', 'facebook_page', 'page', '{"id": "page"}');
 	`
 	mustExec(t, pool, insertFbPageSql)
 	insertReloadlySql := `
@@ -151,7 +151,7 @@ func TestReloadlyResultsOnMissingCredentials(t *testing.T) {
 	mustExec(t, pool, insertUserSql)
 	insertFbPageSql := `
 		INSERT INTO credentials(userid, entity, key, details)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'facebook_page', 'test-key', '{"id": "page"}');
+		VALUES ('00000000-0000-0000-0000-000000000000', 'facebook_page', 'page', '{"id": "page"}');
 	`
 	mustExec(t, pool, insertFbPageSql)
 
@@ -196,7 +196,7 @@ func TestReloadlyAuthsWithCredsBasedOnKey(t *testing.T) {
 	mustExec(t, pool, insertUserSql)
 	insertFbPageSql := `
 		INSERT INTO credentials(userid, entity, key, details)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'facebook_page', 'test-key', '{"id": "page"}');
+		VALUES ('00000000-0000-0000-0000-000000000000', 'facebook_page', 'page', '{"id": "page"}');
 	`
 	mustExec(t, pool, insertFbPageSql)
 	insertReloadlySql := `
