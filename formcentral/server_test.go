@@ -29,13 +29,22 @@ const (
 		INSERT INTO surveys(id, userid, form, translation_conf, formid, shortcode, title, created)
 		VALUES ($1, $2, $3, $4, 'test-form-id', 'test-sc', 'test-title', NOW());
 	`
+	// Legacy-shaped credential (no platform/account_id): exercises the
+	// facebook_page_id dual-read fallback in getSurveyByParams.
 	insertCredentialsSql = `
  		INSERT INTO credentials(userid, entity, key, details)
  		VALUES ($1, 'facebook_page', '', '{"id": "page-test"}');
  	`
 
+	// First-class platform credential: exercises the new account_id query
+	// pattern (see devops/migrations/20-platform-abstraction.sql).
+	insertWhatsAppCredentialsSql = `
+ 		INSERT INTO credentials(userid, entity, key, platform, account_id, details)
+ 		VALUES ($1, 'whatsapp_business', 'wa-test', 'whatsapp', 'wa-test', '{"id": "wa-test"}');
+ 	`
+
 	insertSurveySettingsSql = `
- 		INSERT INTO survey_settings(surveyid, userid, shortcode, off_time) VALUES ($1, $2, $3, $4);
+ 		INSERT INTO survey_settings(surveyid, off_time) VALUES ($1, $2);
  	`
 
 	formA = `
@@ -379,7 +388,7 @@ func TestGetSurveyByParams(t *testing.T) {
 	later, _ := time.Parse("2006-01-02", "2022-02-07")
 	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000001", userid, later)
 
-	mustExec(t, pool, insertSurveySettingsSql, "00000000-0000-0000-0000-000000000001", userid, "a1234", offTimeStr)
+	mustExec(t, pool, insertSurveySettingsSql, "00000000-0000-0000-0000-000000000001", offTimeStr)
 
 	timestamp := 1644356479749 // 2022-02-08
 
@@ -411,6 +420,43 @@ func TestGetSurveyByParams(t *testing.T) {
 	format := "2006-01-02T15:04:05.000-0700"
 	offTime, _ := time.Parse(format, "2022-02-10T10:00:00.000-0000")
 	assert.Equal(t, offTime.UTC(), resSurvey.OffTime.UTC())
+}
+
+func TestGetSurveyByParamsResolvesFirstClassPlatformCredential(t *testing.T) {
+	cfg := testConfig()
+	pool := getPool(cfg)
+	before(t, pool)
+	defer pool.Close()
+
+	mustExec(t, pool, insertUser, userid)
+	mustExec(t, pool, insertWhatsAppCredentialsSql, userid)
+
+	earlier, _ := time.Parse("2006-01-02", "2022-02-06")
+	insertSurveySql := `
+ 		INSERT INTO surveys(id, userid, form, formid, shortcode, translation_conf, messages, title, created)
+		VALUES ($1, $2, '{}', '', 'a1234', '{}', '{}', '', $3);
+ 	`
+	mustExec(t, pool, insertSurveySql, "00000000-0000-0000-0000-000000000000", userid, earlier)
+
+	timestamp := 1644356479749 // 2022-02-08
+
+	q := make(url.Values)
+	q.Set("pageid", "wa-test")
+	q.Set("shortcode", "a1234")
+	q.Set("timestamp", fmt.Sprintf("%v", timestamp))
+	rec, c, s := request(pool, http.MethodGet, "/surveys/?"+q.Encode(), "")
+	err := s.GetSurveyByParams(c)
+
+	assert.Nil(t, err)
+
+	res := rec.Result()
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	resSurvey := Survey{}
+	json.Unmarshal(body, &resSurvey)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "00000000-0000-0000-0000-000000000000", resSurvey.ID)
 }
 
 func TestGetSurveyByParamsReturns404IfSurveyNotFound(t *testing.T) {

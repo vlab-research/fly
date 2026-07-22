@@ -2,16 +2,18 @@ package messageworker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // TokenStore retrieves platform access tokens
 type TokenStore interface {
-	GetToken(ctx context.Context, platformAccountID string) (string, error)
+	GetToken(ctx context.Context, platform, platformAccountID string) (string, error)
 	Close()
 }
 
@@ -58,36 +60,51 @@ func NewPostgresTokenStore(ctx context.Context, databaseURL string, cacheTTL tim
 	}, nil
 }
 
-// GetToken retrieves the access token for a platform account
-// Uses query from old replybot tokenstore.js:
-// SELECT details->>'access_token' AS token FROM credentials WHERE facebook_page_id = $1 ORDER BY created DESC LIMIT 1
+// GetToken retrieves the access token for a platform account.
+// Queries by first-class (platform, account_id) keying, with a dual-read
+// fallback to the legacy facebook_page_id computed column during the
+// Phase 2 migration window (see planning/whatsapp-plan.md CHUNK 1).
 // Note: testrunner uses 'token' key, production uses 'access_token'
-func (s *PostgresTokenStore) GetToken(ctx context.Context, platformAccountID string) (string, error) {
+func (s *PostgresTokenStore) GetToken(ctx context.Context, platform, platformAccountID string) (string, error) {
 	// Check cache first
-	if token, ok := s.cache.get(platformAccountID); ok {
+	cacheKey := platform + ":" + platformAccountID
+	if token, ok := s.cache.get(cacheKey); ok {
 		return token, nil
 	}
 
-	// Query database - try access_token first, fall back to token (for testrunner compatibility)
+	// New pattern: explicit platform + account_id columns
 	var token string
 	err := s.pool.QueryRow(ctx, `
 		SELECT COALESCE(details->>'access_token', details->>'token') AS token
 		FROM credentials
-		WHERE facebook_page_id = $1
+		WHERE platform = $1 AND account_id = $2
 		ORDER BY created DESC
 		LIMIT 1
-	`, platformAccountID).Scan(&token)
+	`, platform, platformAccountID).Scan(&token)
+
+	// Dual-read fallback: legacy pattern, for credentials created before the
+	// backfill (or by writers not yet setting platform/account_id).
+	// Remove in Phase 3 when facebook_page_id is dropped.
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = s.pool.QueryRow(ctx, `
+			SELECT COALESCE(details->>'access_token', details->>'token') AS token
+			FROM credentials
+			WHERE facebook_page_id = $1
+			ORDER BY created DESC
+			LIMIT 1
+		`, platformAccountID).Scan(&token)
+	}
 
 	if err != nil {
-		return "", fmt.Errorf("%w: %s (db error: %v)", ErrTokenNotFound, platformAccountID, err)
+		return "", fmt.Errorf("%w: %s/%s (db error: %v)", ErrTokenNotFound, platform, platformAccountID, err)
 	}
 
 	if token == "" {
-		return "", fmt.Errorf("%w: %s (empty token)", ErrTokenNotFound, platformAccountID)
+		return "", fmt.Errorf("%w: %s/%s (empty token)", ErrTokenNotFound, platform, platformAccountID)
 	}
 
 	// Cache the token
-	s.cache.set(platformAccountID, token, s.ttl)
+	s.cache.set(cacheKey, token, s.ttl)
 
 	return token, nil
 }
@@ -137,7 +154,7 @@ func NewStaticTokenStore(token string) *StaticTokenStore {
 }
 
 // GetToken returns the static token
-func (s *StaticTokenStore) GetToken(ctx context.Context, platformAccountID string) (string, error) {
+func (s *StaticTokenStore) GetToken(ctx context.Context, platform, platformAccountID string) (string, error) {
 	if s.token == "" {
 		return "", ErrTokenNotFound
 	}

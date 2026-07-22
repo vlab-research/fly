@@ -7,6 +7,36 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Legacy-shaped credentials (no platform/account_id) are covered by the
+// reloadly/giftcards tests via the facebook_page_id dual-read fallback.
+// This covers the new first-class (platform, account_id) pattern
+// (see devops/migrations/20-platform-abstraction.sql).
+func TestGenericGetUserResolvesFirstClassPlatformCredential(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+
+	insertUserSql := `
+		INSERT INTO users(id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+	`
+	mustExec(t, pool, insertUserSql)
+
+	insertWhatsAppSql := `
+		INSERT INTO credentials(userid, entity, key, platform, account_id, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'whatsapp_business', 'wa-phone-id', 'whatsapp', 'wa-phone-id', '{"id": "wa-phone-id"}');
+	`
+	mustExec(t, pool, insertWhatsAppSql)
+
+	pe := &PaymentEvent{Pageid: "wa-phone-id"}
+	user, err := GenericGetUser(pool, pe)
+
+	assert.Nil(t, err)
+	assert.Equal(t, "00000000-0000-0000-0000-000000000000", user.Id)
+}
+
 func TestHandleJSONUnmarshalError(t *testing.T) {
 	// Create a sample JSON details
 	details := json.RawMessage(`{"test": "data"}`)

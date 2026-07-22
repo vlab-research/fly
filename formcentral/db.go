@@ -69,21 +69,35 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.Form, *tra
 	return src, dest, err
 }
 
+// getSurveyByParams resolves a survey from the account id (pageid) that
+// received the event. pageid holds the platform account id: a Facebook page
+// id for Messenger, a phone_number_id for WhatsApp. The caller does not know
+// the platform, so the lookup is by account_id alone (globally unique
+// Meta-issued ids), with a dual-read fallback to the legacy facebook_page_id
+// computed column during the migration window (planning/whatsapp-plan.md
+// CHUNK 1). Remove the fallback in Phase 3.
 func getSurveyByParams(pool *pgxpool.Pool, pageid string, shortcode string, created time.Time) (*Survey, error) {
-	query := `
+	queryFmt := `
       SELECT id, s.userid, form_json, form, s.shortcode, translation_conf, messages, created, off_time
       FROM surveys s
       LEFT JOIN survey_settings
       ON s.id = survey_settings.surveyid
-      WHERE s.userid=(SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1) 
-      AND s.shortcode=$2 
+      WHERE s.userid=(SELECT userid FROM credentials WHERE %s=$1 LIMIT 1)
+      AND s.shortcode=$2
       AND created<=$3
       ORDER BY created DESC
       LIMIT 1
    `
 	s := &Survey{}
-	row := pool.QueryRow(context.Background(), query, pageid, shortcode, created)
+	row := pool.QueryRow(context.Background(), fmt.Sprintf(queryFmt, "account_id"), pageid, shortcode, created)
 	err := row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Form, &s.Shortcode, &s.Translation_conf, &s.Messages, &s.Created, &s.OffTime)
+
+	if err == pgx.ErrNoRows {
+		// Dual-read fallback: credential may predate the platform/account_id
+		// backfill (or have been written without the new columns).
+		row = pool.QueryRow(context.Background(), fmt.Sprintf(queryFmt, "facebook_page_id"), pageid, shortcode, created)
+		err = row.Scan(&s.ID, &s.Userid, &s.Form_json, &s.Form, &s.Shortcode, &s.Translation_conf, &s.Messages, &s.Created, &s.OffTime)
+	}
 
 	if err == pgx.ErrNoRows {
 		return nil, nil

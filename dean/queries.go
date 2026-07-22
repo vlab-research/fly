@@ -210,13 +210,17 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 }
 
 // TODO: test cockroach perf and index
+// NOTE: the credentials join matches pageid against the new account_id
+// column, with facebook_page_id as dual-read fallback during the platform
+// keying migration (planning/whatsapp-plan.md CHUNK 1). In Phase 3, when
+// facebook_page_id is dropped, reduce the join to `ON pageid = c.account_id`.
 func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `WITH x AS
                 (WITH t AS
                   (SELECT state_json->>'question' as question, states.userid, states.pageid, surveys.shortcode, has_followup, surveys.created
 				  FROM states
                                   INNER JOIN credentials c
-                                    ON pageid = facebook_page_id
+                                    ON (pageid = c.account_id OR pageid = c.facebook_page_id)
 				  INNER JOIN surveys
                                     ON states.current_form = surveys.shortcode
                                     AND c.userid = surveys.userid
