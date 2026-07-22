@@ -20,18 +20,18 @@ exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
-versionDashboard: &vdashboard v0.0.64
+versionDashboard: &vdashboard v0.0.67-wa
 versionBotserver: &vbotserver v0.0.12
-versionHermes: &vhermes v0.0.1-wa
-versionReplybot: &vreplybot v0.0.208-wa
+versionHermes: &vhermes v0.0.2-wa
+versionReplybot: &vreplybot v0.0.209-wa
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.41
+versionDean: &vdean v0.0.42-wa
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.41-wa
-versionFormcentral: &vformcentral v0.0.12
+versionDinersclub: &vdinersclub v0.0.42-wa
+versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.9
 versionExodus: &vexodus v0.2.1
-versionMessageWorker: &vmessageworker v0.1.14-wa
+versionMessageWorker: &vmessageworker v0.1.15-wa
 
 # Kafka consumer-group lag/health alerting is NOT defined here — it lives at the
 # infra level (one rule set for the shared cluster, covering both envs) in
