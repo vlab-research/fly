@@ -153,6 +153,48 @@ async function list(email, surveyName, shortcodes, { state, errorTag, form, sear
   };
 }
 
+// Window for the dashboard Health card. Distinct from sql_exporter's 1h
+// alerting window: alerting cares about "now"; the card covers "since I
+// last looked". The states table is current-state per user (sticky until
+// the user recovers), so the updated filter scopes the card to now-ish and
+// ages out ancient testing noise.
+const HEALTH_WINDOW_HOURS = 24;
+
+// One grouped round-trip feeding the health aggregate bag (see
+// api/health/aggregate.js). The CASE bucketing mirrors the taxonomy
+// contract in documentation/study-error-alerting.md — the sql_exporter
+// ConfigMap (devops/sql-exporter/templates/configmap.yaml) is the other
+// consumer; keep both in sync with the contract.
+//
+// Each state row lands in exactly one (form, state, error_tag,
+// fb_category) group; stuck/expired are FILTER counts within the group so
+// the fold can sum them independently of the grouping dimensions.
+async function healthSummary(email, surveyName, shortcodes) {
+  const query = `
+    SELECT
+      states.current_form AS form,
+      states.current_state AS state,
+      COALESCE(states.error_tag, 'none') AS error_tag,
+      CASE
+        WHEN states.fb_error_code IN ('10','190','551') THEN 'attrition'
+        WHEN states.fb_error_code = '100'  THEN 'template_missing'
+        WHEN states.fb_error_code = '2022' THEN 'rate_limit'
+        WHEN states.fb_error_code = '200'  THEN 'unsupported'
+        ELSE 'other'
+      END AS fb_category,
+      COUNT(*) FILTER (WHERE states.stuck_on_question IS NOT NULL)::int AS stuck,
+      COUNT(*) FILTER (WHERE states.current_state = 'WAIT_EXTERNAL_EVENT'
+                         AND states.timeout_date < NOW())::int AS expired,
+      COUNT(*)::int AS count
+    ${SCOPE_SQL}
+      AND states.updated > NOW() - INTERVAL '${HEALTH_WINDOW_HOURS} hours'
+    GROUP BY 1, 2, 3, 4
+  `;
+
+  const { rows } = await this.query(query, [email, surveyName, shortcodes]);
+  return rows;
+}
+
 async function detail(email, surveyName, shortcodes, userid) {
   const query = `
     SELECT
@@ -182,9 +224,11 @@ async function detail(email, surveyName, shortcodes, userid) {
 
 module.exports = {
   name: 'States',
+  HEALTH_WINDOW_HOURS,
   queries: pool => ({
     summary: summary.bind(pool),
     list: list.bind(pool),
     detail: detail.bind(pool),
+    healthSummary: healthSummary.bind(pool),
   }),
 };

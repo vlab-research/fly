@@ -29,6 +29,7 @@ const envVarsSchema = joi
     LINEAR_TEAM_ID: joi.string().optional().empty(''),
     LINEAR_API_URL: joi.string().optional().empty(''),
     LINEAR_TODO_STATE_ID: joi.string().optional().empty(''),
+    ALERTMANAGER_URL: joi.string().optional().empty(''),
   })
   .unknown()
   .required();
@@ -94,6 +95,12 @@ const config = {
     teamId: envVars.LINEAR_TEAM_ID || '',
     url: envVars.LINEAR_API_URL || 'https://api.linear.app/graphql',
     todoStateId: envVars.LINEAR_TODO_STATE_ID || '',
+  },
+  ALERTMANAGER: {
+    // Unset -> /platform/notices returns { notices: [] } (feature cleanly
+    // off in dev or if monitoring moves). In-cluster:
+    // http://alertmanager-operated.monitoring:9093
+    url: envVars.ALERTMANAGER_URL || '',
   },
 };
 
