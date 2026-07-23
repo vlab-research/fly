@@ -22,7 +22,7 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 
 versionDashboard: &vdashboard v0.0.67-wa
 versionBotserver: &vbotserver v0.0.12
-versionHermes: &vhermes v0.0.2-wa
+versionHermes: &vhermes v0.0.3-wa
 versionReplybot: &vreplybot v0.0.209-wa
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.42-wa
