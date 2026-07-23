@@ -229,15 +229,12 @@ describe('message-templates.controller (makeHandlers)', () => {
   describe('list', () => {
     const listReq = { user: { email }, query: { accountId } };
 
-<<<<<<< HEAD
-    it('returns 200 with the formatted row list (no accountId filter)', async () => {
-=======
-    it('lists across all pages via listAll when pageId is omitted', async () => {
+    it('lists across all accounts via listAll when accountId is omitted', async () => {
       // The dashboard's MessageTemplates page calls GET /message-templates
-      // with no pageId (MessageTemplates.js) — the all-pages listing is
-      // production behavior, not an error.
+      // with no accountId (MessageTemplates.js) — the all-accounts listing
+      // is production behavior, not an error.
       const rows = [{
-        id: 'u1', facebook_page_id: pageId, fb_template_id: 'fb1',
+        id: 'u1', account_id: accountId, fb_template_id: 'fb1',
         name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',
         rejection_reason: null, created: 't', updated: 't',
       }];
@@ -256,7 +253,6 @@ describe('message-templates.controller (makeHandlers)', () => {
     });
 
     it('returns 200 with the formatted row list', async () => {
->>>>>>> cc0b060e (test(dashboard-server): repair 26 stale pre-existing test failures; suite fully green)
       const rows = [{
         id: 'u1', account_id: accountId, fb_template_id: 'fb1',
         name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',

@@ -28,9 +28,10 @@ describe('Health API', () => {
 
     const user = await User.create({ email });
 
-    // Credentials so the pageid scoping includes our test page.
+    // Credentials so the pageid scoping includes our test page. For
+    // messaging-account entities, key IS the account id (= details->>'id').
     await vlabPool.query(
-      `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'health-test-page', $2)`,
+      `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'page-health', $2)`,
       [user.id, JSON.stringify({ id: 'page-health' })]
     );
 
