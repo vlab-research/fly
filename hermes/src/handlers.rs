@@ -10,7 +10,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::config::Config;
 use crate::event::{stamp_event, stamp_whatsapp_event};
@@ -127,7 +127,10 @@ pub async fn handle_whatsapp(
 ) -> impl IntoResponse {
     let entries = match body.get("entry").and_then(|e| e.as_array()) {
         Some(e) => e.clone(),
-        None => return StatusCode::OK,
+        None => {
+            warn!("[DROP] whatsapp POST with no entry array: {}", body);
+            return StatusCode::OK;
+        }
     };
 
     for entry in &entries {
@@ -142,13 +145,19 @@ pub async fn handle_whatsapp(
 async fn process_whatsapp_entry(state: &AppState, entry: &Value) -> Result<(), String> {
     let changes = match entry.get("changes").and_then(|c| c.as_array()) {
         Some(c) => c,
-        None => return Ok(()),
+        None => {
+            warn!("[DROP] whatsapp entry with no changes array: {}", entry);
+            return Ok(());
+        }
     };
 
     for change in changes {
         let value = match change.get("value") {
             Some(v) => v,
-            None => continue,
+            None => {
+                warn!("[DROP] whatsapp change with no value: {}", change);
+                continue;
+            }
         };
 
         let phone_number_id = value
@@ -157,6 +166,10 @@ async fn process_whatsapp_entry(state: &AppState, entry: &Value) -> Result<(), S
             .and_then(|p| p.as_str())
             .unwrap_or("")
             .to_string();
+
+        if value.get("messages").is_none() && value.get("statuses").is_none() {
+            warn!("[DROP] whatsapp change with no messages/statuses: {}", change);
+        }
 
         for key in &["messages", "statuses"] {
             if let Some(items) = value.get(key).and_then(|m| m.as_array()) {
@@ -194,7 +207,10 @@ pub async fn handle_webhook(
 ) -> impl IntoResponse {
     let entries = match body.get("entry").and_then(|e| e.as_array()) {
         Some(e) => e.clone(),
-        None => return StatusCode::OK,
+        None => {
+            warn!("[DROP] webhook POST with no entry array: {}", body);
+            return StatusCode::OK;
+        }
     };
 
     for entry in &entries {
@@ -208,8 +224,11 @@ pub async fn handle_webhook(
 }
 
 async fn process_entry(state: &AppState, entry: &Value) -> Result<(), String> {
+    let mut handled = false;
+
     for event_type in &["messaging", "messaging_handovers"] {
         if let Some(events) = entry.get(event_type).and_then(|e| e.as_array()) {
+            handled = true;
             for event_data in events {
                 match stamp_event(event_data.clone(), "messenger") {
                     Ok((user, bytes)) => {
@@ -223,7 +242,23 @@ async fn process_entry(state: &AppState, entry: &Value) -> Result<(), String> {
         }
     }
 
+    // Handover Protocol: when another app (e.g. the Page Inbox) holds thread
+    // control, Meta delivers that thread's events in entry.standby instead of
+    // entry.messaging. We deliberately don't process them — the state machine
+    // must not advance on a thread we don't own — but dropping them silently
+    // makes per-user webhook silence undiagnosable, so log each one.
+    if let Some(events) = entry.get("standby").and_then(|e| e.as_array()) {
+        handled = true;
+        for event_data in events {
+            warn!(
+                "[STANDBY] dropped event for thread owned by another app: {}",
+                event_data
+            );
+        }
+    }
+
     if let Some(changes) = entry.get("changes").and_then(|c| c.as_array()) {
+        handled = true;
         for change in changes {
             if change.get("field").and_then(|f| f.as_str())
                 == Some("message_template_status_update")
@@ -244,8 +279,14 @@ async fn process_entry(state: &AppState, entry: &Value) -> Result<(), String> {
                         }
                     });
                 }
+            } else {
+                warn!("[DROP] unhandled webhook change: {}", change);
             }
         }
+    }
+
+    if !handled {
+        warn!("[DROP] webhook entry with no processable payload: {}", entry);
     }
 
     Ok(())

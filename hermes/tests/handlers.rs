@@ -236,6 +236,30 @@ async fn empty_event_arrays_returns_200_no_produce() {
 }
 
 #[tokio::test]
+async fn standby_events_return_200_no_produce() {
+    // Handover Protocol: events for threads owned by another app arrive in
+    // entry.standby. They must NOT be produced (the state machine must not
+    // advance on threads we don't own) — they are logged and dropped.
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "entry": [{
+            "standby": [{
+                "sender": { "id": "user1" },
+                "recipient": { "id": "page123" },
+                "timestamp": 1_640_995_200_000_i64,
+                "message": { "text": "hello from a standby thread" }
+            }]
+        }]
+    });
+
+    let resp = app.oneshot(json_post("/webhooks", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(producer.get_calls().len(), 0);
+}
+
+#[tokio::test]
 async fn event_missing_sender_logs_and_returns_200() {
     // An event with no sender/recipient/user can't be stamped → error logged, 200 returned.
     let producer = Arc::new(MockProducer::new());
