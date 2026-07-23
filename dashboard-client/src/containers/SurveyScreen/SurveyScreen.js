@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import {
-  Switch, Route, useRouteMatch, useLocation, useHistory, Link, Redirect
+  Switch, Route, useRouteMatch, useLocation, useHistory, Link, Redirect,
 } from 'react-router-dom';
-import { Table, Spin, Tabs, Tag } from 'antd';
+import {
+  Table, Spin, Tabs, Tag, Badge, Alert,
+} from 'antd';
 import './SurveyScreen.css';
-import { FormScreen, StatesSummary, StatesList, StateDetail } from '..';
+import {
+  FormScreen, StatesSummary, StatesList, StateDetail,
+} from '..';
 import { groupBy } from '../../helpers';
 import { CreateBtn } from '../../components/UI';
 import fetchExportsBySurvey from '../../services/api/fetchExportsBySurvey';
+import useSurveyHealth from './useSurveyHealth';
+import { hasActionFindings, destToUrl } from '../StatesExplorer/healthNav';
 
 const { TabPane } = Tabs;
 
@@ -59,15 +65,15 @@ const Survey = ({ forms, selected }) => {
   const ActionLink = (text, record) => (<Link to={`/surveys/create?from=${record.id}`}> new version </Link>);
 
   columns = [...columns,
-  { title: 'translation', dataIndex: 'translation_conf', render: (text, record) => getTranslationInfo(record) },
-  { title: 'actions', dataIndex: 'id', render: ActionLink },
-  { title: 'killed', dataIndex: 'off_time', render: text => text && (<span className="skull">☠☠☠</span>) },
+    { title: 'translation', dataIndex: 'translation_conf', render: (text, record) => getTranslationInfo(record) },
+    { title: 'actions', dataIndex: 'id', render: ActionLink },
+    { title: 'killed', dataIndex: 'off_time', render: text => text && (<span className="skull">☠☠☠</span>) },
   ];
 
   const PrettyNameLink = (text, record) => (
     <Link to={`${match.url}/form/${record.id}`}>
       {record.prettyName}
-    </Link >
+    </Link>
   );
 
   const expandedRowRender = (row) => {
@@ -100,13 +106,61 @@ const Survey = ({ forms, selected }) => {
   );
 };
 
-const DownloadLink = (text) => (
+const DownloadLink = text => (
   text && text !== 'Not Found'
     ? <a href={text} target="_blank" rel="noopener noreferrer">DOWNLOAD</a>
     : null
 );
 
-const MonitorSection = ({ surveyName, match }) => {
+// Layer-2 banners: render only when firing (silent by default). Platform
+// notices are calm/informational — not caused by the researcher's
+// configuration. Study `action` findings get an amber banner; multiple
+// findings collapse into a single "N issues" line rather than stacking.
+const HealthBanners = ({ health, monitorUrl }) => {
+  const notices = (health && health.notices) || [];
+  const actions = ((health && health.findings) || []).filter(
+    f => f.level === 'action',
+  );
+
+  return (
+    <div>
+      {notices.map(notice => (
+        <Alert
+          key={notice.alertname}
+          type="info"
+          showIcon
+          message={notice.message}
+          style={{ marginBottom: 12 }}
+        />
+      ))}
+      {actions.length === 1 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={actions[0].message}
+          action={
+            destToUrl(actions[0].action, monitorUrl) && (
+              <Link to={destToUrl(actions[0].action, monitorUrl)}>
+                {actions[0].action.label}
+              </Link>
+            )
+          }
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {actions.length > 1 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`${actions.length} issues need attention — see Health below`}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+    </div>
+  );
+};
+
+const MonitorSection = ({ surveyName, match, health }) => {
   const location = useLocation();
   const history = useHistory();
 
@@ -130,6 +184,8 @@ const MonitorSection = ({ surveyName, match }) => {
 
   return (
     <div>
+      <HealthBanners health={health} monitorUrl={`${match.url}/monitor`} />
+
       <Tabs
         activeKey={getActiveSubTab()}
         onChange={handleSubTabChange}
@@ -142,7 +198,7 @@ const MonitorSection = ({ surveyName, match }) => {
 
       <Switch>
         <Route exact path={`${match.path}/monitor`}>
-          <StatesSummary surveyName={surveyName} />
+          <StatesSummary surveyName={surveyName} health={health} />
         </Route>
         <Route exact path={`${match.path}/monitor/list`}>
           <StatesList surveyName={surveyName} />
@@ -157,14 +213,14 @@ const MonitorSection = ({ surveyName, match }) => {
 
 const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-const isStale = (updated) => Date.now() - new Date(updated).getTime() > STALE_MS;
+const isStale = updated => Date.now() - new Date(updated).getTime() > STALE_MS;
 
 const IN_PROGRESS_STATUSES = [
   'Requested', 'Processing',
   'Querying', 'Formatting', 'Writing', 'Uploading',
   'Started', // legacy — pre-v0.6.6 exports may still carry this
 ];
-const isInProgress = (status) => IN_PROGRESS_STATUSES.includes(status);
+const isInProgress = status => IN_PROGRESS_STATUSES.includes(status);
 
 const renderMetadata = (metadata) => {
   if (!metadata || typeof metadata !== 'object') return null;
@@ -182,25 +238,33 @@ const renderMetadata = (metadata) => {
 };
 
 const exportColumns = [
-  { title: 'Source', dataIndex: 'source', render: (text) => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
-  { title: 'Status', dataIndex: 'status', render: (status, record) => {
-    if (isInProgress(status)) {
-      return isStale(record.updated)
-        ? <span style={{ color: '#faad14' }}>Stale</span>
-        : status;
-    }
-    if (status === 'Failed') {
-      return <span style={{ color: '#ff4d4f' }}>Failed</span>;
-    }
-    return status;
-  }},
+  { title: 'Source', dataIndex: 'source', render: text => ({ chat_log: 'Chat Log', full_messages: 'Full Messages' }[text] || 'Responses') },
+  {
+    title: 'Status',
+    dataIndex: 'status',
+    render: (status, record) => {
+      if (isInProgress(status)) {
+        return isStale(record.updated)
+          ? <span style={{ color: '#faad14' }}>Stale</span>
+          : status;
+      }
+      if (status === 'Failed') {
+        return <span style={{ color: '#ff4d4f' }}>Failed</span>;
+      }
+      return status;
+    },
+  },
   { title: 'Details', dataIndex: 'metadata', render: renderMetadata },
   { title: 'Time', dataIndex: 'updated' },
-  { title: 'Download', dataIndex: 'export_link', render: (text, record) => (
-    isInProgress(record.status) && !isStale(record.updated)
-      ? <Spin size="small" />
-      : DownloadLink(text)
-  )},
+  {
+    title: 'Download',
+    dataIndex: 'export_link',
+    render: (text, record) => (
+      isInProgress(record.status) && !isStale(record.updated)
+        ? <Spin size="small" />
+        : DownloadLink(text)
+    ),
+  },
 ];
 
 const ExportPanel = ({ selected }) => {
@@ -213,7 +277,7 @@ const ExportPanel = ({ selected }) => {
 
     const fetchExports = () => {
       fetchExportsBySurvey(selected)
-        .then(data => {
+        .then((data) => {
           if (!cancelled) {
             const rows = data || [];
             setExports(rows);
@@ -267,6 +331,7 @@ const SurveyScreen = ({ forms, selected }) => {
   const match = useRouteMatch();
   const location = useLocation();
   const history = useHistory();
+  const health = useSurveyHealth(selected);
 
   const getActiveTab = () => {
     const path = location.pathname.slice(match.url.length);
@@ -279,11 +344,21 @@ const SurveyScreen = ({ forms, selected }) => {
     history.push(`${match.url}/${key}`);
   };
 
+  // Layer-1 ambient badge: amber dot on the Monitor tab when any `action`
+  // finding is live. Absent when healthy — zero pixels when fine.
+  const monitorTab = hasActionFindings(health.findings) ? (
+    <Badge dot offset={[6, 0]} style={{ backgroundColor: '#faad14' }}>
+      Monitor
+    </Badge>
+  ) : (
+    'Monitor'
+  );
+
   return (
     <div>
       <Tabs activeKey={getActiveTab()} onChange={handleTabChange}>
         <TabPane tab="Edit" key="edit" />
-        <TabPane tab="Monitor" key="monitor" />
+        <TabPane tab={monitorTab} key="monitor" />
         <TabPane tab="Export" key="export" />
       </Tabs>
 
@@ -298,7 +373,7 @@ const SurveyScreen = ({ forms, selected }) => {
         </Route>
 
         <Route path={`${match.path}/monitor`}>
-          <MonitorSection surveyName={selected} match={match} />
+          <MonitorSection surveyName={selected} match={match} health={health} />
         </Route>
 
         <Route exact path={`${match.path}/export`}>
@@ -318,9 +393,28 @@ ExportPanel.propTypes = {
   selected: PropTypes.string.isRequired,
 };
 
+const healthShape = PropTypes.shape({
+  findings: PropTypes.arrayOf(PropTypes.object),
+  notices: PropTypes.arrayOf(PropTypes.object),
+});
+
+HealthBanners.propTypes = {
+  health: healthShape,
+  monitorUrl: PropTypes.string.isRequired,
+};
+
+HealthBanners.defaultProps = {
+  health: null,
+};
+
 MonitorSection.propTypes = {
   surveyName: PropTypes.string.isRequired,
   match: PropTypes.object.isRequired,
+  health: healthShape,
+};
+
+MonitorSection.defaultProps = {
+  health: null,
 };
 
 SurveyScreen.propTypes = {

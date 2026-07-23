@@ -118,9 +118,37 @@ src/
 - **MessageTemplates** — creates/manages Facebook Utility Message templates per `(page, name, language)` for out-of-window sends; see `documentation/utility-messages.md`
 - **Tickets** — support inbox UI (split list/detail layout with open/closed tabs, Markdown-rendered conversations via the shared `src/components/Markdown` component) backed entirely by Linear (no local storage); see `documentation/tickets.md`
 - **StatesExplorer** — participant state debugging (where participants are in survey flow, error tracking)
-  - **StatesSummary** — aggregated state counts per form and state
+  - **StatesSummary** — aggregated state counts per form and state, topped by the **HealthCard**
   - **StatesList** — filterable list of all participants with their current states
   - **StateDetail** — detailed view of a single participant's state including QA transcript and error details
+
+### Monitor Tab Health Surface
+
+The Monitor tab surfaces survey health findings from
+`GET /surveys/:surveyName/health` and platform notices from
+`GET /platform/notices` (see `documentation/dashboard-study-health.md` for
+the full design). The client is intentionally dumb: findings arrive fully
+resolved (message strings, levels, action dests); no thresholds or taxonomy
+live client-side.
+
+Three presentation layers, silent by default:
+
+1. **Ambient badge** — amber dot on the Monitor tab label
+   (`SurveyScreen.js`) when any finding has `level === 'action'`. Notes and
+   platform notices do not light it.
+2. **Banners** (`HealthBanners` in `SurveyScreen.js`) — inside the Monitor
+   tab, above the sub-tabs, only when firing: blue `info` alerts for
+   platform notices; a single amber `warning` alert for study action
+   findings (collapsed to "N issues need attention" when more than one).
+3. **HealthCard** (`StatesExplorer/HealthCard.js`) — top of
+   Monitor → Summary; "✓ No issues in the last 24h" when healthy, otherwise
+   `action` findings (prominent) and `note` findings (muted) with links.
+
+Supporting modules: `SurveyScreen/useSurveyHealth.js` (fetch + 60s poll,
+mounted at SurveyScreen level so the badge works without entering the tab;
+`findings` stays `null` until first load, and failed polls keep the last
+known state) and `StatesExplorer/healthNav.js` (pure helpers: badge logic +
+`action.dest` → URL mapping; unknown dests render without a link).
 
 ### API Client
 

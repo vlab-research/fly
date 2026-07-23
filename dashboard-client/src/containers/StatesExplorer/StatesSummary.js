@@ -4,6 +4,7 @@ import { Link, useRouteMatch } from 'react-router-dom';
 import { Card, Table, Tag, Statistic, Row, Col, message } from 'antd';
 import api from '../../services/api';
 import { Loading } from '../../components/UI';
+import HealthCard from './HealthCard';
 
 const linkStyle = {
   display: 'block',
@@ -16,7 +17,7 @@ const linkStyle = {
   transition: 'background-color 0.2s',
 };
 
-const StatesSummary = ({ surveyName }) => {
+const StatesSummary = ({ surveyName, health }) => {
   const match = useRouteMatch();
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +100,8 @@ const StatesSummary = ({ surveyName }) => {
 
   return (
     <div>
+      <HealthCard findings={health && health.findings} />
+
       <Card style={{ marginBottom: 24 }}>
         <Row gutter={16}>
           <Col span={6}>
@@ -140,6 +143,14 @@ const StatesSummary = ({ surveyName }) => {
 
 StatesSummary.propTypes = {
   surveyName: PropTypes.string.isRequired,
+  health: PropTypes.shape({
+    findings: PropTypes.arrayOf(PropTypes.object),
+    notices: PropTypes.arrayOf(PropTypes.object),
+  }),
+};
+
+StatesSummary.defaultProps = {
+  health: null,
 };
 
 export default StatesSummary;
