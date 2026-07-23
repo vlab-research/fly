@@ -484,6 +484,10 @@ dashboard:
       value: *exportertopic
     - name: EXODUS_API_URL
       value: "http://gbv-exodus-api"
+    # Platform notices proxy (/platform/notices). Unset -> endpoint returns
+    # { notices: [] } (feature cleanly off).
+    - name: ALERTMANAGER_URL
+      value: 'http://alertmanager-operated.monitoring:9093'
   resources:
     requests:
       cpu: 10m

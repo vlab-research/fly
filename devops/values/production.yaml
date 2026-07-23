@@ -420,6 +420,10 @@ dashboard:
       value: '004fb90f-35c7-47dd-afd1-0bc5c71bed67'
     - name: LINEAR_TODO_STATE_ID
       value: 'ebc049cd-ca61-4ef2-a117-250bd08873f9'
+    # Platform notices proxy (/platform/notices). Unset -> endpoint returns
+    # { notices: [] } (feature cleanly off).
+    - name: ALERTMANAGER_URL
+      value: 'http://alertmanager-operated.monitoring:9093'
 
   resources:
     requests:
