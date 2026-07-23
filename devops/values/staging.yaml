@@ -375,6 +375,8 @@ replybot:
 formcentral:
   replicaCount: 1
   image:
+    # Chart default is Docker Hub (vlabresearch/); CI publishes to GHCR
+    repository: ghcr.io/vlab-research/formcentral
     tag: *vformcentral
   env:
   - name: CHATBASE_DATABASE
