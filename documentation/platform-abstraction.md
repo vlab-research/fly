@@ -235,6 +235,31 @@ WHERE key = $1 AND entity IN ('facebook_page', 'whatsapp_business')
 | `dean/queries.go` `FollowUps` | join `ON pageid = c.key AND c.entity IN (...)` — NOTE: a 9th consumer missed by the original 8-consumer inventory |
 | dashboard-server queries (states, templates, media) + dashboard-client UI | DONE (commit `2bea1f8f`): states SCOPE_SQL scopes `states.pageid` via `key` + entity filter; migration 22 renames `media.facebook_page_id` / `message_templates.facebook_page_id` → `account_id` (those tables' own columns, not the credentials computed column); API accepts `accountId` with legacy `pageId` fallback. Hermes tags all inbound events with `source.account_id` (Messenger page_id, WhatsApp phone_number_id). |
 
+**RATIFIED DESIGN DECISION (2026-07-22): account identity = `(allocator, id)`, serialized to one string.**
+Considered and decided against the alternative — first-class `(platform, account_id)`
+pairs threaded through every key, join, and event schema. Basis:
+
+- *Platform is an attribute of an account, never part of its identity.* The
+  namespace that guarantees uniqueness is the **id allocator**, not the
+  platform: Meta is ONE allocator issuing page ids and `phone_number_id`s
+  from one graph-id space, so a bare Meta id is already unambiguous across
+  both Meta platforms. Which platform an id belongs to lives where
+  properties live — `credentials.entity`, threaded event attributes,
+  `states.platform` (migration 21).
+- *Platform-as-attribute is cheap and already done* (migration 21, response
+  metadata, event threading). *Platform-as-identity* would require the
+  `states` PK rewrite, pair-matching in every join and consumer contract,
+  and dual-read windows on three Kafka topics and four service APIs — while
+  adding zero behavioral capability over the serialized form, since
+  ambiguity is already impossible.
+- *Meta is the default (bare-numeric) namespace* — a default that can never
+  create ambiguity, per standard serialization practice (E.164, relative
+  URIs). An explicit `meta:` prefix would rewrite the entire keyspace to
+  disambiguate nothing.
+- *Tripwires that reopen the first-class-pair migration:* an allocator whose
+  ids cannot be prefix-encoded; a need to shard or segregate data by
+  platform; any observed failure of an allocator's id-space uniqueness.
+
 **Account-id namespace policy (standing rule for new platforms):** the bare-numeric namespace is reserved for Meta graph ids (page ids, WhatsApp `phone_number_id` — note WhatsApp is keyed by the Meta graph id, *not* the phone number, which is display metadata). Any platform whose account ids are not Meta graph ids — raw phone numbers (SMS providers), Telegram bot ids, etc. — MUST be namespaced with a channel prefix stamped once at Hermes ingestion (e.g. `sms:+2348012345678`, `tg:7123456789`); the platform's outbound API client strips its own prefix. This matters most for *correlated reuse*: the same physical phone number deliberately used on two channels (`sms:` vs `signal:`) must not collide. A prefixed id is the `(entity, key)` pair encoded into the one opaque string that fits through `states.pageid`, event payloads, and every API that only carries a single account-id field. When the first prefixed entity is added to the index predicate, also add a CHECK (Meta entities `^[0-9]+$`, others `^[a-z]+:`) to turn the convention into a constraint.
 
 **Test-DB gotcha (fixed):** the per-app test initdb concatenates `devops/migrations/*` through `cockroach sql`; migrations 16/17 used unqualified `export_status`, which aborted the run before later migrations applied. They are now qualified (`chatroach.export_status`). Any migration must use fully-qualified `chatroach.` table names or it will break the test bootstrap for everything after it.
