@@ -120,6 +120,12 @@ describe('Response queries', () => {
     3: '2022-06-06 10:02:00+00:00',
   };
 
+  // The query returns `timestamp` as an ISO string (new Date(...).toISOString())
+  // while the pagination token encodes CockroachDB's raw ::string rendering,
+  // which prints the UTC offset as '+00' rather than '+00:00'.
+  const iso = ts => new Date(ts).toISOString();
+  const dbText = ts => ts.replace('+00:00', '+00');
+
   describe('all()', () => {
     it('should return a list of responses for a survey created by a user', async () => {
 
@@ -136,11 +142,11 @@ describe('Response queries', () => {
           question_idx: '10',
           question_text: 'text',
           response: 'last',
-          timestamp: timestamps[1],
+          timestamp: iso(timestamps[1]),
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encoded([timestamps[1], '127', 'ref']),
+          token: token.encoded([dbText(timestamps[1]), '127', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -153,11 +159,11 @@ describe('Response queries', () => {
           question_idx: '10',
           question_text: 'text',
           response: 'first',
-          timestamp: timestamps[2],
+          timestamp: iso(timestamps[2]),
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encoded([timestamps[2], '127', 'ref']),
+          token: token.encoded([dbText(timestamps[2]), '127', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -170,11 +176,11 @@ describe('Response queries', () => {
           question_idx: '10',
           question_text: 'text',
           response: 'first',
-          timestamp: timestamps[2],
+          timestamp: iso(timestamps[2]),
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encoded([timestamps[2], '128', 'ref']),
+          token: token.encoded([dbText(timestamps[2]), '128', 'ref']),
         },
         {
           parent_surveyid: survey.id,
@@ -187,11 +193,11 @@ describe('Response queries', () => {
           question_idx: '10',
           question_text: 'text',
           response: 'first',
-          timestamp: timestamps[3],
+          timestamp: iso(timestamps[3]),
           metadata: null,
           pageid: null,
           translated_response: null,
-          token: token.encoded([timestamps[3], '126', 'ref']),
+          token: token.encoded([dbText(timestamps[3]), '126', 'ref']),
         },
       ]);
     })

@@ -62,8 +62,8 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/credentials` | Credential management |
 | `/facebook` | Facebook integration |
 | `/auth` | Authentication endpoints |
-| `/surveys/:surveyId/bails` | Bail-out monitoring |
-| `/surveys/:surveyId/bail-events` | Survey-wide bail events |
+| `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware |
+| `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
 | `/platform/notices` | Platform-wide notices proxied from AlertManager (whitelisted alertnames, fail-soft) |
