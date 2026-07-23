@@ -49,6 +49,16 @@ inconsistency; monitoring fate-sharing).
   "now"; the card covers "since I last looked"). The states table is
   current-state per user — sticky until the user recovers — so the window
   also ages out ancient testing noise.
+
+  **Performance note:** the query constrains `current_state` to an
+  enumerated list (`STATE_MACHINE_STATES` in the query module) so
+  CockroachDB can build tight `(current_state, updated > t)` spans on the
+  existing `states_current_state_updated_idx` — measured on prod: 124ms /
+  2.3MiB KV read vs ~4s / 144MiB without the constraint (there is no index
+  leading with `current_form` + `updated`, and the hot states table's
+  index count is intentionally kept down). **A state machine state missing
+  from that list is silently invisible to the health card** — keep it in
+  sync with botserver-core.
 - **Interpretation plane (declarative, editable):** a data-only ruleset
   (`dashboard-server/api/health/rules.js`) mapping conditions over the
   aggregate bag → `{level, message, action}` findings, evaluated by a pure

@@ -160,6 +160,30 @@ async function list(email, surveyName, shortcodes, { state, errorTag, form, sear
 // ages out ancient testing noise.
 const HEALTH_WINDOW_HOURS = 24;
 
+// KEEP IN SYNC with the state machine (botserver-core). Every current_state
+// value that can appear in the states table must be listed here — the
+// health query constrains on this list so CockroachDB can build tight
+// (current_state, updated > t) index spans instead of scanning every
+// historical row for the survey's shortcodes (measured on prod: 124ms vs
+// ~4s / 144MiB KV read without the constraint; there is no index leading
+// with current_form+updated, and the team intentionally keeps the hot
+// states table's index count down). A state missing from this list is
+// INVISIBLE to the health card — silently excluded from counts and the
+// active_users denominator — so treat additions to the state machine as
+// requiring an update here.
+const STATE_MACHINE_STATES = [
+  'START',
+  'RESPONDING',
+  'QOUT',
+  'END',
+  'BLOCKED',
+  'ERROR',
+  'WAIT_EXTERNAL_EVENT',
+  'USER_BLOCKED',
+  'RESET',
+  'OFF',
+];
+
 // One grouped round-trip feeding the health aggregate bag (see
 // api/health/aggregate.js). The CASE bucketing mirrors the taxonomy
 // contract in documentation/study-error-alerting.md — the sql_exporter
@@ -187,11 +211,17 @@ async function healthSummary(email, surveyName, shortcodes) {
                          AND states.timeout_date < NOW())::int AS expired,
       COUNT(*)::int AS count
     ${SCOPE_SQL}
+      AND states.current_state = ANY($4)
       AND states.updated > NOW() - INTERVAL '${HEALTH_WINDOW_HOURS} hours'
     GROUP BY 1, 2, 3, 4
   `;
 
-  const { rows } = await this.query(query, [email, surveyName, shortcodes]);
+  const { rows } = await this.query(query, [
+    email,
+    surveyName,
+    shortcodes,
+    STATE_MACHINE_STATES,
+  ]);
   return rows;
 }
 
