@@ -1001,24 +1001,39 @@ func TestGetTimeoutsIgnoresThoseAtOrAboveCap(t *testing.T) {
 		"bar",
 		ts,
 		"WAIT_EXTERNAL_EVENT",
+		// 5 timeout events already emitted for THIS wait (value == waitStart) =>
+		// retry cap reached. (Previously modeled as opaque [1,2,3,4,5]; the gate
+		// now counts timeout attempts for this wait, not total externalEvents.)
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1"],
-                      "waitStart": %v,
-                      "md": { "startTime": %v },
-                      "externalEvents": [1, 2, 3, 4, 5],
-                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
+                      "waitStart": %[1]v,
+                      "md": { "startTime": %[1]v },
+                      "externalEvents": [
+                        {"event":{"type":"timeout","value":%[1]v}},
+                        {"event":{"type":"timeout","value":%[1]v}},
+                        {"event":{"type":"timeout","value":%[1]v}},
+                        {"event":{"type":"timeout","value":%[1]v}},
+                        {"event":{"type":"timeout","value":%[1]v}}
+                      ],
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
 
 	mustExec(t, pool, insertQuery,
 		"under_cap",
 		"bar",
 		ts,
 		"WAIT_EXTERNAL_EVENT",
+		// 4 timeout attempts for THIS wait => still under the cap of 5.
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "forms": ["short1"],
-                      "waitStart": %v,
-                      "md": { "startTime": %v },
-                      "externalEvents": [1, 2, 3, 4],
-                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms, ms))
+                      "waitStart": %[1]v,
+                      "md": { "startTime": %[1]v },
+                      "externalEvents": [
+                        {"event":{"type":"timeout","value":%[1]v}},
+                        {"event":{"type":"timeout","value":%[1]v}},
+                        {"event":{"type":"timeout","value":%[1]v}},
+                        {"event":{"type":"timeout","value":%[1]v}}
+                      ],
+                      "wait": { "type": "timeout", "value": "20 minutes"}}`, ms))
 
 	cfg := &Config{TimeoutMaxPast: "48 hours", TimeoutMaxAttempts: 5}
 	ch := Timeouts(cfg, pool)
