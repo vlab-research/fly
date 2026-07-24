@@ -196,7 +196,22 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 WHERE
                   surv.created <= s.form_start_time AND
                   current_state = 'WAIT_EXTERNAL_EVENT' AND
-                  jsonb_array_length(COALESCE(s.state_json->'externalEvents','[]'::jsonb)) < $3
+                  -- Cap timeout RETRIES for this wait. externalEvents is a shared,
+                  -- never-drained log that also holds unrelated events (e.g.
+                  -- moviehouse:* video events), so its total length is the wrong
+                  -- proxy: a user who watched a clip is falsely counted as having
+                  -- exhausted their timeout attempts. Count only the timeout events
+                  -- Dean itself emitted for THIS wait (value == waitStart). The
+                  -- key-existence test short-circuits the ~99% of rows with no log.
+                  (
+                    NOT (s.state_json ? 'externalEvents')
+                    OR (
+                      SELECT count(*)
+                      FROM jsonb_array_elements(s.state_json->'externalEvents') e
+                      WHERE e->'event'->>'type' = 'timeout'
+                        AND e->'event'->>'value' = s.state_json->>'waitStart'
+                    ) < $3
+                  )
               )
               SELECT waitStart, userid, pageid, platform
               FROM timeout_dates
