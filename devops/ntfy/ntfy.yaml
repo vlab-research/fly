@@ -1,0 +1,105 @@
+# ntfy — self-hosted push server (OSS) for phone push on critical alerts.
+# Namespace `monitoring` (with the rest of the alerting stack). AlertManager
+# publishes to topic `vlab-alerts` with a bearer token; the ntfy phone app
+# subscribes to it. Auth is ntfy-NATIVE (users/tokens/ACLs) — NOT oauth2-proxy,
+# because the mobile app and AlertManager are non-browser clients that can't do
+# the interactive OIDC flow. See README.md and documentation/alerting.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ntfy-config
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: ntfy }
+data:
+  server.yml: |
+    base-url: "https://ntfy.vlab.digital"
+    listen-http: ":80"
+    # nginx terminates TLS and forwards; trust X-Forwarded-* so rate-limiting and
+    # visitor IPs are correct.
+    behind-proxy: true
+    # Native auth: SQLite user db + message cache live on the PVC below.
+    auth-file: "/var/lib/ntfy/user.db"
+    # Nobody may read/write any topic unless explicitly granted (least privilege).
+    auth-default-access: "deny-all"
+    cache-file: "/var/lib/ntfy/cache.db"
+    cache-duration: "12h"
+    attachment-cache-dir: "/var/lib/ntfy/attachments"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ntfy-data
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: ntfy }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName omitted -> cluster default. Set explicitly (e.g. pd-ssd) if
+  # you want to match the rest of the stack.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: ntfy }
+spec:
+  replicas: 1
+  # RWO volume -> never run two writers at once.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: ntfy }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: ntfy }
+    spec:
+      # Let the container write the PVC regardless of its runtime UID.
+      securityContext:
+        fsGroup: 2000
+      containers:
+        - name: ntfy
+          # template=alertmanager (built-in AlertManager formatting) requires a
+          # recent ntfy. Verify the deployed version supports it; else see the
+          # raw-webhook fallback in README.md.
+          image: binwiederhier/ntfy:v2.11.0
+          args: ["serve"]
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ntfy
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/ntfy
+          livenessProbe:
+            httpGet: { path: /v1/health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /v1/health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: config
+          configMap: { name: ntfy-config }
+        - name: data
+          persistentVolumeClaim: { claimName: ntfy-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: ntfy }
+spec:
+  selector: { app.kubernetes.io/name: ntfy }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

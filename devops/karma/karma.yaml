@@ -1,0 +1,84 @@
+# Karma — at-a-glance dashboard for all live AlertManager alerts (OSS).
+# Reads the in-cluster AlertManager; groups/collapses chronic alerts so multiple
+# always-firing alerts don't drown the view. Has NO built-in auth -> fronted by
+# oauth2-proxy/Auth0-Google (see devops/oauth2-proxy/ + ingress.yaml).
+# Read-only: no silence creation from the board (start conservative).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: karma-config
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: karma }
+data:
+  karma.yaml: |
+    alertmanager:
+      interval: 60s
+      servers:
+        - name: default
+          uri: http://prometheus-kube-prometheus-alertmanager.monitoring:9093
+          timeout: 20s
+          # proxy + readonly are mutually exclusive in Karma; readonly is what we
+          # want (no silence writes), so proxy stays off (default).
+          readonly: true
+    # Collapse resolved/inactive noise; show a compact multi-alert overview.
+    grid:
+      sorting:
+        order: startsAt
+        reverse: true
+    alertAcknowledgement:
+      enabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karma
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: karma }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: karma }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: karma }
+    spec:
+      containers:
+        - name: karma
+          image: ghcr.io/prymitive/karma:v0.120
+          env:
+            - name: CONFIG_FILE
+              value: /etc/karma/karma.yaml
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/karma
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: config
+          configMap: { name: karma-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: karma
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: karma }
+spec:
+  selector: { app.kubernetes.io/name: karma }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

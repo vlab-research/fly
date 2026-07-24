@@ -1,17 +1,26 @@
 # AlertManager routing
 
+> **Reading/investigating alerts?** See `documentation/alerting.md` §7
+> ("Connect → read → investigate alerts") for the agent runbook (AM v2 API,
+> port-forwards, Karma) and §§3–6 for per-alert runbooks. This file is about the
+> **routing config** and how to change it.
+
 ## Deployed state (live)
 
-**Slack-only, two-channel severity routing** — no PagerDuty/email/paging.
+**Severity-based routing → Slack, plus phone push for criticals via ntfy.**
 
-| Alert | Channel |
+| Alert | Destination |
 |---|---|
-| `severity=critical` (e.g. `KubeProxyDown`, our `Platform*` rules) | **`#vlab-alerts-critical`** |
-| `severity=warning` / `info` (default) | **`#vlab-alerts`** |
+| `severity=critical` (e.g. `KubeProxyDown`, our `Platform*` rules) | **`#vlab-alerts-critical`** Slack **+ ntfy phone push** (topic `vlab-alerts`) |
+| `severity=warning` / `info` (default) | **`#vlab-alerts`** Slack |
 | `Watchdog` (heartbeat) | silenced (`null` receiver) |
+| `KubeJobFailed` / `KubeJobNotCompleted` | silenced (replaced by cronjob-health rules) |
 
-Both channels are Slack incoming webhooks in the same workspace. All receivers
-use `send_resolved: true`, so a firing alert gets a green "resolved" follow-up.
+Slack channels are incoming webhooks in the same workspace. Criticals **also** post
+to the self-hosted ntfy server (`ntfy.vlab.digital`) via a `webhook_configs` on the
+`slack-critical` receiver (inline template → `🔴 FIRING: <alertname>`, priority 4).
+See `devops/ntfy/README.md`. All receivers use `send_resolved: true`, so a firing
+alert gets a green "resolved" follow-up.
 
 ### How it's wired
 
@@ -25,10 +34,10 @@ mounted `alertmanager-…-generated` secret from it, and AlertManager hot-reload
 
 | File | Purpose |
 |---|---|
-| `alertmanager.yaml` | The live config, with `${SLACK_WEBHOOK_*}` placeholders (no secrets) |
-| `apply.sh` | Renders the webhooks in + validates (`amtool`) + updates the secret |
-| `secret.env.template` | Copy to `secret.env` (gitignored), fill in the two webhook URLs |
-| `alertmanager-full.yaml.example` | The fuller design (PagerDuty + email + dead-man's-switch) — **not deployed**; kept as a reference for adding paging |
+| `alertmanager.yaml` | The live config, with `${SLACK_WEBHOOK_*}` + `${NTFY_TOKEN}` placeholders (no secrets) |
+| `apply.sh` | Renders the webhooks/token in + validates (`amtool`) + updates the secret |
+| `secret.env.template` | Copy to `secret.env` (gitignored): two Slack webhook URLs + the ntfy publish token |
+| `alertmanager-full.yaml.example` | The fuller design (PagerDuty + email + dead-man's-switch) — **not deployed**; kept as a reference |
 
 ## Change / reproduce the config
 
@@ -40,16 +49,17 @@ devops/alertmanager/apply.sh          # validates, backs up, applies, hot-reload
 `apply.sh` writes `alertmanager.live-backup.yaml` (gitignored) first; roll back with
 the command it prints.
 
-## Adding real paging later (no SaaS needed)
+## Phone push (live via ntfy)
 
-You are **not** getting paged today — critical alerts just land in a separate Slack
-channel. To add an actual phone page, add an open-source push receiver and route
-`severity=critical` to it as well (keep the Slack copy):
+Critical alerts now push to a phone: the `slack-critical` receiver has a
+`webhook_configs` → self-hosted **ntfy** (`ntfy.vlab.digital`, topic `vlab-alerts`),
+authenticated with a write-only bearer token injected as `${NTFY_TOKEN}` from
+`secret.env`. Setup, tokens, and the phone app are documented in
+`devops/ntfy/README.md`. The overview/state board is **Karma**
+(`devops/karma/`, `alerts.vlab.digital`) — not a receiver, it *reads* AlertManager.
 
-- **ntfy** (self-host or ntfy.sh): AlertManager `webhook_configs` → ntfy topic → phone push with priority.
-- **Telegram bot**: AlertManager → Telegram → phone.
-
-`alertmanager-full.yaml.example` shows the shape of a multi-receiver config
-(swap its PagerDuty receiver for ntfy/Telegram). A dead-man's-switch (route
-`Watchdog` to an external heartbeat like healthchecks.io so silence = monitoring
-is down) is the other piece to add there.
+### Still not wired (future)
+- **Dead-man's-switch:** route `Watchdog` to an external heartbeat (healthchecks.io)
+  so *silence = monitoring is down*.
+- **PagerDuty/email/escalation:** `alertmanager-full.yaml.example` shows the shape
+  (on-call rotations/escalation are the one thing ntfy doesn't do).

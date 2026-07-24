@@ -288,9 +288,86 @@ port-forward:
 - The `/study-health` helper works today via `kubectl port-forward` + `curl`
   (unique ports) and should prefer the MCP tools once available.
 
+### Connect → read → investigate alerts (agent runbook)
+
+**1. Connect to AlertManager.** No ingress on the raw stack — three ways in:
+- **Port-forward (preferred for local agents):** `devops/port-forwards.sh` opens
+  `localhost:9093` (AlertManager), `:9090` (Prometheus), `:26257` (CockroachDB).
+  Idempotent.
+- **In-cluster service:** `prometheus-kube-prometheus-alertmanager.monitoring:9093`
+  (what Karma reads).
+- **No local tooling?** Exec the AM pod:
+  `kubectl -n monitoring exec $(kubectl -n monitoring get pod -l app.kubernetes.io/name=alertmanager -o name | head -1) -c alertmanager -- wget -qO- http://localhost:9093/api/v2/alerts`
+
+**2. Read the CURRENT firing alerts** (state, not history) via the AM v2 API:
+```bash
+curl -s 'http://localhost:9093/api/v2/alerts?active=true&silenced=false&inhibited=false' \
+  | jq -r '.[] | "\(.labels.severity)\t\(.labels.alertname)\t\(.labels.namespace // "-")\t\(.annotations.summary // "")"'
+```
+Each alert has `.labels.alertname`, `.labels.severity`, `.labels.namespace`
+(prod=`vprod`, staging=`vstag`), `.annotations.summary/description`, and
+`.status.state`. `amtool alert query --alertmanager.url=http://localhost:9093` is
+the CLI equivalent. **Humans:** use the **Karma** board (`https://alerts.vlab.digital`,
+Google login) — same data as a live state view; resolved alerts disappear.
+
+**3. Investigate a firing alert:**
+- **What it means + fix:** find the alertname in §§3–6 of this doc (runbooks). Every
+  alert is documented with its PromQL and remediation steps.
+- **Where it's defined / its exact threshold:** the PrometheusRule — `devops/alerts/`
+  (broker/app/study/cronjob), `devops/kafka-consumer-health/` (lag),
+  `devops/vlab/charts/redis/` (redis). Grep the alertname to find the `expr`.
+- **Underlying metrics:** run the rule's `expr` (or narrower) against Prometheus via
+  the **`mcp__prometheus`** tool (PromQL at `:9090`).
+- **Study/error alerts** (`Platform*`, `Survey*`, `MultiSurvey*`, `Dean*`):
+  cross-reference CockroachDB survey states (port-forward `:26257`,
+  `mcp__postgres`) and `documentation/study-error-alerting.md`; the `/study-health`
+  skill returns a one-shot green/degraded/critical verdict with next steps.
+
 ---
 
-## 8. Other alert sources (aware, not yet curated)
+## 8. Alert overview + phone push (Karma + ntfy)
+
+Slack `#vlab-alerts` is a firehose — poor for *overview* when several alerts fire
+chronically, and it can't push to a phone selectively. Two OSS, self-hosted pieces
+fill the gap (both in the `monitoring` namespace). Full build/rollout plan:
+`planning/karma-ntfy-alerting-plan.md`.
+
+### Karma — the overview board (`devops/karma/`)
+[Karma](https://github.com/prymitive/karma) at **`https://alerts.vlab.digital`**
+reads AlertManager (`prometheus-kube-prometheus-alertmanager:9093`, **read-only**)
+and shows **all** live alerts grouped/collapsed — the at-a-glance state view. Works
+in a phone browser, so it's also how you *see everything* on your phone.
+
+- **Auth:** Karma has no built-in auth, so it's fronted by **oauth2-proxy**
+  (`devops/oauth2-proxy/`) doing OIDC to **Auth0** (`https://virtuallab.auth0.com/`);
+  Auth0's Universal Login shows **"Sign in with Google."** Access is gated by an
+  **email allowlist** (`oauth2-proxy-emails` ConfigMap). oauth2-proxy runs in nginx
+  `auth_request` mode; two ingresses on the host (`/oauth2/*` open, `/` gated).
+- **Auth0 app:** a dedicated **Regular Web Application** (confidential client) — NOT
+  the dashboard SPA. Client id/secret live in `devops/alerts/.env-karma`
+  (gitignored). Callback `…/oauth2/callback`, logout `https://alerts.vlab.digital`.
+
+### ntfy — phone push for criticals (`devops/ntfy/`)
+[ntfy](https://ntfy.sh) at **`https://ntfy.vlab.digital`** pushes to the ntfy phone
+app on topic **`vlab-alerts`**. **Only `severity=critical` pushes** (low noise —
+everything is still visible in Slack + Karma). Achieved by adding a `webhook_configs`
+(ntfy's built-in `template=alertmanager`) to the **`slack-critical`** receiver in
+`devops/alertmanager/alertmanager.yaml`, so criticals hit **both** Slack and phone.
+The publish token is injected via `secret.env` → `apply.sh` (`${NTFY_TOKEN}`), same
+pattern as the Slack webhooks — never committed.
+
+- **Auth (deliberately different from Karma):** ntfy's clients are the **phone app**
+  (streaming subscribe) and **AlertManager** (machine publish) — neither can do the
+  browser OIDC flow, so ntfy uses its **own** auth (users + tokens + per-topic ACLs,
+  `auth-default-access: deny-all`), **not** oauth2-proxy. See `devops/ntfy/README.md`
+  for the user/token/access setup.
+
+### Why not Grafana OnCall
+OnCall **OSS is archived** (2026-03-24) and its mobile push/SMS/phone features (which
+were Cloud-backed) stopped working for OSS users the same day; push now lives only in
+paid Grafana Cloud IRM. Karma + ntfy keeps the whole path OSS + self-hosted.
+
+## 9. Other alert sources (aware, not yet curated)
 
 - **kube-prometheus-stack default rules** are enabled (`defaultRules` in
   `devops/prometheus/values.yaml`). Triage status:

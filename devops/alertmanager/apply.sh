@@ -13,6 +13,7 @@ cd "$(dirname "$0")"
 set -a; . ./secret.env; set +a
 : "${SLACK_WEBHOOK_WARNING:?set in secret.env}"
 : "${SLACK_WEBHOOK_CRITICAL:?set in secret.env}"
+: "${NTFY_TOKEN:?set in secret.env (ntfy publish token for topic vlab-alerts)}"
 
 # Back up whatever is live now (contains real webhooks -> gitignored).
 kubectl -n monitoring get secret alertmanager -o jsonpath='{.data.alertmanager\.yaml}' \
@@ -22,7 +23,8 @@ kubectl -n monitoring get secret alertmanager -o jsonpath='{.data.alertmanager\.
 RENDER="$(mktemp -d)/alertmanager.yaml"
 trap 'rm -rf "$(dirname "$RENDER")"' EXIT
 sed -e "s#\${SLACK_WEBHOOK_WARNING}#${SLACK_WEBHOOK_WARNING}#" \
-    -e "s#\${SLACK_WEBHOOK_CRITICAL}#${SLACK_WEBHOOK_CRITICAL}#" alertmanager.yaml > "$RENDER"
+    -e "s#\${SLACK_WEBHOOK_CRITICAL}#${SLACK_WEBHOOK_CRITICAL}#" \
+    -e "s#\${NTFY_TOKEN}#${NTFY_TOKEN}#" alertmanager.yaml > "$RENDER"
 
 # Validate before touching the live config (a bad config would break ALL alerting).
 docker run --rm --entrypoint amtool -v "$(dirname "$RENDER"):/cfg" \

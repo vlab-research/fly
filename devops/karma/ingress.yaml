@@ -1,0 +1,58 @@
+# Ingresses for alerts.vlab.digital (Karma behind Google/Auth0 login).
+# TWO objects on purpose:
+#   1) alerts-oauth2  — /oauth2/* -> oauth2-proxy, NO auth annotations (the login
+#      endpoints must be reachable without being logged in).
+#   2) alerts-karma   — /       -> Karma, WITH nginx external-auth annotations that
+#      require a valid oauth2-proxy session (else redirect to /oauth2/start).
+# Both share host + TLS secret `alerts-tls` (cert-manager issues once).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alerts-oauth2
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: oauth2-proxy }
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [ alerts.vlab.digital ]
+      secretName: alerts-tls
+  rules:
+    - host: alerts.vlab.digital
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  number: 4180
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alerts-karma
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: karma }
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.monitoring.svc.cluster.local:4180/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://alerts.vlab.digital/oauth2/start?rd=$escaped_request_uri"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [ alerts.vlab.digital ]
+      secretName: alerts-tls
+  rules:
+    - host: alerts.vlab.digital
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: karma
+                port:
+                  number: 8080

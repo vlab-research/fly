@@ -1,0 +1,113 @@
+# oauth2-proxy — Google login (brokered by Auth0) in front of Karma.
+# Runs in nginx external-auth ("auth_request") mode: nginx calls /oauth2/auth on
+# every request to alerts.vlab.digital; unauthenticated users are bounced to
+# /oauth2/start -> Auth0 Universal Login -> "Sign in with Google". oauth2-proxy
+# does NOT proxy Karma traffic (upstream is static://200); nginx forwards to Karma
+# directly once auth passes. See devops/karma/ingress.yaml.
+#
+# Secret `oauth2-proxy` (monitoring) holds client-id/client-secret (from
+# devops/alerts/.env-karma) + a generated cookie-secret. See devops/karma/README.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth2-proxy-emails
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: oauth2-proxy }
+data:
+  # Allowlist — ONLY these emails may access Karma, even though Auth0's Google
+  # connection would authenticate any Google account. Add teammates here.
+  # (To allow the whole vlab.digital Google Workspace instead, drop this file and
+  # set OAUTH2_PROXY_EMAIL_DOMAINS=vlab.digital in the Deployment.)
+  emails.txt: |
+    nandan@vlab.digital
+    nandanmarkrao@gmail.com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: oauth2-proxy }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: oauth2-proxy }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: oauth2-proxy }
+    spec:
+      containers:
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.0
+          args: ["--config=/dev/null"]  # all config via env below
+          env:
+            - name: OAUTH2_PROXY_PROVIDER
+              value: "oidc"
+            - name: OAUTH2_PROXY_OIDC_ISSUER_URL
+              value: "https://virtuallab.auth0.com/"
+            - name: OAUTH2_PROXY_SCOPE
+              value: "openid email profile"
+            # Go straight to Auth0 (which shows the Google button) — no interstitial.
+            - name: OAUTH2_PROXY_SKIP_PROVIDER_BUTTON
+              value: "true"
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              value: "https://alerts.vlab.digital/oauth2/callback"
+            - name: OAUTH2_PROXY_HTTP_ADDRESS
+              value: "0.0.0.0:4180"
+            - name: OAUTH2_PROXY_REVERSE_PROXY
+              value: "true"
+            # Auth-only mode: nothing to proxy, just return 200/202 for auth_request.
+            - name: OAUTH2_PROXY_UPSTREAMS
+              value: "static://200"
+            - name: OAUTH2_PROXY_SET_XAUTHREQUEST
+              value: "true"
+            # Access control: only emails in the allowlist file (not domain-based,
+            # since the team isn't on a single Google Workspace domain).
+            - name: OAUTH2_PROXY_AUTHENTICATED_EMAILS_FILE
+              value: "/etc/oauth2-proxy/emails.txt"
+            - name: OAUTH2_PROXY_COOKIE_SECURE
+              value: "true"
+            - name: OAUTH2_PROXY_COOKIE_DOMAINS
+              value: "alerts.vlab.digital"
+            - name: OAUTH2_PROXY_WHITELIST_DOMAINS
+              value: "alerts.vlab.digital"
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: oauth2-proxy, key: client-id } }
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: oauth2-proxy, key: client-secret } }
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom: { secretKeyRef: { name: oauth2-proxy, key: cookie-secret } }
+          ports:
+            - containerPort: 4180
+              name: http
+          volumeMounts:
+            - name: emails
+              mountPath: /etc/oauth2-proxy
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /ping, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /ping, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: emails
+          configMap: { name: oauth2-proxy-emails }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: oauth2-proxy }
+spec:
+  selector: { app.kubernetes.io/name: oauth2-proxy }
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
