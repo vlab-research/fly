@@ -11,7 +11,12 @@ The staging environment runs in the `vstag` Kubernetes namespace on the same GKE
 | Frontend (Netlify) | `staging--vlab-research.netlify.app` | `fly.vlab.digital` |
 | Dashboard API (K8s) | `staging.fly-dashboard-api.vlab.digital` | `fly-dashboard-api.vlab.digital` |
 | Botserver (K8s) | `staging.fly-botserver.vlab.digital` | `fly-botserver.vlab.digital` |
+| Moviehouse (Netlify) | `staging--virtuallab-videos.netlify.app` | `virtuallab-videos.netlify.app` |
 | Linksniffer (K8s) | `staging.links.vlab.digital` | `links.vlab.digital` |
+
+On staging, the `staging.fly-botserver.vlab.digital` host is served by **hermes** (the Rust
+ingester), which fully replaces botserver in the `vstag` namespace but keeps the same public
+host and the internal `/synthetic` endpoint. See `devops/values/staging.yaml` (`botserver.enabled: false`, `hermes.enabled: true`).
 
 ### DNS
 
@@ -23,6 +28,42 @@ All staging DNS records are CNAMEs to `vlab-cluster.vlab.digital` (the GKE ingre
 - **Production branch**: `main` → `fly.vlab.digital`
 - **Staging branch**: `staging` → `staging--vlab-research.netlify.app`
 - **Build config**: base `dashboard-client/`, command `npm run build`, publish `dashboard-client/build/`
+
+### Moviehouse (video WebView)
+
+Moviehouse (`moviehouse/`) is the Vimeo-in-Messenger-WebView player. It POSTs video
+interaction events to the botserver `/synthetic` endpoint. It is a **separate Netlify site**
+from the dashboard, but builds from the same `fly` repo.
+
+- **Site**: `virtuallab-videos` (ID: `40af3fe3-4d9c-4bb2-aaa8-e4f6d3c373fc`)
+- **Repo**: `vlab-research/fly`, base `moviehouse/`, command `npm start` (gulp templates
+  `netlify.toml` env → `dist/`), publish `dist/`
+- **Production branch**: `main` → `virtuallab-videos.netlify.app`
+- **Staging branch**: `staging` → `staging--virtuallab-videos.netlify.app`
+- **Per-context config**: `moviehouse/netlify.toml` sets `SERVER_URL` and `APP_ID` per context.
+  Staging → `https://staging.fly-botserver.vlab.digital/synthetic` + Facebook test app
+  `790352681363186`. Production → `https://fly-botserver.vlab.digital/synthetic` + app
+  `699455733740842`.
+
+**Enabling staging (gotcha):** the `[context.staging.environment]` block in `netlify.toml`
+only takes effect if the site's **branch deploys include `staging`**. This is the
+`build_settings.allowed_branches` field, which must be `["main", "staging"]` (it was
+`["main"]` by default). The `netlify api updateSite` CLI wrapper silently drops nested
+build-settings payloads — set it with a raw PATCH instead:
+
+```bash
+curl -s -X PATCH "https://api.netlify.com/api/v1/sites/40af3fe3-4d9c-4bb2-aaa8-e4f6d3c373fc" \
+  -H "Authorization: Bearer $NETLIFY_TOKEN" -H "Content-Type: application/json" \
+  -d '{"build_settings":{"allowed_branches":["main","staging"]}}'
+```
+
+**Note:** the site rebuilds on *every* push/PR to the `fly` repo (no build filter). When
+`dist/` is unchanged, Netlify marks the build `error` with `Canceled build due to no content
+change` — this is benign, not a real failure.
+
+**Follow-up for full WebView auth:** `MessengerExtensions.getContext` (the `?useExtensions=true`
+path) requires `staging--virtuallab-videos.netlify.app` to be whitelisted in the staging
+Facebook test app's Messenger domains. Direct mode (`?userId=`) bypasses this.
 
 ## Auth0
 
