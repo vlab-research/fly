@@ -774,6 +774,15 @@ func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {
 	cfg := &Config{
 		PaymentGrace:    "8 hours",
 		PaymentInterval: "2 days",
+		// The retry cap is orthogonal to what this test covers (the grace /
+		// interval window), but it is NOT optional: Payments gates on
+		// `jsonb_array_length(externalEvents) < $3`, so leaving this at Go's
+		// zero value makes the predicate `0 < 0` and drops every row. In
+		// production DEAN_PAYMENT_MAX_ATTEMPTS is a required env var, so 0 is
+		// never a real configuration. Any non-zero cap keeps the three
+		// fixtures (all of which have no externalEvents) subject only to the
+		// grace/interval windows under test.
+		PaymentMaxAttempts: 3,
 	}
 
 	ch := Payments(cfg, pool)
