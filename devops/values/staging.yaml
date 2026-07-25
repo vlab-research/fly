@@ -606,7 +606,7 @@ exporter:
 
 exodus:
   image:
-    repository: vlabresearch/exodus
+    repository: ghcr.io/vlab-research/exodus
     tag: *vexodus
     pullPolicy: Always
   env:
