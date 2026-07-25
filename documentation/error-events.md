@@ -19,12 +19,28 @@ errors. `states`, `responses`, `chat_log` are projections of it.
 Errors come from **two producers that converge on one event type**:
 
 - `replybot/lib/typewheels/transition.js` — processing failures
-  (`CORRUPTED_MESSAGE`, `STATE_TRANSITION`, `STATE_ACTIONS`/`FORM_NOT_FOUND`).
+  (`CORRUPTED_MESSAGE`, `STATE_ACTIONS`/`FORM_NOT_FOUND`).
 - `message-worker/worker.go` `reportError()` — delivery failures (`FB`).
 
 Both emit a `machine_report` external event (`{ error: { tag, … } }`). That
 event (a) lands in `messages` and (b) is consumed by `machine.js exec` to set
 `states.error`. `machine.js` does **not** create errors — it routes them.
+
+Two things that are easy to get wrong here:
+
+- **Not every `machine_report` is an error.** The success and RESET paths in
+  `transition.js` publish error-free reports too, so any consumer must filter on
+  the presence of an `error` key, not on the event type.
+- **`STATE_TRANSITION` errors are not in the log at all.**
+  `transition.js:151-157` returns `publish: false`, so they reach no table —
+  only stdout. Deliberate since `cb87b858` (2020), most likely as a loop guard.
+  Treat this as a known hole, not as a producer.
+
+The on-disk shape in `messages.content` is
+`{user, page, event:{type, value}, source, timestamp}` — the error lives at
+`content->'event'->'value'->'error'`. (`machine.js` reads `nxt.payload`, but
+that is the post-`parseEvent` in-memory shape, not what is stored.) Full
+verified trace: `planning/error-events-b2-payload.md`.
 
 Historically the error survived only as sticky `states.error`, doing two
 incompatible jobs. We split them:
@@ -57,7 +73,19 @@ state_json.error = { tag, code, message, ts }   // ts = epoch ms, occurrence tim
   timestamp so the current-error population can be aged by **onset**, not by
   `updated` (which Dean re-warms — the source of the alert flapping).
 
-## 3. `errors` — the projection (Piece B, next)
+## 3. `errors` — the projection (Piece B — **deferred, not built**)
+
+> **Status:** designed, not implemented, and parked. Tracing the real payload
+> showed that `FB` delivery errors — the highest-volume class, and the one the
+> alerts group by survey — carry no `form` and no `platform`, because the
+> `send_message` command never told message-worker which survey it was sending
+> for. Attribution currently happens *via `states`*, not via the event, so a
+> pure event projection loses it. Fixing that is a wire-format change across
+> replybot + message-worker. Rationale, the three-layer root analysis, and the
+> decisions to make before restarting: `planning/error-events.md`.
+>
+> Everything in this section describes the intended design, not current
+> behaviour.
 
 An append-only read model, one row per error occurrence, built by a
 **dedicated consumer of the `machine_report` stream** (CQRS: same event,
@@ -80,7 +108,11 @@ errors ( userid, account_id, platform, form, timestamp,
 - **Backfill = replay** `messages` (durable past the topic's retention).
 - **Rebuildable / disposable.** Wrong mapping? Drop and re-run.
 
-## 4. Consumers — both audiences, one primitive (Piece C, later)
+## 4. Consumers — both audiences, one primitive (Piece C — **deferred with B**)
+
+> One part of this is **not** blocked: aging the `states` stock by `errored_at`
+> instead of `updated` needs only Piece A, and is where the de-flapping benefit
+> is actually realised.
 
 - **Researcher dashboard** (`dashboard-study-health.md`): error/blocked
   findings source recent-error *flow* from `errors`; `states` stock (aged by
