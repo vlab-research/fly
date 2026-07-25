@@ -865,6 +865,37 @@ describe('getState', () => {
     state.error.code.should.equal('FOO')
   })
 
+  it('stamps error.ts with the triggering event timestamp on entry', () => {
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO', message: 'boom' } } }, { timestamp: 111 })
+    const state = getState([referral, echo, text, report])
+    state.state.should.equal('ERROR')
+    state.error.ts.should.equal(111)
+  })
+
+  it('persists only the thin error on state (tag/code/message/ts), dropping stack/state/event', () => {
+    // The heavy context (stack, pre-error state snapshot, raw event) stays on
+    // the machine_report event → messages → errors projection; it must NOT be
+    // duplicated onto the states row.
+    const report = synthetic({ type: 'machine_report', value: { error: { tag: 'STATE_ACTIONS', code: 'X', message: 'm', stack: 'deep\nstack\ntrace', state: { big: 'snapshot' }, event: { raw: 1 } } } }, { timestamp: 7 })
+    const state = getState([referral, echo, text, report])
+    Object.keys(state.error).sort().should.eql(['code', 'message', 'tag', 'ts'])
+    state.error.should.not.have.property('stack')
+    state.error.should.not.have.property('state')
+    state.error.should.not.have.property('event')
+  })
+
+  it('preserves error.ts (onset) across a Dean retry that re-fails', () => {
+    // reportA breaks the user; a redo retries (RESPONDING blip, error kept);
+    // reportB re-fails with different content. Same episode → onset ts is
+    // preserved, content updated to the latest failure.
+    const reportA = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'A', message: 'a' } } }, { timestamp: 100 })
+    const reportB = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'B', message: 'b' } } }, { timestamp: 200 })
+    const state = getState([referral, echo, text, reportA, synthetic({ type: 'redo' }), reportB])
+    state.state.should.equal('ERROR')
+    state.error.code.should.equal('B')
+    state.error.ts.should.equal(100)
+  })
+
   it('gets into a blocked state when given a bad platform response', () => {
 
     const pr = { ...syntheticPR, payload: { response: { error: { code: 2022 } } } }

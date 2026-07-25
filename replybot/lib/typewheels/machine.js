@@ -238,6 +238,28 @@ function tokenWrap(state, nxt, output) {
   return { ...output, token, stateUpdate: { ...output.stateUpdate, tokens } }
 }
 
+// Persist only the minimal error onto the live state: what it is (tag/code),
+// a human message, and WHEN it occurred (ts). The full context — stack, the
+// pre-error state snapshot, the triggering event — stays on the machine_report
+// event (→ messages → the errors projection); we don't duplicate it onto the
+// hot `states` row (which keeps rows small and feeds the error_tag/fb_error_code
+// computed columns from tag/code).
+//
+// `ts` is the occurrence time (the triggering event's timestamp). It's
+// preserved across retry re-fails: RESPOND clears `error` on genuine recovery,
+// so a fresh error episode gets a new ts, while a failed Dean retry — which
+// only blipped through RESPONDING without truly recovering — keeps the original
+// onset. That makes `errored_at` an honest "when did this user break", immune
+// to retry churn.
+function thinError(err, priorError, ts) {
+  return {
+    tag: err.tag,
+    code: err.code,
+    message: err.message,
+    ts: (priorError && priorError.ts) || ts,
+  }
+}
+
 function exec(state, nxt) {
   switch (categorizeEvent(nxt)) {
 
@@ -273,7 +295,7 @@ function exec(state, nxt) {
       const { response } = nxt.payload
 
       if (response && response.error && state.state !== 'BLOCKED') {
-        return { action: 'BLOCKED', error: response.error }
+        return { action: 'BLOCKED', error: thinError(response.error, state.error, nxt.timestamp) }
       }
       return _noop()
     }
@@ -286,11 +308,11 @@ function exec(state, nxt) {
       }
 
       if (report && report.error && report.error.tag === 'FB') {
-        return { action: 'BLOCKED', error: report.error }
+        return { action: 'BLOCKED', error: thinError(report.error, state.error, nxt.timestamp) }
       }
 
       if (report && report.error) {
-        return { action: 'ERROR', error: report.error }
+        return { action: 'ERROR', error: thinError(report.error, state.error, nxt.timestamp) }
       }
 
       return _noop()
@@ -729,7 +751,7 @@ function act(ctx, state, output) {
 
     case 'MAKE_PAYMENT': {
       const qa = state.qa
-      const payment = _wrapSideEffect(ctx, getPayment(ctx, qa, output.question))
+      const payment = _wrapPayment(ctx, getPayment(ctx, qa, output.question))
       return {
         messages: [],
         payment
@@ -764,16 +786,25 @@ function _wrapSideEffect(ctx, data) {
   }
 }
 
-function getSideEffectFromMessage(ctx, message, type) {
-  const metadata = message.metadata
-  if (metadata && metadata[type]) {
-    return _wrapSideEffect(ctx, metadata[type])
+// Payment events are published off-pipeline (VLAB_PAYMENT_TOPIC, consumed by
+// dinersclub) and carry the conversation's platform so downstream consumers
+// can route/report by platform. ctx.platform is threaded from
+// actionsResponses (transition.js), which reads the persisted md.platform;
+// 'messenger' is exact for anything predating that persistence.
+function _wrapPayment(ctx, payment) {
+  if (!payment) return
+  return {
+    ..._wrapSideEffect(ctx, payment),
+    platform: ctx.platform || 'messenger'
   }
-  return undefined
 }
 
 function getPaymentFromMessage(ctx, message) {
-  return getSideEffectFromMessage(ctx, message, 'payment')
+  const metadata = message.metadata
+  if (metadata && metadata.payment) {
+    return _wrapPayment(ctx, metadata.payment)
+  }
+  return undefined
 }
 
 function updateQA(qa, u) {

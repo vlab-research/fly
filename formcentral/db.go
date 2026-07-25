@@ -69,14 +69,18 @@ func getTranslationForms(pool *pgxpool.Pool, surveyid string) (*trans.Form, *tra
 	return src, dest, err
 }
 
+// getSurveyByParams resolves a survey from the platform account id (pageid).
+// pageid holds the platform account id (Facebook page id for Messenger, phone_number_id
+// for WhatsApp), which equals credentials.key for messaging entities. Uniqueness is
+// enforced by the unique_messaging_account partial index.
 func getSurveyByParams(pool *pgxpool.Pool, pageid string, shortcode string, created time.Time) (*Survey, error) {
 	query := `
       SELECT id, s.userid, form_json, form, s.shortcode, translation_conf, messages, created, off_time
       FROM surveys s
       LEFT JOIN survey_settings
       ON s.id = survey_settings.surveyid
-      WHERE s.userid=(SELECT userid FROM credentials WHERE facebook_page_id=$1 LIMIT 1) 
-      AND s.shortcode=$2 
+      WHERE s.userid=(SELECT userid FROM credentials WHERE key=$1 AND entity IN ('facebook_page', 'whatsapp_business') LIMIT 1)
+      AND s.shortcode=$2
       AND created<=$3
       ORDER BY created DESC
       LIMIT 1

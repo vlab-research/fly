@@ -8,6 +8,8 @@ const {
   validateButtons,
   validateCreateInput,
   buildFacebookCreatePayload,
+  buildWhatsAppCreatePayload,
+  resolveWabaId,
   parseCreateResponse,
   parseListResponse,
   matchFbEntry,
@@ -40,10 +42,15 @@ describe('message-templates.core', () => {
   // validateCreateInput — branching validation logic
   // -------------------------------------------------------
   describe('validateCreateInput', () => {
-    const valid = { pageId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
+    const valid = { accountId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
+    const validLegacy = { pageId: 'p1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
 
-    it('accepts complete, correct input', () => {
+    it('accepts complete, correct input with accountId', () => {
       validateCreateInput(valid).should.deep.equal({ valid: true, buttons: [], examples: ['Alice'] });
+    });
+
+    it('accepts complete, correct input with legacy pageId', () => {
+      validateCreateInput(validLegacy).should.deep.equal({ valid: true, buttons: [], examples: ['Alice'] });
     });
 
     it('accepts a body without placeholders and no examples', () => {
@@ -82,14 +89,14 @@ describe('message-templates.core', () => {
       r.error.should.match(/no \{\{N\}\} placeholders/);
     });
 
-    it('rejects missing pageId', () => {
-      const r = validateCreateInput({ ...valid, pageId: undefined });
+    it('rejects missing accountId and pageId', () => {
+      const r = validateCreateInput({ ...valid, accountId: undefined, pageId: undefined });
       r.valid.should.equal(false);
-      r.error.should.include('pageId');
+      r.error.should.include('accountId');
     });
 
-    it('rejects empty-string pageId', () => {
-      validateCreateInput({ ...valid, pageId: '' }).valid.should.equal(false);
+    it('rejects empty-string accountId', () => {
+      validateCreateInput({ ...valid, accountId: '' }).valid.should.equal(false);
     });
 
     it('rejects missing name', () => {
@@ -140,10 +147,10 @@ describe('message-templates.core', () => {
       r.should.deep.equal({ valid: true, buttons: [], examples: [] });
     });
 
-    it('reports pageId error before name when both are missing', () => {
+    it('reports accountId error before name when both are missing', () => {
       // Predictable short-circuit order: authors see the first missing field first
-      const r = validateCreateInput({ pageId: '', name: '', language: 'en_US', body: 'x' });
-      r.error.should.include('pageId');
+      const r = validateCreateInput({ accountId: '', name: '', language: 'en_US', body: 'x' });
+      r.error.should.include('accountId');
     });
   });
 
@@ -260,6 +267,85 @@ describe('message-templates.core', () => {
       // Facebook rejects a BUTTONS component with zero buttons; skip it entirely.
       const payload = buildFacebookCreatePayload({ name: 'x', language: 'en', body: 'b', buttons: [] });
       payload.components.should.have.length(1);
+    });
+  });
+
+  // -------------------------------------------------------
+  // buildWhatsAppCreatePayload — WABA-level template shape
+  // -------------------------------------------------------
+  describe('buildWhatsAppCreatePayload', () => {
+    it('builds the canonical UTILITY template shape', () => {
+      const payload = buildWhatsAppCreatePayload({ name: 'prize', language: 'en_US', body: 'No placeholders.' });
+      payload.should.deep.equal({
+        name: 'prize',
+        language: 'en_US',
+        category: 'UTILITY',
+        components: [{ type: 'BODY', text: 'No placeholders.' }],
+      });
+    });
+
+    it('attaches example.body_text when placeholder examples are supplied', () => {
+      // WhatsApp REQUIRES sample values for every {{N}} placeholder —
+      // templates without them are rejected at creation.
+      const payload = buildWhatsAppCreatePayload({
+        name: 'prize', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'],
+      });
+      payload.components[0].should.deep.equal({
+        type: 'BODY',
+        text: 'Hi {{1}}',
+        example: { body_text: [['Alice']] },
+      });
+    });
+
+    it('uses QUICK_REPLY buttons with no payload (unlike Messenger POSTBACK)', () => {
+      // WhatsApp quick-reply buttons bake in only the visible text at
+      // approval time; the tap payload is supplied per-send by
+      // message-worker's template translator. Baking a payload here (the
+      // Messenger POSTBACK pattern) is rejected by the WABA endpoint.
+      const payload = buildWhatsAppCreatePayload({
+        name: 'x', language: 'en_US', body: 'b',
+        buttons: [{ label: 'Yes' }, { label: 'No' }],
+      });
+      payload.components.should.have.length(2);
+      payload.components[1].should.deep.equal({
+        type: 'BUTTONS',
+        buttons: [
+          { type: 'QUICK_REPLY', text: 'Yes' },
+          { type: 'QUICK_REPLY', text: 'No' },
+        ],
+      });
+    });
+
+    it('omits the BUTTONS component when buttons array is empty (text-only template)', () => {
+      const payload = buildWhatsAppCreatePayload({ name: 'x', language: 'en', body: 'b', buttons: [] });
+      payload.components.should.have.length(1);
+    });
+
+    it('always sets category to UTILITY', () => {
+      buildWhatsAppCreatePayload({ name: 'x', language: 'fr', body: 'b' }).category.should.equal('UTILITY');
+    });
+  });
+
+  // -------------------------------------------------------
+  // resolveWabaId — fail-fast WABA resolution from credential details
+  // -------------------------------------------------------
+  describe('resolveWabaId', () => {
+    it('extracts waba_id from credential details', () => {
+      const r = resolveWabaId({ details: { id: 'PHONE_1', waba_id: 'WABA_9', access_token: 't' } });
+      r.should.deep.equal({ ok: true, wabaId: 'WABA_9' });
+    });
+
+    it('fails with an actionable error when waba_id is missing', () => {
+      // Track A (org-number) credentials MUST include details.waba_id —
+      // template CRUD is a WABA-level API and there is no fallback.
+      const r = resolveWabaId({ details: { id: 'PHONE_1', access_token: 't' } });
+      r.ok.should.equal(false);
+      r.error.should.include('waba_id');
+    });
+
+    it('fails when details are absent entirely', () => {
+      resolveWabaId({}).ok.should.equal(false);
+      resolveWabaId(null).ok.should.equal(false);
     });
   });
 
@@ -400,7 +486,7 @@ describe('message-templates.core', () => {
   describe('formatRecord', () => {
     it('keeps the snake_case wire shape expected by the client', () => {
       const row = {
-        id: 'u1', facebook_page_id: 'p1', fb_template_id: 'fb1',
+        id: 'u1', account_id: 'p1', fb_template_id: 'fb1',
         name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',
         rejection_reason: null, created: 't1', updated: 't2',
         userid: 'should_be_stripped',
@@ -408,7 +494,7 @@ describe('message-templates.core', () => {
       const out = formatRecord(row);
       out.should.not.have.property('userid');
       out.should.have.property('id', 'u1');
-      out.should.have.property('facebook_page_id', 'p1');
+      out.should.have.property('account_id', 'p1');
       out.should.have.property('fb_template_id', 'fb1');
       out.should.have.property('language', 'en_US');
     });

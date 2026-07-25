@@ -2,7 +2,7 @@
 import 'chai';
 import parallel from 'mocha.parallel';
 import sendMessage from './sender';
-import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, fieldsFromForm, makeNotify, makeEcho, makeHandover, makeWhatsAppReferral, makeWhatsAppText, makeWhatsAppReply, Field } from './mox';
+import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, fieldsFromForm, makeNotify, makeEcho, makeHandover, makeWhatsAppReferral, makeWhatsAppText, makeWhatsAppReply, makeWhatsAppTextStart, Field } from './mox';
 import { v4 as uuid } from 'uuid';
 import farmhash from 'farmhash';
 import { seed } from './seed-db';
@@ -770,6 +770,17 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const fields = getFields('forms/KAvzEUWn.json');
 
       await sendMessage(makeWhatsAppReferral(userId, 'KAvzEUWn'));
+      await flowMasterWhatsApp(userId, [
+        [ok, fields[0], [makeWhatsAppText(userId, '590')]],
+        [ok, fields[1], []],
+      ]);
+    });
+
+    it('Starts survey via bare-text form ref (wa.me link entry point)', async () => {
+      const userId = 'wa_' + uuid();
+      const fields = getFields('forms/KAvzEUWn.json');
+
+      await sendMessage(makeWhatsAppTextStart(userId, 'KAvzEUWn'));
       await flowMasterWhatsApp(userId, [
         [ok, fields[0], [makeWhatsAppText(userId, '590')]],
         [ok, fields[1], []],

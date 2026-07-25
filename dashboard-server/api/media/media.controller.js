@@ -29,10 +29,12 @@ function makeHandlers({ credentialQuery, mediaQuery, facebookClient }) {
 
   async function uploadMedia(req, res) {
     const { email } = req.user;
-    const { pageId, mediaType } = req.body;
+    // Support both accountId (new) and legacy pageId parameter for deploy safety
+    const accountId = req.body.accountId || req.body.pageId;
+    const { mediaType } = req.body;
 
     // 1. Validate inputs (pure)
-    const validation = validateUploadInput({ file: req.file, pageId, mediaType });
+    const validation = validateUploadInput({ file: req.file, accountId, pageId: req.body.pageId, mediaType });
     if (!validation.valid) {
       return res.status(400).json({ error: validation.error });
     }
@@ -42,7 +44,7 @@ function makeHandlers({ credentialQuery, mediaQuery, facebookClient }) {
       const credential = await credentialQuery.getOne({
         email,
         entity: 'facebook_page',
-        key: pageId,
+        key: accountId,
       });
 
       if (!credential) {
@@ -65,7 +67,7 @@ function makeHandlers({ credentialQuery, mediaQuery, facebookClient }) {
       }
 
       // 6. Build DB record (pure)
-      const record = buildMediaRecord(email, pageId, parsed.attachmentId, mediaType, req.file.originalname);
+      const record = buildMediaRecord(email, accountId, parsed.attachmentId, mediaType, req.file.originalname);
 
       // 7. Insert into database (IO)
       const saved = await mediaQuery.create(record);

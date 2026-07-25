@@ -20,18 +20,18 @@ exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
-versionDashboard: &vdashboard v0.0.64
+versionDashboard: &vdashboard v0.0.67-wa
 versionBotserver: &vbotserver v0.0.12
-versionHermes: &vhermes v0.0.1-wa
-versionReplybot: &vreplybot v0.0.208-wa
+versionHermes: &vhermes v0.0.3-wa
+versionReplybot: &vreplybot v0.0.209-wa
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.41-wa
-versionFormcentral: &vformcentral v0.0.12
+versionDinersclub: &vdinersclub v0.0.42-wa
+versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.9
 versionExodus: &vexodus v0.2.1
-versionMessageWorker: &vmessageworker v0.1.14-wa
+versionMessageWorker: &vmessageworker v0.1.15-wa
 
 # Kafka consumer-group lag/health alerting is NOT defined here — it lives at the
 # infra level (one rule set for the shared cluster, covering both envs) in
@@ -375,6 +375,8 @@ replybot:
 formcentral:
   replicaCount: 1
   image:
+    # Chart default is Docker Hub (vlabresearch/); CI publishes to GHCR
+    repository: ghcr.io/vlab-research/formcentral
     tag: *vformcentral
   env:
   - name: CHATBASE_DATABASE
@@ -542,8 +544,18 @@ hermes:
       value: "80"
     - name: DASHBOARD_URL
       value: "http://gbv-dashboard"
-    # WHATSAPP_VERIFY_TOKEN is intentionally unset until the Meta WhatsApp
-    # webhook is provisioned; GET /whatsapp verification returns 401 until then.
+    # Enables X-Hub-Signature-256 enforcement on POST /webhooks and
+    # POST /whatsapp (hermes reads FB_APP_SECRET; the secret stores it as
+    # FACEBOOK_APP_SECRET, hence the explicit mapping — envFrom alone won't
+    # surface it under the name hermes expects).
+    - name: FB_APP_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: gbv-bot-envs
+          key: FACEBOOK_APP_SECRET
+    # WHATSAPP_VERIFY_TOKEN comes from the gbv-bot-envs secret via envFrom
+    # (same pattern as VERIFY_TOKEN). Until the key is added to the secret,
+    # GET /whatsapp verification returns 401.
 
   resources:
     requests:

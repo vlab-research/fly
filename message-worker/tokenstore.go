@@ -9,10 +9,26 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TokenStore retrieves platform access tokens
+// TokenStore retrieves messaging account tokens by (platform, account ID).
+// The credentials natural key is (entity, key), where key holds the platform
+// account id (facebook_page page_id, whatsapp_business phone_number_id).
+// When the platform is known it maps to an entity (platformToEntity) and the
+// lookup is by that natural key. When the platform is absent or unmapped, the
+// lookup falls back to key alone across messaging entities — safe because the
+// unique_messaging_account partial index on credentials(key) WHERE entity IN
+// ('facebook_page', 'whatsapp_business') guarantees account ids are globally
+// unique across messaging platforms.
 type TokenStore interface {
-	GetToken(ctx context.Context, platformAccountID string) (string, error)
+	GetToken(ctx context.Context, platform, platformAccountID string) (string, error)
 	Close()
+}
+
+// platformToEntity maps a messaging platform name to its credentials entity
+// type. The platform values match types.PlatformType; entity values are the
+// credentials.entity discriminator.
+var platformToEntity = map[string]string{
+	"messenger": "facebook_page",
+	"whatsapp":  "whatsapp_business",
 }
 
 // ErrTokenNotFound is returned when no token is found for a platform account
@@ -58,25 +74,42 @@ func NewPostgresTokenStore(ctx context.Context, databaseURL string, cacheTTL tim
 	}, nil
 }
 
-// GetToken retrieves the access token for a platform account
-// Uses query from old replybot tokenstore.js:
-// SELECT details->>'access_token' AS token FROM credentials WHERE facebook_page_id = $1 ORDER BY created DESC LIMIT 1
-// Note: testrunner uses 'token' key, production uses 'access_token'
-func (s *PostgresTokenStore) GetToken(ctx context.Context, platformAccountID string) (string, error) {
+// GetToken retrieves the access token for a messaging account.
+// (entity, key) is the credentials natural key: when platform maps to a known
+// entity the lookup is WHERE entity = $1 AND key = $2. When platform is empty
+// or unmapped it falls back to WHERE key = $1 AND entity IN ('facebook_page',
+// 'whatsapp_business') — the unique_messaging_account partial index guards
+// this fallback by keeping account ids globally unique across messaging
+// platforms. Note: testrunner uses 'token' key; production uses 'access_token'.
+func (s *PostgresTokenStore) GetToken(ctx context.Context, platform, platformAccountID string) (string, error) {
+	cacheKey := platform + ":" + platformAccountID
+
 	// Check cache first
-	if token, ok := s.cache.get(platformAccountID); ok {
+	if token, ok := s.cache.get(cacheKey); ok {
 		return token, nil
 	}
 
-	// Query database - try access_token first, fall back to token (for testrunner compatibility)
 	var token string
-	err := s.pool.QueryRow(ctx, `
-		SELECT COALESCE(details->>'access_token', details->>'token') AS token
-		FROM credentials
-		WHERE facebook_page_id = $1
-		ORDER BY created DESC
-		LIMIT 1
-	`, platformAccountID).Scan(&token)
+	var err error
+	if entity, ok := platformToEntity[platform]; ok {
+		err = s.pool.QueryRow(ctx, `
+			SELECT COALESCE(details->>'access_token', details->>'token') AS token
+			FROM credentials
+			WHERE entity = $1 AND key = $2
+			ORDER BY created DESC
+			LIMIT 1
+		`, entity, platformAccountID).Scan(&token)
+	} else {
+		// Fallback: platform absent/unknown — key alone identifies the
+		// account thanks to unique_messaging_account.
+		err = s.pool.QueryRow(ctx, `
+			SELECT COALESCE(details->>'access_token', details->>'token') AS token
+			FROM credentials
+			WHERE key = $1 AND entity IN ('facebook_page', 'whatsapp_business')
+			ORDER BY created DESC
+			LIMIT 1
+		`, platformAccountID).Scan(&token)
+	}
 
 	if err != nil {
 		return "", fmt.Errorf("%w: %s (db error: %v)", ErrTokenNotFound, platformAccountID, err)
@@ -87,7 +120,7 @@ func (s *PostgresTokenStore) GetToken(ctx context.Context, platformAccountID str
 	}
 
 	// Cache the token
-	s.cache.set(platformAccountID, token, s.ttl)
+	s.cache.set(cacheKey, token, s.ttl)
 
 	return token, nil
 }
@@ -137,7 +170,7 @@ func NewStaticTokenStore(token string) *StaticTokenStore {
 }
 
 // GetToken returns the static token
-func (s *StaticTokenStore) GetToken(ctx context.Context, platformAccountID string) (string, error) {
+func (s *StaticTokenStore) GetToken(ctx context.Context, platform, platformAccountID string) (string, error) {
 	if s.token == "" {
 		return "", ErrTokenNotFound
 	}

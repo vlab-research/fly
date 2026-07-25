@@ -8,13 +8,15 @@ const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
  *
  * @param {Object} input
  * @param {Object|null} input.file - The uploaded file object (from multer)
- * @param {string|undefined} input.pageId - Facebook page ID
+ * @param {string|undefined} input.accountId - Platform account ID (page ID or phone number ID)
+ * @param {string|undefined} input.pageId - (Deprecated) Legacy Facebook page ID
  * @param {string|undefined} input.mediaType - 'image' or 'video'
  * @returns {{ valid: true } | { valid: false, error: string }}
  */
-function validateUploadInput({ file, pageId, mediaType }) {
-  if (!pageId) {
-    return { valid: false, error: 'pageId is required' };
+function validateUploadInput({ file, accountId, pageId, mediaType }) {
+  const idValue = accountId || pageId;
+  if (!idValue) {
+    return { valid: false, error: 'accountId is required' };
   }
   if (!mediaType || !VALID_MEDIA_TYPES.includes(mediaType)) {
     return { valid: false, error: 'mediaType must be "image" or "video"' };
@@ -78,16 +80,16 @@ function parseAttachmentResponse(fbResponseBody) {
  * Constructs the database row object for a media record.
  *
  * @param {string} email - User's email
- * @param {string} pageId - Facebook page ID
+ * @param {string} accountId - Platform account ID (page ID or phone number ID)
  * @param {string} attachmentId - Facebook attachment ID
  * @param {string} mediaType - 'image' or 'video'
  * @param {string} filename - Original filename
  * @returns {Object} - Row object ready for insertion
  */
-function buildMediaRecord(email, pageId, attachmentId, mediaType, filename) {
+function buildMediaRecord(email, accountId, attachmentId, mediaType, filename) {
   return {
     email,
-    facebookPageId: pageId,
+    accountId,
     attachmentId,
     mediaType,
     filename,
@@ -103,7 +105,7 @@ function buildMediaRecord(email, pageId, attachmentId, mediaType, filename) {
 function formatMediaList(rows) {
   return rows.map(row => ({
     id: row.id,
-    facebook_page_id: row.facebook_page_id,
+    account_id: row.account_id,
     attachment_id: row.attachment_id,
     media_type: row.media_type,
     filename: row.filename,

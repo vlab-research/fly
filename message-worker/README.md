@@ -387,6 +387,24 @@ func (w *MessageWorker) ProcessCommand(ctx context.Context, cmd types.SendMessag
 }
 ```
 
+## Token Lookup (TokenStore)
+
+`TokenStore.GetToken(ctx, platform, platformAccountID)` resolves the platform API access token
+from the `credentials` table, whose natural key is `(entity, key)` — `key` holds the platform
+account id (`facebook_page` page_id, `whatsapp_business` phone_number_id).
+
+- **Platform known** (the normal case — clients pass `types.PlatformMessenger` /
+  `types.PlatformWhatsApp`): lookup is `WHERE entity = $1 AND key = $2`, mapping
+  platform→entity (messenger→facebook_page, whatsapp→whatsapp_business).
+- **Platform absent/unmapped**: falls back to
+  `WHERE key = $1 AND entity IN ('facebook_page', 'whatsapp_business')`. This is safe because
+  the `unique_messaging_account` partial index guarantees account ids are globally unique
+  across messaging platforms.
+
+Tokens are cached per `platform + ":" + accountID` with a TTL (`PostgresTokenStore`).
+`StaticTokenStore` serves a fixed token for tests/facebot mock. See
+`documentation/platform-abstraction.md` ("Account ID Routing").
+
 ## Components
 
 ### Core Translation (Complete)

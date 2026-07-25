@@ -1,4 +1,4 @@
-ALTER TABLE export_status
+ALTER TABLE chatroach.export_status
   ADD COLUMN IF NOT EXISTS options JSONB,
   ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;

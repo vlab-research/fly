@@ -1,9 +1,11 @@
 'use strict';
 
-async function create({ email, facebookPageId, fbTemplateId, name, language, body, status, rejectionReason, buttons }) {
+async function create({ email, accountId, pageId, fbTemplateId, name, language, body, status, rejectionReason, buttons }) {
+  // Support both accountId (new) and legacy pageId parameter for deploy safety
+  const accountIdValue = accountId || pageId;
   const q = `
     INSERT INTO message_templates
-      (userid, facebook_page_id, fb_template_id, name, language, body, status, rejection_reason, buttons)
+      (userid, account_id, fb_template_id, name, language, body, status, rejection_reason, buttons)
     VALUES (
       (SELECT id FROM users WHERE email = $1),
       $2, $3, $4, $5, $6, $7, $8, $9
@@ -12,7 +14,7 @@ async function create({ email, facebookPageId, fbTemplateId, name, language, bod
   `;
   const values = [
     email,
-    facebookPageId,
+    accountIdValue,
     fbTemplateId || null,
     name,
     language,
@@ -25,24 +27,26 @@ async function create({ email, facebookPageId, fbTemplateId, name, language, bod
   return rows[0];
 }
 
-async function list({ email, facebookPageId }) {
+async function list({ email, accountId, pageId }) {
+  // Support both accountId (new) and legacy pageId parameter for deploy safety
+  const accountIdValue = accountId || pageId;
   const q = `
-    SELECT m.id, m.facebook_page_id, m.fb_template_id, m.name, m.language,
+    SELECT m.id, m.account_id, m.fb_template_id, m.name, m.language,
            m.body, m.status, m.rejection_reason, m.buttons, m.created, m.updated
     FROM message_templates m
     JOIN users u ON m.userid = u.id
     WHERE u.email = $1
-      AND m.facebook_page_id = $2
+      AND m.account_id = $2
     ORDER BY m.name ASC, m.language ASC
   `;
-  const values = [email, facebookPageId];
+  const values = [email, accountIdValue];
   const { rows } = await this.query(q, values);
   return rows;
 }
 
 async function listAll({ email }) {
   const q = `
-    SELECT m.id, m.facebook_page_id, m.fb_template_id, m.name, m.language,
+    SELECT m.id, m.account_id, m.fb_template_id, m.name, m.language,
            m.body, m.status, m.rejection_reason, m.buttons, m.created, m.updated
     FROM message_templates m
     JOIN users u ON m.userid = u.id
@@ -55,7 +59,7 @@ async function listAll({ email }) {
 
 async function get({ email, id }) {
   const q = `
-    SELECT m.id, m.facebook_page_id, m.fb_template_id, m.name, m.language,
+    SELECT m.id, m.account_id, m.fb_template_id, m.name, m.language,
            m.body, m.status, m.rejection_reason, m.buttons, m.created, m.updated
     FROM message_templates m
     JOIN users u ON m.userid = u.id

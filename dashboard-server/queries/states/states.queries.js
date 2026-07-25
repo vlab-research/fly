@@ -29,6 +29,9 @@
  *    whichever survey_name owned that version when they started.
  *  - Canonical resolution rule lives in formcentral (shortcode + timestamp
  *    -> surveyid). This SQL mirrors it; keep in sync if that rule changes.
+ *  - Account ID lookup is platform-agnostic: credentials.key holds the
+ *    platform account ID (page_id for Messenger, phone_number_id for WhatsApp)
+ *    filtered by entity type. Served index-only by unique_messaging_account.
  */
 
 // Pre-filter on shortcode (uses states indexes) + scalar-subquery version
@@ -47,11 +50,11 @@ const SCOPE_SQL = `
   FROM states
   WHERE states.current_form = ANY($3)
     AND states.pageid IN (
-      SELECT facebook_page_id
+      SELECT credentials.key
       FROM credentials
       JOIN users u ON credentials.userid = u.id
       WHERE u.email = $1
-        AND facebook_page_id IS NOT NULL
+        AND credentials.entity IN ('facebook_page', 'whatsapp_business')
     )
     AND (
       SELECT s.survey_name

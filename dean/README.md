@@ -2,6 +2,27 @@
 
 Dean is a service that monitors the chatbase database and sends events to the botserver for various timeout and retry scenarios.
 
+## Event Shape & Platform Threading
+
+Dean POSTs `ExternalEvent` JSON to botserver's `/synthetic` endpoint:
+
+```json
+{ "user": "<userid>", "page": "<pageid>", "platform": "whatsapp", "event": { "type": "...", "value": null } }
+```
+
+Every query (`Respondings`, `Errored`, `Blocked`, `Payments`, `Timeouts`, `FollowUps`, `Spammers`)
+selects `COALESCE(states.platform, 'messenger')` and threads it into the emitted event.
+`states.platform` is a stored computed column over `state_json->'md'->>'platform'`; legacy rows
+without `md.platform` are NULL and report `messenger`. Botserver passes unknown fields through to
+Kafka untouched, so replybot receives the platform on synthetic events and can route re-entries
+(timeouts, follow-ups, repeat payments) to the correct platform instead of defaulting to Messenger.
+See `documentation/platform-abstraction.md` ("Account ID Routing").
+
+`FollowUps` joins states to credentials via `pageid = credentials.key` with
+`entity IN ('facebook_page', 'whatsapp_business')` — `states.pageid` holds the platform account id,
+which equals `credentials.key` for messaging entities (globally unique via the
+`unique_messaging_account` partial index).
+
 ## Testing
 
 ### Running Tests

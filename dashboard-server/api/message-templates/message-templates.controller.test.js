@@ -18,21 +18,21 @@ function mockRes() {
 
 describe('message-templates.controller (makeHandlers)', () => {
   const email = 'test@vlab.com';
-  const pageId = 'page1';
-  const validBody = { pageId, name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}' };
+  const accountId = 'page1';
+  const validBody = { accountId, name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}' };
   const validReq = { user: { email }, body: validBody };
 
   // Default mocks — all happy-path, overridden per test as needed
   const defaultCredentialQuery = {
     getOne: async () => ({
-      entity: 'facebook_page', key: pageId,
-      details: { id: pageId, name: 'Test Page', access_token: 'tok123' },
+      entity: 'facebook_page', key: accountId,
+      details: { id: accountId, name: 'Test Page', access_token: 'tok123' },
     }),
   };
   const defaultTemplateQuery = {
     create: async (record) => ({
       id: 'uuid-new',
-      facebook_page_id: record.facebookPageId,
+      account_id: record.accountId,
       fb_template_id: record.fbTemplateId,
       name: record.name,
       language: record.language,
@@ -45,7 +45,7 @@ describe('message-templates.controller (makeHandlers)', () => {
     list: async () => [],
     get: async ({ id }) => ({
       id,
-      facebook_page_id: pageId,
+      account_id: accountId,
       fb_template_id: 'fb_abc',
       name: 'prize_ready',
       language: 'en_US',
@@ -61,12 +61,18 @@ describe('message-templates.controller (makeHandlers)', () => {
     getTemplatesByName: async () => ({ data: [] }),
     deleteTemplateByHsmId: async () => ({ success: true }),
   };
+  const defaultWhatsAppClient = {
+    createTemplate: async () => ({ id: 'wa_fb_1', status: 'PENDING' }),
+    getTemplatesByName: async () => ({ data: [] }),
+    deleteTemplateByHsmId: async () => ({ success: true }),
+  };
 
   function makeTestHandlers(overrides = {}) {
     return makeHandlers({
       credentialQuery: overrides.credentialQuery || defaultCredentialQuery,
       templateQuery: overrides.templateQuery || defaultTemplateQuery,
       facebookClient: overrides.facebookClient || defaultFacebookClient,
+      whatsappClient: overrides.whatsappClient || defaultWhatsAppClient,
     });
   }
 
@@ -170,7 +176,7 @@ describe('message-templates.controller (makeHandlers)', () => {
           createTemplate: async (pid, token) => { captured = { pid, token }; return { id: 'fb', status: 'APPROVED' }; },
         },
       }).create(validReq, mockRes());
-      captured.pid.should.equal(pageId);
+      captured.pid.should.equal(accountId);
       captured.token.should.equal('tok123');
     });
 
@@ -220,18 +226,11 @@ describe('message-templates.controller (makeHandlers)', () => {
   // list
   // -------------------------------------------------------
   describe('list', () => {
-    const listReq = { user: { email }, query: { pageId } };
+    const listReq = { user: { email }, query: { accountId } };
 
-    it('returns 400 when pageId query param is missing', async () => {
-      const res = mockRes();
-      await makeTestHandlers().list({ user: { email }, query: {} }, res);
-      res.statusCode.should.equal(400);
-      res.body.error.should.include('pageId');
-    });
-
-    it('returns 200 with the formatted row list', async () => {
+    it('returns 200 with the formatted row list (no accountId filter)', async () => {
       const rows = [{
-        id: 'u1', facebook_page_id: pageId, fb_template_id: 'fb1',
+        id: 'u1', account_id: accountId, fb_template_id: 'fb1',
         name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',
         rejection_reason: null, created: 't', updated: 't',
       }];
@@ -251,7 +250,7 @@ describe('message-templates.controller (makeHandlers)', () => {
       await makeTestHandlers({
         templateQuery: {
           ...defaultTemplateQuery,
-          list: async () => [{ id: '1', name: 'p', language: 'en_US', status: 'APPROVED', facebook_page_id: pageId }],
+          list: async () => [{ id: '1', name: 'p', language: 'en_US', status: 'APPROVED', account_id: accountId }],
         },
         facebookClient: { ...defaultFacebookClient, getTemplatesByName: async () => { called = true; return { data: [] }; } },
       }).list(listReq, mockRes());
@@ -260,7 +259,7 @@ describe('message-templates.controller (makeHandlers)', () => {
 
     it('refreshes PENDING rows from Facebook and updates matching (name, language) entries', async () => {
       const row = {
-        id: 'u1', facebook_page_id: pageId, fb_template_id: null,
+        id: 'u1', account_id: accountId, fb_template_id: null,
         name: 'prize', language: 'en_US', status: 'PENDING',
       };
       let updateArgs;
@@ -289,8 +288,8 @@ describe('message-templates.controller (makeHandlers)', () => {
       // Two PENDING rows with the same name but different languages. FB's response
       // carries both variants. Each row must receive ITS OWN language\'s status.
       const rows = [
-        { id: 'u-en', facebook_page_id: pageId, name: 'prize', language: 'en_US', status: 'PENDING' },
-        { id: 'u-es', facebook_page_id: pageId, name: 'prize', language: 'es_LA', status: 'PENDING' },
+        { id: 'u-en', account_id: accountId, name: 'prize', language: 'en_US', status: 'PENDING' },
+        { id: 'u-es', account_id: accountId, name: 'prize', language: 'es_LA', status: 'PENDING' },
       ];
       const updates = [];
       await makeTestHandlers({
@@ -317,7 +316,7 @@ describe('message-templates.controller (makeHandlers)', () => {
     });
 
     it('still returns the row list even when FB refresh throws (graceful degradation)', async () => {
-      const row = { id: 'u1', facebook_page_id: pageId, name: 'prize', language: 'en_US', status: 'PENDING' };
+      const row = { id: 'u1', account_id: accountId, name: 'prize', language: 'en_US', status: 'PENDING' };
       const res = mockRes();
       await makeTestHandlers({
         templateQuery: { ...defaultTemplateQuery, list: async () => [row] },
@@ -366,7 +365,7 @@ describe('message-templates.controller (makeHandlers)', () => {
         },
       }).remove(delReq, mockRes());
       captured.hsm.should.equal('fb_abc');
-      captured.pid.should.equal(pageId);
+      captured.pid.should.equal(accountId);
       captured.token.should.equal('tok123');
     });
 
@@ -411,7 +410,7 @@ describe('message-templates.controller (makeHandlers)', () => {
       await makeTestHandlers({
         templateQuery: {
           ...defaultTemplateQuery,
-          get: async () => ({ id: 'uuid-abc', facebook_page_id: pageId, fb_template_id: null, name: 'x', language: 'en_US' }),
+          get: async () => ({ id: 'uuid-abc', account_id: accountId, fb_template_id: null, name: 'x', language: 'en_US' }),
         },
         facebookClient: {
           ...defaultFacebookClient,
@@ -420,6 +419,186 @@ describe('message-templates.controller (makeHandlers)', () => {
       }).remove(delReq, res);
       fbCalled.should.equal(false);
       res.statusCode.should.equal(204);
+    });
+  });
+
+  // -------------------------------------------------------
+  // WhatsApp accounts (entity whatsapp_business) — template CRUD runs
+  // against the WABA resolved from the credential's details.waba_id,
+  // using the credential's business access token. The Messenger path
+  // above must be untouched by any of this.
+  // -------------------------------------------------------
+  describe('whatsapp accounts', () => {
+    const waAccountId = 'PHONE_1';
+    const waValidBody = {
+      accountId: waAccountId, name: 'recontact', language: 'en_US', body: 'Your results are ready',
+    };
+    const waValidReq = { user: { email }, body: waValidBody };
+
+    // No facebook_page credential; a whatsapp_business one matches the id.
+    const waCredentialQuery = {
+      getOne: async ({ entity, key }) => {
+        if (entity === 'whatsapp_business' && key === waAccountId) {
+          return {
+            entity, key,
+            details: { id: waAccountId, waba_id: 'WABA_9', access_token: 'wa-tok' },
+          };
+        }
+        return null;
+      },
+    };
+    const waTemplateQuery = {
+      ...defaultTemplateQuery,
+      get: async ({ id }) => ({
+        id,
+        account_id: waAccountId,
+        fb_template_id: 'wa_fb_1',
+        name: 'recontact',
+        language: 'en_US',
+        status: 'APPROVED',
+      }),
+    };
+
+    it('creates via the WhatsApp client against the WABA id with the business token', async () => {
+      let captured;
+      const res = mockRes();
+      await makeTestHandlers({
+        credentialQuery: waCredentialQuery,
+        whatsappClient: {
+          ...defaultWhatsAppClient,
+          createTemplate: async (wabaId, token, payload) => {
+            captured = { wabaId, token, payload };
+            return { id: 'wa_fb_1', status: 'PENDING' };
+          },
+        },
+      }).create(waValidReq, res);
+
+      res.statusCode.should.equal(201);
+      captured.wabaId.should.equal('WABA_9');
+      captured.token.should.equal('wa-tok');
+      captured.payload.category.should.equal('UTILITY');
+    });
+
+    it('builds QUICK_REPLY buttons with no payload (WhatsApp shape, not Messenger POSTBACK)', async () => {
+      let payload;
+      await makeTestHandlers({
+        credentialQuery: waCredentialQuery,
+        whatsappClient: {
+          ...defaultWhatsAppClient,
+          createTemplate: async (wabaId, token, p) => { payload = p; return { id: 'wa_fb_1', status: 'PENDING' }; },
+        },
+      }).create(
+        { user: { email }, body: { ...waValidBody, buttons: [{ label: 'Yes' }, { label: 'No' }] } },
+        mockRes(),
+      );
+
+      payload.components[1].should.deep.equal({
+        type: 'BUTTONS',
+        buttons: [
+          { type: 'QUICK_REPLY', text: 'Yes' },
+          { type: 'QUICK_REPLY', text: 'No' },
+        ],
+      });
+    });
+
+    it('returns 400 with an actionable message when the credential lacks details.waba_id', async () => {
+      // Fail fast: without waba_id there is no WABA to manage templates on.
+      // Track A (org-number) credentials must include it in details.
+      const res = mockRes();
+      let waCalled = false;
+      await makeTestHandlers({
+        credentialQuery: {
+          getOne: async ({ entity }) => (
+            entity === 'whatsapp_business'
+              ? { entity, key: waAccountId, details: { id: waAccountId, access_token: 'wa-tok' } }
+              : null
+          ),
+        },
+        whatsappClient: {
+          ...defaultWhatsAppClient,
+          createTemplate: async () => { waCalled = true; return {}; },
+        },
+      }).create(waValidReq, res);
+
+      res.statusCode.should.equal(400);
+      res.body.error.should.include('waba_id');
+      waCalled.should.equal(false);
+    });
+
+    it('returns 404 when neither a page nor a whatsapp credential matches', async () => {
+      const res = mockRes();
+      await makeTestHandlers({
+        credentialQuery: { getOne: async () => null },
+      }).create(waValidReq, res);
+      res.statusCode.should.equal(404);
+    });
+
+    it('never calls the WhatsApp client when a facebook_page credential matches the id', async () => {
+      // Messenger precedence: the facebook_page lookup runs first, so an
+      // existing Messenger account keeps its exact original behavior.
+      let waCalled = false;
+      const res = mockRes();
+      await makeTestHandlers({
+        whatsappClient: {
+          ...defaultWhatsAppClient,
+          createTemplate: async () => { waCalled = true; return {}; },
+        },
+      }).create({ user: { email }, body: { accountId, name: 'plain', language: 'en_US', body: 'no placeholders' } }, res);
+
+      res.statusCode.should.equal(201);
+      waCalled.should.equal(false);
+    });
+
+    it('refreshes PENDING rows via the WhatsApp client against the WABA', async () => {
+      let captured;
+      const pendingRow = {
+        id: 'u1', account_id: waAccountId, fb_template_id: 'wa_fb_1',
+        name: 'recontact', language: 'en_US', body: 'b', status: 'PENDING',
+        rejection_reason: null, created: 't', updated: 't',
+      };
+      const res = mockRes();
+      await makeTestHandlers({
+        credentialQuery: waCredentialQuery,
+        templateQuery: {
+          ...defaultTemplateQuery,
+          list: async () => [pendingRow],
+        },
+        whatsappClient: {
+          ...defaultWhatsAppClient,
+          getTemplatesByName: async (wabaId, token, name) => {
+            captured = { wabaId, token, name };
+            return { data: [{ id: 'wa_fb_1', name: 'recontact', language: 'en_US', status: 'APPROVED' }] };
+          },
+        },
+      }).list({ user: { email }, query: { accountId: waAccountId } }, res);
+
+      res.statusCode.should.equal(200);
+      captured.wabaId.should.equal('WABA_9');
+      captured.token.should.equal('wa-tok');
+      captured.name.should.equal('recontact');
+      res.body[0].status.should.equal('APPROVED');
+    });
+
+    it('deletes via the WABA with BOTH hsm_id and name (WhatsApp requires the pair)', async () => {
+      let captured;
+      const res = mockRes();
+      await makeTestHandlers({
+        credentialQuery: waCredentialQuery,
+        templateQuery: waTemplateQuery,
+        whatsappClient: {
+          ...defaultWhatsAppClient,
+          deleteTemplateByHsmId: async (wabaId, token, hsmId, name) => {
+            captured = { wabaId, token, hsmId, name };
+            return { success: true };
+          },
+        },
+      }).remove({ user: { email }, params: { id: 'uuid-wa' } }, res);
+
+      res.statusCode.should.equal(204);
+      captured.wabaId.should.equal('WABA_9');
+      captured.token.should.equal('wa-tok');
+      captured.hsmId.should.equal('wa_fb_1');
+      captured.name.should.equal('recontact');
     });
   });
 });

@@ -16,6 +16,14 @@ const accountConfs = [
     // TODO: add "actions" with name/route for each action
   },
   {
+    to: '/connect/whatsapp',
+    title: 'WhatsApp Business Account',
+    entity: 'whatsapp_business',
+    description: 'Connect your WhatsApp Business Account using the Embedded Signup flow. This feature is a temporary demonstration for Meta App Review and may change in future updates.',
+    getName: c => (c.details && c.details.display_phone_number) || c.key,
+    buttonText: 'Connect',
+  },
+  {
     to: '/connect/reloadly',
     title: 'Reloadly',
     entity: 'reloadly',

@@ -2,6 +2,7 @@ package messageworker
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/vlab-research/fly/message-worker/types"
 )
@@ -11,6 +12,17 @@ func TranslateToWhatsApp(cmd types.SendMessageCommand) (types.WhatsAppMessage, e
 	// Validate message content
 	if err := cmd.Message.Validate(); err != nil {
 		return types.WhatsAppMessage{}, err
+	}
+
+	// utility_message (the out-of-window re-contact mechanism) is dispatched
+	// ahead of the base-type switch, mirroring TranslateToMessenger: replybot
+	// emits it as base type "question" when the field has choices and "text"
+	// when it doesn't — the metadata.type discriminator identifies it, not
+	// MessageContent.Type. WhatsApp only allows free-form sends within 24h of
+	// the user's last message; outside that window only a pre-approved
+	// template (type: "template") is deliverable.
+	if cmd.Message.GetTypeFromMetadata() == "utility_message" {
+		return translateWhatsAppTemplate(cmd.Message)
 	}
 
 	switch cmd.Message.Type {
@@ -23,6 +35,74 @@ func TranslateToWhatsApp(cmd types.SendMessageCommand) (types.WhatsAppMessage, e
 	default:
 		return types.WhatsAppMessage{}, fmt.Errorf("%w: %s", types.ErrUnsupportedMessageType, cmd.Message.Type)
 	}
+}
+
+// translateWhatsAppTemplate renders a utility_message field as a WhatsApp
+// Cloud API template send. template/language/params come from the field's
+// metadata (same contract as the Messenger utility path:
+// {"type":"utility_message","template":...,"language":...,"params":[...],"ref":...});
+// buttons come from the field's own choices/options.
+//
+// Differences from translateMessengerUtility, both mandated by WhatsApp's API:
+//   - the body component is OMITTED when there are no params (WhatsApp
+//     rejects a body component with an empty parameters array, whereas
+//     Messenger requires body to always be present);
+//   - each button is its OWN component {type: "button", sub_type:
+//     "quick_reply", index: "<i>"} (Messenger uses a single "buttons"
+//     component and rejects the per-button index shape).
+//
+// Each button's payload carries the same JSON that Messenger quick replies
+// deliver — {"value":<option value>,"ref":"<field ref>"} via
+// buildQuickReplyPayload — so the inbound webhook's button payload parses
+// through replybot's existing quick-reply handling unchanged.
+func translateWhatsAppTemplate(msg types.MessageContent) (types.WhatsAppMessage, error) {
+	md := metadataMap(msg.Metadata)
+
+	template := metadataString(md, "template")
+	if template == "" {
+		return types.WhatsAppMessage{}, fmt.Errorf("%w", types.ErrMissingUtilityTemplate)
+	}
+	language := metadataString(md, "language")
+	if language == "" {
+		return types.WhatsAppMessage{}, fmt.Errorf("%w", types.ErrMissingUtilityLanguage)
+	}
+
+	var components []types.WhatsAppTemplateComponent
+
+	params := metadataStringSlice(md, "params")
+	if len(params) > 0 {
+		bodyParams := make([]types.WhatsAppTemplateParameter, len(params))
+		for i, p := range params {
+			bodyParams[i] = types.WhatsAppTemplateParameter{Type: "text", Text: p}
+		}
+		components = append(components, types.WhatsAppTemplateComponent{
+			Type:       "body",
+			Parameters: bodyParams,
+		})
+	}
+
+	if len(msg.Options) > 0 {
+		ref := getRefFromMetadata(msg.Metadata)
+		for i, opt := range msg.Options {
+			components = append(components, types.WhatsAppTemplateComponent{
+				Type:    "button",
+				SubType: "quick_reply",
+				Index:   strconv.Itoa(i),
+				Parameters: []types.WhatsAppTemplateParameter{
+					{Type: "payload", Payload: buildQuickReplyPayload(opt.Value, ref)},
+				},
+			})
+		}
+	}
+
+	return types.WhatsAppMessage{
+		Type: "template",
+		Template: &types.WhatsAppTemplate{
+			Name:       template,
+			Language:   types.WhatsAppTemplateLanguage{Code: language},
+			Components: components,
+		},
+	}, nil
 }
 
 func translateWhatsAppText(msg types.MessageContent) (types.WhatsAppMessage, error) {

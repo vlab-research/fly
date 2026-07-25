@@ -1,0 +1,13 @@
+-- 21-states-platform.sql: expose the conversation's platform on states.
+--
+-- Computed from the row's own canonical state_json (states already has 11
+-- such computed columns). Replybot persists md.platform ('messenger' |
+-- 'whatsapp') at conversation start, and the full state — including md — is
+-- what scribble writes to state_json, so no writer changes are needed.
+--
+-- NULL for rows predating md.platform persistence — consumers must
+-- COALESCE(platform, 'messenger'), which is exact for all pre-WhatsApp data.
+--
+-- No responses column: responses carry platform via their metadata JSONB
+-- (metadata = state.md).
+ALTER TABLE chatroach.states ADD COLUMN IF NOT EXISTS platform VARCHAR AS (state_json->'md'->>'platform') STORED;

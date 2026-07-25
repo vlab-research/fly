@@ -1,5 +1,20 @@
 const USER_ID = '1800244896727776'
 const PAGE_ID = '1051551461692797'
+const WA_USER_ID = '4915551234567'
+const WA_PHONE_NUMBER_ID = '109876543210001'
+
+const whatsappReferral = {
+  event_id: 'evt_test_wa_referral',
+  user_id: WA_USER_ID,
+  timestamp: 1542123799219,
+  source: { type: 'whatsapp', account_id: WA_PHONE_NUMBER_ID },
+  event_type: 'conversation_started',
+  payload: {
+    type: 'conversation_started',
+    trigger: 'referral',
+    referral: { ref: 'form.FOO.foo.bar', source: 'ctwa', type: 'OPEN' }
+  }
+}
 
 const referral = {
   event_id: 'evt_test_referral',
@@ -293,4 +308,4 @@ const handover = (payload = {}, more = {}) => ({
 // block_user needs no fixture of its own -- synthetic() generates it:
 //   synthetic({ type: 'block_user' })  ->  event_type 'synthetic_block_user'
 
-module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, PAGE_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover }
+module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, PAGE_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID }

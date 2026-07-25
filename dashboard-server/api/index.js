@@ -10,6 +10,7 @@ router
   .use('/credentials', require('./credentials'))
   .use('/facebook', require('./facebook'))
   .use('/media', require('./media'))
+  .use('/whatsapp', require('./whatsapp'))
   .use('/message-templates', require('./message-templates'))
   .use('/tickets', require('./tickets'))
   .use('/auth', require('./auth/auth.routes'))

@@ -18,6 +18,15 @@ pub fn verify_sha256(secret: &str, signature_header: &str, body: &[u8]) -> bool 
     computed == hex_sig
 }
 
+/// Produces the X-Hub-Signature-256 header value ("sha256=<hex>") for a body.
+/// Counterpart of verify_sha256; used by integration tests to sign payloads.
+pub fn sign_sha256(secret: &str, body: &[u8]) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(body);
+    format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,5 +47,12 @@ mod tests {
     #[test]
     fn missing_prefix_fails() {
         assert!(!verify_sha256("secret", "noprefixhere", b"hello"));
+    }
+
+    #[test]
+    fn sign_verify_roundtrip() {
+        let sig = sign_sha256("secret", b"payload");
+        assert!(verify_sha256("secret", &sig, b"payload"));
+        assert!(!verify_sha256("other", &sig, b"payload"));
     }
 }

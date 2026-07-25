@@ -45,18 +45,40 @@ describe('media.controller (makeHandlers)', () => {
   describe('uploadMedia', () => {
     const validReq = {
       user: { email: 'test@vlab.com' },
+      body: { accountId: 'page1', mediaType: 'image' },
+      file: { buffer: Buffer.from('data'), originalname: 'pic.jpg', mimetype: 'image/jpeg', size: 1024 },
+    };
+
+    const validReqLegacy = {
+      user: { email: 'test@vlab.com' },
       body: { pageId: 'page1', mediaType: 'image' },
       file: { buffer: Buffer.from('data'), originalname: 'pic.jpg', mimetype: 'image/jpeg', size: 1024 },
     };
 
-    it('returns 400 when validation fails (missing pageId)', async () => {
+    it('accepts accountId parameter', async () => {
+      const handlers = makeTestHandlers();
+      const res = mockRes();
+
+      await handlers.uploadMedia(validReq, res);
+      res.statusCode.should.equal(201);
+    });
+
+    it('accepts legacy pageId parameter for backward compatibility', async () => {
+      const handlers = makeTestHandlers();
+      const res = mockRes();
+
+      await handlers.uploadMedia(validReqLegacy, res);
+      res.statusCode.should.equal(201);
+    });
+
+    it('returns 400 when validation fails (missing accountId and pageId)', async () => {
       const handlers = makeTestHandlers();
       const req = { ...validReq, body: { mediaType: 'image' } };
       const res = mockRes();
 
       await handlers.uploadMedia(req, res);
       res.statusCode.should.equal(400);
-      res.body.error.should.include('pageId');
+      res.body.error.should.include('accountId');
     });
 
     it('returns 404 when page credential is not found', async () => {
@@ -115,7 +137,7 @@ describe('media.controller (makeHandlers)', () => {
 
       await handlers.uploadMedia(validReq, res);
       capturedRecord.email.should.equal('test@vlab.com');
-      capturedRecord.facebookPageId.should.equal('page1');
+      capturedRecord.accountId.should.equal('page1');
       capturedRecord.attachmentId.should.equal('9876543210');
       capturedRecord.mediaType.should.equal('image');
       capturedRecord.filename.should.equal('pic.jpg');
@@ -164,7 +186,7 @@ describe('media.controller (makeHandlers)', () => {
   describe('listMedia', () => {
     it('returns formatted media list', async () => {
       const rows = [
-        { id: '1', facebook_page_id: 'p', attachment_id: 'a', media_type: 'image', filename: 'f.jpg', created: 't', userid: 'stripped' },
+        { id: '1', account_id: 'p', attachment_id: 'a', media_type: 'image', filename: 'f.jpg', created: 't', userid: 'stripped' },
       ];
       const handlers = makeTestHandlers({
         mediaQuery: { ...defaultMediaQuery, list: async () => rows },

@@ -219,11 +219,21 @@ function parseSyntheticEvent(data, timestamp) {
   const userId = data.user_id || data.user || ''
   const pageId = data.page || data.pageid || data.account_id
 
+  // Synthetic events may carry the conversation's real platform as an
+  // optional top-level field ("platform": "messenger" | "whatsapp") — dean
+  // sends it and hermes/botserver pass it through. Surface it as
+  // source.platform so downstream consumers can recover the real platform;
+  // source.type stays 'synthetic'.
+  const source = { type: 'synthetic', account_id: pageId }
+  if (data.platform) {
+    source.platform = data.platform
+  }
+
   return {
     event_id: newEventId(),
     user_id: userId,
     timestamp,
-    source: { type: 'synthetic', account_id: pageId },
+    source,
     event_type: unifiedType,
     payload: event.value !== undefined ? event.value : null,
     raw: data
@@ -244,6 +254,34 @@ function categorizeWhatsAppEvent(data) {
         type: 'conversation_started',
         trigger: 'referral',
         referral: data.referral
+      }
+    }
+  }
+
+  // Bare-text entry fallback: if there is no referral and the message is plain
+  // text, test it against a strict full-match pattern for form refs. This allows
+  // wa.me/<number>?text=form.<shortcode> links and real-phone smoke tests to
+  // start surveys without Click-to-WhatsApp ads. The pattern is STRICT
+  // (full-match, anchored) to prevent mid-survey free-text answers from
+  // accidentally re-triggering a referral — an existing user answering a
+  // question must not be interrupted by a ref token in their text reply.
+  // On match, synthesize a referral shape so machine.js's REFERRAL logic
+  // (no-retake, ignore rules) applies identically to both entry paths.
+  if (data.type === 'text' && !data.referral) {
+    const body = (data.text && data.text.body) || ''
+    const trimmed = body.trim()
+    const refPattern = /^(?:start\s+)?form\.([A-Za-z0-9_-]+)$/i
+    const match = trimmed.match(refPattern)
+    if (match) {
+      // Preserve shortcode case exactly as typed; prefix is always lowercase
+      const shortcode = match[1]
+      return {
+        event_type: 'conversation_started',
+        payload: {
+          type: 'conversation_started',
+          trigger: 'referral',
+          referral: { ref: `form.${shortcode}` }
+        }
       }
     }
   }

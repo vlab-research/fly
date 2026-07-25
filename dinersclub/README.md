@@ -89,6 +89,7 @@ type Provider interface {
 {
   "userid": "user123",
   "pageid": "fb-page-456",
+  "platform": "messenger",
   "timestamp": 1600558963867,
   "provider": "http",
   "key": "custom-api-key",
@@ -103,6 +104,15 @@ type Provider interface {
   }
 }
 ```
+
+`pageid` holds the platform account id (Facebook page_id for Messenger, phone_number_id for
+WhatsApp), which equals `credentials.key` for messaging entities. `platform`
+(`"messenger" | "whatsapp"`) is optional: when present, `GenericGetUser` resolves the researcher
+via the credentials natural key `WHERE entity = $1 AND key = $2` (messenger→facebook_page,
+whatsapp→whatsapp_business). When absent (old in-flight events emitted before replybot added the
+field), it falls back to `WHERE key = $1 AND entity IN ('facebook_page', 'whatsapp_business')` —
+safe because the `unique_messaging_account` partial index keeps account ids globally unique
+across messaging platforms. See `documentation/platform-abstraction.md` ("Account ID Routing").
 
 **Result**: Response sent to botserver indicating success or failure.
 

@@ -9,6 +9,7 @@ import { useHistory, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { Loading } from '../../components/UI';
 import LOCALES from './locales';
+import fetchMessagingAccounts from './accounts';
 
 const { Content } = Layout;
 const { Text, Paragraph } = Typography;
@@ -39,9 +40,9 @@ const TemplateDetail = () => {
   useEffect(() => {
     (async () => {
       try {
-        const [tmplRes, pagesRes] = await Promise.all([
+        const [tmplRes, accounts] = await Promise.all([
           api.fetcher({ path: `/message-templates/${id}` }),
-          api.fetcher({ path: '/media/pages' }),
+          fetchMessagingAccounts(),
         ]);
 
         if (tmplRes.status === 404) {
@@ -49,9 +50,9 @@ const TemplateDetail = () => {
           return;
         }
 
-        const [tmpl, pages] = await Promise.all([tmplRes.json(), pagesRes.json()]);
+        const tmpl = await tmplRes.json();
         setTemplate(tmpl);
-        setPageMap(pages.reduce((acc, p) => ({ ...acc, [p.id]: p.name }), {}));
+        setPageMap(accounts.reduce((acc, p) => ({ ...acc, [p.id]: p.name }), {}));
       } catch (err) {
         console.error(err);
         setNotFound(true);
@@ -108,8 +109,8 @@ const TemplateDetail = () => {
               <Text code>{template.name}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="Language">{languageLabel}</Descriptions.Item>
-            <Descriptions.Item label="Page">
-              {pageMap[template.facebook_page_id] || template.facebook_page_id}
+            <Descriptions.Item label="Account">
+              {pageMap[template.account_id] || template.account_id}
             </Descriptions.Item>
             <Descriptions.Item label="Status">{statusTag(template.status)}</Descriptions.Item>
             <Descriptions.Item label="Submitted">

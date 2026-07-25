@@ -48,7 +48,7 @@ const Media = () => {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('pageId', selectedPage);
+      formData.append('accountId', selectedPage);
       formData.append('mediaType', mediaType);
 
       const res = await api.fetcher({
@@ -103,9 +103,9 @@ const Media = () => {
     },
     {
       title: 'Page',
-      dataIndex: 'facebook_page_id',
-      key: 'facebook_page_id',
-      render: (pageId) => pageNameMap[pageId] || pageId,
+      dataIndex: 'account_id',
+      key: 'account_id',
+      render: (accountId) => pageNameMap[accountId] || accountId,
     },
     {
       title: 'Uploaded',

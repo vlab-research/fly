@@ -3,6 +3,8 @@
 const {
   validateCreateInput,
   buildFacebookCreatePayload,
+  buildWhatsAppCreatePayload,
+  resolveWabaId,
   parseCreateResponse,
   parseListResponse,
   matchFbEntry,
@@ -14,23 +16,70 @@ function isUniqueViolation(err) {
   return err && (err.code === '23505' || /duplicate key|unique constraint/i.test(err.message || ''));
 }
 
-function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
+function makeHandlers({ credentialQuery, templateQuery, facebookClient, whatsappClient }) {
   const { createTemplate, getTemplatesByName, deleteTemplateByHsmId } = facebookClient;
+  const waClient = whatsappClient || {};
 
-  async function getPageToken(email, pageId) {
-    const credential = await credentialQuery.getOne({
+  // Resolves the messaging account behind accountId and returns
+  // platform-appropriate template operations bound to the right Meta id and
+  // token. Messenger operations are identical to the original page-token
+  // path (Graph calls against the page id with the page access token).
+  // WhatsApp template CRUD is a WABA-level API: operations run against the
+  // WABA id resolved from the whatsapp_business credential's
+  // details.waba_id, using the credential's stored business access token.
+  // A whatsapp_business credential without waba_id fails loudly (400) —
+  // no silent fallback.
+  async function resolveAccountOps(email, accountId) {
+    const page = await credentialQuery.getOne({
       email,
       entity: 'facebook_page',
-      key: pageId,
+      key: accountId,
     });
-    return credential ? credential.details.access_token : null;
+    if (page) {
+      const token = page.details && page.details.access_token;
+      if (!token) return { ok: false, status: 404, error: 'Page not found or not connected' };
+      return {
+        ok: true,
+        platform: 'messenger',
+        buildCreatePayload: buildFacebookCreatePayload,
+        createTemplate: payload => createTemplate(accountId, token, payload),
+        getTemplatesByName: name => getTemplatesByName(accountId, token, name),
+        // Messenger delete-by-id needs only hsm_id.
+        deleteTemplate: row => deleteTemplateByHsmId(accountId, token, row.fb_template_id),
+      };
+    }
+
+    const wa = await credentialQuery.getOne({
+      email,
+      entity: 'whatsapp_business',
+      key: accountId,
+    });
+    if (wa) {
+      const token = wa.details && wa.details.access_token;
+      if (!token) return { ok: false, status: 404, error: 'Page not found or not connected' };
+      const waba = resolveWabaId(wa);
+      if (!waba.ok) return { ok: false, status: 400, error: waba.error };
+      return {
+        ok: true,
+        platform: 'whatsapp',
+        buildCreatePayload: buildWhatsAppCreatePayload,
+        createTemplate: payload => waClient.createTemplate(waba.wabaId, token, payload),
+        getTemplatesByName: name => waClient.getTemplatesByName(waba.wabaId, token, name),
+        // WhatsApp delete-by-id requires BOTH hsm_id and name.
+        deleteTemplate: row => waClient.deleteTemplateByHsmId(waba.wabaId, token, row.fb_template_id, row.name),
+      };
+    }
+
+    return { ok: false, status: 404, error: 'Page not found or not connected' };
   }
 
   async function create(req, res) {
     const { email } = req.user;
-    const { pageId, name, language, body, buttons, examples } = req.body;
+    // Support both accountId (new) and legacy pageId parameter for deploy safety
+    const accountId = req.body.accountId || req.body.pageId;
+    const { name, language, body, buttons, examples } = req.body;
 
-    const validation = validateCreateInput({ pageId, name, language, body, buttons, examples });
+    const validation = validateCreateInput({ accountId, pageId: req.body.pageId, name, language, body, buttons, examples });
     if (!validation.valid) {
       return res.status(400).json({ error: validation.error });
     }
@@ -38,15 +87,15 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
     const normalizedExamples = validation.examples || [];
 
     try {
-      const pageToken = await getPageToken(email, pageId);
-      if (!pageToken) {
-        return res.status(404).json({ error: 'Page not found or not connected' });
+      const account = await resolveAccountOps(email, accountId);
+      if (!account.ok) {
+        return res.status(account.status).json({ error: account.error });
       }
 
-      const payload = buildFacebookCreatePayload({
+      const payload = account.buildCreatePayload({
         name, language, body, buttons: normalizedButtons, examples: normalizedExamples,
       });
-      const fbResponse = await createTemplate(pageId, pageToken, payload);
+      const fbResponse = await account.createTemplate(payload);
       const parsed = parseCreateResponse(fbResponse);
 
       if (!parsed.ok) {
@@ -55,7 +104,7 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
 
       const saved = await templateQuery.create({
         email,
-        facebookPageId: pageId,
+        accountId,
         fbTemplateId: parsed.fbTemplateId,
         name,
         language,
@@ -84,16 +133,16 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
     const pending = rows.filter(r => r.status === 'PENDING');
     if (pending.length === 0) return;
 
-    const pageIds = [...new Set(pending.map(r => r.facebook_page_id))];
-    for (const pid of pageIds) {
-      const pageToken = await getPageToken(email, pid);
-      if (!pageToken) continue;
-      const namesToRefresh = [...new Set(pending.filter(r => r.facebook_page_id === pid).map(r => r.name))];
+    const accountIds = [...new Set(pending.map(r => r.account_id))];
+    for (const aid of accountIds) {
+      const account = await resolveAccountOps(email, aid);
+      if (!account.ok) continue;
+      const namesToRefresh = [...new Set(pending.filter(r => r.account_id === aid).map(r => r.name))];
       for (const name of namesToRefresh) {
         try {
-          const fbResponse = await getTemplatesByName(pid, pageToken, name);
+          const fbResponse = await account.getTemplatesByName(name);
           const fbEntries = parseListResponse(fbResponse);
-          const rowsWithName = pending.filter(r => r.facebook_page_id === pid && r.name === name);
+          const rowsWithName = pending.filter(r => r.account_id === aid && r.name === name);
           for (const row of rowsWithName) {
             const entry = matchFbEntry(row, fbEntries);
             if (entry && entry.status !== row.status) {
@@ -115,11 +164,12 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
 
   async function list(req, res) {
     const { email } = req.user;
-    const { pageId } = req.query;
+    // Support both accountId (new) and legacy pageId parameter for deploy safety
+    const accountId = req.query.accountId || req.query.pageId;
 
     try {
-      const rows = pageId
-        ? await templateQuery.list({ email, facebookPageId: pageId })
+      const rows = accountId
+        ? await templateQuery.list({ email, accountId })
         : await templateQuery.listAll({ email });
 
       await refreshTemplateStatus(rows, email);
@@ -140,13 +190,13 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient }) {
         return res.status(404).json({ error: 'Template not found' });
       }
 
-      const pageToken = await getPageToken(email, row.facebook_page_id);
-      if (!pageToken) {
-        return res.status(404).json({ error: 'Page not found or not connected' });
+      const account = await resolveAccountOps(email, row.account_id);
+      if (!account.ok) {
+        return res.status(account.status).json({ error: account.error });
       }
 
       if (row.fb_template_id) {
-        const fbResponse = await deleteTemplateByHsmId(row.facebook_page_id, pageToken, row.fb_template_id);
+        const fbResponse = await account.deleteTemplate(row);
         if (fbResponse && fbResponse.error) {
           const code = fbResponse.error.code;
           // 100 = template not found; ignore so the local row can be cleaned up

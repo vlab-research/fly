@@ -30,9 +30,10 @@ describe('States API', () => {
     const user = await User.create({ email });
 
     // Create credentials so the pageid scoping (states.pageid IN credentials
-    // owned by this user) includes our test page.
+    // owned by this user) includes our test page. Invariant: for messaging
+    // entities, key IS the account id (= details->>'id').
     await vlabPool.query(
-      `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'test-page', $2)`,
+      `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'page-123', $2)`,
       [user.id, JSON.stringify({ id: 'page-123' })]
     );
 
@@ -418,9 +419,9 @@ describe('States API', () => {
       collisionToken = await makeAPIToken({ email: collisionEmail });
       const u = await User.create({ email: collisionEmail });
 
-      // Credentials so pageid scoping includes page-c
+      // Credentials so pageid scoping includes page-c (key = account id invariant)
       await vlabPool.query(
-        `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'collision-page', $2)`,
+        `INSERT INTO credentials (userid, entity, key, details) VALUES ($1, 'facebook_page', 'page-c', $2)`,
         [u.id, JSON.stringify({ id: 'page-c' })]
       );
 

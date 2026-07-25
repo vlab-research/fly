@@ -12,6 +12,7 @@ import { PrivateRoute, Spinner } from './components';
 import { TypeformCreateAuth } from './components/TypeformCreate/TypeformCreate';
 import { Auth, History } from './services';
 import FacebookPages from './containers/FacebookPages';
+import WhatsAppEmbedded from './containers/WhatsAppEmbedded';
 import Reloadly from './containers/Reloadly';
 import Secrets from './containers/Secrets';
 import Media from './containers/Media';
@@ -36,6 +37,7 @@ const Root = () => (
         <PrivateRoute exact path="/surveys/auth" component={TypeformCreateAuth} auth={Auth} />
         <PrivateRoute exact path="/connect/facebook-messenger" component={FacebookPages} auth={Auth} />
         <PrivateRoute exact path="/connect/facebook-ads" component={NotFound} auth={Auth} />
+        <PrivateRoute exact path="/connect/whatsapp" component={WhatsAppEmbedded} auth={Auth} />
         <PrivateRoute exact path="/connect/reloadly" component={Reloadly} auth={Auth} />
         <PrivateRoute exact path="/connect/secrets" component={Secrets} auth={Auth} />
         <PrivateRoute exact path="/connect/api-keys" component={ApiKeys} auth={Auth} />
