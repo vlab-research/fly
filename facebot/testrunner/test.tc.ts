@@ -245,8 +245,27 @@ describe('Test Bot flow Survey Integration Testing', () => {
         return s?.current_state !== 'RESPONDING' ? s : null;
       });
       state.current_state.should.equal('ERROR');
-      state.state_json.error.tag.should.equal('FORM_NOT_FOUND');
-      state.state_json.error.status.should.equal(404);
+
+      // The thin-error contract: states.error carries ONLY tag/code/message/ts.
+      // The rich context -- formcentral's response body, the HTTP status, the
+      // stack -- stays on the machine_report event in `messages` and is
+      // deliberately not duplicated onto the hot states row. `messages` is the
+      // durable log; states.error is a live-state projection of it.
+      // See documentation/error-events.md and replybot/README.md.
+      const error = state.state_json.error;
+      error.tag.should.equal('FORM_NOT_FOUND');
+      error.message.should.include('DOESNTEXIST');
+
+      // ts is the onset of the error episode -- the triggering event's
+      // timestamp -- which is what the errored_at computed column exposes.
+      error.ts.should.be.a('number');
+
+      // Nothing outside the whitelist may leak back onto the states row.
+      Object.keys(error).forEach((k: string) => {
+        ['tag', 'code', 'message', 'ts'].should.include(k);
+      });
+      error.should.not.have.property('status');
+      error.should.not.have.property('stack');
     });
 
     it('Test chat flow with logic jump from previous question', async () => {
