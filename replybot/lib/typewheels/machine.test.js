@@ -1018,6 +1018,37 @@ describe('getState', () => {
       state.retries.length.should.equal(1)
     })
 
+    it('parks the episode onset (not the error) on the RESPONDING blip of a REDO', () => {
+      // The retry must not leave an `error` on a RESPONDING state — that would
+      // show a not-currently-broken user as broken in Monitor / error_tag. But
+      // the episode is not over yet, so the onset is kept aside on errorOnset.
+      const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } }, { timestamp: 100 })
+      const redo = synthetic({ type: 'redo' })
+      const log = [referral, echo, text, report, redo]
+      const state = getState(log)
+      state.state.should.equal('RESPONDING')
+      should.not.exist(state.error)
+      state.errorOnset.should.equal(100)
+    })
+
+    it('ends the episode when a retry succeeds, so the next error gets a fresh onset', () => {
+      const reportA = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'A' } } }, { timestamp: 100 })
+      const reportB = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'B' } } }, { timestamp: 300 })
+      // referral breaks; a redo retries; the echo proves the question went out
+      // (retry succeeded → episode over); a later, unrelated failure is a NEW
+      // episode and must be stamped with its own onset.
+      const log = [referral, reportA, synthetic({ type: 'redo' }), echo]
+      const recovered = getState(log)
+      recovered.state.should.equal('QOUT')
+      should.not.exist(recovered.error)
+      should.not.exist(recovered.errorOnset)
+
+      const state = getState([...log, reportB])
+      state.state.should.equal('ERROR')
+      state.error.code.should.equal('B')
+      state.error.ts.should.equal(300)
+    })
+
     it('clears error and retries when user responds from ERROR state', () => {
       const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
       const log = [referral, echo, text, report, text]

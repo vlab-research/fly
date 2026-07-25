@@ -245,19 +245,38 @@ function tokenWrap(state, nxt, output) {
 // hot `states` row (which keeps rows small and feeds the error_tag/fb_error_code
 // computed columns from tag/code).
 //
-// `ts` is the occurrence time (the triggering event's timestamp). It's
-// preserved across retry re-fails: RESPOND clears `error` on genuine recovery,
-// so a fresh error episode gets a new ts, while a failed Dean retry — which
-// only blipped through RESPONDING without truly recovering — keeps the original
-// onset. That makes `errored_at` an honest "when did this user break", immune
-// to retry churn.
-function thinError(err, priorError, ts) {
+// `ts` is the occurrence time (the triggering event's timestamp), stamped once
+// per error EPISODE rather than once per error event: a genuine recovery ends
+// the episode so the next error gets a fresh ts, while a Dean retry that
+// re-fails keeps the original onset. That makes `errored_at` an honest "when
+// did this user break", immune to retry churn.
+function thinError(err, onset, ts) {
   return {
     tag: err.tag,
     code: err.code,
     message: err.message,
-    ts: (priorError && priorError.ts) || ts,
+    ts: onset || ts,
   }
+}
+
+// The onset of the error episode currently in flight, if there is one.
+//
+// While the user sits in ERROR/BLOCKED it lives on `state.error.ts`. A Dean
+// retry (REDO → RESPOND_AGAIN) blips the user through RESPONDING, where an
+// `error` must NOT linger — a lingering error makes a state that is not
+// currently broken look broken in the Monitor view and in the
+// error_tag/fb_error_code computed columns (fix 57bc567e). So the retry drops
+// the error but parks the onset on `state.errorOnset`: a bare timestamp, no
+// tag/code, invisible to those columns, with exactly the same lifetime as
+// `retries` (the other piece of retry-episode bookkeeping RESPONDING keeps).
+//
+// If the retry re-fails, the onset comes back out of `errorOnset` and the
+// episode continues with its original ts. If the retry succeeds, the
+// transition that proves it (WAIT_RESPONSE/HANDOFF/WAIT_EXTERNAL_EVENT/END, or
+// the user answering: RESPOND) clears `errorOnset` along with the other
+// transient fields, so the episode is genuinely over.
+function episodeOnset(state) {
+  return (state.error && state.error.ts) || state.errorOnset
 }
 
 function exec(state, nxt) {
@@ -295,7 +314,7 @@ function exec(state, nxt) {
       const { response } = nxt.payload
 
       if (response && response.error && state.state !== 'BLOCKED') {
-        return { action: 'BLOCKED', error: thinError(response.error, state.error, nxt.timestamp) }
+        return { action: 'BLOCKED', error: thinError(response.error, episodeOnset(state), nxt.timestamp) }
       }
       return _noop()
     }
@@ -308,11 +327,11 @@ function exec(state, nxt) {
       }
 
       if (report && report.error && report.error.tag === 'FB') {
-        return { action: 'BLOCKED', error: thinError(report.error, state.error, nxt.timestamp) }
+        return { action: 'BLOCKED', error: thinError(report.error, episodeOnset(state), nxt.timestamp) }
       }
 
       if (report && report.error) {
-        return { action: 'ERROR', error: thinError(report.error, state.error, nxt.timestamp) }
+        return { action: 'ERROR', error: thinError(report.error, episodeOnset(state), nxt.timestamp) }
       }
 
       return _noop()
@@ -598,6 +617,7 @@ function apply(state, output) {
         question: output.question,
         previousOutput: output,
         error: undefined, // remove error when responding
+        errorOnset: undefined, // user responded: the error episode is over
         retries: undefined, // remove retries when responding
         wait: undefined, // remove wait when user responds
         waitStart: undefined, // remove waitStart when user responds
@@ -628,6 +648,7 @@ function apply(state, output) {
         ...output.stateUpdate,
         state: 'RESPONDING',
         error: undefined, // remove stale error on retry (keep retries for backoff)
+        errorOnset: episodeOnset(state), // ...but remember when the episode began
         wait: undefined, // remove stale wait on retry
       }
 
@@ -648,6 +669,7 @@ function apply(state, output) {
         state: 'QOUT',
         question: output.question,
         error: undefined, // question sent, no error context
+        errorOnset: undefined, // question sent: any retry succeeded, episode over
         retries: undefined, // question sent, no retry context
       }
 
@@ -661,6 +683,7 @@ function apply(state, output) {
         externalEvents: output.externalEvents || state.externalEvents,
         waitStart: output.waitStart,
         error: undefined, // entering wait, clear prior error
+        errorOnset: undefined, // question sent: any retry succeeded, episode over
         retries: undefined, // entering wait, clear prior retries
       }
 
@@ -674,6 +697,7 @@ function apply(state, output) {
         externalEvents: output.externalEvents || state.externalEvents,
         waitStart: output.waitStart,
         error: undefined, // entering/continuing wait, clear prior error
+        errorOnset: undefined, // question sent: any retry succeeded, episode over
         retries: undefined, // entering/continuing wait, clear prior retries
       }
 
@@ -684,6 +708,7 @@ function apply(state, output) {
         state: 'END',
         question: output.question,
         error: undefined, // completed, no error context
+        errorOnset: undefined, // completed: episode over
         wait: undefined, // completed, no wait context
         retries: undefined, // completed, no retry context
       }
@@ -693,6 +718,7 @@ function apply(state, output) {
         ...state,
         state: 'BLOCKED',
         error: output.error,
+        errorOnset: undefined, // consumed: the onset now lives on error.ts
         wait: undefined, // blocked, clear prior wait
         waitStart: undefined, // blocked, clear prior waitStart
       }
@@ -705,6 +731,7 @@ function apply(state, output) {
         ...state,
         state: 'ERROR',
         error: output.error,
+        errorOnset: undefined, // consumed: the onset now lives on error.ts
         wait: undefined, // errored, clear prior wait
         waitStart: undefined, // errored, clear prior waitStart
       }
