@@ -71,6 +71,37 @@ nowhere. Downstream needs no change per tag: `DEAN_ERROR_TAGS` and the dashboard
 - **rate_limit** (code 2022) — Facebook rate-limiting the page. Platform issue (hitting Meta API limits) → **page**.
 - **unsupported / other** — rare edge cases.
 
+### Taxonomy contract
+
+The classification above is a **shared contract** with two consumers that
+must stay in sync (both cite this section in code comments):
+
+1. **sql_exporter** — `devops/sql-exporter/templates/configmap.yaml`
+   (Prometheus metrics feeding the platform-owner alerts above; 1h window).
+2. **dashboard-server health API** — `dashboard-server/api/health/`
+   (`aggregate.js` for error_tag bucketing) +
+   `dashboard-server/queries/states/states.queries.js` (`healthSummary`, for
+   fb_error_code bucketing; 24h window). Feeds the researcher-facing Monitor
+   tab — see `documentation/dashboard-study-health.md`.
+
+| Dimension | Mapping | Class |
+|---|---|---|
+| `error_tag` IN (INTERNAL, STATE_ACTIONS, NETWORK) | `error.platform` | deterministic (platform's fault) |
+| `error_tag` = FORM_NOT_FOUND or NULL (`none`), or any unrecognized tag | `error.study` | stochastic |
+| `fb_error_code` IN (10, 190, 551) | `blocked.attrition` | excluded (expected churn) |
+| `fb_error_code` = 100 | `blocked.template_missing` | deterministic |
+| `fb_error_code` = 2022 | `blocked.rate_limit` | deterministic (platform-side) |
+| `fb_error_code` = 200 | `blocked.unsupported` | stochastic |
+| other `fb_error_code` | `blocked.other` | stochastic |
+| `stuck_on_question IS NOT NULL` | `stuck_users` | stochastic |
+| `current_state = 'WAIT_EXTERNAL_EVENT' AND timeout_date < NOW()` | `expired_waits` | stochastic |
+| all rows in window | `active_users` | denominator |
+
+The two consumers intentionally use **different windows** (1h alerting vs
+24h dashboard) and **different thresholds** — the contract is the
+classification, not the rules on top of it. If the mapping changes, update
+both consumers and this table together.
+
 ### Alerting Logic
 
 Alerts distinguish **platform regressions** (page immediately) from **study issues** (ticket).

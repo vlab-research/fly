@@ -62,9 +62,11 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/credentials` | Credential management |
 | `/facebook` | Facebook integration |
 | `/auth` | Authentication endpoints |
-| `/surveys/:surveyId/bails` | Bail-out monitoring |
-| `/surveys/:surveyId/bail-events` | Survey-wide bail events |
+| `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware |
+| `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
+| `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
+| `/platform/notices` | Platform-wide notices proxied from AlertManager (whitelisted alertnames, fail-soft) |
 | `/media` | Facebook `message_attachments` uploads (reusable image/video attachments) |
 | `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
@@ -116,6 +118,25 @@ The resolution is written as a scalar subquery rather than `JOIN LATERAL` becaus
 State rows with NULL `form_start_time` (haven't started a form) are excluded. Killed versions (`off_time` set) are intentionally kept so historical attribution stays correct.
 
 If the resolution rule in formcentral ever changes (shortcode + timestamp → surveyid), update this subquery to match — formcentral is the canonical source.
+
+#### Health API (`api/health/`)
+
+Functional core / imperative shell: `rules.js` (declarative, data-only
+ruleset + platform-notice whitelist), `aggregate.js` (pure fold from query
+rows to the aggregate bag), `evaluate.js` (pure rule engine),
+`notices.js` (pure AlertManager-alert translation). IO lives at the edges:
+the `healthSummary` query (in `queries/states/`, reusing the states scoping
+SQL with a 24h window) and the AlertManager fetch in the controller.
+
+The error/blocked classification is a shared taxonomy contract with
+sql_exporter — see the "Taxonomy contract" section of
+`documentation/study-error-alerting.md`. Full feature design:
+`documentation/dashboard-study-health.md`.
+
+Env: `ALERTMANAGER_URL` (optional) — base URL for the notices proxy
+(in-cluster: `http://alertmanager-operated.monitoring:9093`). Unset →
+`/platform/notices` returns `{ notices: [] }` and the feature is cleanly
+off. All AlertManager failures are fail-soft (2s timeout, empty notices).
 
 ### External Integrations
 

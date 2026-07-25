@@ -19,7 +19,7 @@ function mockRes() {
 describe('message-templates.controller (makeHandlers)', () => {
   const email = 'test@vlab.com';
   const accountId = 'page1';
-  const validBody = { accountId, name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}' };
+  const validBody = { accountId, name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Alice'] };
   const validReq = { user: { email }, body: validBody };
 
   // Default mocks — all happy-path, overridden per test as needed
@@ -43,6 +43,7 @@ describe('message-templates.controller (makeHandlers)', () => {
       updated: '2026-04-18T00:00:00Z',
     }),
     list: async () => [],
+    listAll: async () => [],
     get: async ({ id }) => ({
       id,
       account_id: accountId,
@@ -182,9 +183,9 @@ describe('message-templates.controller (makeHandlers)', () => {
 
     it('threads buttons through FB create + DB insert when supplied', async () => {
       // End-to-end: buttons in the request body land on BOTH the FB payload
-      // (as a BUTTONS component with QUICK_REPLY entries) AND the DB record
-      // (as the stored buttons JSONB). If this routing breaks, button-less
-      // templates would leak through silently.
+      // (as a BUTTONS component with POSTBACK entries) AND the DB record
+      // (as the stored buttons JSONB). Messenger utility templates reject QUICK_REPLY
+      // at creation time; only POSTBACK, URL, and PHONE_NUMBER are accepted.
       let fbPayload;
       let dbRecord;
       const res = mockRes();
@@ -205,8 +206,8 @@ describe('message-templates.controller (makeHandlers)', () => {
       res.statusCode.should.equal(201);
       fbPayload.components.should.have.length(2);
       fbPayload.components[1].buttons.should.deep.equal([
-        { type: 'QUICK_REPLY', text: 'Yes' },
-        { type: 'QUICK_REPLY', text: 'No' },
+        { type: 'POSTBACK', text: 'Yes', payload: JSON.stringify({ value: 'Yes', ref: '{{1}}' }) },
+        { type: 'POSTBACK', text: 'No', payload: JSON.stringify({ value: 'No', ref: '{{1}}' }) },
       ]);
       dbRecord.buttons.should.deep.equal([{ label: 'Yes' }, { label: 'No' }]);
     });
@@ -228,7 +229,30 @@ describe('message-templates.controller (makeHandlers)', () => {
   describe('list', () => {
     const listReq = { user: { email }, query: { accountId } };
 
-    it('returns 200 with the formatted row list (no accountId filter)', async () => {
+    it('lists across all accounts via listAll when accountId is omitted', async () => {
+      // The dashboard's MessageTemplates page calls GET /message-templates
+      // with no accountId (MessageTemplates.js) — the all-accounts listing
+      // is production behavior, not an error.
+      const rows = [{
+        id: 'u1', account_id: accountId, fb_template_id: 'fb1',
+        name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',
+        rejection_reason: null, created: 't', updated: 't',
+      }];
+      const calls = [];
+      const res = mockRes();
+      await makeTestHandlers({
+        templateQuery: {
+          ...defaultTemplateQuery,
+          listAll: async (args) => { calls.push(args); return rows; },
+        },
+      }).list({ user: { email }, query: {} }, res);
+      res.statusCode.should.equal(200);
+      calls.should.deep.equal([{ email }]);
+      res.body.length.should.equal(1);
+      res.body[0].id.should.equal('u1');
+    });
+
+    it('returns 200 with the formatted row list', async () => {
       const rows = [{
         id: 'u1', account_id: accountId, fb_template_id: 'fb1',
         name: 'prize', language: 'en_US', body: 'hi', status: 'APPROVED',

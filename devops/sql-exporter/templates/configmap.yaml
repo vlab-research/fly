@@ -16,6 +16,11 @@ data:
     # Study health collector: 6 queries exposing survey error/blocked/stuck/expired/active states
     # as Prometheus gauges. All queries window on updated > NOW() - INTERVAL '1 hour' to surface
     # recent activity; labels are ONLY form + tag/category/state — NO user-identifying data.
+    #
+    # TAXONOMY CONTRACT: the error_tag / fb_error_code bucketing below is a shared contract —
+    # see the "Taxonomy contract" section of documentation/study-error-alerting.md. The other
+    # consumer is dashboard-server/api/health/ (+ the healthSummary query in
+    # dashboard-server/queries/states/states.queries.js). Keep all consumers in sync.
     collectors:
       - collector_name: study_health
         min_interval: {{ .Values.database.minInterval }}s

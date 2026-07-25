@@ -156,6 +156,17 @@ analyzing error, blocked, stuck, and expired states across surveys. All threshol
 are **v1 — tuned for current low traffic** (~8 active users/hr total) and will
 need adjustment as traffic grows.
 
+**Second, lower-threshold consumer:** the dashboard's Monitor tab surfaces
+the same study-health signals to **survey owners** at effectively zero
+threshold (quiet notes) with its own alarm rules, via a direct CockroachDB
+query (24h window) — it does not read these alert rules. It shares only the
+classification taxonomy (see the "Taxonomy contract" section of
+`documentation/study-error-alerting.md`). The dashboard additionally proxies
+a whitelist of the alerts on this page (`PlatformInternalErrors`,
+`PlatformRateLimited`, `MultiSurveyErrorRegression`, `DeanExpiredWaits`) as
+in-product platform notices via `GET /platform/notices`. Full design:
+`documentation/dashboard-study-health.md`.
+
 ### PlatformInternalErrors
 `sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"}) >= 5` for
 10m — **critical**. Platform bugs (DB failures, state machine errors, network

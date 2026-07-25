@@ -355,12 +355,12 @@ describe('message-templates.core', () => {
   describe('parseCreateResponse', () => {
     it('extracts id and status on APPROVED response', () => {
       parseCreateResponse({ id: '12345', status: 'APPROVED', category: 'UTILITY' })
-        .should.deep.equal({ ok: true, fbTemplateId: '12345', status: 'APPROVED' });
+        .should.deep.equal({ ok: true, fbTemplateId: '12345', status: 'APPROVED', rejectionReason: null });
     });
 
     it('extracts id and status on PENDING response', () => {
       parseCreateResponse({ id: '12345', status: 'PENDING' })
-        .should.deep.equal({ ok: true, fbTemplateId: '12345', status: 'PENDING' });
+        .should.deep.equal({ ok: true, fbTemplateId: '12345', status: 'PENDING', rejectionReason: null });
     });
 
     it('defaults missing status to PENDING', () => {
