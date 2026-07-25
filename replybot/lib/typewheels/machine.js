@@ -100,6 +100,15 @@ function _currentUserIsReferrer(event) {
 
 
 function _handleExternalEvent(state, nxt, includeMetadata = false) {
+  // In START there is no conversation to attach this to, and no md. Start a
+  // form, as TEXT/MEDIA do -- otherwise makeEventMetadata() gets merged into a
+  // missing md ({ ...undefined, ...{...} }), producing a truthy husk with no
+  // startTime that passes transition.js's `!md` guard and then throws in
+  // getForm.
+  if (state.state === 'START') {
+    return _blankStart(nxt)
+  }
+
   const externalEvents = [...(state.externalEvents || []), nxt]
   const md = includeMetadata ? makeEventMetadata(nxt) : null
 
@@ -464,6 +473,11 @@ function exec(state, nxt) {
 
     case 'POSTBACK': {
       if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
+
+      if (state.state === 'START') {
+        return _blankStart(nxt)
+      }
+
       return {
         action: 'RESPOND',
         response: nxt.payload.value,
@@ -474,6 +488,10 @@ function exec(state, nxt) {
 
     case 'QUICK_REPLY': {
       if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
+
+      if (state.state === 'START') {
+        return _blankStart(nxt)
+      }
 
       return {
         action: 'RESPOND',

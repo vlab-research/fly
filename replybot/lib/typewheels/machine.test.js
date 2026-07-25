@@ -7,7 +7,7 @@ const { parseLogJSON } = require('./utils')
 const { followUpMessage, offMessage } = require('../generic-validator')
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover } = require('./events.test')
 const { parseEvent } = require('../event-normalizer')
 
 const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md.ref ? md : { ref: md } } })
@@ -2888,5 +2888,44 @@ describe('Statement with wait should not gather next responses', () => {
     md.type.should.equal('handoff')
     md.handoff.should.deep.equal({ target_app_id: '123456789', mode: 'wait' })
     should.not.exist(actions.handoff)
+  })
+})
+
+// Regression: entering without a referral used to build an `md` husk -- `{}` or
+// e_*-only keys, no startTime -- which passed transition.js's `!md` guard and then
+// threw inside getForm. See replybot/README.md.
+describe('md must always carry startTime', () => {
+
+  const step = (state, event) => apply(state, exec(state, event))
+
+  // Behavior change, not only a crash fix: a stray quick_reply from an old
+  // broadcast now starts the fallback form rather than erroring.
+  it('blank-starts a form when a quick_reply is the first event', () => {
+    const next = step(_initialState(), qr)
+
+    next.forms.should.eql(['fallback'])
+    should.exist(next.md)
+    next.md.should.have.property('startTime', qr.timestamp)
+    next.md.should.have.property('form', 'fallback')
+  })
+
+  it('blank-starts a form when a postback is the first event', () => {
+    const next = step(_initialState(), multipleChoice)
+
+    next.forms.should.eql(['fallback'])
+    should.exist(next.md)
+    next.md.should.have.property('startTime', multipleChoice.timestamp)
+    next.md.should.have.property('form', 'fallback')
+  })
+
+  it('blank-starts a form when an external event arrives for a user with no conversation', () => {
+    // In prod the handover usually races the user's own first message by a
+    // second or two, so starting the form is the right outcome anyway.
+    const next = step(_initialState(), handover({ metadata: 'new message' }))
+
+    next.forms.should.eql(['fallback'])
+    should.exist(next.md)
+    next.md.should.have.property('startTime', 3000)
+    next.md.should.have.property('form', 'fallback')
   })
 })

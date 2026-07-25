@@ -102,6 +102,26 @@ Notes on specific shapes:
   normalized event in `externalEvents`, so a raw handover never reaches
   `waiting.js`.)
 
+## Entering a conversation
+
+A referral is not the only way in. Any event arriving on a `START` state blank-starts a
+survey on `FALLBACK_FORM` via `_blankStart`, which stamps the `md` the rest of the
+pipeline depends on: `startTime` (needed by `getForm` to resolve the form version),
+`form`, `pageid` and `seed`.
+
+`TEXT` and `MEDIA` always did this. `QUICK_REPLY`, `POSTBACK` and external events
+(`_handleExternalEvent`) did not — they fell through to `RESPOND`, so `apply()` computed
+`md: { ...undefined, ...undefined }` = `{}`. That husk is truthy, so it passed the
+`!newState.md` guard in `transition.js` and then threw inside `getForm` on the missing
+`startTime`. 277 production states were trapped that way, mostly users whose first event
+was a quick_reply or a "Get Started" postback. All five paths now share the same
+`state.state === 'START'` check.
+
+Note this covers users who arrive without a conversation. A user who *had* one and lost
+their `md` — `block_user` drops it — is damaged rather than new, and is not blank-started:
+that would append the fallback form and silently reassign a real participant mid-survey.
+See `planning/blocked-user-durability-handoff.md`.
+
 ### Testing
 
 `npm test` runs the full mocha suite via the quoted glob `'lib/**/*.test.js'`

@@ -275,4 +275,22 @@ const reaction = {
   }
 }
 
-module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, PAGE_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic }
+// Messenger thread-control handover (pass_thread_control). Factory rather than
+// a constant because the payload varies: `previous_owner_app_id`/`metadata` are
+// what makeEventMetadata flattens into e_handover_*, and `new_owner_app_id` is
+// what the app-id filter in machine.js checks. Omitting new_owner_app_id keeps
+// the event unfiltered regardless of FACEBOOK_APP_ID.
+const handover = (payload = {}, more = {}) => ({
+  event_id: 'evt_test_handover',
+  user_id: USER_ID,
+  timestamp: 3000,
+  source: { type: 'messenger', account_id: PAGE_ID },
+  event_type: 'handover',
+  payload: { type: 'handover', ...payload },
+  ...more
+})
+
+// block_user needs no fixture of its own -- synthetic() generates it:
+//   synthetic({ type: 'block_user' })  ->  event_type 'synthetic_block_user'
+
+module.exports = { getStarted, echo, fakeEcho, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, legalQuickReply, referral, reaction, USER_ID, PAGE_ID, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover }
