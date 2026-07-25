@@ -124,6 +124,49 @@ their `md` — `block_user` drops it — is damaged rather than new, and is not 
 that would append the fallback form and silently reassign a real participant mid-survey.
 See `planning/blocked-user-durability-handoff.md`.
 
+## Transient state fields — error episodes and retries
+
+`apply()` in `lib/typewheels/machine.js` enforces an invariant: **transient
+fields exist only in the states that own them.** Left lying around they show a
+healthy participant as broken in the Monitor tab's `state_json` viewer and in
+the `error_tag`/`fb_error_code` computed columns that StatesList filters on.
+
+| Field | Lives in |
+|---|---|
+| `error` | `ERROR`, `BLOCKED` |
+| `wait` / `waitStart` | `WAIT_EXTERNAL_EVENT` |
+| `retries` | `RESPONDING`, `ERROR`, `BLOCKED` |
+| `errorOnset` | `RESPONDING` (only while a retry is in flight) |
+
+### An error is an episode, not an event
+
+`state.error.ts` is the **onset** of an error episode, not the timestamp of the
+most recent failure — it is what the `errored_at` computed column
+(`devops/migrations/23-states-errored-at.sql`) exposes, so that the
+current-error population can be aged by when a user actually broke rather than
+by `updated`, which Dean re-warms on every retry. See
+`documentation/error-events.md` §2.
+
+An episode ends on **recovery**, not on **retry attempt**. That distinction is
+what `errorOnset` exists for:
+
+- A Dean retry (`REDO` → `RESPOND_AGAIN`) blips the user through `RESPONDING`.
+  The `error` is dropped there — a `RESPONDING` state must never carry one —
+  but the onset is parked on `state.errorOnset`: a bare epoch-ms number, no
+  `tag`/`code`, so it is invisible to the error computed columns. It has the
+  same lifetime as `retries`, the other piece of retry bookkeeping that
+  `RESPONDING` legitimately keeps.
+- **Retry re-fails** → `exec` reads the onset back (`episodeOnset`) and stamps
+  the new, thinner error with the *original* `ts`. Same episode; content updates
+  to the latest failure, onset does not move.
+- **Retry succeeds** → whichever transition proves it (`WAIT_RESPONSE`,
+  `HANDOFF`, `WAIT_EXTERNAL_EVENT`, `END`, or the user answering via `RESPOND`)
+  clears `errorOnset` along with the other transient fields. The next failure is
+  a new episode with a fresh onset.
+
+Every transition reachable from `RESPONDING` either consumes `errorOnset` (into
+`error.ts` on `ERROR`/`BLOCKED`) or clears it, so it cannot leak.
+
 ## Platform Tracking (md.platform)
 
 The conversation's platform (`'messenger'` | `'whatsapp'`) is persisted in
