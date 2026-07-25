@@ -21,7 +21,7 @@ func TestChatLogMarshalAllFields(t *testing.T) {
 			"content": "Hello, how are you?",
 			"question_ref": "q1",
 			"shortcode": "sc1",
-			"surveyid": "survey789",
+			"surveyid": "550e8400-e29b-41d4-a716-446655440789",
 			"message_type": "text",
 			"raw_payload": {"type": "text", "text": "Hello"},
 			"metadata": {"source": "facebook"}
@@ -47,7 +47,7 @@ func TestChatLogMarshalAllFields(t *testing.T) {
 	assert.NotNil(t, entry.Shortcode)
 	assert.Equal(t, "sc1", *entry.Shortcode)
 	assert.NotNil(t, entry.Surveyid)
-	assert.Equal(t, "survey789", *entry.Surveyid)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440789", *entry.Surveyid)
 	assert.NotNil(t, entry.MessageType)
 	assert.Equal(t, "text", *entry.MessageType)
 	assert.NotNil(t, entry.RawPayload)
@@ -223,7 +223,7 @@ func TestChatLogGetRowReturnsCorrectOrder(t *testing.T) {
 	pageid := "page456"
 	qref := "q1"
 	shortcode := "sc1"
-	surveyid := "survey789"
+	surveyid := "550e8400-e29b-41d4-a716-446655440789"
 	msgType := "text"
 	ts := &JSTimestamp{time.Date(2020, 8, 29, 10, 0, 0, 0, time.UTC)}
 
@@ -299,7 +299,7 @@ func TestChatLogWriterWritesGoodData(t *testing.T) {
 		  "content": "Hello bot",
 		  "question_ref": "q1",
 		  "shortcode": "sc1",
-		  "surveyid": "survey1",
+		  "surveyid": "550e8400-e29b-41d4-a716-446655440001",
 		  "message_type": "text",
 		  "raw_payload": {"type": "text"},
 		  "metadata": {"source": "fb"}}`,
@@ -310,7 +310,7 @@ func TestChatLogWriterWritesGoodData(t *testing.T) {
 		  "content": "Hi user",
 		  "question_ref": "q2",
 		  "shortcode": "sc1",
-		  "surveyid": "survey1",
+		  "surveyid": "550e8400-e29b-41d4-a716-446655440001",
 		  "message_type": "text",
 		  "raw_payload": {"type": "text"},
 		  "metadata": {"source": "fb"}}`,

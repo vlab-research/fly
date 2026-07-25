@@ -71,7 +71,7 @@ func resetDb(pool *pgxpool.Pool, tableNames []string) error {
 }
 
 func before(pool *pgxpool.Pool) {
-	err := resetDb(pool, []string{"messages", "states", "responses", "surveys", "credentials", "users"})
+	err := resetDb(pool, []string{"chat_log", "messages", "states", "responses", "surveys", "credentials", "users"})
 	if err != nil {
 		fmt.Printf("ERROR in before(): %v", err)
 	}
