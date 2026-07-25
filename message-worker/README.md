@@ -313,6 +313,32 @@ ErrUnsupportedMediaType   // Media type not supported by platform
 ErrUnsupportedMessageType // Unknown message type
 ```
 
+### Worker outcomes: `HandledError`
+
+`Worker.ProcessCommand` returns three distinguishable outcomes, because a failed
+send still needs its Kafka offset committed (replaying it would re-send a message
+the user may already have received) without being logged as a success:
+
+| Return | Meaning | Consumer action |
+|--------|---------|-----------------|
+| `nil` | Message sent | commit; log success |
+| `*HandledError` | Send failed, reported to botserver as a `machine_report` | commit; log a warning with the underlying error |
+| any other error | Processing failed (unparseable payload, unknown command type) | do not commit; log an error |
+
+`HandledError` is created inside `reportError`, so every send path that reports a
+failure returns it without extra ceremony. It implements `Unwrap()`, so
+`errors.Is` / `errors.As` / `IsPlatformError` still see the wrapped
+`*PlatformError`.
+
+Not every failure is a `HandledError`. `emitWhatsAppEcho` failures are logged and
+swallowed — the message *was* sent, so the send did not fail; only the internal
+echo that advances the state machine did. Legacy `native` commands and unknown
+command types return plain errors: nothing was sent and nothing was reported, so
+they are genuine processing failures.
+
+See `documentation/message-worker-deployment.md` ("Error Handling Flow") for how
+this interacts with offset commits and consumer lag.
+
 ## Testing
 
 The package includes comprehensive table-driven tests:

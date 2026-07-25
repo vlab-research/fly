@@ -186,6 +186,41 @@ The error tag in the machine_report determines the state transition:
 - `"FB"` → BLOCKED state (platform errors: user blocked the bot, etc.)
 - `"STATE_ACTIONS"` → ERROR state (config/client errors)
 
+### Command outcomes and offset commits
+
+A failed send must still commit its Kafka offset — replaying it would re-send a
+message the user may already have received, and the failure has already been
+handed to the state machine via machine_report. But "commit the offset" is not
+the same as "this worked", so `ProcessCommand` distinguishes three outcomes:
+
+| Return | Meaning | Offset | Log line |
+|--------|---------|--------|----------|
+| `nil` | Sent | committed | info `command processed successfully` |
+| `*HandledError` | Send failed, reported to botserver | committed | warn `command send failed but handled/reported` |
+| any other error | Processing failed (malformed payload, unknown command type) | not committed | error `failed to process command` |
+
+`HandledError` is minted inside `reportError`, so every path that reports a
+failure returns it automatically. It wraps the original error and implements
+`Unwrap()`, so `errors.Is`/`errors.As` (and `IsPlatformError`) still reach the
+underlying `*PlatformError` through it.
+
+Two failures deliberately fall outside this scheme:
+
+- **WhatsApp echo failures** (`emitWhatsAppEcho`) are logged as a warning and
+  otherwise ignored. The message was delivered; only the internal Kafka echo
+  that advances RESPONDING → QOUT failed. Reporting a send failure would be
+  untruthful in the other direction, and a hard error would replay the command
+  and duplicate the message. The symptom is a stalled conversation, not a
+  missed send.
+- **Legacy `native` commands** are rejected with a hard error, so their offset
+  is never committed — see finding 13.
+
+**Known asymmetry:** the code also defines `message_failed`/`message_sent` Kafka
+events, but emission is currently commented out in `worker.go` and replybot only
+handles machine_report. The HTTP machine_report → botserver path is the only
+live error-handling route; the event-emitting functions are reachable from tests
+only. Both mechanisms should be consolidated in a future refactor.
+
 ## Health Checks
 
 The message-worker exposes a health endpoint on port 8081:
@@ -220,3 +255,21 @@ Graceful shutdown: preStop hook sleeps 15s to allow Kafka offset commits before 
 10. **Production.yaml had uncommitted changes on main:** The main worktree had uncommitted version bumps (replybot v0.0.200, dinersclub v0.0.40, exodus v0.2.2, dean config tweaks) that were already live in production but never committed to git. These had to be merged into the feature branch's production.yaml to avoid regressing those services during the message-worker deploy.
 
 11. **MESSENGER_URL env var required:** The Docker image built by CI contains a config validation from the rust branch that requires at least one of `MESSENGER_URL`, `WHATSAPP_URL`, or `INSTAGRAM_URL` to be set. Even though our branch's config.go doesn't have this validation, the packaged Helm chart was built from the rust branch. Adding `MESSENGER_URL=https://graph.facebook.com/v22.0` to the env config satisfies this validation.
+
+12. **Send failures used to log as successes:** When a send failed, the worker
+    reported the failure to botserver and returned `nil`, so main.go logged
+    "command processed successfully". Real production failures were invisible —
+    the only trace was the resulting BLOCKED/ERROR state transition, with nothing
+    in the worker's own logs. Fixed by the `HandledError` type described under
+    "Command outcomes and offset commits" above. When auditing logs from before
+    that fix, treat "command processed successfully" as "the command was
+    processed", not "the message was delivered".
+
+13. **A hard error blocks its partition:** `processFunc` returns non-nil only for
+    genuine processing failures, and burrow does not commit the offset in that
+    case. For a permanently-unprocessable message — a legacy `native` command, or
+    an unrecognised `type` — that means the same message is retried forever and
+    its partition stops advancing. This is intentional loud failure (both paths
+    are meant to be extinct), but if either ever reappears on the `commands`
+    topic in production, the symptom is consumer lag on one partition plus a
+    repeating "failed to process command" error, not a dropped message.
