@@ -38,7 +38,14 @@ func (dc *DC) Process(messages []*kafka.Message) error {
 		pe := new(PaymentEvent)
 		err := json.Unmarshal(m.Value, pe)
 		if err != nil {
-			e := fmt.Errorf("Error parsing kakfa message: %s. Error: %s", string(m.Value), err)
+			// Wrap with %w, not %s. This error carries a concrete type that
+			// the package elsewhere inspects to distinguish a malformed
+			// payload from a system fault (see reloadly.go's
+			// *json.SyntaxError branch, which maps it to a user-facing
+			// JSON_SYNTAX_ERROR instead of retrying). Formatting the error
+			// with %s flattens it to an opaque *errors.errorString and
+			// silently breaks errors.As/errors.Is for every caller.
+			e := fmt.Errorf("Error parsing kakfa message: %s. Error: %w", string(m.Value), err)
 			return e
 		}
 		tasks = append(tasks, pe)

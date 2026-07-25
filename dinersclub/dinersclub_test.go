@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -126,8 +127,18 @@ func TestDinersClubErrorsOnMalformedJSONMessages(t *testing.T) {
 	err := getDC(ts).Process(msgs)
 	assert.NotNil(t, err)
 
-	e := err.(*json.SyntaxError)
+	// Process annotates the parse failure with the offending payload before
+	// returning it, so the returned error is a wrapper -- a bare type
+	// assertion cannot see through it. errors.As is the assertion that
+	// actually expresses the contract: the error chain must still carry the
+	// concrete *json.SyntaxError.
+	var e *json.SyntaxError
+	assert.True(t, errors.As(err, &e))
 	assert.Contains(t, e.Error(), "invalid character")
+
+	// The annotation Process adds must survive alongside the wrapped error --
+	// this is what makes a malformed message diagnosable in production.
+	assert.Contains(t, err.Error(), "Error parsing kakfa message")
 }
 
 func TestDinersClubErrorsOnNonExistentProvider(t *testing.T) {

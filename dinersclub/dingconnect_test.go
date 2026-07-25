@@ -29,9 +29,20 @@ func init() {
 	os.Setenv("KAFKA_POLL_TIMEOUT", "1s")
 	os.Setenv("DINERSCLUB_BATCH_SIZE", "100")
 	os.Setenv("DINERSCLUB_PROVIDERS", "fake,reloadly,giftcard,http,dingconnect")
-	os.Setenv("DINERSCLUB_POOL_SIZE", "10")
-	os.Setenv("DINERSCLUB_RETRY_PROVIDER", "2m")
-	os.Setenv("DINERSCLUB_RETRY_BOTSERVER", "2m")
+	// Processing knobs below must match ./test-env, NOT the production values
+	// in ./.env. Two tests depend on them:
+	//   - TestDinersClubCache asserts 1 cache miss + 2 hits, which only holds
+	//     when the worker pool is serial. At pool size 10 all three messages
+	//     race through cache.Get() before the first SetWithTTL lands, giving
+	//     3 misses / 0 hits.
+	//   - TestDinersClubRepeatsOnServerErrorFromBotserver asserts exactly 3
+	//     botserver attempts. Attempt count is governed by the backoff's
+	//     MaxElapsedTime (= RETRY_BOTSERVER) and its randomization factor, so
+	//     it needs the 1s budget and a factor of 0, not the production 2m/0.5.
+	os.Setenv("DINERSCLUB_POOL_SIZE", "1")
+	os.Setenv("DINERSCLUB_RETRY_PROVIDER", "1s")
+	os.Setenv("DINERSCLUB_RETRY_BOTSERVER", "1s")
+	os.Setenv("BACK_OFF_RANDOM_FACTOR", "0")
 	os.Setenv("RELOADLY_SANDBOX", "true")
 	os.Setenv("BOTSERVER_URL", "http://localhost:8080/synthetic")
 }
