@@ -13,6 +13,39 @@ import (
 	"go.uber.org/zap"
 )
 
+// HandledError signals that a command failed to send but the failure was already
+// reported to botserver as a machine_report, which is what drives the
+// conversation's ERROR/BLOCKED state transition. Re-processing would only
+// re-send a message the user may already have received, so the Kafka offset
+// should still be committed.
+//
+// It exists because ProcessCommand's return value was otherwise overloaded: nil
+// meant both "sent" and "failed but handled", so the consumer logged "command
+// processed successfully" for real send failures. The three outcomes are now
+// distinguishable:
+//
+//	nil             -> the command was sent
+//	*HandledError   -> the send failed and was reported; commit the offset
+//	any other error -> processing itself failed (bad payload, unknown type)
+type HandledError struct {
+	underlying error
+}
+
+// NewHandledError wraps a send failure that has already been reported.
+func NewHandledError(err error) *HandledError {
+	return &HandledError{underlying: err}
+}
+
+func (he *HandledError) Error() string {
+	return he.underlying.Error()
+}
+
+// Unwrap exposes the original failure so callers can log it, and so errors.Is /
+// errors.As still reach through to the underlying error (e.g. *PlatformError).
+func (he *HandledError) Unwrap() error {
+	return he.underlying
+}
+
 type EventProducer interface {
 	PublishEvent(ctx context.Context, event types.UniversalEvent) error
 	// PublishRawEvent publishes pre-serialized event bytes under the given
@@ -122,6 +155,12 @@ func (w *Worker) processSendMessage(ctx context.Context, cmd types.SendMessageCo
 	// bot_message_sent echo carrying the outbound message's metadata. Emit that
 	// echo here so the survey progresses. Scoped to WhatsApp so platforms that
 	// already echo natively don't get a duplicate.
+	//
+	// A failed echo is deliberately not a HandledError: the message itself was
+	// sent, so reporting it as a send failure would be just as untruthful as
+	// the reverse. It is not a hard error either — returning one would replay
+	// the command and re-send a message the user already got. The warning above
+	// is the signal; it stalls the state machine, not the delivery.
 	if cmd.Platform == types.PlatformWhatsApp {
 		if err := w.emitWhatsAppEcho(ctx, cmd); err != nil {
 			w.logger.Warn("failed to emit whatsapp echo", zap.Error(err))
@@ -324,6 +363,16 @@ type MachineReportValue struct {
 	Timestamp int64              `json:"timestamp"`
 }
 
+// reportError POSTs a machine_report to botserver so the state machine can
+// transition (FB -> BLOCKED, STATE_ACTIONS -> ERROR), and returns a
+// *HandledError wrapping the original failure. Every send path returns that
+// error straight through, so the consumer can log the failure truthfully while
+// still committing the offset.
+//
+// Delivering the machine_report is best-effort: if marshalling or the POST
+// fails we log it and still return a *HandledError, because retrying the
+// command risks re-sending a message that was already delivered. The command
+// still failed either way, so it must never be reported as a success.
 func (w *Worker) reportError(cmd types.SendMessageCommand, err error) error {
 	tag := "STATE_ACTIONS"
 	code := 0
@@ -351,7 +400,7 @@ func (w *Worker) reportError(cmd types.SendMessageCommand, err error) error {
 		w.logger.Error("failed to marshal machine_report value",
 			zap.String("command_id", cmd.CommandID),
 			zap.Error(marshalErr))
-		return nil
+		return NewHandledError(err)
 	}
 
 	rawValue := json.RawMessage(valueJSON)
@@ -364,8 +413,8 @@ func (w *Worker) reportError(cmd types.SendMessageCommand, err error) error {
 			zap.String("user_id", cmd.UserID),
 			zap.Error(sendErr),
 			zap.NamedError("original_error", err))
-		return nil
+		return NewHandledError(err)
 	}
 
-	return nil
+	return NewHandledError(err)
 }

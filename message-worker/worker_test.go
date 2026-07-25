@@ -192,8 +192,9 @@ func TestWorker_ProcessCommand_TranslationError(t *testing.T) {
 
 	cmdJSON, _ := json.Marshal(cmd)
 	err := worker.ProcessCommand(context.Background(), cmdJSON)
-	if err != nil {
-		t.Fatalf("Expected nil (error handled by reporting to botserver), got: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError (error handled by reporting to botserver), got: %v (type: %T)", err, err)
 	}
 
 	if len(mockBot.requests) != 1 {
@@ -401,8 +402,9 @@ func TestWorker_ProcessCommand_NoClientForPlatform(t *testing.T) {
 
 	cmdJSON, _ := json.Marshal(cmd)
 	err := worker.ProcessCommand(context.Background(), cmdJSON)
-	if err != nil {
-		t.Fatalf("Expected nil (error handled), got: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError (error handled), got: %v (type: %T)", err, err)
 	}
 
 	if len(mockBot.requests) != 1 {
@@ -425,6 +427,100 @@ func TestWorker_ProcessCommand_NoClientForPlatform(t *testing.T) {
 
 	if reportValue.Error.Tag != "STATE_ACTIONS" {
 		t.Errorf("Expected error tag 'STATE_ACTIONS' for config error, got '%s'", reportValue.Error.Tag)
+	}
+}
+
+// The production bug this guards against: a send that fails at the platform
+// used to return nil, so the consumer logged "command processed successfully".
+func TestWorker_ProcessCommand_SendFailure_ReturnsHandledError(t *testing.T) {
+	mockProducer := &mockEventProducer{}
+	mockBot := newMockBotserver()
+	defer mockBot.Close()
+
+	platformErr := &PlatformError{
+		StatusCode: 400,
+		Message:    "User blocked the page",
+		Retriable:  false,
+	}
+	mockSender := &mockMessageSender{err: platformErr}
+
+	clients := map[types.PlatformType]MessageSender{
+		types.PlatformMessenger: mockSender,
+	}
+	worker := NewWorker(clients, mockProducer, mockBot.URL(), zap.NewNop())
+
+	text := "Hello"
+	cmd := types.SendMessageCommand{
+		Type:              "send_message",
+		CommandID:         "cmd_123",
+		ConversationID:    "conv_456",
+		UserID:            "user_789",
+		Platform:          types.PlatformMessenger,
+		PlatformAccountID: "page_123",
+		Message: types.MessageContent{
+			Type: types.MessageTypeText,
+			Text: &text,
+		},
+	}
+
+	cmdJSON, _ := json.Marshal(cmd)
+	err := worker.ProcessCommand(context.Background(), cmdJSON)
+
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError for failed send, got: %v (type: %T)", err, err)
+	}
+	if !errors.Is(err, error(platformErr)) {
+		t.Errorf("Expected the platform error to survive wrapping, got: %v", err)
+	}
+	if err.Error() != platformErr.Error() {
+		t.Errorf("Expected HandledError to report the underlying message %q, got %q",
+			platformErr.Error(), err.Error())
+	}
+
+	// The failure must still reach botserver so the state machine transitions.
+	if len(mockBot.requests) != 1 {
+		t.Fatalf("Expected 1 request to botserver, got %d", len(mockBot.requests))
+	}
+}
+
+// A failed WhatsApp echo is not a send failure — the message went out, so the
+// command must not be reported as failed (nor replayed, which would re-send it).
+func TestWorker_ProcessCommand_WhatsAppEchoFailure_IsNotHandledError(t *testing.T) {
+	mockProducer := &mockEventProducer{err: errors.New("kafka unavailable")}
+	mockSender := &mockMessageSender{response: &SendMessageResponse{MessageID: "wamid_1", Success: true}}
+	mockBot := newMockBotserver()
+	defer mockBot.Close()
+
+	clients := map[types.PlatformType]MessageSender{
+		types.PlatformWhatsApp: mockSender,
+	}
+	worker := NewWorker(clients, mockProducer, mockBot.URL(), zap.NewNop())
+
+	text := "Hello"
+	cmd := types.SendMessageCommand{
+		Type:              "send_message",
+		CommandID:         "cmd_wa_1",
+		ConversationID:    "conv_456",
+		UserID:            "user_789",
+		Platform:          types.PlatformWhatsApp,
+		PlatformAccountID: "phone_123",
+		Message: types.MessageContent{
+			Type: types.MessageTypeText,
+			Text: &text,
+		},
+	}
+
+	cmdJSON, _ := json.Marshal(cmd)
+	if err := worker.ProcessCommand(context.Background(), cmdJSON); err != nil {
+		t.Fatalf("Expected nil (message was sent; echo failure is logged only), got: %v", err)
+	}
+
+	if mockSender.calls != 1 {
+		t.Errorf("Expected 1 send, got %d", mockSender.calls)
+	}
+	if len(mockBot.requests) != 0 {
+		t.Errorf("Expected no machine_report for a successful send, got %d", len(mockBot.requests))
 	}
 }
 
@@ -491,8 +587,17 @@ func TestWorker_ReportError_PlatformError(t *testing.T) {
 	}
 
 	err := worker.reportError(cmd, platformErr)
-	if err != nil {
-		t.Fatalf("reportError failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError from reportError, got: %v (type: %T)", err, err)
+	}
+	// The original failure must survive the wrapping, both for logging and so
+	// error classification still works through it.
+	if handledErr.Unwrap() != error(platformErr) {
+		t.Errorf("Expected underlying error to be the platform error, got: %v", handledErr.Unwrap())
+	}
+	if !IsPlatformError(err) {
+		t.Error("Expected IsPlatformError to see through HandledError")
 	}
 
 	if len(mockBot.requests) != 1 {
@@ -546,8 +651,12 @@ func TestWorker_ReportError_NonPlatformError(t *testing.T) {
 	regularErr := errors.New("translation failed")
 
 	err := worker.reportError(cmd, regularErr)
-	if err != nil {
-		t.Fatalf("reportError failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError from reportError, got: %v (type: %T)", err, err)
+	}
+	if !errors.Is(err, regularErr) {
+		t.Errorf("Expected HandledError to wrap the original error, got: %v", err)
 	}
 
 	if len(mockBot.requests) != 1 {

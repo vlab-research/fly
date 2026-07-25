@@ -3,6 +3,7 @@ package messageworker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/vlab-research/fly/message-worker/types"
@@ -76,6 +77,12 @@ func TestWorker_ProcessCommand_NativeLegacy_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error for legacy native message, got nil")
 	}
+	// Legacy native is rejected before any send is attempted and nothing is
+	// reported to botserver, so it stays a plain processing error.
+	var handledErr *HandledError
+	if errors.As(err, &handledErr) {
+		t.Errorf("Expected a plain processing error, got HandledError: %v", err)
+	}
 
 	if mockSender.calls != 0 {
 		t.Errorf("Expected 0 calls to SendMessage (native not supported), got %d", mockSender.calls)
@@ -108,5 +115,9 @@ func TestWorker_ProcessCommand_NativeLegacy_NoClient(t *testing.T) {
 	err := worker.ProcessCommand(context.Background(), legacyJSON)
 	if err == nil {
 		t.Fatal("Expected error for legacy native message, got nil")
+	}
+	var handledErr *HandledError
+	if errors.As(err, &handledErr) {
+		t.Errorf("Expected a plain processing error, got HandledError: %v", err)
 	}
 }

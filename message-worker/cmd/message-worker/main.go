@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -157,7 +158,19 @@ func main() {
 			return nil
 		}
 
-		if err := worker.ProcessCommand(ctx, msg.Value); err != nil {
+		err := worker.ProcessCommand(ctx, msg.Value)
+
+		// The send failed but was already reported to botserver, so the offset
+		// still commits — log the failure rather than claiming success.
+		var handledErr *messageworker.HandledError
+		if errors.As(err, &handledErr) {
+			logger.Warn("command send failed but handled/reported",
+				zap.Error(handledErr.Unwrap()),
+				zap.ByteString("value", msg.Value))
+			return nil
+		}
+
+		if err != nil {
 			logger.Error("failed to process command",
 				zap.Error(err),
 				zap.ByteString("value", msg.Value))
