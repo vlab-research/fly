@@ -26,13 +26,20 @@ The 1h window reflects **recent activity** (users active in the last hour), not
 total lifetime counts. This is sufficient for alerting (we care about current
 degradation, not historical trends) and keeps query times <1s.
 
+**The window is also correctness, not just performance.** `states` holds one sticky
+row per user and is **never garbage-collected**, so any count taken over the whole
+table is a graveyard of long-fixed bugs. In July 2026 the 2,001 lifetime
+`STATE_ACTIONS` states were dominated by three dead classes — 1,013 last seen in
+2022, 366 in 2024, 286 in 2022 — against roughly 42 in the preceding 90 days. Always
+window error-tag queries on `updated`.
+
 ### Metrics Catalog
 
 All metrics are gauges reflecting counts in the last hour:
 
 | Metric | Labels | Meaning |
 |--------|--------|---------|
-| `survey_error_states` | `form`, `error_tag` | Users in ERROR state by error_tag (INTERNAL, STATE_ACTIONS, NETWORK, FORM_NOT_FOUND, none) |
+| `survey_error_states` | `form`, `error_tag` | Users in ERROR state by error_tag (INTERNAL, STATE_ACTIONS, NETWORK, FORM_NOT_FOUND, FIELD_NOT_FOUND, INTERPOLATION_ERROR, none) |
 | `survey_blocked_states` | `form`, `category` | Users in BLOCKED state by category (attrition, template_missing, rate_limit, unsupported, other) |
 | `survey_stuck_users` | `form` | Users stuck on the same question (validation loop / confusing form) |
 | `survey_expired_waits` | `form` | Users in WAIT_EXTERNAL_EVENT past timeout (Dean not processing) |
@@ -47,7 +54,16 @@ All metrics are gauges reflecting counts in the last hour:
 **error_tag** (ERROR state, `survey_error_states`):
 - **INTERNAL / STATE_ACTIONS / NETWORK** — platform bugs (database failures, state machine errors, network issues). Rare, always actionable → **page**.
 - **FORM_NOT_FOUND** — study misconfiguration (no form/study exists for that user). Study-level issue → **ticket**.
+- **FIELD_NOT_FOUND** — the form does not contain a field it refers to (a jump target, or the field the respondent is sitting on after the owner edited the form). Study-level issue → **ticket**.
+- **INTERPOLATION_ERROR** — a question interpolates a value that does not exist: `{{field:ref}}` for an answer the respondent never gave (questions reordered, or the branch that asks it was skipped), or an unknown transform. Study-level issue → **ticket**. Note `{{hidden:key}}` cannot trigger this — a missing metadata key interpolates to `""`.
 - **none** — ERROR state with no specific tag. Often study logic errors.
+
+`FIELD_NOT_FOUND` and `INTERPOLATION_ERROR` are thrown by `form.js` and carry their
+`tag` on the error object; `transition.js` reads it. Anything untagged falls to
+`STATE_ACTIONS`, which every consumer reads as *platform fault* — so a study-authoring
+mistake must be given a tag, or it pages the platform on-call with a runbook that leads
+nowhere. Downstream needs no change per tag: `DEAN_ERROR_TAGS` and the dashboard's
+`PLATFORM_ERROR_TAGS` are both allow-lists, and unrecognized tags default to the study.
 
 **category** (BLOCKED state, `survey_blocked_states`):
 - **attrition** (codes 10, 190, 551) — normal user churn (user blocked the page, opted out, etc.). **Excluded from alerts** (expected behavior).
@@ -463,7 +479,7 @@ exit 0
 
 ### Long-term
 
-- **Lifetime state metrics:** Solve the query timeout issue (partitioning, materialized views, or a separate OLAP DB) to restore lifetime state totals alongside the 1h window metrics.
+- **Lifetime state metrics:** Solve the query timeout issue (partitioning, materialized views, or a separate OLAP DB) to restore lifetime state totals alongside the 1h window metrics. Note lifetime totals over `states` are close to meaningless as a health signal (see below); the value would be historical trend analysis, not alerting.
 - **Real-time alerting on critical errors:** Kafka stream processor (ksqlDB, Flink) to alert on INTERNAL errors in <1 min (Prometheus polling is 1m min).
 - **Predictive alerting:** ML model to predict study degradation before users are impacted (error rate trending up, lag building, etc.).
 

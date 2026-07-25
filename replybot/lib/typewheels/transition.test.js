@@ -2,6 +2,7 @@ const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
+const { _initialState } = require('./machine')
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic } = require('./events.test')
 
 process.env.FALLBACK_FORM = 'fallback'
@@ -70,6 +71,51 @@ describe('machine.run', () => {
     report.publish.should.be.true
   })
 
+
+  // Mistakes in the study's own form config used to land in the STATE_ACTIONS
+  // catch-all, which every consumer reads as "platform fault": it paged the
+  // platform on-call, dean retried it forever, and the dashboard told the
+  // researcher it was "not caused by your survey configuration".
+  describe('study form-config errors carry their own tag', () => {
+
+    const stubForm = (fields) => {
+      const m = new Machine()
+      m.getForm = async () => [{ id: 'FOO', fields }, 'survey-id']
+      return m
+    }
+
+    // The respondent is sitting on a field the study owner has since deleted.
+    it('returns FIELD_NOT_FOUND when the form no longer has the field', async () => {
+      const m = stubForm([{ ref: 'still-here', type: 'short_text', title: 'hi', properties: {} }])
+
+      const state = {
+        state: 'QOUT',
+        question: 'deleted-field',
+        qa: [],
+        forms: ['FOO'],
+        md: { startTime: 1, form: 'FOO', pageid: PAGE_ID }
+      }
+
+      const report = await m.run(state, USER_ID, text)
+      report.error.tag.should.equal('FIELD_NOT_FOUND')
+      report.error.message.should.match(/Could not find the requested field, deleted-field/)
+    })
+
+    // A title referencing an answer the respondent never gave -- questions
+    // reordered, or the branch that asks it was skipped.
+    it('returns INTERPOLATION_ERROR when a title references a missing answer', async () => {
+      const m = stubForm([{
+        ref: 'a',
+        type: 'short_text',
+        title: 'Hi {{field:never-answered}}',
+        properties: {}
+      }])
+
+      const report = await m.run(_initialState(), USER_ID, referral)
+      report.error.tag.should.equal('INTERPOLATION_ERROR')
+      report.error.message.should.match(/non-existent value/)
+    })
+  })
 
 })
 

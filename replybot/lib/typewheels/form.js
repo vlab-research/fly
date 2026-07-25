@@ -10,7 +10,23 @@ function normalizePhone(number, country, mobile) {
   return phone('' + number, country || '', !mobile)[0] || null
 }
 
-class FieldError extends Error { }
+// Mistakes in the study's own form config, not platform faults. The `tag` is what
+// routes them: transition.js reads it, and everything downstream treats an
+// unrecognized tag as a study error. See documentation/study-error-alerting.md.
+class FieldError extends Error {
+  constructor(msg) {
+    super(msg)
+    this.tag = 'FIELD_NOT_FOUND'
+  }
+}
+
+// Extends TypeError because these used to be plain TypeErrors.
+class InterpolationError extends TypeError {
+  constructor(msg) {
+    super(msg)
+    this.tag = 'INTERPOLATION_ERROR'
+  }
+}
 
 // Type-cast values for comparisons.
 // Uses parseNumber for proper handling of unicode numerals and decimals.
@@ -69,7 +85,7 @@ const transforms = {
 
 function _applyTransform(name, value) {
   const fn = transforms[name]
-  if (!fn) throw new TypeError(`Unknown interpolation transform: ${name}`)
+  if (!fn) throw new InterpolationError(`Unknown interpolation transform: ${name}`)
   return fn(value)
 }
 
@@ -84,7 +100,7 @@ function getDynamicValue(ctx, qa, v) {
     getFieldValue(qa, key)
 
   if (val === undefined || val === null) {
-    throw new TypeError(`Trying to interpolate a non-existent value: ${v}`)
+    throw new InterpolationError(`Trying to interpolate a non-existent value: ${v}`)
   }
 
   return transformNames.reduce((acc, name) => _applyTransform(name, acc), val)
@@ -369,6 +385,7 @@ module.exports = {
   addCustomType,
   getFromMetadata,
   FieldError,
+  InterpolationError,
   _splitUrls,
   deTypeformify,
 }

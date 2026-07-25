@@ -167,7 +167,11 @@ class Machine {
       }
 
     } catch (e) {
-      const tag = (e instanceof MachineIOError) ? e.tag : 'STATE_ACTIONS'
+      // Any error carrying its own tag routes itself -- MachineIOError, and the
+      // study-config errors in form.js. STATE_ACTIONS is the untagged catch-all
+      // and is read downstream as "platform fault", so only put things there
+      // that really are ours.
+      const tag = e.tag || 'STATE_ACTIONS'
       // Preserve MachineIOError details (e.g. status:404 for FORM_NOT_FOUND) on
       // the published error, matching main. The error report is fed back through
       // the machine, which transitions the user to the ERROR state.
