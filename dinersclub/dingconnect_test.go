@@ -20,7 +20,11 @@ func init() {
 	os.Setenv("CACHE_BUFFER_ITEMS", "64")
 	os.Setenv("CHATBASE_DATABASE", "chatroach")
 	os.Setenv("CHATBASE_HOST", "localhost")
-	os.Setenv("CHATBASE_PORT", "26257")
+	// 5433 is the canonical test database: `make test-db` in devops/ creates it
+	// (devops/Makefile PORT=5433) and every other module targets it. 26257 came
+	// from ./.env, i.e. the production port -- pointing the suite at whatever
+	// happened to be listening there.
+	os.Setenv("CHATBASE_PORT", "5433")
 	os.Setenv("CHATBASE_USER", "root")
 	os.Setenv("CHATBASE_MAX_CONNECTIONS", "10")
 	os.Setenv("KAFKA_BROKERS", "localhost:9092")
