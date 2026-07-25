@@ -542,6 +542,51 @@ docker-compose -f test.yaml up -d cockroachdb
 go test ./...
 ```
 
+### Test configuration comes from `init()`, not your shell
+
+`getConfig()` parses the process environment and every field is `required`, but
+the test binary never reads `.env` or `test-env`. Instead `dingconnect_test.go`
+has a package-level `init()` that calls `os.Setenv` for the full config. Two
+consequences that have bitten us:
+
+1. **It clobbers your shell.** `os.Setenv` is unconditional, so exporting a
+   variable before `go test` has no effect. To point the tests somewhere else
+   you must edit that `init()`.
+2. **`CHATBASE_PORT` is `26257`, not `5433`.** The tests talk to whichever
+   cluster is on host port 26257 — a *different* container from the one on
+   5433 that other modules (e.g. `dean`) use. Resetting the database on 5433
+   does nothing for these tests. DB-touching tests self-clean via
+   `before(t, pool)`, which deletes from `users` and `credentials`.
+
+The processing knobs in that `init()` must mirror `./test-env`, **not** the
+production values in `./.env`:
+
+| Variable | Test value | Why |
+|---|---|---|
+| `DINERSCLUB_POOL_SIZE` | `1` | `TestDinersClubCache` asserts 1 cache miss + 2 hits. `chance.Pool` at size >1 lets all messages race through `cache.Get()` before the first `SetWithTTL` lands, yielding 3 misses / 0 hits. |
+| `DINERSCLUB_RETRY_BOTSERVER` | `1s` | `TestDinersClubRepeatsOnServerErrorFromBotserver` asserts exactly 3 attempts. Attempt count is a function of the backoff `MaxElapsedTime`. At the production `2m` the test makes many more attempts and takes ~194s. |
+| `DINERSCLUB_RETRY_PROVIDER` | `1s` | Same reasoning for provider-side retries. |
+| `BACK_OFF_RANDOM_FACTOR` | `0` | Makes retry counts deterministic; unset it defaults to `0.5`. |
+
+### A panic in one test hides every later test
+
+Go aborts the whole test binary on panic, and `dinersclub_test.go` sorts before
+`dingconnect_test.go`. A panic in an early test (historically the bare
+`err.(*json.SyntaxError)` assertion in
+`TestDinersClubErrorsOnMalformedJSONMessages`) silently prevents everything
+after it from running — the suite reports `FAIL` without ever reporting the
+tests it never reached. Prefer `errors.As` over bare type assertions in tests so
+a mismatch fails one test instead of killing the run.
+
+### Error wrapping contract
+
+`Process()` annotates JSON parse failures with the offending Kafka payload and
+wraps with `%w`. Use `%w` (never `%s`) when adding context to an error here:
+the package inspects concrete error types to tell a malformed payload apart
+from a system fault (see the `*json.SyntaxError` branch in `reloadly.go`), and
+`%s` flattens the error to an opaque `*errors.errorString`, silently breaking
+`errors.As` / `errors.Is` for every caller.
+
 ### Key Test Files
 
 | File | Tests |

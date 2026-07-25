@@ -47,6 +47,19 @@ go test -v -run TestGetTimeouts
 go test -v -run TestGetRespondings
 ```
 
+### Retry caps must be set in test `Config` literals
+
+Several queries gate on a retry cap that is a **required** env var in
+production (`DEAN_PAYMENT_MAX_ATTEMPTS`, `DEAN_TIMEOUT_MAX_ATTEMPTS`,
+`DEAN_RETRY_MAX_ATTEMPTS`), so the value is never legitimately zero. A test that
+builds a `Config` literal and omits the cap gets Go's zero value, turning e.g.
+`Payments`' gate into `jsonb_array_length(externalEvents) < 0` — always false,
+so the query silently returns **no rows** and the test fails for a reason that
+looks nothing like the cap.
+
+When adding a test for `Payments`, `Timeouts`, or `Respondings`, always set the
+relevant `*MaxAttempts` field even when the cap is not what you are testing.
+
 ### Stopping the Test Database
 
 ```bash
