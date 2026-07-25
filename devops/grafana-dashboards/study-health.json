@@ -315,7 +315,7 @@
     },
     {
       "datasource": "Prometheus",
-      "description": "Error states by error_tag (1h window). INTERNAL/STATE_ACTIONS/NETWORK are platform regressions (always actionable). FORM_NOT_FOUND is study misconfig.",
+      "description": "Error states by error_tag (1h window). INTERNAL/STATE_ACTIONS/NETWORK are platform regressions (always actionable). FORM_NOT_FOUND, FIELD_NOT_FOUND and INTERPOLATION_ERROR are study misconfig -- the study owner fixes their form. Any tag not listed here is study-side by default: platform classification is an explicit allow-list. See documentation/study-error-alerting.md.",
       "fieldConfig": {
         "defaults": {
           "color": {
