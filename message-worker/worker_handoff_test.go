@@ -3,6 +3,7 @@ package messageworker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/vlab-research/botparty"
@@ -129,8 +130,9 @@ func TestWorker_ProcessCommand_Handoff_NoClient(t *testing.T) {
 
 	cmdJSON, _ := json.Marshal(cmd)
 	err := worker.ProcessCommand(context.Background(), cmdJSON)
-	if err != nil {
-		t.Fatalf("ProcessCommand failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError (handoff reported to botserver), got: %v (type: %T)", err, err)
 	}
 
 	if len(mockBot.requests) != 1 {
@@ -170,8 +172,9 @@ func TestWorker_ProcessCommand_Handoff_RetriableError(t *testing.T) {
 
 	cmdJSON, _ := json.Marshal(cmd)
 	err := worker.ProcessCommand(context.Background(), cmdJSON)
-	if err != nil {
-		t.Fatalf("ProcessCommand failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError after retries exhausted, got: %v (type: %T)", err, err)
 	}
 
 	if mockSender.calls < 3 {
@@ -215,8 +218,9 @@ func TestWorker_ProcessCommand_Handoff_NonRetriableError(t *testing.T) {
 
 	cmdJSON, _ := json.Marshal(cmd)
 	err := worker.ProcessCommand(context.Background(), cmdJSON)
-	if err != nil {
-		t.Fatalf("ProcessCommand failed: %v", err)
+	var handledErr *HandledError
+	if !errors.As(err, &handledErr) {
+		t.Fatalf("Expected HandledError for non-retriable failure, got: %v (type: %T)", err, err)
 	}
 
 	if mockSender.calls != 1 {
@@ -312,6 +316,12 @@ func TestWorker_ProcessCommand_LegacyNative_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error for legacy native message, got nil")
 	}
+	// Nothing was sent and nothing was reported, so this is a genuine
+	// processing failure, not a handled send failure.
+	var handledErr *HandledError
+	if errors.As(err, &handledErr) {
+		t.Errorf("Expected a plain processing error, got HandledError: %v", err)
+	}
 }
 
 func TestWorker_ProcessCommand_LegacyDefault_SendsMessage(t *testing.T) {
@@ -362,5 +372,10 @@ func TestWorker_ProcessCommand_UnknownCommandType(t *testing.T) {
 	err := worker.ProcessCommand(context.Background(), cmdJSON)
 	if err == nil {
 		t.Fatal("Expected error for unknown command type, got nil")
+	}
+	// An unroutable command is a processing failure, not a handled send.
+	var handledErr *HandledError
+	if errors.As(err, &handledErr) {
+		t.Errorf("Expected a plain processing error, got HandledError: %v", err)
 	}
 }
