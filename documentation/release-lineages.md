@@ -1,4 +1,4 @@
-# Release Lineages: `main` is Staging, Production is Its Own Line
+# Release Lineages: Staging and Production Are Separate Lines
 
 ## Purpose
 
@@ -12,13 +12,40 @@ have to be repeated.
 
 ## The Model
 
-- **`main` is effectively the staging line.** Work lands on `main`, ships to
-  the `vstag` namespace, and accumulates ahead of production.
+- **`staging` is the integration branch for staging** (since 2026-07-25).
+  Feature branches merge into `staging`; it is what the `vstag` namespace and
+  the staging Netlify sites are built from. It is merged into, never rebased.
 - **Production runs its own, older line.** It is not simply "an earlier commit
-  on `main`" — production hotfixes are cherry-picked onto the production
-  baseline rather than being taken from `main`.
+  on the integration branch" — production hotfixes are cherry-picked onto the
+  production baseline rather than taken from the staging line.
 - Consequently a production tag is `production baseline + cherry-picked fixes`,
   and may not contain staging-only work regardless of its version number.
+
+### Historical note
+
+Before 2026-07-25 the `staging` branch was unused (75 commits stale) and `main`
+served as the de-facto staging accumulator, while Netlify simultaneously
+treated `main` as *production* for the frontend. Those two facts contradicted
+each other. Consolidating onto `staging` resolves it.
+
+> **Unresolved:** `main`'s role after this cutover has not been settled. Netlify
+> still builds the production frontend from `main` (see
+> `documentation/staging.md`), but `main` also still carries un-promoted backend
+> work. Decide and record whether `main` becomes the production line or remains
+> a trunk that `staging` merges from. Until that is settled, do not infer
+> `main`'s meaning from this document.
+
+## Branch → Environment
+
+| Branch | Frontend (Netlify) | Backend (k8s) |
+|---|---|---|
+| `staging` | `staging--vlab-research.netlify.app`, `staging--virtuallab-videos.netlify.app` | `vstag`, via image tags in `devops/values/staging.yaml` |
+| `main` | production — `fly.vlab.digital`, `virtuallab-videos.netlify.app` | see Unresolved note above |
+| `fix/replybot-restore-state-on-200` | — | live prod replybot (`v0.0.204`) |
+
+**Pushing `staging` deploys the staging frontend immediately.** Backend services
+do *not* deploy from the branch — they deploy from image tags in
+`devops/values/staging.yaml` via Helm, as a separate step.
 
 ## Worked Example: replybot v0.0.203 vs v0.0.204
 

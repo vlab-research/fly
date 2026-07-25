@@ -4,6 +4,8 @@
 
 The staging environment runs in the `vstag` Kubernetes namespace on the same GKE cluster as production (`vprod`). It uses the same Helm chart (`devops/vlab`) with `devops/values/staging.yaml` as the values override.
 
+**Branch:** since 2026-07-25 the `staging` branch is the integration branch — feature branches merge into it, and it is what staging runs. Pushing it rebuilds the staging Netlify sites immediately; backend services deploy separately via image tags in `devops/values/staging.yaml`. See `documentation/release-lineages.md` for the full branch → environment mapping and why production is a separate lineage.
+
 ## URLs
 
 | Service | Staging URL | Production URL |
