@@ -664,7 +664,9 @@ message-worker:
   - name: KAFKA_EVENT_TOPIC
     value: *topic
   - name: KAFKA_GROUP_ID
-    value: "message-worker"
+    # Env-scoped: the Kafka cluster is shared with production. Mirrors the
+    # vlab-<env>-* topic convention. See documentation/kafka-consumer-lag-alerting.md
+    value: "vlab-staging-message-worker"
   - name: KAFKA_AUTO_OFFSET_RESET
     value: "latest"
   - name: DATABASE_URL

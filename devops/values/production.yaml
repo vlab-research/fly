@@ -20,17 +20,25 @@ exporterTopic: &exportertopic "vlab-exports"
 chatLogTopic: &chatlogtopic "vlab-prod-chat-log"
 commandsTopic: &commandstopic "vlab-prod-commands"
 
-versionDashboard: &vdashboard v0.0.66
+# NOTE ON THE -wa SUFFIX. documentation/staging-tagging-and-deploy.md says a
+# -wa tag must never appear in this file, because the suffix is the guardrail
+# against promoting untested WhatsApp work. That rule is DELIBERATELY suspended
+# for this promotion: these are the exact images validated in vstag, and
+# re-cutting clean tags would ship different bytes than were tested. Clean tags
+# (dashboard-v0.0.68, replybot-v0.0.210, ...) already exist on origin pointing
+# at the same commits; swap to them on the next release and restore the rule.
+versionDashboard: &vdashboard v0.0.68-wa
 versionBotserver: &vbotserver v0.0.12
-versionReplybot: &vreplybot v0.0.204
+versionHermes: &vhermes v0.0.3-wa
+versionReplybot: &vreplybot v0.0.210-wa
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.43
+versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.40
-versionFormcentral: &vformcentral v0.0.12
+versionDinersclub: &vdinersclub v0.0.43-wa
+versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
-versionExodus: &vexodus v0.2.2
-versionMessageWorker: &vmessageworker v0.1.1
+versionExodus: &vexodus v0.2.3
+versionMessageWorker: &vmessageworker v0.1.16-wa
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
 # Kafka cluster, Prometheus and kminion are singletons shared by prod+staging,
@@ -100,7 +108,7 @@ dinersclub:
     - name: RELOADLY_SANDBOX
       value: "false"
     - name: BOTSERVER_URL
-      value: "http://gbv-botserver/synthetic"
+      value: "http://gbv-hermes/synthetic"
     - name: CHATBASE_DATABASE
       value: "chatroach"
     - name: CHATBASE_HOST
@@ -147,7 +155,7 @@ dean:
   - name: CHATBASE_PORT
     value: "26257"
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver/synthetic"
+    value: "http://gbv-hermes/synthetic"
   - name: DEAN_ERROR_TAGS
     value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
@@ -307,6 +315,10 @@ scribble:
 formcentral:
   replicaCount: 3
   image:
+    # Chart default is Docker Hub (vlabresearch/); CI publishes to GHCR only.
+    # Without this override the tag bump ImagePullBackOffs — vlabresearch/
+    # formcentral has no v0.0.14-wa (Docker Hub stops at v0.0.13).
+    repository: ghcr.io/vlab-research/formcentral
     tag: *vformcentral
   env:
   - name: CHATBASE_DATABASE
@@ -339,7 +351,7 @@ linksniffer:
 
   env:
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver/synthetic"
+    value: "http://gbv-hermes/synthetic"
 
   resources:
     requests:
@@ -409,7 +421,7 @@ dashboard:
     - name: TYPEFORM_REDIRECT_URL
       value: 'https://fly.vlab.digital/surveys/auth'
     - name: FACEBOOK_GRAPH_URL
-      value: 'https://graph.facebook.com/v22.0'
+      value: 'https://graph.facebook.com/v25.0'
     - name: KAFKA_BROKERS
       value: *kb
     - name: KAFKA_EXPORTS_TOPIC
@@ -500,9 +512,9 @@ replybot:
   - name: KAFKA_COMMANDS_TOPIC
     value: *commandstopic
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver"
+    value: "http://gbv-hermes"
   - name: FACEBOOK_GRAPH_URL
-    value: "https://graph.facebook.com/v22.0"
+    value: "https://graph.facebook.com/v25.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
   - name: STATE_STORE_LIMIT
@@ -524,6 +536,14 @@ replybot:
     value: *chatlogtopic
 
 botserver:
+  # DISABLED — replaced by hermes (below) in this release. The block is kept,
+  # not deleted, so rollback is a one-line flip back to `enabled: true` plus
+  # reverting the six BOTSERVER_URL values to http://gbv-botserver.
+  # NOTE: the image below is Docker Hub, which CI no longer publishes to. It
+  # resolves today only because v0.0.12 already exists there. Any future
+  # botserver bump needs a ghcr.io repository override first.
+  enabled: false
+
   replicaCount: 3
 
   image:
@@ -569,6 +589,77 @@ botserver:
     port: 80
 
 
+# Hermes — the Rust webhook ingester that replaces botserver in this release.
+# Serves GET/POST /webhooks (Messenger), GET/POST /whatsapp (WhatsApp Cloud
+# API), POST /synthetic (internal) and GET /health.
+#
+# It reuses botserver's host AND cert secret deliberately, so Meta's webhook
+# callback URL does not change and cert-manager does not re-issue. Because
+# nginx will not admit two Ingresses claiming the same host, botserver.enabled
+# must go false in the SAME apply that brings hermes up — expect a brief
+# ingest gap while the Ingress changes hands.
+hermes:
+  enabled: true
+  replicaCount: 3
+
+  image:
+    # Chart default is vlabresearch/hermes, which does not exist on Docker Hub
+    # at all (404 on the repository, not just the tag). This override is
+    # mandatory, not cosmetic.
+    repository: ghcr.io/vlab-research/hermes
+    tag: *vhermes
+    pullPolicy: IfNotPresent
+
+  envFrom: *botenvs
+
+  env:
+    - name: BOTSERVER_EVENT_TOPIC
+      value: *topic
+    - name: KAFKA_BROKERS
+      value: *kb
+    - name: PORT
+      value: "80"
+    - name: DASHBOARD_URL
+      value: "http://gbv-dashboard"
+    # Enables X-Hub-Signature-256 enforcement on POST /webhooks and
+    # POST /whatsapp (hermes reads FB_APP_SECRET; the secret stores it as
+    # FACEBOOK_APP_SECRET, hence the explicit mapping — envFrom alone won't
+    # surface it under the name hermes expects). Omitting this silently
+    # DISABLES signature enforcement with no error.
+    - name: FB_APP_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: gbv-bot-envs
+          key: FACEBOOK_APP_SECRET
+    # WHATSAPP_VERIFY_TOKEN comes from the gbv-bot-envs secret via envFrom.
+    # It is NOT yet present in the vprod secret — GET /whatsapp verification
+    # returns 401 until it is added. Messenger ingest is unaffected.
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+
+  ingress:
+    enabled: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
+    hosts:
+      - host: fly-botserver.vlab.digital
+        paths:
+          - path: '/'
+            pathType: Prefix
+    tls:
+      - secretName: fly-botserver-cert
+        hosts:
+          - fly-botserver.vlab.digital
+
+  service:
+    type: ClusterIP
+    port: 80
+
+
 # Configuration for Exporter Worker
 exporter:
   replicaCount: 2
@@ -599,7 +690,7 @@ exodus:
   - name: CHATBASE_PORT
     value: "26257"
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver/synthetic"
+    value: "http://gbv-hermes/synthetic"
   - name: DRY_RUN
     value: "false"
   - name: EXODUS_RATE_LIMIT
@@ -621,7 +712,10 @@ exodus:
         memory: 64Mi
 
 message-worker:
-  replicaCount: 0
+  # Scaled up for the first time in this release. replybot v0.0.210-wa has NO
+  # send path of its own — it publishes commands here — so a worker at 0
+  # replicas means production sends nothing at all, silently.
+  replicaCount: 1
   image:
     repository: ghcr.io/vlab-research/message-worker
     tag: *vmessageworker
@@ -642,17 +736,22 @@ message-worker:
   - name: KAFKA_EVENT_TOPIC
     value: *topic
   - name: KAFKA_GROUP_ID
-    value: "message-worker"
+    # Env-scoped: the Kafka cluster is shared with staging. Mirrors the
+    # vlab-<env>-* topic convention. See documentation/kafka-consumer-lag-alerting.md
+    value: "vlab-prod-message-worker"
   - name: KAFKA_AUTO_OFFSET_RESET
+    # Must stay "latest". vlab-prod-commands holds ~47k stale messages from an
+    # abandoned trial; "earliest" would replay legacy `native` commands, which
+    # worker.go rejects with a plain error -> burrow FatalOnError -> crashloop.
     value: "latest"
   - name: DATABASE_URL
     value: "postgresql://chatroach@gbv-cockroachdb-public:26257/chatroach?sslmode=disable"
   - name: BOTSERVER_URL
-    value: "http://gbv-botserver"
+    value: "http://gbv-hermes"
   - name: FACEBOOK_GRAPH_URL
-    value: "https://graph.facebook.com/v22.0"
+    value: "https://graph.facebook.com/v25.0"
   - name: MESSENGER_URL
-    value: "https://graph.facebook.com/v22.0"
+    value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
     value: "1"
   - name: MAX_RETRY_ATTEMPTS
