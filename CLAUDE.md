@@ -118,6 +118,42 @@ git branch -d feature/<feature-name>
 
 ## Build & Infrastructure Practices
 
+### Everything Is Infrastructure as Code
+
+**This is a hard rule — no exceptions.**
+
+Live infrastructure is never modified by hand. Every change to a cluster is made
+by editing a file in the repo and re-running the apply script for it. The repo is
+the source of truth; the cluster is a build artifact.
+
+**Never run** `kubectl patch`, `kubectl edit`, `kubectl create secret` ad hoc, or
+any other imperative mutation of live state — not to "just quickly fix" a broken
+value, and not as a temporary workaround. An ad-hoc change is invisible in a
+diff, unreviewable, and silently reverted the next time anyone applies the real
+config. It also hides the bug: the wrong value stays wrong in the file it came
+from, so the same breakage reappears in the next environment.
+
+Instead:
+
+| To change | Edit | Then apply |
+|---|---|---|
+| A secret | the gitignored `.env` file for that app | `devops/secrets.sh <ns> <secret> <env-file>` |
+| Deployment config / images / env | `devops/values/<env>.yaml` | `helm upgrade gbv vlab -f values/<env>.yaml -n <ns>` |
+| Database schema | a new `devops/migrations/NN-*.sql` | `devops/run-migration.sh <ns> <file>` |
+
+If a fix requires touching live state and no file governs it yet, **create the
+file first**, then apply from it.
+
+Reading live state to diagnose (`kubectl logs`, `get`, `describe`) is always
+fine — it's mutation that must go through the repo.
+
+Secrets themselves live in **gitignored `.env` files** next to their app, with a
+committed `.env-example` template. See `documentation/secrets.md` for the full
+convention, including the `postgres://` vs `cockroachdb://` DSN gotcha.
+
+**Restarting is part of the change**: pods do not reload secrets or configmaps.
+After applying, `kubectl rollout restart deployment/<name> -n <ns>`.
+
 ### Docker Build Optimization
 - **Use Docker cache by default** - leverage layer caching for faster builds
 - **Only disable cache (`--no-cache`) when necessary** - broken layer cache, stale dependencies, or debugging

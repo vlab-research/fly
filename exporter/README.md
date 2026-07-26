@@ -13,7 +13,21 @@ There are currently various settings that you can configure on this application
 **KAFKA_SERVERS:** Comma seperated list fo kafka brokers to listen on
 **KAFKA_GROUP_ID:** Kafka Group ID
 **APP_NAME:** identifier of the application
-**DATABASE_URLL** the full url to access the database please see [SqlAlchemy's docs][1] on the format of these urls
+**DATABASE_URL:** the full url to access the database.
+
+> **The scheme must be `postgres://` or `postgresql://`.** The exporter connects
+> with psycopg (libpq) directly, *not* SQLAlchemy, and libpq recognises only
+> those two as connection URIs. A `cockroachdb://` URL — valid as a SQLAlchemy
+> dialect, and what CockroachDB's own docs often show — is not rejected as an
+> unknown scheme. It falls through to keyword/value DSN parsing, which splits on
+> the `=` in `?sslmode=disable` and fails at connect time with:
+>
+> ```
+> invalid connection option "cockroachdb://root@host:26257/chatroach?sslmode"
+> ```
+>
+> This took down every staging export worker for 7 days. See
+> `documentation/secrets.md`.
 **STORAGE_BACKEND:** Storage backend to use, current options supported are `google` and `s3`
 
 ## Storage Specific Configurations
@@ -57,5 +71,24 @@ In order to run tests please use:
 pytest exporter/ -s
 ```
 
+## Known Issues
 
-[1]: https://docs.sqlalchemy.org/en/20/core/engines.html#backend-specific-urls
+**Empty surveys fail instead of producing an empty CSV.** A `responses` export
+for a survey with zero responses fails all retries and lands in `Failed` with:
+
+```
+"['metadata'] not found in axis"
+```
+
+The formatting step drops a `metadata` column that does not exist on an empty
+dataframe. The job metadata correctly records `{"responses": 0, "users": 0}`, so
+the cause is identifiable, but the surfaced error is misleading — it reads like a
+schema problem rather than "there is no data". Note that `survey_id` in
+`export_status` holds `surveys.survey_name`, **not** the survey title, so an
+export requested against a title silently matches zero rows and hits this path.
+
+## See Also
+
+- `documentation/exports-storage.md` — storage backend, bucket-per-environment
+  split, retention policy, and presigned URL lifecycle
+- `documentation/secrets.md` — how the `exporter` secret is built and applied

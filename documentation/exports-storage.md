@@ -64,10 +64,33 @@ image (not the Bitnami helm chart). Its manifests live in `devops/minio/`
 kubectl apply -f devops/minio/
 ```
 
-The `minio-auth` Secret (root credentials) is managed out-of-band and is not in
-the repo. The two `devops/values/minio*.yaml` Bitnami-style values files are
-**not** used by this deployment (they predate it / relate to a possible future
-chart migration).
+The `minio-auth` Secret (root credentials, keys `root-user` / `root-password`) is
+managed out-of-band and is not in the repo. The two `devops/values/minio*.yaml`
+Bitnami-style values files are **not** used by this deployment (they predate it /
+relate to a possible future chart migration).
+
+### One MinIO, two buckets
+
+A single MinIO instance in the `minio` namespace serves both environments, split
+by bucket. Both reach it at `storage-api.vlab.digital`:
+
+| Env | Bucket | Credential |
+|---|---|---|
+| `vprod` | `fly` | MinIO **root** credentials |
+| `vstag` | `staging` | `staging-exporter` service account, scoped to the `staging` bucket |
+
+Production using root credentials is legacy, not a pattern to copy — a scoped
+service account per environment is the intended shape. Staging's is provisioned
+declaratively by `devops/minio/staging-svcacct.sh`, which creates the bucket and
+the service account (with an embedded policy granting object read/write plus
+`Get/PutLifecycleConfiguration` on that bucket only), then writes the generated
+credentials into the gitignored `exporter/.env-staging`. It runs `mc` inside the
+cluster so the root credentials are read from `minio-auth` by the pod and never
+touch a shell or the repo. Re-running it rotates the key pair.
+
+The lifecycle rule requires `s3:PutLifecycleConfiguration` on the bucket — a
+scoped policy that omits it leaves exports accumulating forever, silently, since
+`_ensure_lifecycle` is best-effort.
 
 The PVC size (`devops/minio/minio.yaml`, 25Gi) is sized for headroom over the
 3-day retention window, since individual `*_full_messages.csv` exports can reach

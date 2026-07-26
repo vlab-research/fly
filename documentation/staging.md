@@ -109,8 +109,20 @@ Contains 13 keys:
 
 ### `exporter` (staging)
 
-Created manually (no script). Contains:
+Source of truth is `exporter/.env-staging` (gitignored). Apply with:
+```bash
+cd devops && bash secrets.sh vstag exporter ../exporter/.env-staging
+kubectl rollout restart deployment/gbv-exporter -n vstag
+```
+
+Contains:
 - `DATABASE_URL`, `STORAGE_BACKEND`, `S3_ACCESS_KEY`, `S3_BUCKET_NAME`, `S3_HOST`, `S3_SECRET_KEY`, `S3_SSL_ENABLED`
+
+`DATABASE_URL` **must** use the `postgres://` scheme — `cockroachdb://` is
+rejected by libpq/psycopg. See `documentation/secrets.md`.
+
+This secret was hand-created before the IaC convention and drifted: it carried a
+`cockroachdb://` DSN, which broke every exporter worker in `vstag`.
 
 Kafka config (`KAFKA_BROKERS`, `KAFKA_TOPIC`, `KAFKA_GROUP_ID`) is set in `staging.yaml` `exporter.env` block, not the secret.
 
@@ -153,13 +165,69 @@ The frontend deploys automatically via Netlify's Git integration on push to the 
 - **`checkSession` fails**: Auth0's silent renewal uses a hidden iframe, which fails with `login_required` when third-party cookies are blocked (default in modern browsers). Workaround: tokens are persisted in `sessionStorage` and restored on page reload. The return URL is saved before redirecting to login so OAuth flows (e.g. Typeform) survive the re-login.
 - **Graph API version mismatch**: `netlify.toml` uses `REACT_APP_FACEBOOK_GRAPH_VERSION=25.0` (browser SDK), `staging.yaml` uses `FACEBOOK_GRAPH_URL=https://graph.facebook.com/v25.0` (server-side). Both are v25.0 now but the browser and server use different mechanisms.
 
+## Deploy from the `staging` branch — never from `main` or a feature branch
+
+`devops/values/staging.yaml` is maintained on the **`staging` branch**. It is the
+only copy that reflects what is deployed. `main` carries a stale copy (it lagged
+by 4–8 patch versions as of 2026-07-26), and any feature branch cut from `main`
+inherits that staleness.
+
+Deploying staging from the wrong branch **silently reverts live config**. The
+stale copy on `main` was missing, among other things:
+
+- `dashboard.ALERTMANAGER_URL` — turns the `/platform/notices` proxy off
+- `hermes.FB_APP_SECRET` (mapped from `gbv-bot-envs/FACEBOOK_APP_SECRET`) —
+  disables X-Hub-Signature-256 enforcement on `POST /webhooks` and `/whatsapp`
+- `ghcr.io/vlab-research/*` repository overrides for exodus and formcentral
+  (chart default is Docker Hub `vlabresearch/*`, but CI publishes to GHCR)
+
+plus seven older image pins. None of this shows up in a version-anchor
+comparison, which is why an image-only diff is not a sufficient check.
+
+Always work in a worktree on `staging`:
+
+```bash
+git worktree add ../fly-staging staging
+cd ../fly-staging/devops
+helm upgrade gbv vlab -f values/staging.yaml -n vstag
+```
+
+**Always run a full `helm upgrade`.** Never make surgical `kubectl` edits to live
+resources — they are invisible to the repo and reverted by the next deploy.
+
+### Verify before applying
+
+Diff the whole rendered manifest against what is live, not just images:
+
+```bash
+helm upgrade gbv vlab -f values/staging.yaml -n vstag --dry-run=server > /tmp/new.yaml
+helm get manifest gbv -n vstag > /tmp/cur.yaml
+diff /tmp/cur.yaml /tmp/new.yaml
+```
+
+Use `--dry-run=server`, not plain `--dry-run`: the plain form skips cluster
+`lookup`, so the Redis chart renders a **freshly generated `redis-password`** and
+the diff falsely appears to rotate the Redis credential. Under
+`--dry-run=server` the existing password is looked up and preserved.
+
+Expect two categories of benign noise: Helm hook resources (test pod, init job)
+appear only in the dry-run, and `checksum/secret` pod annotations change whenever
+a referenced secret changed.
+
 ## Current Versions
+
+Recorded 2026-07-26 (Helm revision 70), sourced from `devops/values/staging.yaml`
+**on the `staging` branch**. Update this table when versions change.
 
 | Service | Staging Version | Notes |
 |---------|----------------|-------|
-| replybot | v0.0.202 | Includes handoff wait guard (`_isHandoffWait`) and message-worker integration |
-| message-worker | v0.1.1 | Native passthrough + `pass_thread_control` support |
-| dashboard | v0.0.64 | |
-| botserver | v0.0.12 | |
-| exodus | v0.2.1 | |
-| dean | v0.0.41 | |
+| replybot | v0.0.210-wa | Includes handoff wait guard (`_isHandoffWait`) and message-worker integration |
+| message-worker | v0.1.16-wa | Native passthrough + `pass_thread_control` support |
+| dashboard | v0.0.68-wa | |
+| botserver | v0.0.12 | Disabled in `vstag` — hermes serves the host |
+| hermes | v0.0.3-wa | |
+| exodus | v0.2.3 | |
+| dean | v0.0.44-wa | |
+| dinersclub | v0.0.43-wa | |
+| formcentral | v0.0.14-wa | |
+| exporter | v0.6.10 | v0.6.9 lacked `_ensure_lifecycle`, so exports never expired |
