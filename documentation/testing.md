@@ -4,23 +4,31 @@ This document describes the two-tier testing strategy for the Fly chatbot system
 
 ## What We Test
 
-The integration test suite validates the complete message pipeline:
+The integration test suite validates the complete message pipeline, including message delivery:
 
 ```
-User (test) → Hermes → Redpanda → Replybot → Redpanda → Scribble → CockroachDB
-                                          ↓
-                                    Form logic
-                                          ↓
-                                   Question-to-send
-                                          ↓
-                                    Facebot (mock)
+User (test) → Hermes → Redpanda → Replybot → Redpanda
+                                              ↓
+                          [Message-Worker: translate & send]
+                                              ↓
+                          Scribble → CockroachDB (state/responses)
+                            ↓
+                      Form logic, question-to-send
+                            ↓
+                          Facebot (mock receives sends)
 ```
+
+The stack includes **two Scribble instances** with distinct roles:
+- **`scribble-states`**: Persists conversation state (current question, user progress)
+- **`scribble-responses`**: Persists survey responses
 
 Tests also validate **dean** (the scheduler for timeouts, followups, and retries):
 
 ```
 Dean (on-demand trigger) → Query CockroachDB → Identify overdue messages → Publish new questions
 ```
+
+The test database is **pre-populated with the full production schema** via all migrations in `devops/migrations/*.sql` executed in sorted order during stack startup (see "Stack Setup: Database Schema & Seeding" below).
 
 ## Two-Tier Strategy
 
@@ -30,10 +38,14 @@ Dean (on-demand trigger) → Query CockroachDB → Identify overdue messages →
 **When to run**: Every development session, in CI before merge  
 **Command**: `npm run test:tc` from `facebot/testrunner/`
 
-Testcontainers boots a complete, isolated Docker network with every component (database, Kafka, hermes, replybot, facebot, scribble, dean). The webhook entry point is **Hermes** — the Rust drop-in replacement for the deprecated Node botserver — running under the `botserver` network alias. Each test run is independent—no shared state across developers, no cluster flakiness, no need to wait for external resources.
+Testcontainers boots a complete, isolated Docker network with every component: CockroachDB, Redpanda, Redis, Hermes (botserver), Replybot, Message-Worker, Scribble (states + responses), Formcentral, Dinersclub, Facebot mock, and Dean. The webhook entry point is **Hermes** — the Rust drop-in replacement for the deprecated Node botserver — running under the `botserver` network alias. Each test run is independent—no shared state across developers, no cluster flakiness, no need to wait for external resources.
 
 **Speed**: Cold start ~60s (rebuilds all images), warm ~30s (containers only)  
 **Dean behavior**: Triggered imperatively per test via `triggerDean()`—no cron waits needed. Timeout tests run in ~2s instead of ~180s.
+
+**Test coverage gaps**:
+- **Exporter not covered**: The exporter service (database-polling CSV export) is not integrated into the testcontainers stack. See `planning/exporter-integration-test-plan.md` for the proposal.
+- **Message-Worker CI gap**: Changes to `message-worker/**` do not trigger the integration test suite (path filters in `.github/workflows/testcontainers-integration.yml` omit it, even though the service is built and started in the stack).
 
 ### Tier 2: k8s Smoke Tests (Secondary)
 
@@ -77,6 +89,16 @@ The k8s suite (`test.ts`) is a genuinely minimal ~4-test deployment smoke subset
 5. **Image registry**: Images pull successfully in the cluster
 
 Smoke tests are **not** a substitute for functional coverage—they're a checkpoint before production deployment.
+
+## Stack Setup: Database Schema & Seeding
+
+When `facebot/testrunner/stack.ts` boots the testcontainers network:
+
+1. **CockroachDB is initialized** with a single-node cluster and test database `chatroach`
+2. **All production migrations are applied in sorted order** from `devops/migrations/*.sql` — this ensures the test database carries the complete production schema, including tables like `export_status`, `chat_log`, `messages`, `forms`, `responses`, etc.
+3. **Test data is seeded** via `seed-db.ts`: a test user (`test@test.com`) is created, credentials are added for Facebook, WhatsApp, and Reloadly, and all form JSON files in the `forms/` directory are inserted as surveys.
+
+This means the test database is **schema-complete** — any test can assume production tables exist and are properly indexed. When adding new production tables or columns, the corresponding migration is automatically used in tests without any additional test-setup code.
 
 ## Dean: The Key Insight
 
@@ -129,6 +151,7 @@ See `facebot/testrunner/README.md` for detailed test writing patterns. Key point
 - **Only the `Basic Functionality` block runs in parallel** (via `mocha.parallel`). The `Timeouts` and `Phone normalization` blocks in `test.tc.ts`, and `Timeouts` in `test.ts`, run serially — don't assume parallel execution semantics apply suite-wide.
 - **Dean/`QOUT` race**: dean's followups query matches only rows with `current_state = 'QOUT'`. A test that triggers a followup must `waitFor` that exact state before calling `triggerDean(...)`; waiting for "any state row" races the scribble upsert and dean will find zero overdue users. See the inline comment above the followups test in `test.tc.ts`.
 - **`mox.ts` builds expected messages via `@vlab-research/translate-typeform`** (the older Facebook-native message translator) specifically so tests can cross-check message-worker's `TranslateToMessenger` output against an independent implementation of the same typeform-to-Messenger shape. This is an intentional equivalence check between two translators, not legacy code left over to clean up.
+- **`seed-db.ts` pre-populates test data**: On stack startup, `seed-db.ts` populates credentials for Facebook page access (token `test`, page ID `935593143497601`), WhatsApp Business (phone number ID `106540352242922`), Reloadly (sandbox mode, credentials from env), and all form JSON files from the `forms/` directory are inserted as surveys for the test user `test@test.com`.
 
 Example timeout test:
 
@@ -195,7 +218,7 @@ kubectl exec pod/cockroach-0 -- cockroach sql --insecure -e "SELECT * FROM forms
 - **`facebot/testrunner/mox.ts`**: Fixture/message builders — `getFields`/`fieldsFromForm`, `makeReferral`, `makeHandover`, `makeEcho`, etc.
 - **`facebot/testrunner/responses.ts`**: Reads response/state rows back from CockroachDB for assertions
 - **`facebot/testrunner/utils.ts`**: `snooze` and `waitFor` polling helpers
-- **`facebot/testrunner/stack.ts`**: Boots the testcontainers Docker network
+- **`facebot/testrunner/stack.ts`**: Boots the testcontainers Docker network; executes all `devops/migrations/*.sql` to establish the production schema; starts all services (CockroachDB, Redpanda, Redis, Scribble, Formcentral, Dinersclub, Hermes, Replybot, Message-Worker, Facebot, Dean)
 - **`facebot/testrunner/dean-trigger.ts`**: One-shot dean container orchestration
 - **`facebot/receiver/index.js`**: Facebot mock — queues outbound messages for `flowMaster` to poll and answer `POST /me/pass_thread_control` for handoff tests
 - **`replybot/HANDOFF_PROTOCOL.md`**: The handoff/handover protocol exercised by the handoff integration test and by `machine.test.js`'s `makeEventMetadata` unit tests

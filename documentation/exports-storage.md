@@ -1,7 +1,7 @@
 # Export Storage & Retention
 
 CSV exports (full messages, chat logs, response exports — see
-`full-messages-export.md`) are written to object storage under an `exports/`
+`full-messages-export.md` and `exporter/README.md`) are written to object storage under an `exports/`
 prefix. In production the backend is a single-node MinIO (S3-compatible); the
 exporter selects the backend via the `STORAGE_BACKEND` env var
 (`google` → GCS, `s3` → MinIO, unset → dev no-op). See

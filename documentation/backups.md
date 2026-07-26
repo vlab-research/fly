@@ -9,7 +9,7 @@ The `chatroach` database is backed up daily to Google Cloud Storage by **Cockroa
 | Production (`vprod`) | `@daily`, `FULL BACKUP ALWAYS`, `revision_history` | `gs://vlab-research-crdb-backups` (europe-west1) | 90-day lifecycle delete | KSA `gbv-cockroachdb` → GSA `cockroachdb-backup@toixotoixo.iam.gserviceaccount.com` via WI |
 | Staging (`vstag`) | not yet wired (deferred until staging CRDB is healthy) | will be `gs://vlab-research-crdb-backups-staging` | 90 days | will be `cockroachdb-backup-staging@` |
 
-Each daily run lands at `gs://vlab-research-crdb-backups/<YYYY>/<MM>/<DD-HHMMSS.SS>/` containing a `BACKUP-LOCK-*` marker, a `data/` tree of SST files, and a `progress/` tree of checkpoints. As of writing, prod's `chatroach` snapshot is ~545 GB compressed in GCS (~672 GB logical, dominated by `messages` at 624 GB, `responses` at 37 GB, `states` at 10.5 GB).
+Each daily run lands at `gs://vlab-research-crdb-backups/<YYYY>/<MM>/<DD-HHMMSS.SS>/` containing a `BACKUP-LOCK-*` marker, a `data/` tree of SST files, and a `progress/` tree of checkpoints. Sizes here shrink as the index cleanup in [`cockroachdb-storage.md`](./cockroachdb-storage.md) proceeds. As of `2026-07-26` (after Tier 1 Phase 1) the `chatroach` logical total is **432.2 GiB**, dominated by `messages` at 378.6 GiB, `responses` at 38.6 GiB, `states` at 11.1 GiB. Before that cleanup it was ~672 GB logical / ~545 GB compressed in GCS, with `messages` at 624 GB.
 
 ### Replaces the legacy dumper
 

@@ -1,13 +1,17 @@
 # Fly Exporter
 
-A service that handles exporting fly data into CSV format for download
+A database-polling service that processes export jobs for survey responses, chat logs, and message history, writing CSVs to object storage.
 
+## Architecture
 
-## Setup
+The exporter runs as a set of daemon worker threads that continuously poll the `export_status` table in CockroachDB for jobs to process. Each worker:
+1. Calls `claim_job()` every `POLL_INTERVAL_SECONDS` to atomically claim a `Requested` job and transition it to `Processing`
+2. Calls `process_job()` to execute the export (querying data, formatting to CSV, uploading to storage)
+3. Updates the job to `Finished` on success or resets it to `Requested` for retry on failure
 
-There are currently various settings that you can configure on this application
+Stale jobs (jobs stuck in `Processing` longer than `STUCK_TIMEOUT_MINUTES`) are automatically reset back to `Requested` for reprocessing.
 
-## General Configuration:
+## Export Types & Sources
 
 **KAFKA_TOPIC:** The topic on which to listen for message
 **KAFKA_SERVERS:** Comma seperated list fo kafka brokers to listen on
@@ -30,26 +34,58 @@ There are currently various settings that you can configure on this application
 > `documentation/secrets.md`.
 **STORAGE_BACKEND:** Storage backend to use, current options supported are `google` and `s3`
 
-## Storage Specific Configurations
+The exporter supports three export sources, each with its own handler:
 
-### Google
+- **`responses`**: Survey response data in pivot or flat format. See `export_data()` in `exporter.py` and the vlab-prepro library for formatting options.
+- **`chat_log`**: Conversation history with optional raw payload and metadata fields. See `export_chat_log()` in `exporter.py`.
+- **`full_messages`**: Complete message history with event-type filtering and optional raw JSON. Covers all message sources (Messenger, WhatsApp, synthetic) and event types (conversation, referrals, payments, system, etc.). See `export_full_messages()` in `exporter.py` and `documentation/full-messages-export.md` for details.
 
-**GOOGLE_STORAGE_BUCKET:** Google Storage Bucket Name
-**GOOGLE_APPLICATION_CREDENTIALS:** The path to the credentials to use to
-upload exports
+## Job Lifecycle
 
-### S3
+A job progresses through the following states:
 
-**S3_BUCKET_NAME:** Storage Bucket Name
-**S3_ACCESS_KEY:** Access Key
-**S3_ACCESS_KEY:** Access Key
-**S3_BUCKET_NAME:** Access Key
-**S3_HOST:** Access Key
+```
+Requested
+  ↓ [claimed by worker, locked_at set, retry_count incremented]
+Processing
+  ↓ [worker calls process_job]
+Querying → Formatting/Writing → Uploading
+  ↓
+Finished (successful export)
+  OR
+Failed (max retries exhausted or unrecoverable error)
+  OR
+[Reset to Requested if stuck > STUCK_TIMEOUT_MINUTES]
+```
 
+On failure, if `retry_count < MAX_EXPORT_RETRIES`, the job is reset to `Requested` for the next worker to retry. Exceeding `MAX_EXPORT_RETRIES` marks it `Failed`.
+
+## Configuration
+
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `DATABASE_URL` | Required | CockroachDB connection string (PostgreSQL format) |
+| `WORKER_THREADS` | 4 | Number of daemon threads polling for jobs |
+| `POLL_INTERVAL_SECONDS` | 5 | Seconds to sleep between claim attempts when no jobs are available |
+| `MAX_EXPORT_RETRIES` | 3 | Maximum attempts per job before marking Failed |
+| `STUCK_TIMEOUT_MINUTES` | 120 | Minutes a Processing job can be locked before resetting to Requested |
+| `STORAGE_BACKEND` | (no-op) | Storage backend: `google` (GCS), `s3` (MinIO), or unset for dev |
+
+### Storage-Specific Configuration
+
+**Google Cloud Storage**:
+- `GOOGLE_STORAGE_BUCKET`: Bucket name
+- `GOOGLE_APPLICATION_CREDENTIALS`: Path to service account JSON
+
+**S3 / MinIO**:
+- `S3_BUCKET_NAME`: Bucket name
+- `S3_ACCESS_KEY`: Access key
+- `S3_SECRET_KEY`: Secret key (if required)
+- `S3_HOST`: Endpoint URL (for MinIO or S3-compatible services)
 
 ## Development
 
-**Please Note To use Python 3.9 and above for development**
+**Requires Python 3.9+**
 
 ### Install Dependencies
 
@@ -64,8 +100,6 @@ pip install -r requirements.dev.txt
 ```
 
 ### Running Tests
-
-In order to run tests please use:
 
 ```bash
 pytest exporter/ -s
@@ -89,6 +123,8 @@ export requested against a title silently matches zero rows and hits this path.
 
 ## See Also
 
+- `documentation/full-messages-export.md` — event classification and
+  full-messages-specific options
 - `documentation/exports-storage.md` — storage backend, bucket-per-environment
   split, retention policy, and presigned URL lifecycle
 - `documentation/secrets.md` — how the `exporter` secret is built and applied
