@@ -3,20 +3,42 @@
 **Goal:** Shrink the production CockroachDB cluster (and the GKE compute pool sized
 around it) by attacking the `messages` table, which is ~93% of all data.
 
-**Status as of 2026-07-22:** Phase 1 index cleanup applied and soaking. Canary
-verified healthy. Awaiting soak → Phase 2.
+**Status as of 2026-07-26:** Phase 1 soak **complete and verified against prod**
+(schema correct, physical ~596 GB → ~407 GiB, GC settled). Phase 2 is ready to run
+once its two new preconditions are met — see below.
 
-Full technical reference (measurements, access patterns, index analysis): see
-[`documentation/cockroachdb-storage.md`](../documentation/cockroachdb-storage.md).
+> 🔴 **Do not run Phase 2, and do not act on Tier 4, before reading
+> [`cockroachdb-memory-and-topology-plan.md`](./cockroachdb-memory-and-topology-plan.md).**
+> It documents a **live production availability risk** (two CockroachDB pods sharing
+> one GKE node, ~half of all ranges unable to survive that node's loss) that must be
+> fixed first. It also establishes that **memory, not disk, is the actual cost lever** —
+> CockroachDB is 60% of all memory requests in the GKE cluster.
+>
+> Several claims in *this* document were checked against prod on 2026-07-26 and found
+> wrong. They are corrected inline below and marked ⚠️.
+
+**New here? Start at
+[`documentation/cockroachdb-storage.md`](../documentation/cockroachdb-storage.md)** —
+it's the measured ground truth (cluster shape, table and index sizes, access patterns)
+and maps out all four CockroachDB documents. This plan is the **disk / index-drop work
+log**; the overall priority order lives in
+[`cockroachdb-memory-and-topology-plan.md`](./cockroachdb-memory-and-topology-plan.md).
+Version upgrades are in
+[`cockroachdb-operator-and-v25-v26-migration.md`](./cockroachdb-operator-and-v25-v26-migration.md).
 
 ---
 
-## The situation (measured 2026-07-22, prod, CRDB v24.1.28, RF3)
+## The situation (measured 2026-07-22 — **pre-Phase-1 baseline**, kept for reference)
+
+> Current numbers are in the *Work log — DONE* entry for 2026-07-26 and in
+> [`documentation/cockroachdb-storage.md`](../documentation/cockroachdb-storage.md).
+> Post-Phase-1: **432.2 GiB logical / ~407 GiB physical**, `messages` 378.6 GiB.
 
 - Cluster: StatefulSet `gbv-cockroachdb`, 4 pods in `vprod`, each on a `240Gi pd-ssd`
   PVC → **960Gi provisioned, ~596GB physical used** (~63%). All 4 pods on the
-  `bigpool` node pool (4 × 4 vCPU / 32GB).
-- **`messages` is ~93% of the data** (~624 GB logical). `responses` ~37GB, `states`
+  `bigpool` node pool (4 × `e2-highmem-4`, 4 vCPU / 32GB, all `europe-west1-b`).
+  ⚠️ Two of those pods currently share one GKE node — see the memory/topology plan.
+- **`messages` was ~93% of the data** (~624 GB logical). `responses` ~37GB, `states`
   ~10.5GB, everything else <1GB.
 - **Root cause of `messages` bloat:** the big `content` (raw event JSON) column is
   `STORED` in every secondary index, so each index is a near-full copy of the table
@@ -31,19 +53,28 @@ Full technical reference (measurements, access patterns, index analysis): see
 
 ## Index inventory & decision
 
-| Index | Key order | Size | Verdict |
-|---|---|---|---|
-| `primary` `(hsh, userid)` | — | 131.7 GiB | **keep** — insert dedup |
-| `messages_userid_timestamp_idx` STORING `(content)` | `(userid, ts, hsh)` | 131.6 GiB | **keep** — hot path, no sort |
-| `messages_userid_idx` STORING `(content, ts)` | `(userid, hsh)` | 131.6 GiB | **drop** — sibling that forces a sort |
-| `messages_timestamp_idx` STORING `(content)` | `(ts ASC, …)` | 131.6 GiB | **drop** — scratch-replay only |
-| `messages_timestamp_idx1` STORING `(content)` | `(ts DESC, …)` | 131.6 GiB | **drop** — scratch-replay only |
+Sizes re-measured 2026-07-26; the 131.6 GiB figures were the pre-drop measurements.
 
-**Why keep `userid_timestamp` over `userid_idx`** (verified with `EXPLAIN`, not the
-stale read counter): the hot query orders by timestamp. `userid_timestamp` is keyed
-`(userid, timestamp)` → optimizer's natural plan is a plain scan with **no sort**.
-`userid_idx` is keyed `(userid, hsh)` → the same query needs a `sort` node. So keeping
-`userid_timestamp` makes the hot path *faster*, not just smaller.
+| Index | Key order | Size | Verdict | Status |
+|---|---|---|---|---|
+| `primary` `(hsh, userid)` | — | 126.2 GiB | **keep** — insert dedup | live |
+| `messages_userid_timestamp_idx` STORING `(content)` | `(userid, ts, hsh)` | 126.2 GiB | **keep** — hot path | live |
+| `messages_userid_idx` STORING `(content, ts)` | `(userid, hsh)` | 126.2 GiB | **drop** — redundant sibling | `NOT VISIBLE` canary |
+| `messages_timestamp_idx` STORING `(content)` | `(ts ASC, …)` | ~131.6 GiB | **drop** — scratch-replay only | ✅ dropped 07-22 |
+| `messages_timestamp_idx1` STORING `(content)` | `(ts DESC, …)` | ~131.6 GiB | **drop** — scratch-replay only | ✅ dropped 07-22 |
+
+**Why keep `userid_timestamp` over `userid_idx`:** it is the optimizer's choice and the
+better key order for a timestamp-ordered per-user read. The decision is correct.
+
+> ⚠️ **Correction (prod-verified 2026-07-26): the "no sort" reasoning was wrong.**
+> The `EXPLAIN` behind it was run against a simplified query. The real `Chatbase.get()`
+> (`chatbase-postgres/lib/index.js:21-37`) LEFT JOINs `states` for the `message_pointer`
+> checkpoint, and **the merge join on `userid` destroys the timestamp ordering — so the
+> plan contains a `sort` node.**
+>
+> This does **not** change the verdict: `userid_idx` is keyed `(userid, hsh)` and would
+> sort too, no better. But any checklist step that says "verify no sort node" is wrong
+> and **will fail**; those are corrected below.
 
 **Why the two `timestamp` indexes are safe to drop:** used only by the manual replay
 tool `replybot/lib/responses/batch.js` (via `replybot/kube-scratch/batchscratch.yaml`),
@@ -174,26 +205,44 @@ the exporter's and dashboard-server's `STATE_MACHINE_STATES`.
 - [x] **Applied Phase 1 (migration 18)** — dropped the two `timestamp` indexes and set
       `messages_userid_idx` `NOT VISIBLE` (canary).
 - [x] Verified post-Phase-1 plan: hot query runs on `messages_userid_timestamp_idx`,
-      **no sort node**, ~88 rows, ~271ms (dominated by the `id`→primary index join).
+      ~88 rows, ~271ms (dominated by the `id`→primary index join).
+      ⚠️ *The original entry claimed "no sort node" — incorrect, see the correction above.*
+- [x] **2026-07-26 — verified Phase 1 against prod (read-only).** Schema correct
+      (`messages_userid_idx` `visible=f`, both timestamp indexes gone). Physical usage
+      98.7 / 98.2 / 105.0 / 105.4 GiB per store, down from ~596 GB. GC fully settled.
+- [x] **2026-07-26 — measured memory and GKE topology.** Findings, including a live
+      availability risk, are in
+      [`cockroachdb-memory-and-topology-plan.md`](./cockroachdb-memory-and-topology-plan.md).
 
 ---
 
 ## Work log — TODO
 
-### Immediate — soak Phase 1 (next few days)
-- [ ] Watch replybot state-recompute latency / error rate (Grafana/Prometheus) — expect flat.
-- [ ] Confirm no unexpected full scans / slow queries in the CRDB console.
-- [ ] After >25h (`gc.ttlseconds = 90000`): confirm per-pod disk sheds ~263 GiB worth:
-      `kubectl -n vprod exec gbv-cockroachdb-0 -- df -h /cockroach/cockroach-data`
+### Immediate — soak Phase 1 — ✅ DONE (verified 2026-07-26)
+- [x] Disk shed confirmed: ~596 GB → ~407 GiB total, GC settled well past the 25h TTL.
+- [x] Schema confirmed correct via `SHOW INDEXES`.
+- [ ] *Still worth a glance:* replybot state-recompute latency / error rate in Grafana.
 - **Abort switch (instant, no rebuild):**
       `ALTER INDEX chatroach.public.messages@messages_userid_idx VISIBLE;`
 
-### Phase 2 — drop the canary (after clean soak)
+### Phase 2 — drop the canary
+
+**Preconditions (both new, both required):**
+1. 🔴 **Fix the replica co-location risk first** — two CRDB pods share one GKE node.
+   See [`cockroachdb-memory-and-topology-plan.md`](./cockroachdb-memory-and-topology-plan.md) Part 0.
+2. **Ship the `SELECT content` PR first** (Tier 2 below). While `SELECT *` remains,
+   `EXPLAIN` emits `CREATE INDEX ON messages (userid) STORING (id, content, "timestamp")`
+   — i.e. CockroachDB actively recommends recreating the exact index being dropped.
+
+Then:
 - [ ] Run `./devops/run-prod-migration.sh devops/migrations/19-drop-message-userid-idx.sql`.
 - [ ] Verify only `primary` + `messages_userid_timestamp_idx` remain.
-- [ ] After GC, confirm disk sheds the final ~131.6 GiB worth.
-- **Expected total win:** ~395 GiB logical freed (~60% of `messages`), cluster physical
-      ~596GB → ~250GB (~62GB/pod).
+      ⚠️ The migration's own precondition checklist says to verify "no sort node" —
+      that check is wrong (see the correction above); ignore it.
+- [ ] After GC, confirm disk sheds a further 126.2 GiB worth.
+- **Expected end state:** `messages` ~252 GiB logical, cluster physical ~407 → ~290 GiB
+      (~72 GiB/node). *Also* removes ~2,916 ranges → ~2,190 fewer replicas per node,
+      which is the more valuable number — see the memory plan.
 
 ### Tier 1b — `states` index cleanup (see section above)
 - [ ] Author `devops/migrations/20-drop-cold-states-indexes.sql` (3 drops + 2 canaries).
@@ -204,14 +253,23 @@ the exporter's and dashboard-server's `STATE_MACHINE_STATES`.
       Real win: 14 → 9 index writes per state update, including the inverted index.
 
 ### Tier 2 — make the read path covering + `messages` archival-only
-- [ ] **Small standalone PR:** change `Chatbase.get()` in `@vlab-research/chatbase-postgres`
-      from `SELECT *` to `SELECT content`. Then `messages_userid_timestamp_idx` is fully
-      covering → no primary index join, no sort → collapses the ~271ms read and adds no
-      storage. (Pairs naturally with the index work.)
-- [ ] **State snapshot checkpointing:** on a Redis miss, recompute currently replays a
-      user's *entire* history from zero and ignores the already-persisted `states` table.
-      Snapshot state durably and replay only from the last snapshot → `messages` becomes
-      operationally unnecessary (audit/export only). Precondition for aggressive cold storage.
+- [ ] **Small standalone PR — do this BEFORE Phase 2.** Change `Chatbase.get()` in
+      `@vlab-research/chatbase-postgres` from `SELECT *` to `SELECT content`.
+      `EXPLAIN`-verified 2026-07-26: this removes the index join to `primary` entirely.
+      The join exists *only* to fetch `id`, which `get()` then discards
+      (`result.rows.map(r => r.content)`). The `sort` remains — it comes from the
+      `states` join, not the projection.
+- [ ] **State snapshot checkpointing.**
+      ⚠️ **Correction:** the premise below was wrong. A checkpoint mechanism already
+      exists — `states.message_pointer` is a stored computed column off
+      `state_json->>'pointer'` (`devops/migrations/04-pointers.sql`), and `Chatbase.get()`
+      already filters `message_pointer <= timestamp`, so replay is already truncated.
+      The **real** limitation is narrower: `pointer` only advances on `RESET`,
+      `RESTORE_STATE`, and `USER_BLOCKED`
+      (`replybot/lib/typewheels/machine.js:249,314,400`) — never periodically.
+      **So this is extending a working mechanism with periodic snapshots, not building
+      one.** Substantially cheaper than this plan originally implied. Still the
+      precondition for aggressive cold storage.
 
 ### Tier 3 — cold storage for dormant users
 - [ ] Periodic archival job: for users inactive > N months, write full history to one
@@ -222,12 +280,31 @@ the exporter's and dashboard-server's `STATE_MACHINE_STATES`.
       originally was the *write* path, not keyed reads).
 
 ### Tier 4 — downsize the cluster (the goal)
-- [ ] After the working set drops to tens of GB: move `4×240Gi → 3×~50Gi pd-ssd`
-      (RF3 min = 3 nodes), lower the `8000Mi` memory requests and `--cache` /
-      `--max-sql-memory`, reclaim a `bigpool` node (4→3) or a smaller machine type.
+
+⚠️ **This tier is superseded by
+[`cockroachdb-memory-and-topology-plan.md`](./cockroachdb-memory-and-topology-plan.md).**
+Read that first; the corrections below are why.
+
+- [ ] 🔴 **Precondition: fix the replica co-location risk.** You cannot safely go 4 → 3
+      nodes while `podAntiAffinity` is `soft` and CRDB locality is unset.
+- [ ] ⚠️ **`3 × ~50Gi` does not follow from the index work.** Post-Phase-2 the cluster is
+      ~290 GiB physical; over 3 nodes that is ~96 GiB/node before headroom. `50Gi` needs
+      **Tier 3 archival** first. Size PVCs off the right milestone.
+- [ ] ⚠️ **The cost lever is memory, not disk.** Measured: CockroachDB is **60% of all
+      memory requests in the GKE cluster** (31.25 GiB of 52.2 GiB), which is what forces
+      `e2-highmem-4` (32 GB) over `e2-standard-4` (16 GB) at the same 4 vCPU. The whole
+      machine-type change reduces to getting the CRDB pod from `8000Mi` to ~`4000Mi`.
+      CPU is not binding (43% of requests).
+- [ ] ⚠️ **Do not lower `--max-sql-memory` expecting a win** — it runs at 0.1%
+      utilization (3.5 MiB of 3000Mi) and is a ceiling, not an allocation. The two real
+      dials are `--cache` and **replica count**.
+- [ ] **Biggest untapped memory win, needs no upgrade:** every zone carries
+      `range_max_bytes = 67108864` (64 MiB), the pre-v21.1 default, giving ~8,850
+      replicas/node. Raising it to 512 MiB is a ~13× replica reduction. See the memory plan.
 - [ ] **Note:** GKE `pd-ssd` cannot be shrunk in place. This is a provision-new +
       let-CRDB-rebalance + decommission-old sequence — plan it explicitly before touching
-      PVCs.
+      PVCs. It is also the *same physical operation* as the operator's rolling adoption,
+      so sequence them together rather than rebuilding the cluster twice.
 
 ---
 
@@ -250,9 +327,21 @@ whether such payloads are being replayed through the state machine.
 kubectl -n vprod exec gbv-cockroachdb-0 -- ./cockroach sql --insecure --database=chatroach \
   --execute "SHOW INDEXES FROM messages;"
 
-# Verify hot-path plan (expect messages_userid_timestamp_idx, no sort)
+# Verify hot-path plan. Use the REAL query (with the states join), not the simplified one —
+# expect scan on messages_userid_timestamp_idx. A `sort` node IS expected and is fine.
 kubectl -n vprod exec gbv-cockroachdb-0 -- ./cockroach sql --insecure --database=chatroach \
-  --execute "EXPLAIN SELECT * FROM messages WHERE userid='<real-userid>' ORDER BY timestamp ASC;"
+  --execute "EXPLAIN SELECT * FROM messages \
+    LEFT JOIN (SELECT userid, message_pointer FROM states WHERE userid='<real-userid>') USING (userid) \
+    WHERE userid='<real-userid>' \
+    AND (message_pointer IS NULL OR message_pointer <= timestamp) ORDER BY timestamp ASC;"
+
+# Replica count per node — the memory-relevant metric (see the memory/topology plan)
+kubectl -n vprod exec gbv-cockroachdb-0 -- ./cockroach sql --insecure --database=chatroach \
+  --execute "SELECT node_id, round((metrics->>'replicas')::float,0) AS replicas \
+    FROM crdb_internal.kv_store_status ORDER BY node_id;"
+
+# Topology check — all four pods MUST be on distinct nodes
+kubectl get pods -n vprod -o wide | grep cockroachdb
 
 # Verify disk (wait > gc.ttlseconds = 25h after each drop)
 for i in 0 1 2 3; do kubectl -n vprod exec gbv-cockroachdb-$i -- df -h /cockroach/cockroach-data | tail -1; done
