@@ -190,6 +190,10 @@ func translateWhatsAppList(msg types.MessageContent) (types.WhatsAppMessage, err
 }
 
 func translateWhatsAppMedia(msg types.MessageContent) (types.WhatsAppMessage, error) {
+	if types.Blank(msg.MediaURL) {
+		return types.WhatsAppMessage{}, types.ErrAttachmentIDUnsupported
+	}
+
 	media := types.WhatsAppMedia{
 		Link: *msg.MediaURL,
 	}

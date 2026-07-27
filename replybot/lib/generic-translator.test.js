@@ -63,6 +63,43 @@ describe('translateTypeformField', () => {
       result.should.have.property('caption', 'Attachment Title')
       result.should.have.property('media_type', 'image')
     })
+
+    it('sends pre-uploaded media by attachment_id, not as a URL', () => {
+      const field = {
+        type: 'attachment',
+        ref: 'contraceptive_image',
+        title: 'Contraceptive 1',
+        md: {
+          type: 'attachment',
+          keepMoving: true,
+          attachment: { type: 'image', attachment_id: '1658615935222752' }
+        },
+        properties: { description: '' }
+      }
+
+      const result = translateTypeformField(field)
+
+      result.should.have.property('media_attachment_id', '1658615935222752')
+      // Regression guard: the md JSON used to leak into media_url, and Messenger
+      // rejected it with (#100) "... should represent a valid URL".
+      should.equal(result.media_url, null)
+      result.should.have.property('media_type', 'image')
+    })
+
+    it('still sends URL-based media by URL', () => {
+      const field = {
+        type: 'attachment',
+        ref: 'att_url',
+        title: 'A picture',
+        md: { attachment: { type: 'image', url: 'https://example.com/i.jpg' } },
+        properties: { description: '' }
+      }
+
+      const result = translateTypeformField(field)
+
+      result.should.have.property('media_url', 'https://example.com/i.jpg')
+      should.equal(result.media_attachment_id, null)
+    })
   })
 
   describe('translateStatement', () => {

@@ -196,6 +196,31 @@ func TestTranslateToMessenger(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			// Media pre-uploaded to the page: sent by id, with no url and no
+			// is_reusable. Messenger rejects a payload carrying an empty "url".
+			name: "image message by attachment id",
+			cmd: types.SendMessageCommand{
+				CommandID:      "cmd_5b",
+				ConversationID: "conv_1",
+				UserID:         "user_1",
+				Platform:       types.PlatformMessenger,
+				Message: types.MessageContent{
+					Type:              types.MessageTypeMedia,
+					MediaType:         mediaTypePtr(types.MediaTypeImage),
+					MediaAttachmentID: stringPtr("1658615935222752"),
+				},
+			},
+			want: types.MessengerMessage{
+				Attachment: &types.Attachment{
+					Type: "image",
+					Payload: types.AttachmentPayload{
+						AttachmentID: "1658615935222752",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "missing text field",
 			cmd: types.SendMessageCommand{
 				CommandID:      "cmd_7",

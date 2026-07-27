@@ -65,10 +65,16 @@ type MessageContent struct {
 
 	MediaType *MediaType `json:"media_type,omitempty"`
 	MediaURL  *string    `json:"media_url,omitempty"`
-	Caption   *string    `json:"caption,omitempty"`
+	// Alternative to MediaURL. Messenger-only: ids are scoped to the page that
+	// uploaded the media.
+	MediaAttachmentID *string `json:"media_attachment_id,omitempty"`
+	Caption           *string `json:"caption,omitempty"`
 
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
+
+// Blank reports whether an optional string field is unset or empty.
+func Blank(s *string) bool { return s == nil || *s == "" }
 
 type Option struct {
 	Value       json.RawMessage `json:"value"`
@@ -183,7 +189,7 @@ func (mc *MessageContent) Validate() error {
 		if mc.MediaType == nil {
 			return ErrMissingMediaType
 		}
-		if mc.MediaURL == nil || *mc.MediaURL == "" {
+		if Blank(mc.MediaURL) && Blank(mc.MediaAttachmentID) {
 			return ErrMissingMediaURL
 		}
 	default:

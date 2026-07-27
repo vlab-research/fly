@@ -205,14 +205,19 @@ function translateWebview(field) {
 function translateAttachment(field) {
   const md = field.md || {}
   const attachment = md.attachment || {}
-  const mediaUrl = attachment.url || md.md || field.properties.description || ''
+
+  // Media already uploaded to the page is referenced by id, not URL. Without
+  // this the URL fallback chain below puts the raw md JSON in media_url, which
+  // Messenger rejects with "... should represent a valid URL".
+  const attachmentId = attachment.attachment_id || null
 
   return {
     type: 'media',
     text: null,
     question_text: null,
     options: null,
-    media_url: mediaUrl,
+    media_url: attachmentId ? null : (attachment.url || md.md || field.properties.description || ''),
+    media_attachment_id: attachmentId,
     media_type: attachment.type || 'image',
     caption: field.title,
     metadata: { ...(field.md || {}), ref: field.ref, type: 'attachment' }

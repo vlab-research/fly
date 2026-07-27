@@ -69,10 +69,13 @@ type Attachment struct {
 	Payload interface{} `json:"payload"`
 }
 
-// AttachmentPayload contains the attachment URL
+// AttachmentPayload identifies media either by URL or by the id of media
+// already uploaded to the page. Exactly one is set — Messenger rejects an empty
+// "url", hence omitempty. IsReusable applies only to the URL form.
 type AttachmentPayload struct {
-	URL         string `json:"url"`
-	IsReusable  *bool  `json:"is_reusable,omitempty"`
+	URL          string `json:"url,omitempty"`
+	AttachmentID string `json:"attachment_id,omitempty"`
+	IsReusable   *bool  `json:"is_reusable,omitempty"`
 }
 
 // TemplatePayload represents a Messenger template attachment payload. The set of

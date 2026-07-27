@@ -346,13 +346,19 @@ func translateMessengerMedia(msg types.MessageContent, metadata string) (types.M
 		return types.MessengerMessage{}, fmt.Errorf("%w: %s", types.ErrUnsupportedMediaType, *msg.MediaType)
 	}
 
+	// Either an already-uploaded attachment id, or a URL. Validate() guarantees
+	// one of them is set; is_reusable belongs only to the URL form.
+	payload := types.AttachmentPayload{}
+	if types.Blank(msg.MediaAttachmentID) {
+		payload.URL, payload.IsReusable = *msg.MediaURL, ptrBool(true)
+	} else {
+		payload.AttachmentID = *msg.MediaAttachmentID
+	}
+
 	return types.MessengerMessage{
 		Attachment: &types.Attachment{
-			Type: attachmentType,
-			Payload: types.AttachmentPayload{
-				URL:        *msg.MediaURL,
-				IsReusable: ptrBool(true),
-			},
+			Type:    attachmentType,
+			Payload: payload,
 		},
 		Metadata: metadata,
 	}, nil

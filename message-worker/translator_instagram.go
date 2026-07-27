@@ -57,6 +57,10 @@ func translateInstagramQuestion(msg types.MessageContent) (types.InstagramMessag
 }
 
 func translateInstagramMedia(msg types.MessageContent) (types.InstagramMessage, error) {
+	if types.Blank(msg.MediaURL) {
+		return types.InstagramMessage{}, types.ErrAttachmentIDUnsupported
+	}
+
 	// Map media type to Instagram attachment type
 	var attachmentType string
 	switch *msg.MediaType {

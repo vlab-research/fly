@@ -190,8 +190,8 @@ kubectl exec -n vstag gbv-cockroachdb-0 -- ./cockroach sql --insecure \
   from chatroach.message_templates;"
 ```
 
-(prod's column is still named `facebook_page_id`; staging has been renamed to
-`account_id` by the platform-abstraction migration.) Then align `choices` in
+(Both environments now use `account_id`; migration 22 renamed it from
+`facebook_page_id` in vprod on 2026-07-26.) Then align `choices` in
 `form-a.json` and redeploy — approved templates **cannot** be edited, so the
 survey is what moves.
 

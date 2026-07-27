@@ -199,6 +199,16 @@
       }
     },
     {
+      "type": "statement",
+      "ref": "media_attachment_id",
+      "title": "🖼️ And here's an IMAGE sent by attachment_id — pre-uploaded to the page rather than fetched from a URL:",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1658615935222752\"}}"
+      }
+    },
+    {
       "type": "short_text",
       "ref": "send_picture",
       "title": "📸 Now testing INBOUND media. Please send me a picture — tap the attachment/camera button in Messenger and choose any photo.",
