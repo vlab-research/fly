@@ -26,6 +26,27 @@ The 1h window reflects **recent activity** (users active in the last hour), not
 total lifetime counts. This is sufficient for alerting (we care about current
 degradation, not historical trends) and keeps query times <1s.
 
+**Every query must pin `current_state`, or it full-scans.** `states` has no index
+leading with `updated`; the usable indexes (`states_current_state_updated_idx`,
+`states_current_state_current_form_updated_idx`) both lead with `current_state`. A query
+filtering only on `updated > NOW() - INTERVAL ...` therefore scans the whole table —
+measured on prod 2026-07-25, **1,072,959 rows / 1.23s per call**, and since `states` is
+never garbage-collected that scan grows forever. Adding
+`current_state = ANY(<all 10 machine states>)` lets CockroachDB build tight
+`(current_state, updated > t)` spans: same result, 200–320ms.
+
+`survey_active_users` and the retired `survey_state_total` were both full-scanning on
+every 60s scrape until 2026-07-25. This is the same fix applied to dashboard-server's
+`healthSummary` in commit 413d6774.
+
+**The tradeoff, stated loudly:** a state machine state missing from the enumeration is
+*invisible* to every metric — silently dropped from counts **and from the
+`survey_active_users` denominator**, which would inflate `survey:error_ratio:1h` and fire
+alerts. The list must stay in sync with the state machine (botserver-core) and with
+dashboard-server's `STATE_MACHINE_STATES`. Verified complete against 30 days of prod data
+on 2026-07-25 (zero rows outside `START`, `RESPONDING`, `QOUT`, `END`, `BLOCKED`, `ERROR`,
+`WAIT_EXTERNAL_EVENT`, `USER_BLOCKED`, `RESET`, `OFF`).
+
 **The window is also correctness, not just performance.** `states` holds one sticky
 row per user and is **never garbage-collected**, so any count taken over the whole
 table is a graveyard of long-fixed bugs. In July 2026 the 2,001 lifetime
@@ -39,15 +60,104 @@ All metrics are gauges reflecting counts in the last hour:
 
 | Metric | Labels | Meaning |
 |--------|--------|---------|
-| `survey_error_states` | `form`, `error_tag` | Users in ERROR state by error_tag (INTERNAL, STATE_ACTIONS, NETWORK, FORM_NOT_FOUND, FIELD_NOT_FOUND, INTERPOLATION_ERROR, none) |
-| `survey_blocked_states` | `form`, `category` | Users in BLOCKED state by category (attrition, template_missing, rate_limit, unsupported, other) |
+| `survey_error_states` | `form`, `error_tag`, `page` | Users in ERROR state by error_tag (INTERNAL, STATE_ACTIONS, NETWORK, FORM_NOT_FOUND, FIELD_NOT_FOUND, INTERPOLATION_ERROR, none) |
+| `survey_blocked_states` | `form`, `category`, `code`, `page` | Users in BLOCKED state by category **and raw provider code** |
+
+**Changed 2026-07-26 — three things that were destroying signal:**
+
+1. **`survey_blocked_states` now carries the raw `code`.** The `CASE` bucketing discarded
+   the actual reason a user was blocked. It existed to bound cardinality that does not
+   exist: over 30 days there are exactly **7** distinct `fb_error_code` values. `category`
+   is unchanged (the alert rules match on it); `code` sits alongside it.
+2. **`form="(none)"` replaces dropped rows.** Every query used to end
+   `AND current_form IS NOT NULL`, hiding **55%** of platform-fault errors (37 of 67 over
+   30 days) from `PlatformInternalErrors`, a *paging* alert. Per-form rules exclude the
+   sentinel via `studyHealth.nullForm`; **platform-wide rules must not** — that inclusion
+   is the fix.
+3. **`page` added to both.** A provider failure hits every form on a page, so a form-only
+   view renders one channel outage as N unrelated study problems.
+
+**Two categories split out of `other`** (which no alert rule has ever referenced, so this
+whole class was silent):
+
+| category | code | Meaning |
+|---|---|---|
+| `provider_error` | `-1` | Meta's own `(#-1) Unexpected internal error`. We reached Meta; Meta failed. Dean retries these. |
+| `provider_unreachable` | `(none)` / `0` | We never reached Meta — no HTTP request was made, typically a missing page token. **Dean cannot retry these** (`= ANY` never matches NULL), so affected users stay blocked permanently. See `planning/null-fb-error-code-findings.md`. |
 | `survey_stuck_users` | `form` | Users stuck on the same question (validation loop / confusing form) |
 | `survey_expired_waits` | `form` | Users in WAIT_EXTERNAL_EVENT past timeout (Dean not processing) |
 | `survey_active_users` | `form` | Total active users (denominator for error ratios) |
-| `survey_state_total` | `form`, `state` | Recent state distribution (ALL states, for debugging) — 1h window, not lifetime |
 
-**Recording rule:**
-- `survey:error_ratio:1h{form}` = `sum by (form)(survey_error_states) / clamp_min(sum by (form)(survey_active_users), 1)` — error ratio per form, denominator clamped to 1 to avoid div-by-zero on inactive forms.
+**Live traffic metric** (5m window, `study_traffic` collector — *not* alerted on):
+
+| Metric | Labels | Meaning |
+|--------|--------|---------|
+| `survey_recent_states` | `window`, `state`, `form`, `study`, `page`, `page_name` | Distinct users active within `window` (`5m` / `1h` / `24h`), by state machine state, form (shortcode), study (`surveys.survey_name`), and messaging page |
+
+`survey_recent_states` backs the **Live Traffic** Grafana board (`/d/live-traffic`) and
+answers "who is talking to the bot right now, on which page, in which study, in which
+state". The board's `$window` variable switches between the three windows in the UI.
+
+> **⚠️ Always pin the window in PromQL.** `sum by (state) (survey_recent_states)` sums all
+> three windows and silently triple-counts. Write
+> `sum by (state) (survey_recent_states{window="5m"})`.
+
+**Every window is a distinct-user count, not a sum of buckets.** `states` holds one sticky
+row per (user, page), so `window="24h"` is *distinct people we talked to today* (2,951 on
+2026-07-26) and `window="5m"` is *who is here right now* (7 at the same moment). They
+answer different questions and are not scaled versions of each other.
+
+Keep the **error spike panel on `5m`**. The 1h windows used by the alerting metrics smear
+a spike across an hour and hold it visible for an hour after it stopped — right for "is
+this study broken", wrong for "what is happening now".
+
+**One scan, three windows.** The exporter uses `COUNT(*) FILTER (WHERE updated > ...)` over
+a single 24h index span rather than three separate queries, and resolves the study/page
+labels *after* the `GROUP BY` — against ~124 grouped rows instead of ~2,951 raw ones.
+Joining before aggregating measured 2x slower (1.03s vs 420–500ms) and the gap widens with
+traffic, since group count grows far slower than row count.
+
+Study and page names are resolved **in SQL** (`LEFT JOIN LATERAL` to the newest `surveys`
+row for the shortcode; `LEFT JOIN credentials` on `facebook_page_id`) rather than by a
+PromQL `group_left` join against an info metric. An info-metric join silently *drops* any
+series with no match — on a traffic board that means traffic disappearing with no
+indication. `COALESCE` guarantees every row is emitted: an unmapped form appears as
+`study="unknown"`. The study mapping takes the newest `surveys` row rather than the
+version-aware one dashboard-server uses (`created <= form_start_time`); over a 5m window
+of currently-active users these agree except when a study is renamed mid-conversation.
+
+> **Retired 2026-07-25:** `survey_state_total{form,state}` (1h state distribution).
+> Superseded by `survey_recent_states`, which answers the same question on a live window
+> and adds the study/page dimensions. Nothing alerted on it.
+
+**All five 1h metrics also carry `study`** (from `surveys.survey_name`, resolved *after*
+aggregation via the covering index added in migration 22). Form `305` is relabelled
+`study="fallback (no study)"` — it previously inherited the newest matching survey's name
+and the boards showed 331 users at a 100% error rate under a real study's name.
+
+**Recording rules** (group `vlab-study-health-recordings`; no alert reads any of them):
+
+| Rule | Meaning |
+|---|---|
+| `survey:error_ratio:1h{form}` | Error ratio per form. Denominator clamped to 1 against div-by-zero on inactive forms. Excludes `(none)`. |
+| `survey:error_ratio:fleet:1h` | **What "normal" is right now.** Fleet-wide ratio, fallback and `(none)` excluded from both sides so the permanent-100% fallback cannot drag the baseline up and mask a real regression. |
+| `survey:error_ratio_excess:1h{form}` | **How far above normal one study sits** — the per-form ratio minus the fleet baseline. |
+| `survey:erroring_studies:platform:1h` | Count of distinct studies carrying platform-fault tags. |
+| `survey:erroring_studies:study_side:1h` | Count of distinct studies carrying study-fault tags (fallback excluded). |
+
+**Why `excess` and not just `ratio`** — this is the column that tells you which board to
+be on. A 40% error ratio means something completely different when the fleet is at 4%
+(that study is broken → stay on Study Health) than when the fleet is at 35% (*everything*
+is broken → go to Live Traffic). During a platform-wide event every study rises together
+and excess collapses toward zero. **That asymmetry is the point**: excess is an excellent
+within-survey detector and a deliberately useless cross-survey one.
+
+> ⚠️ **Two idioms in the breadth rules are load-bearing, do not "simplify" them:**
+> - **`> 0`** — these gauges emit *zero-valued* series for every group seen in the scan
+>   window, so a bare `count()` counts the entire fleet. This exact bug shipped to Live
+>   Traffic's stat panels on 2026-07-25 (read 29 against a true 3).
+> - **`or vector(0)`** — without it the series vanishes when nothing is erroring and a
+>   Grafana stat renders "No data" instead of a reassuring `0`.
 
 ### Error Taxonomy
 
@@ -125,9 +235,26 @@ alerts.
 
 ### Volume-Gating Reality
 
-**Current traffic is LOW:** ~8 active users/hr total across 5 forms; per-form
-traffic is 0–3 users/hr. Error/blocked/stuck/expired counts are all 0–2 now. This
-means:
+> **⚠️ These figures are stale and the thresholds rest on them.** The numbers below
+> described traffic when the rules were written (July 2026, ~8 active users/hr across 5
+> forms). Measured on prod **2026-07-25**, actual traffic is roughly **20× higher**:
+>
+> | window | active rows | distinct shortcodes | pages |
+> |--------|------------|---------------------|-------|
+> | 5 min  | ~9         | —                   | —     |
+> | 1 hour | ~156       | 11                  | 5     |
+> | 24 h   | 2,917      | 83                  | 9     |
+>
+> Every absolute threshold in `study-health.yaml` (platform errors ≥5, rate_limit ≥10,
+> stuck ≥10, expired ≥10) was calibrated as a noise gate against the *old* volume, so
+> they now sit far closer to normal traffic than intended — a single busy study can
+> plausibly reach them. **Recalibration is outstanding work**; the Live Traffic board
+> exists partly to give the real baseline to recalibrate against. The reasoning below is
+> still correct, the constants are not.
+
+**Traffic was LOW when these rules were written:** ~8 active users/hr total across 5
+forms; per-form traffic is 0–3 users/hr. Error/blocked/stuck/expired counts are all 0–2
+now. This means:
 
 1. **Absolute thresholds must be low** (5–10 range) to detect real issues.
 2. **Per-form proportion alerts must gate on minimum volume** (≥10 active users +
@@ -146,6 +273,63 @@ expression is wrong.
 All alerts defined in `devops/alerts/templates/study-health.yaml`, configured via
 `devops/alerts/values.yaml`. Severity labels drive the staged AlertManager routing
 (critical → page + Slack, warning → Slack). Today all alerts go to `#vlab-alerts`.
+
+### providererrors
+
+**Signal:** `sum by (page) (survey_blocked_states{category=~"provider_error|provider_unreachable"}) >= 10` for 30m
+**Severity:** critical (pages)
+**Meaning:** The messaging channel is failing users on a specific page. These people
+wanted to participate and the platform could not deliver — this is neither churn nor a
+study misconfiguration.
+
+**First: read the `code` label. The two classes have completely different causes.**
+
+| `category` | `code` | What it means |
+|---|---|---|
+| `provider_error` | `-1` | A genuine Meta error: `(#-1) Unexpected internal error`. We reached Meta; Meta failed. Usually transient. Dean **does** retry these (`-1` is in `DEAN_FB_CODES`). |
+| `provider_unreachable` | `(none)` / `0` | We **never reached Meta**. `status 0` means no HTTP request was made — almost always a missing page access token. Dean **cannot** retry these. |
+
+**`provider_unreachable` is the serious one.** Users land permanently blocked and nothing
+recovers them: `dean/queries.go:136` retries via `fb_error_code = ANY($1)`, and SQL
+`= ANY` never matches NULL, so these are structurally invisible to the retry path. The
+July 2026 incident left 131 participants blocked for 12 days this way.
+
+**What to do:**
+
+1. **Split the two classes:**
+   ```promql
+   sum by (page, code) (survey_blocked_states{category=~"provider_error|provider_unreachable"})
+   ```
+
+2. **If `provider_unreachable`** — check whether the page's credentials resolve:
+   ```sql
+   SELECT facebook_page_id, details->>'name'
+   FROM chatroach.credentials WHERE facebook_page_id = '<page>';
+   ```
+   Confirm `message-worker` is reading the **right database** — the known root cause was
+   staging's worker consuming production traffic and querying the staging DB, which held
+   no production tokens. Check the message-worker logs for
+   `failed to get token: token not found for platform account`.
+
+3. **If `provider_error` (-1)** — check whether Meta is degraded
+   (<https://metastatus.com>). Dean retries these; confirm the retry path is actually
+   draining rather than assuming it.
+
+4. **Find the affected users** (they will not self-heal if `provider_unreachable`):
+   ```sql
+   SELECT userid, pageid, current_form, updated
+   FROM chatroach.states
+   WHERE current_state='BLOCKED' AND (fb_error_code IS NULL OR fb_error_code IN ('0','-1'))
+     AND updated > NOW() - INTERVAL '24 hours'
+   ORDER BY updated DESC LIMIT 50;
+   ```
+
+**Known outstanding fix:** `message-worker` tags pre-flight failures as `FB`
+(`worker.go:328-335`), which routes them to `BLOCKED` instead of `ERROR`, and drops the
+status code via `json:"code,omitempty"` (`worker.go:317`). Until both are fixed, this
+class stays unrecoverable by design. See `planning/null-fb-error-code-findings.md`.
+
+---
 
 ### platforminternalerrors
 

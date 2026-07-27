@@ -152,9 +152,41 @@ Defined in `devops/alerts/templates/study-health.yaml`. Metrics from sql_exporte
 `documentation/study-error-alerting.md`.
 
 These alerts detect study misconfiguration, platform regressions, and UX issues by
-analyzing error, blocked, stuck, and expired states across surveys. All thresholds
-are **v1 — tuned for current low traffic** (~8 active users/hr total) and will
-need adjustment as traffic grows.
+analyzing error, blocked, stuck, and expired states across surveys.
+
+> ⚠️ **All thresholds are stale by roughly 20×.** They were tuned against ~8 active
+> users/hr across 5 forms. Measured 2026-07-26: **~156/hr across 11 shortcodes**, 2,951
+> distinct users/24h. Recalibration is outstanding work — see
+> `planning/core-visibility-alerting-plan.md` W5.
+
+**Changed 2026-07-26 — two things that affect what these rules see:**
+
+- **The `"(none)"` form sentinel.** States with no `current_form` used to be dropped by
+  the exporter, hiding **55%** of platform-fault errors from `PlatformInternalErrors`.
+  They are now exported. Per-form rules exclude the sentinel via `studyHealth.nullForm`;
+  **`PlatformInternalErrors`, `PlatformRateLimited` and `DeanExpiredWaits` deliberately
+  do not** — that inclusion is the fix, and adding a guard there would restore the bug.
+- **Four new recording rules** (group `vlab-study-health-recordings`, no alert reads
+  them): `survey:error_ratio:fleet:1h`, `survey:error_ratio_excess:1h`,
+  `survey:erroring_studies:platform:1h`, `survey:erroring_studies:study_side:1h`. They
+  back the Study Health triage table. `> 0` guards and `or vector(0)` are load-bearing —
+  see `study-error-alerting.md`.
+
+### ProviderErrors
+`sum by (page) (survey_blocked_states{category=~"provider_error|provider_unreachable"}) >= 10`
+for 30m — **critical**. The messaging channel is failing users on a specific page: either
+Meta returning its own internal error (code `-1`) or the platform never reaching Meta at
+all (code `(none)`/`0`, typically a missing page access token).
+
+Scoped `by (page)`, not by form — a provider failure hits every form on that page, so a
+form-scoped rule fires N times and reads as N unrelated study problems instead of one
+channel outage.
+
+This whole class was **silent until 2026-07-26**: both categories fell into `other`, which
+no rule has ever referenced. **Read the `code` label first** — `provider_error` is
+transient and dean retries it; `provider_unreachable` is *not retryable* and leaves users
+blocked permanently. See
+`documentation/study-error-alerting.md#providererrors`.
 
 **Second, lower-threshold consumer:** the dashboard's Monitor tab surfaces
 the same study-health signals to **survey owners** at effectively zero
