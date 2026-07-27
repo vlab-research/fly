@@ -112,7 +112,7 @@ kubectl exec kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 | `KAFKA_BROKERS` | `kafka-headless.default.svc.cluster.local:29092` | Same as all services |
 | `KAFKA_COMMAND_TOPIC` | `vlab-prod-commands` | Input topic from replybot |
 | `KAFKA_EVENT_TOPIC` | `vlab-prod-chat-events` | Output topic for events |
-| `KAFKA_GROUP_ID` | `message-worker` | Consumer group |
+| `KAFKA_GROUP_ID` | `vlab-prod-message-worker` | Consumer group. **Required — no default**; startup fails loudly if unset. Must be env-scoped (`vlab-<env>-message-worker`) because the Kafka cluster is shared with staging, and must have a matching row in `devops/kafka-consumer-health/values.yaml`. See `documentation/kafka-consumer-lag-alerting.md`. |
 | `KAFKA_AUTO_OFFSET_RESET` | `latest` | Only process new commands |
 | `DATABASE_URL` | `postgresql://chatroach@gbv-cockroachdb-public:26257/chatroach?sslmode=disable` | For token lookup |
 | `BOTSERVER_URL` | `http://gbv-botserver` | For error reporting (synthetic events) |

@@ -50,7 +50,9 @@ func LoadConfigFromEnv() (*Config, error) {
 	config := &Config{
 		// Kafka defaults
 		KafkaBrokers:         parseCommaSeparated(getEnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
-		KafkaGroupID:         getEnvOrDefault("KAFKA_GROUP_ID", "message-worker"),
+		// KAFKA_GROUP_ID is REQUIRED — deliberately no default. See the
+		// validation below for why.
+		KafkaGroupID:         os.Getenv("KAFKA_GROUP_ID"),
 		KafkaCommandTopic:    getEnvOrDefault("KAFKA_COMMAND_TOPIC", "commands"),
 		KafkaEventTopic:      getEnvOrDefault("KAFKA_EVENT_TOPIC", "chat-events"),
 		KafkaAutoOffsetReset: getEnvOrDefault("KAFKA_AUTO_OFFSET_RESET", "earliest"),
@@ -91,6 +93,23 @@ func LoadConfigFromEnv() (*Config, error) {
 
 	if config.BotserverURL == "" {
 		return nil, fmt.Errorf("BOTSERVER_URL is required for error reporting")
+	}
+
+	// KAFKA_GROUP_ID has no default on purpose. One Kafka cluster is shared by
+	// production and staging, so the consumer group MUST be env-scoped
+	// (vlab-prod-message-worker / vlab-staging-message-worker) to match the
+	// vlab-<env>-* topic convention. Consumer-group alerting in
+	// devops/kafka-consumer-health/values.yaml is keyed on the exact group name,
+	// so a bare fallback like "message-worker" would let a deploy that forgot
+	// this variable start up healthy-looking while joining a group that NOTHING
+	// alerts on — and message-worker is the sole outbound send path. Failing
+	// loudly at startup is strictly safer than a plausible-looking default.
+	if config.KafkaGroupID == "" {
+		return nil, fmt.Errorf(
+			"KAFKA_GROUP_ID is required and must be env-scoped, e.g. " +
+				"vlab-prod-message-worker or vlab-staging-message-worker; " +
+				"it must also have a matching row in " +
+				"devops/kafka-consumer-health/values.yaml or the group will run unmonitored")
 	}
 
 	return config, nil

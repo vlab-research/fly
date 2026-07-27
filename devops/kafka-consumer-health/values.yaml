@@ -35,8 +35,9 @@ groups:
   - { env: production, group: dinersclub,               topic: vlab-prod-payment,     drainSeconds: 1800, severity: critical }
   # message-worker owns the outbound send path — replybot no longer sends
   # directly, so a wedged worker means zero messages delivered. Page.
-  # ONLY valid once prod message-worker is scaled >0; while it is replicaCount 0
-  # this row fires a permanent ConsumerGroupAbsent.
+  # Prod message-worker is live (replicaCount 1), so this row is active and
+  # correct. If it is ever scaled back to 0, this row will fire a permanent
+  # ConsumerGroupAbsent — remove the row in the same change that scales it down.
   - { env: production, group: vlab-prod-message-worker, topic: vlab-prod-commands,    drainSeconds: 300,  severity: critical }
   - { env: production, group: scribble-messages,        topic: vlab-prod-chat-events, drainSeconds: 600,  severity: warning }
   - { env: production, group: scribble-states,          topic: vlab-prod-state,       drainSeconds: 600,  severity: warning }
