@@ -50,9 +50,7 @@ func LoadConfigFromEnv() (*Config, error) {
 	config := &Config{
 		// Kafka defaults
 		KafkaBrokers:         parseCommaSeparated(getEnvOrDefault("KAFKA_BROKERS", "localhost:9092")),
-		// KAFKA_GROUP_ID is REQUIRED — deliberately no default. See the
-		// validation below for why.
-		KafkaGroupID:         os.Getenv("KAFKA_GROUP_ID"),
+		KafkaGroupID:         os.Getenv("KAFKA_GROUP_ID"), // REQUIRED, no default — see validation below
 		KafkaCommandTopic:    getEnvOrDefault("KAFKA_COMMAND_TOPIC", "commands"),
 		KafkaEventTopic:      getEnvOrDefault("KAFKA_EVENT_TOPIC", "chat-events"),
 		KafkaAutoOffsetReset: getEnvOrDefault("KAFKA_AUTO_OFFSET_RESET", "earliest"),
