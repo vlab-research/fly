@@ -12,6 +12,54 @@ data:
       # Protect the DB: run collectors at most every min_interval (60s).
       collectors:
         - study_health
+        - study_traffic
+
+    # ---------------------------------------------------------------------------
+    # INDEX DISCIPLINE — read before adding or editing any query here.
+    #
+    # chatroach.states has NO index leading with `updated`. The usable indexes are
+    # states_current_state_updated_idx and states_current_state_current_form_updated_idx,
+    # both of which lead with current_state. A query that filters only on
+    # `updated > NOW() - INTERVAL ...` therefore FULL SCANS the table — measured on
+    # prod 2026-07-25: 1,072,959 rows, 1.23s per call. `states` holds one sticky row
+    # per user and is never garbage-collected, so that scan grows forever.
+    #
+    # Pinning current_state = ANY(STATE_MACHINE_STATES) lets CockroachDB build tight
+    # (current_state, updated > t) spans instead: same result, 200-320ms. This is the
+    # same fix applied to dashboard-server's healthSummary (commit 413d6774).
+    #
+    # THE TRADEOFF: a state machine state missing from the enumeration is INVISIBLE
+    # to every metric below — silently dropped from counts AND from the
+    # survey_active_users denominator that survey:error_ratio:1h divides by, which
+    # would inflate the ratio and fire alerts. KEEP IN SYNC with the state machine
+    # (botserver-core) and with dashboard-server's STATE_MACHINE_STATES.
+    # Verified complete against 30 days of prod data on 2026-07-25 (zero rows
+    # outside the list).
+    # ---------------------------------------------------------------------------
+
+    # ---------------------------------------------------------------------------
+    # SHORTCODE 305 IS A REAL SURVEY. Do not special-case it here.
+    #
+    # Until 2026-07-27 every query below carried
+    #   CASE WHEN a.form = '305' THEN 'fallback (no study)' ELSE ... END
+    # which OVERWROTE the real survey name for shortcode 305. That was factually
+    # wrong. 305 is simultaneously (a) the global FALLBACK_FORM target and (b) a
+    # live survey belonging to a real researcher. Verified on prod 2026-07-27:
+    # 50 survey versions carry shortcode '305', it currently resolves to survey
+    # "MENtality" / worldbank@vlab.digital, and over 24h it had 218 users reach END
+    # alongside its 164 FORM_NOT_FOUND errors. Labelling all of that
+    # "fallback (no study)" destroyed a real researcher's real study.
+    #
+    # The special case also caused the bug that triggered the 2026-07 dashboard
+    # review: some panels filtered on study!="fallback (no study)" and some did not,
+    # so a headline stat and the chart beneath it disagreed.
+    #
+    # 305 is now resolved exactly like any other shortcode. EXCLUDING it is the
+    # dashboard reader's decision, made with the shortcode filter — not a decision
+    # baked into the query where nobody can see it. No alert rule matches on the
+    # `study` label (they match on form / error_tag / category), so removing the
+    # CASE changes no alerting behaviour.
+    # ---------------------------------------------------------------------------
 
     # Study health collector: 6 queries exposing survey error/blocked/stuck/expired/active states
     # as Prometheus gauges. All queries window on updated > NOW() - INTERVAL '1 hour' to surface
@@ -21,132 +69,403 @@ data:
     # see the "Taxonomy contract" section of documentation/study-error-alerting.md. The other
     # consumer is dashboard-server/api/health/ (+ the healthSummary query in
     # dashboard-server/queries/states/states.queries.js). Keep all consumers in sync.
+    #
+    # NOTE ON LABEL NAMES: this collector keeps the legacy names `form` (= shortcode)
+    # and `study` (= survey_name) because every alert and recording rule in
+    # devops/alerts/templates/study-health.yaml matches on `form`. The study_traffic
+    # collector below, which no rule reads, uses the accurate names
+    # `shortcode` / `survey` / `researcher` instead. See the comment there.
     collectors:
       - collector_name: study_health
         min_interval: {{ .Values.database.minInterval }}s
         metrics:
-          # survey_error_states{form,error_tag}
-          # Gauges ERROR state counts by form and error_tag (1h window).
+          # survey_error_states{form,error_tag,page,study}
+          # Gauges ERROR state counts by form, error_tag and page (1h window).
+          #
+          # NULL current_form is exported as '(none)', NOT dropped. Dropping it hid 55% of
+          # all platform-fault errors — 37 of 67 INTERNAL/STATE_ACTIONS/NETWORK over 30
+          # days (measured 2026-07-26) — from PlatformInternalErrors, a *paging* alert. A
+          # platform regression frequently has no form precisely BECAUSE the platform
+          # failed before a form was resolved, so those are the errors that matter most.
+          # Per-form alert rules exclude the sentinel; platform-wide rules must not.
+          #
+          # `page` costs almost nothing (pageid is on the row, no join) and is the axis
+          # that separates a channel failure from a study failure.
           - metric_name: survey_error_states
             type: gauge
-            help: "Count of users in ERROR state by form and error_tag (1h window)"
+            help: "Count of users in ERROR state by form, error_tag and page (1h window)"
             key_labels:
               - form
               - error_tag
+              - page
+              - study
             values:
               - value
             query: |
+              WITH agg AS (
+                SELECT
+                  COALESCE(current_form, '(none)') AS form,
+                  COALESCE(error_tag, 'none') AS error_tag,
+                  pageid AS page,
+                  COUNT(*) AS value
+                FROM states
+                WHERE current_state = 'ERROR'
+                  AND updated > NOW() - INTERVAL '1 hour'
+                GROUP BY 1, 2, 3
+              )
               SELECT
-                current_form AS form,
-                COALESCE(error_tag, 'none') AS error_tag,
-                COUNT(*) AS value
-              FROM states
-              WHERE current_state = 'ERROR'
-                AND updated > NOW() - INTERVAL '1 hour'
-                AND current_form IS NOT NULL
-              GROUP BY current_form, error_tag;
+                a.form AS form,
+                a.error_tag AS error_tag,
+                a.page AS page,
+                COALESCE(sv.survey_name, 'unknown') AS study,
+                a.value AS value
+              FROM agg a
+              LEFT JOIN LATERAL (
+                SELECT survey_name
+                FROM surveys
+                WHERE shortcode = a.form
+                ORDER BY created DESC
+                LIMIT 1
+              ) sv ON true;
 
-          # survey_blocked_states{form,category}
-          # Gauges BLOCKED state counts by form and bucketed fb_error_code category (1h window).
-          # Bucketing keeps cardinality bounded (~form×5): attrition / template_missing / rate_limit / unsupported / other.
+          # survey_blocked_states{form,category,code,page,study}
+          # Gauges BLOCKED state counts by form, category, RAW provider code, and page.
+          #
+          # THE RAW `code` IS THE POINT. This metric used to emit `category` only, so the
+          # actual reason a user was blocked was destroyed at the exporter and `other` was
+          # a bucket where signal went to die. The bucketing existed to bound cardinality
+          # that does not exist: measured over 30 days there are exactly SEVEN distinct
+          # fb_error_code values (10, 551, 100, NULL, -1, 190, 200). Collapsing 7 into 5
+          # bought two label values and cost every diagnosis.
+          #
+          # `category` is retained unchanged because the alert rules match on it.
+          #
+          # Two categories split out of `other` on 2026-07-26, both previously silent
+          # because no alert rule references `other`:
+          #
+          #  - provider_error  (code -1): a genuine Meta code, "(#-1) Unexpected internal
+          #    error". The provider failed; we never had a chance. Real and ongoing.
+          #
+          #  - provider_unreachable (code NULL or '0'): we never reached the provider at
+          #    all. `status 0` means no HTTP request was made. All 131 occurrences trace to
+          #    message-worker failing to find a page access token during the July 2026
+          #    staging/production Kafka traffic leak. The NULL is a Go serialization
+          #    artifact — `Code int json:"code,omitempty"` drops the key when the status is
+          #    0 (message-worker/worker.go:317).
+          #    ⚠️ These users are STRUCTURALLY UNRECOVERABLE: dean retries via
+          #    `fb_error_code = ANY($1)` (dean/queries.go:136) and SQL `= ANY` never matches
+          #    NULL, so all 131 have sat BLOCKED for 12 days. Making them visible here is a
+          #    stopgap; the fix is in message-worker. See
+          #    planning/null-fb-error-code-findings.md.
+          #
+          # `page` is the axis that separates a channel failure from a study failure: a
+          # provider outage hits every form served by one page, which a form-only view
+          # renders as N unrelated study problems. Measured cost 94 -> 99 series.
+          #
+          # NULL current_form is exported as '(none)' rather than dropped — see
+          # survey_error_states above.
           - metric_name: survey_blocked_states
             type: gauge
-            help: "Count of users in BLOCKED state by form and fb_error_code category (1h window)"
+            help: "Count of users in BLOCKED state by form, category, raw provider code and page (1h window)"
             key_labels:
               - form
               - category
+              - code
+              - page
+              - study
             values:
               - value
             query: |
+              WITH agg AS (
+                SELECT
+                  COALESCE(current_form, '(none)') AS form,
+                  CASE
+                    WHEN fb_error_code IN ('10', '190', '551') THEN 'attrition'
+                    WHEN fb_error_code = '100' THEN 'template_missing'
+                    WHEN fb_error_code = '2022' THEN 'rate_limit'
+                    WHEN fb_error_code = '200' THEN 'unsupported'
+                    WHEN fb_error_code = '-1' THEN 'provider_error'
+                    WHEN fb_error_code IS NULL OR fb_error_code = '0' THEN 'provider_unreachable'
+                    ELSE 'other'
+                  END AS category,
+                  COALESCE(fb_error_code, '(none)') AS code,
+                  pageid AS page,
+                  COUNT(*) AS value
+                FROM states
+                WHERE current_state = 'BLOCKED'
+                  AND updated > NOW() - INTERVAL '1 hour'
+                GROUP BY 1, 2, 3, 4
+              )
               SELECT
-                current_form AS form,
-                CASE
-                  WHEN fb_error_code IN ('10', '190', '551') THEN 'attrition'
-                  WHEN fb_error_code = '100' THEN 'template_missing'
-                  WHEN fb_error_code = '2022' THEN 'rate_limit'
-                  WHEN fb_error_code = '200' THEN 'unsupported'
-                  ELSE 'other'
-                END AS category,
-                COUNT(*) AS value
-              FROM states
-              WHERE current_state = 'BLOCKED'
-                AND updated > NOW() - INTERVAL '1 hour'
-                AND current_form IS NOT NULL
-              GROUP BY current_form, category;
+                a.form AS form,
+                a.category AS category,
+                a.code AS code,
+                a.page AS page,
+                COALESCE(sv.survey_name, 'unknown') AS study,
+                a.value AS value
+              FROM agg a
+              LEFT JOIN LATERAL (
+                SELECT survey_name
+                FROM surveys
+                WHERE shortcode = a.form
+                ORDER BY created DESC
+                LIMIT 1
+              ) sv ON true;
 
-          # survey_stuck_users{form}
+          # survey_stuck_users{form,study}
           # Gauges count of users with stuck_on_question IS NOT NULL (1h window).
           - metric_name: survey_stuck_users
             type: gauge
             help: "Count of users stuck on a question by form (1h window)"
             key_labels:
               - form
+              - study
             values:
               - value
             query: |
+              WITH agg AS (
+                SELECT
+                  COALESCE(current_form, '(none)') AS form,
+                  COUNT(*) AS value
+                FROM states
+                WHERE stuck_on_question IS NOT NULL
+                  AND updated > NOW() - INTERVAL '1 hour'
+                GROUP BY 1
+              )
               SELECT
-                current_form AS form,
-                COUNT(*) AS value
-              FROM states
-              WHERE stuck_on_question IS NOT NULL
-                AND updated > NOW() - INTERVAL '1 hour'
-                AND current_form IS NOT NULL
-              GROUP BY current_form;
+                a.form AS form,
+                COALESCE(sv.survey_name, 'unknown') AS study,
+                a.value AS value
+              FROM agg a
+              LEFT JOIN LATERAL (
+                SELECT survey_name
+                FROM surveys
+                WHERE shortcode = a.form
+                ORDER BY created DESC
+                LIMIT 1
+              ) sv ON true;
 
-          # survey_expired_waits{form}
+          # survey_expired_waits{form,study}
           # Gauges count of users in WAIT_EXTERNAL_EVENT with expired timeout_date (1h window).
           - metric_name: survey_expired_waits
             type: gauge
             help: "Count of users in WAIT_EXTERNAL_EVENT with expired timeout_date by form (1h window)"
             key_labels:
               - form
+              - study
             values:
               - value
             query: |
+              WITH agg AS (
+                SELECT
+                  COALESCE(current_form, '(none)') AS form,
+                  COUNT(*) AS value
+                FROM states
+                WHERE current_state = 'WAIT_EXTERNAL_EVENT'
+                  AND timeout_date < NOW()
+                  AND updated > NOW() - INTERVAL '1 hour'
+                GROUP BY 1
+              )
               SELECT
-                current_form AS form,
-                COUNT(*) AS value
-              FROM states
-              WHERE current_state = 'WAIT_EXTERNAL_EVENT'
-                AND timeout_date < NOW()
-                AND updated > NOW() - INTERVAL '1 hour'
-                AND current_form IS NOT NULL
-              GROUP BY current_form;
+                a.form AS form,
+                COALESCE(sv.survey_name, 'unknown') AS study,
+                a.value AS value
+              FROM agg a
+              LEFT JOIN LATERAL (
+                SELECT survey_name
+                FROM surveys
+                WHERE shortcode = a.form
+                ORDER BY created DESC
+                LIMIT 1
+              ) sv ON true;
 
-          # survey_active_users{form}
+          # survey_active_users{form,study}
           # Gauges count of all users updated in the last hour (DENOMINATOR for error proportion).
+          # current_state enumeration is for index spans, not filtering — see INDEX DISCIPLINE above.
           - metric_name: survey_active_users
             type: gauge
             help: "Count of active users by form (1h window, denominator for error/blocked rates)"
             key_labels:
               - form
+              - study
             values:
               - value
             query: |
+              WITH agg AS (
+                SELECT
+                  COALESCE(current_form, '(none)') AS form,
+                  COUNT(*) AS value
+                FROM states
+                WHERE current_state = ANY(ARRAY['START','RESPONDING','QOUT','END','BLOCKED',
+                                                'ERROR','WAIT_EXTERNAL_EVENT','USER_BLOCKED','RESET','OFF'])
+                  AND updated > NOW() - INTERVAL '1 hour'
+                GROUP BY 1
+              )
               SELECT
-                current_form AS form,
-                COUNT(*) AS value
-              FROM states
-              WHERE updated > NOW() - INTERVAL '1 hour'
-                AND current_form IS NOT NULL
-              GROUP BY current_form;
+                a.form AS form,
+                COALESCE(sv.survey_name, 'unknown') AS study,
+                a.value AS value
+              FROM agg a
+              LEFT JOIN LATERAL (
+                SELECT survey_name
+                FROM surveys
+                WHERE shortcode = a.form
+                ORDER BY created DESC
+                LIMIT 1
+              ) sv ON true;
 
-          # survey_state_total{form,state}
-          # Gauges snapshot of current_state counts by form (1h window to match other metrics and reduce load).
-          - metric_name: survey_state_total
+      # RETIRED 2026-07-25: survey_state_total{form,state} (1h state distribution).
+      # Superseded by survey_recent_states below, which answers the same question on a
+      # 5m window and adds the study / page / page_name dimensions. Nothing alerted on
+      # it; its only consumer was one Study Health panel, removed in the same change.
+
+      # -------------------------------------------------------------------------
+      # Live traffic collector: ONE query answering "how many people are in each
+      # state right now, whose survey is it, and on which page".
+      #
+      # WHY 5 MINUTES, not the 1h used by study_health: a 1h window smears a spike
+      # across an hour and keeps it visible for an hour after it has stopped. At a 60s
+      # scrape, a 5m window is a live traffic curve — it rises and falls with reality,
+      # which is what makes an ERROR spike legible.
+      #
+      # This collector is for LOOKING AT. No alert rules read it. The 1h study_health
+      # metrics remain the alerting substrate, untouched. That is also why this
+      # collector is free to use ACCURATE LABEL NAMES while study_health keeps its
+      # legacy ones:
+      #
+      #     study_traffic          study_health      what it actually is
+      #     ------------------     --------------    -------------------------------
+      #     researcher             (absent)          users.email — who owns the survey
+      #     survey                 study             surveys.survey_name
+      #     shortcode              form              surveys.shortcode
+      #
+      # Renaming here is safe precisely because nothing but the two Grafana
+      # dashboards reads this metric, and both were rewritten alongside this change.
+      # Renaming `form` in study_health is NOT safe — every alert rule matches on it.
+      # -------------------------------------------------------------------------
+      - collector_name: study_traffic
+        min_interval: {{ .Values.database.minInterval }}s
+        metrics:
+          # survey_recent_states{window,state,reason,researcher,survey,shortcode,page,page_name}
+          #
+          # THREE WINDOWS FROM ONE SCAN. `window` is a value_label: sql_exporter emits one
+          # series per value column, labelled with that column's name (5m / 1h / 24h).
+          # The alternative — three separate queries — would scan the same index spans
+          # three times; COUNT(*) FILTER buckets them in a single pass instead.
+          #
+          # Because `states` holds one sticky row per (user, page), EVERY window is a
+          # DISTINCT-USER count, not a sum of buckets. window="24h" is "distinct people we
+          # talked to today" (2,953 on 2026-07-25), window="5m" is "who is here right now"
+          # (12 at the same moment). They answer different questions; they are not scaled
+          # versions of each other.
+          #
+          # !! Any PromQL over this metric MUST pin the window, e.g.
+          # !!   sum by (state) (survey_recent_states{window="5m"})
+          # !! Omitting it sums all three windows together and silently triple-counts.
+          # !! Both dashboards defend against this structurally: `window` is a
+          # !! SINGLE-SELECT variable with no "All" option, so `window="$window"` can
+          # !! never expand to more than one window. Do not make it multi-select.
+          #
+          # THE `reason` LABEL IS STATE-DEPENDENT, deliberately. It is the error_tag for
+          # ERROR, the raw Facebook error code for BLOCKED, and empty for every other
+          # state. One label carries "why is this person here" for the only two states
+          # where that question has an answer, which is what lets a single expression
+          # (`sum by (reason) (...{state="ERROR"})`) drill down without a second metric.
+          # Empty label values are indistinguishable from absent ones in Prometheus, so
+          # `reason!=""` cleanly selects "only the states that have a reason".
+          #
+          # AGGREGATE FIRST, THEN RESOLVE LABELS. The researcher/survey/page joins run
+          # against the ~125 grouped rows, not the ~2,953 raw rows. Joining before the
+          # GROUP BY runs the LATERAL once per row and measured 2x slower (1.03s vs
+          # 420-500ms) — and that gap widens with traffic, since the group count grows far
+          # slower than the row count.
+          #
+          # Labels are resolved in SQL rather than by a PromQL `group_left` join against
+          # an info metric, deliberately: an info-metric join silently DROPS any series
+          # whose shortcode has no match, which on a traffic board means traffic vanishing
+          # with no indication. COALESCE guarantees every row is emitted — an unmapped
+          # shortcode shows up as survey="unknown" / researcher="unknown" instead of
+          # disappearing. The researcher join is COALESCE-guarded the same way and for the
+          # same reason: measured on prod 2026-07-27, 3 of 125 groups have no researcher
+          # (they are the '(none)' shortcode and shortcodes with no surveys row), and they
+          # must still be counted.
+          #
+          # Survey/researcher resolution takes the NEWEST surveys row for the shortcode.
+          # The fully correct mapping is version-aware (the row where
+          # created <= form_start_time), as dashboard-server does it, but that is a per-row
+          # correlated subquery. For recently-active users the newest definition is the
+          # right one in all but pathological cases (a survey renamed mid-conversation).
+          # Note this matters more for `researcher` than it used to for `survey`: a
+          # shortcode reassigned between researchers would attribute historical traffic to
+          # the new owner. No such reassignment exists in prod today.
+          #
+          # `users` is unqualified like `states` / `surveys` / `credentials` — the DSN
+          # points at the chatroach database and CockroachDB's default search_path
+          # ($user, public) resolves it to chatroach.public.users, never system.users.
+          #
+          # Cardinality: window x state x reason x shortcode x page. researcher/survey/
+          # page_name are functionally dependent on shortcode/page so they do NOT multiply
+          # it — adding `researcher` cost ZERO new series (verified: the group count is
+          # identical with and without the users join). Measured on prod 2026-07-27:
+          # 125-131 groups over 24h => ~375-395 series, drifting by a few groups minute to
+          # minute as new users arrive. Query cost 420-500ms.
+          # credentials.facebook_page_id is UNIQUE, so that join cannot fan out.
+          # surveys is deduped to one row by the LATERAL's LIMIT 1, so the users join
+          # cannot fan out either.
+          - metric_name: survey_recent_states
             type: gauge
-            help: "Snapshot of current_state counts by form (1h window)"
+            help: "Distinct users active within the labelled window, by state, reason, researcher, survey, shortcode and page"
             key_labels:
-              - form
               - state
+              - reason
+              - researcher
+              - survey
+              - shortcode
+              - page
+              - page_name
+            value_label: window
             values:
-              - value
+              - "5m"
+              - "1h"
+              - "24h"
             query: |
+              WITH agg AS (
+                SELECT
+                  current_state AS state,
+                  COALESCE(current_form, '(none)') AS shortcode,
+                  pageid AS page,
+                  CASE
+                    WHEN current_state = 'ERROR'   THEN COALESCE(error_tag, '(untagged)')
+                    WHEN current_state = 'BLOCKED' THEN COALESCE(fb_error_code, '(none)')
+                    ELSE ''
+                  END AS reason,
+                  COUNT(*) FILTER (WHERE updated > NOW() - INTERVAL '5 minutes') AS c5m,
+                  COUNT(*) FILTER (WHERE updated > NOW() - INTERVAL '1 hour') AS c1h,
+                  COUNT(*) AS c24h
+                FROM states
+                WHERE current_state = ANY(ARRAY['START','RESPONDING','QOUT','END','BLOCKED',
+                                                'ERROR','WAIT_EXTERNAL_EVENT','USER_BLOCKED','RESET','OFF'])
+                  AND updated > NOW() - INTERVAL '24 hours'
+                GROUP BY 1, 2, 3, 4
+              )
               SELECT
-                current_form AS form,
-                current_state AS state,
-                COUNT(*) AS value
-              FROM states
-              WHERE updated > NOW() - INTERVAL '1 hour'
-                AND current_form IS NOT NULL
-              GROUP BY current_form, current_state;
+                a.state AS state,
+                a.reason AS reason,
+                COALESCE(sv.email, 'unknown') AS researcher,
+                COALESCE(sv.survey_name, 'unknown') AS survey,
+                a.shortcode AS shortcode,
+                a.page AS page,
+                COALESCE(cr.details->>'name', a.page) AS page_name,
+                a.c5m AS "5m",
+                a.c1h AS "1h",
+                a.c24h AS "24h"
+              FROM agg a
+              LEFT JOIN LATERAL (
+                SELECT s.survey_name, u.email
+                FROM surveys s
+                LEFT JOIN users u ON u.id = s.userid
+                WHERE s.shortcode = a.shortcode
+                ORDER BY s.created DESC
+                LIMIT 1
+              ) sv ON true
+              LEFT JOIN credentials cr ON cr.facebook_page_id = a.page;

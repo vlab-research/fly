@@ -15,11 +15,53 @@ spec:
       rules:
         # Recording rule: error ratio per form (1h window).
         # Denominator clamped to 1 to prevent div-by-zero for inactive forms.
+        #
+        # form!="(none)" excludes states with no current_form. This is a PER-FORM
+        # record — a ratio for "(none)" is not a study and cannot be actioned, and
+        # without the guard those errors would land in a synthetic form series that
+        # SurveyErrorSpike would then page on. Platform-wide rules deliberately do
+        # NOT carry this guard; see the note above PlatformInternalErrors.
         - record: survey:error_ratio:1h
           expr: |
-            sum by (form) (survey_error_states)
+            sum by (form) (survey_error_states{form!="{{ .Values.studyHealth.nullForm }}"})
             /
-            clamp_min(sum by (form) (survey_active_users), 1)
+            clamp_min(sum by (form) (survey_active_users{form!="{{ .Values.studyHealth.nullForm }}"}), 1)
+
+        # Fleet-wide error ratio — what "normal" looks like right now. The fallback form
+        # is excluded from BOTH sides: it is 100% error by design and would drag the
+        # baseline up, masking a real study regression.
+        - record: survey:error_ratio:fleet:1h
+          expr: |
+            sum(survey_error_states{form!="{{ .Values.studyHealth.fallbackForm }}", form!="{{ .Values.studyHealth.nullForm }}"})
+            /
+            clamp_min(sum(survey_active_users{form!="{{ .Values.studyHealth.fallbackForm }}", form!="{{ .Values.studyHealth.nullForm }}"}), 1)
+
+        # How far above the fleet baseline a single study sits.
+        #
+        # THIS IS THE COLUMN THAT TELLS YOU WHICH BOARD TO BE ON. A 40% error ratio means
+        # something completely different when the fleet is at 4% (that study is broken)
+        # than when the fleet is at 35% (everything is broken — go to Live Traffic).
+        # During a platform-wide event every study rises together and excess collapses
+        # toward zero. That asymmetry is the point.
+        - record: survey:error_ratio_excess:1h
+          expr: |
+            survey:error_ratio:1h{form!="{{ .Values.studyHealth.fallbackForm }}", form!="{{ .Values.studyHealth.nullForm }}"}
+            - on() group_left()
+            survey:error_ratio:fleet:1h
+
+        # Breadth — how many distinct studies carry platform-fault vs study-fault errors.
+        # `> 0` is MANDATORY: these gauges emit zero-valued series for every group seen in
+        # the scan window, so a bare count() counts the whole fleet (this exact bug shipped
+        # to Live Traffic's stat panels on 2026-07-25).
+        # `or vector(0)` keeps the series alive when nothing is erroring, so Grafana renders
+        # a reassuring 0 instead of "No data".
+        - record: survey:erroring_studies:platform:1h
+          expr: |
+            count(count by (study) (survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"} > 0)) or vector(0)
+
+        - record: survey:erroring_studies:study_side:1h
+          expr: |
+            count(count by (study) (survey_error_states{error_tag!~"INTERNAL|STATE_ACTIONS|NETWORK", form!="{{ .Values.studyHealth.fallbackForm }}"} > 0)) or vector(0)
 
     - name: vlab-study-health-alerts
       interval: 1m
@@ -27,6 +69,13 @@ spec:
         # Platform-wide internal errors (INTERNAL, STATE_ACTIONS, NETWORK) indicate
         # a platform regression (DB, state machine, network, infra). Rare and always
         # actionable. Pages immediately.
+        #
+        # !! DELIBERATELY NO form!="(none)" GUARD. This is a bare sum across every
+        # !! form, and states with NO current_form are exactly the ones this alert was
+        # !! blind to before 2026-07-26 — 37 of 67 platform errors over 30 days. A
+        # !! platform regression frequently has no form precisely BECAUSE the platform
+        # !! failed before a form was resolved. Adding a guard here would restore the
+        # !! bug. Same reasoning for PlatformRateLimited below.
         - alert: PlatformInternalErrors
           expr: |
             sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"}) >= {{ .Values.studyHealth.platformInternalErrorsThreshold }}
@@ -66,7 +115,7 @@ spec:
         # a study configuration issue, not platform-wide. Create a ticket for that study.
         - alert: SurveyTemplateMissing
           expr: |
-            sum by (form) (survey_blocked_states{category="template_missing"}) >= {{ .Values.studyHealth.surveyTemplateMissingThreshold }}
+            sum by (form) (survey_blocked_states{category="template_missing", form!="{{ .Values.studyHealth.nullForm }}"}) >= {{ .Values.studyHealth.surveyTemplateMissingThreshold }}
           for: {{ .Values.studyHealth.surveyTemplateMissingFor }}
           labels:
             severity: warning
@@ -87,15 +136,15 @@ spec:
         - alert: SurveyErrorSpike
           expr: |
             (
-              survey:error_ratio:1h{form!="{{ .Values.studyHealth.fallbackForm }}"} > {{ .Values.studyHealth.surveyErrorRatioThreshold }}
+              survey:error_ratio:1h{form!="{{ .Values.studyHealth.fallbackForm }}", form!="{{ .Values.studyHealth.nullForm }}"} > {{ .Values.studyHealth.surveyErrorRatioThreshold }}
             )
             and on(form)
             (
-              sum by (form) (survey_error_states) >= {{ .Values.studyHealth.surveyErrorMinErrors }}
+              sum by (form) (survey_error_states{form!="{{ .Values.studyHealth.nullForm }}"}) >= {{ .Values.studyHealth.surveyErrorMinErrors }}
             )
             and on(form)
             (
-              sum by (form) (survey_active_users) >= {{ .Values.studyHealth.surveyErrorMinActiveUsers }}
+              sum by (form) (survey_active_users{form!="{{ .Values.studyHealth.nullForm }}"}) >= {{ .Values.studyHealth.surveyErrorMinActiveUsers }}
             )
           for: {{ .Values.studyHealth.surveyErrorSpikeFor }}
           labels:
@@ -119,11 +168,11 @@ spec:
           expr: |
             count(
               (
-                survey:error_ratio:1h{form!="{{ .Values.studyHealth.fallbackForm }}"} > {{ .Values.studyHealth.multiSurveyErrorRatioThreshold }}
+                survey:error_ratio:1h{form!="{{ .Values.studyHealth.fallbackForm }}", form!="{{ .Values.studyHealth.nullForm }}"} > {{ .Values.studyHealth.multiSurveyErrorRatioThreshold }}
               )
               and on(form)
               (
-                sum by (form) (survey_active_users) >= {{ .Values.studyHealth.multiSurveyErrorMinActiveUsers }}
+                sum by (form) (survey_active_users{form!="{{ .Values.studyHealth.nullForm }}"}) >= {{ .Values.studyHealth.multiSurveyErrorMinActiveUsers }}
               )
             ) >= {{ .Values.studyHealth.multiSurveyErrorCount }}
           for: {{ .Values.studyHealth.multiSurveyErrorFor }}
@@ -146,7 +195,7 @@ spec:
         # a ticket for that study.
         - alert: SurveyStuckUsersSpike
           expr: |
-            survey_stuck_users >= {{ .Values.studyHealth.surveyStuckUsersThreshold }}
+            survey_stuck_users{form!="{{ .Values.studyHealth.nullForm }}"} >= {{ .Values.studyHealth.surveyStuckUsersThreshold }}
           for: {{ .Values.studyHealth.surveyStuckUsersFor }}
           labels:
             severity: warning
@@ -161,8 +210,41 @@ spec:
               (v1, tunable — current per-form stuck count is 0-2).
             runbook_url: "{{ $runbook }}#surveystuckusersspike"
 
+        # The messaging provider is failing us: either returning its own internal errors
+        # (provider_error / Meta code -1) or unreachable before we sent anything
+        # (provider_unreachable / code NULL or 0). Both were previously bucketed into
+        # `other`, which no rule references — so this entire class was silent.
+        #
+        # by (page), NOT by (form) — a provider failure is a CHANNEL fault. It hits every
+        # form on that page, so a form-scoped rule fires N times and looks like N
+        # unrelated study problems instead of one outage. No form!="(none)" guard for the
+        # same reason: this is not a per-study alert.
+        - alert: ProviderErrors
+          expr: |
+            sum by (page) (survey_blocked_states{category=~"provider_error|provider_unreachable"}) >= {{ .Values.studyHealth.providerErrorsThreshold }}
+          for: {{ .Values.studyHealth.providerErrorsFor }}
+          labels:
+            severity: critical
+            component: study-health
+          annotations:
+            summary: "Messaging provider failing on page {{`{{ $labels.page }}`}} ({{`{{ $value }}`}} users blocked)"
+            description: >-
+              {{`{{ $value }}`}} users on page {{`{{ $labels.page }}`}} were blocked in the past
+              hour by a provider-side failure — either Meta returning its own internal error
+              (code -1) or the platform never reaching Meta at all (code NULL/0, meaning no
+              HTTP request was made, typically a missing page access token). These users are
+              NOT churn and NOT a study misconfiguration: they wanted to participate and the
+              channel failed them. Check the `code` label to tell the two apart.
+              Threshold: {{ .Values.studyHealth.providerErrorsThreshold }} sustained
+              {{ .Values.studyHealth.providerErrorsFor }} (v1, calibrated against a measured
+              1-11/hr background — tunable).
+            runbook_url: "{{ $runbook }}#providererrors"
+
         # Users in WAIT_EXTERNAL_EVENT state past timeout. Dean (external event processor)
         # is not clearing timeouts. Platform issue requiring investigation.
+        #
+        # No form!="(none)" guard — deliberate, same reasoning as PlatformInternalErrors:
+        # this is a bare platform-wide sum and Dean stalling is not a per-study fault.
         - alert: DeanExpiredWaits
           expr: |
             sum(survey_expired_waits) >= {{ .Values.studyHealth.deanExpiredWaitsThreshold }}

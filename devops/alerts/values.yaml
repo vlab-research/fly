@@ -67,6 +67,17 @@ studyHealth:
   # from per-study alerts.
   fallbackForm: "305"
 
+  # Sentinel `form` label for states with no current_form. Until 2026-07-26 the
+  # exporter dropped these rows entirely (`AND current_form IS NOT NULL`), which
+  # hid 55% of all platform-fault errors — 37 of 67 INTERNAL/STATE_ACTIONS/NETWORK
+  # errors over 30 days — from PlatformInternalErrors, a *paging* alert.
+  #
+  # They are now exported under this sentinel. PER-FORM alerts must EXCLUDE it (a
+  # form-scoped ticket for "(none)" is meaningless and unactionable), while
+  # PLATFORM-WIDE alerts must INCLUDE it — that inclusion is the entire fix.
+  # See planning/core-visibility-alerting-plan.md W2.
+  nullForm: "(none)"
+
   # PlatformInternalErrors: INTERNAL/STATE_ACTIONS/NETWORK error tags (never
   # expected, always actionable platform regression). Pages immediately.
   platformInternalErrorsThreshold: 5
@@ -105,3 +116,26 @@ studyHealth:
   # Platform issue (Dean down / broken). Warning.
   deanExpiredWaitsThreshold: 10
   deanExpiredWaitsFor: "15m"
+
+  # ProviderErrors: the messaging provider is failing us — either returning its own
+  # internal errors (category provider_error, Meta code -1) or unreachable before we
+  # ever sent a request (category provider_unreachable, code NULL/0).
+  #
+  # Scoped `by (page)`, NOT by form: a provider failure hits every form served by that
+  # page, so a form-scoped rule fires N times and reads as N unrelated study problems
+  # instead of one channel outage.
+  #
+  # Both classes were previously invisible — they fell into `other`, which no rule has
+  # ever referenced. 36 users blocked in 24h produced no alert at all.
+  #
+  # PAGES (severity: critical) by explicit decision: a provider outage silently eats
+  # real participants and nothing else in the system reports it. Demote to warning if
+  # it proves chatty — that is the expected direction and the safe one.
+  #
+  # THRESHOLD IS v1 AND WILL NEED TUNING. Calibrated against a measured background of
+  # 1-11 provider errors/hr (2026-07-26). Deliberately prefers a long `for:` over a
+  # high threshold: a provider blip that self-heals in minutes must not page, but a
+  # sustained half hour at any volume should. Revisit after a week of data — see
+  # planning/core-visibility-alerting-plan.md W5.
+  providerErrorsThreshold: 10
+  providerErrorsFor: "30m"
