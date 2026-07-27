@@ -30,7 +30,7 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 versionDashboard: &vdashboard v0.0.68-wa
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
-versionReplybot: &vreplybot v0.0.210-wa
+versionReplybot: &vreplybot v0.0.211-wa
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32
@@ -38,7 +38,7 @@ versionDinersclub: &vdinersclub v0.0.43-wa
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.16-wa
+versionMessageWorker: &vmessageworker v0.1.17-wa
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
 # Kafka cluster, Prometheus and kminion are singletons shared by prod+staging,
