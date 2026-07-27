@@ -2059,6 +2059,371 @@
       "title": "Drill down — exact rows",
       "description": "Full-depth tables and per-scope history. Every number here reconciles exactly with the totals above: same expression, fewer aggregations. Collapsed by default.",
       "type": "row"
+    },
+    {
+      "collapsed": true,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 93,
+      "type": "row",
+      "title": "Alerting signals — what the pager actually watches",
+      "description": "The four alerts with no other home: SurveyStuckUsersSpike, SurveyErrorSpike, MultiSurveyErrorRegression, DeanExpiredWaits. These read the study_health collector (1h window, form/study labels, no researcher), which is a different substrate from the rest of this board — so numbers here will NOT tie out against the panels above. They are here so that an alert has somewhere to point, not to reconcile.",
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "description": "Users repeating the same question — the signal for a validation loop or a question people can't answer. Alert SurveyStuckUsersSpike fires at >= 10 per shortcode sustained 20m; the marker sits at that line.\n\nNOTE: this panel reads the study_health collector, NOT survey_recent_states. It is fixed at a 1h window and ignores the $window selector, and it carries no researcher label — so the Researcher filter does not apply here. This is the same data the alert rules read, which is the point: what pages you is what you see.",
+          "gridPos": {
+            "h": 8,
+            "w": 9,
+            "x": 0,
+            "y": 40
+          },
+          "id": 120,
+          "title": "Stuck users by shortcode (1h)",
+          "type": "bargauge",
+          "pluginVersion": "7.4.2",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
+                ]
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (form, study) (survey_stuck_users{form=~\"$shortcode\", study=~\"$survey\", form!~\"$exclude_shortcode\"}) > 0",
+              "legendFormat": "{{study}} / {{form}}",
+              "refId": "A",
+              "interval": ""
+            }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Share of active users in ERROR, per shortcode. SurveyErrorSpike pages above 50% (with >= 5 errors and >= 10 active users); MultiSurveyErrorRegression pages when >= 3 shortcodes exceed 30% at once. Markers sit at 30% and 50%.\n\nThe recording rule aggregates `sum by (form)`, so this panel has no study or researcher label — only the Shortcode and Exclude filters apply.\n\nNOTE: this panel reads the study_health collector, NOT survey_recent_states. It is fixed at a 1h window and ignores the $window selector, and it carries no researcher label — so the Researcher filter does not apply here. This is the same data the alert rules read, which is the point: what pages you is what you see.",
+          "gridPos": {
+            "h": 8,
+            "w": 9,
+            "x": 9,
+            "y": 40
+          },
+          "id": 121,
+          "title": "Error ratio by shortcode (1h)",
+          "type": "bargauge",
+          "pluginVersion": "7.4.2",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "unit": "percentunit",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.3
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.5
+                  }
+                ]
+              },
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            }
+          },
+          "targets": [
+            {
+              "expr": "survey:error_ratio:1h{form=~\"$shortcode\", form!~\"$exclude_shortcode\"} > 0",
+              "legendFormat": "{{form}}",
+              "refId": "A",
+              "interval": ""
+            }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Users whose WAIT_EXTERNAL_EVENT timeout passed without the event arriving. DeanExpiredWaits fires on the FLEET TOTAL at >= 10, so this stat is deliberately unscoped by shortcode — it shows exactly what the alert evaluates. Narrow means one study's integration; broad means dean itself is not running.\n\nNOTE: this panel reads the study_health collector, NOT survey_recent_states. It is fixed at a 1h window and ignores the $window selector, and it carries no researcher label — so the Researcher filter does not apply here. This is the same data the alert rules read, which is the point: what pages you is what you see.",
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 40
+          },
+          "id": 122,
+          "title": "Expired waits — fleet total (1h)",
+          "type": "stat",
+          "pluginVersion": "7.4.2",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
+                ]
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "textMode": "auto",
+            "text": {},
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(survey_expired_waits)",
+              "legendFormat": "",
+              "refId": "A",
+              "interval": ""
+            }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Trend behind the bar gauge. A step change usually means a form edit; a slow climb usually means a question people can't answer.\n\nNOTE: this panel reads the study_health collector, NOT survey_recent_states. It is fixed at a 1h window and ignores the $window selector, and it carries no researcher label — so the Researcher filter does not apply here. This is the same data the alert rules read, which is the point: what pages you is what you see.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 48
+          },
+          "id": 123,
+          "title": "Stuck users — over time (1h)",
+          "type": "timeseries",
+          "pluginVersion": "7.4.2",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "custom": {
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "showPoints": "never",
+                "spanNulls": false,
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "calcs": [
+                "last",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (form, study) (survey_stuck_users{form=~\"$shortcode\", study=~\"$survey\", form!~\"$exclude_shortcode\"}) > 0",
+              "legendFormat": "{{study}} / {{form}}",
+              "refId": "A",
+              "interval": ""
+            }
+          ]
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Every study rising together points at the platform; one study diverging points at that study. That asymmetry is the discriminator.\n\nNOTE: this panel reads the study_health collector, NOT survey_recent_states. It is fixed at a 1h window and ignores the $window selector, and it carries no researcher label — so the Researcher filter does not apply here. This is the same data the alert rules read, which is the point: what pages you is what you see.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 48
+          },
+          "id": 124,
+          "title": "Error ratio — over time (1h)",
+          "type": "timeseries",
+          "pluginVersion": "7.4.2",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "unit": "percentunit",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "custom": {
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "showPoints": "never",
+                "spanNulls": false,
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "max": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "calcs": [
+                "last",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "right"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "expr": "survey:error_ratio:1h{form=~\"$shortcode\", form!~\"$exclude_shortcode\"} > 0",
+              "legendFormat": "{{form}}",
+              "refId": "A",
+              "interval": ""
+            }
+          ]
+        }
+      ]
     }
   ],
   "refresh": "1m",
