@@ -420,13 +420,19 @@ dashboard:
       value: 'http://gbv-formcentral'
     - name: TYPEFORM_REDIRECT_URL
       value: 'https://fly.vlab.digital/surveys/auth'
-    # PINNED TO v22.0 DELIBERATELY. Bumping this to v25.0 (2026-07-26) broke
-    # message-template creation on pages the user owns -- POST /<page>/
-    # message_templates started 502ing on a pages_utility_messaging permission
-    # that v22.0 did not require. Do NOT raise this to match staging: staging
-    # runs a different Facebook app with different granted permissions, so a
-    # green staging run says nothing about production's app. Raise it only once
-    # the production app actually holds the permission.
+    # Pinned to v22.0 -- the version production ran before 2026-07-26, with no
+    # evidence anything needs a newer one.
+    #
+    # It was briefly raised to v25.0 that day for "parity with staging". That
+    # reasoning is faulty and should not be repeated: staging runs a DIFFERENT
+    # Facebook app with different granted permissions and different pages, so a
+    # green staging run proves nothing about production. Graph API version is
+    # environment-coupled config, not something to sync for tidiness.
+    #
+    # (It was reverted while investigating a template-creation failure. The
+    # version turned out NOT to be the cause -- creation failed identically on
+    # v22.0, and worked for other pages under other users on the same version,
+    # so that was a page-level Meta permission issue, not an API-version one.)
     - name: FACEBOOK_GRAPH_URL
       value: 'https://graph.facebook.com/v22.0'
     - name: KAFKA_BROKERS
