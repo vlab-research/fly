@@ -383,21 +383,43 @@ data:
           # Labels are resolved in SQL rather than by a PromQL `group_left` join against
           # an info metric, deliberately: an info-metric join silently DROPS any series
           # whose shortcode has no match, which on a traffic board means traffic vanishing
-          # with no indication. COALESCE guarantees every row is emitted — an unmapped
-          # shortcode shows up as survey="unknown" / researcher="unknown" instead of
-          # disappearing. The researcher join is COALESCE-guarded the same way and for the
-          # same reason: measured on prod 2026-07-27, 3 of 125 groups have no researcher
-          # (they are the '(none)' shortcode and shortcodes with no surveys row), and they
-          # must still be counted.
+          # with no indication. COALESCE guarantees every row is emitted — an unresolved
+          # shortcode shows up as survey="unknown" instead of disappearing.
           #
-          # Survey/researcher resolution takes the NEWEST surveys row for the shortcode.
-          # The fully correct mapping is version-aware (the row where
-          # created <= form_start_time), as dashboard-server does it, but that is a per-row
-          # correlated subquery. For recently-active users the newest definition is the
-          # right one in all but pathological cases (a survey renamed mid-conversation).
-          # Note this matters more for `researcher` than it used to for `survey`: a
-          # shortcode reassigned between researchers would attribute historical traffic to
-          # the new owner. No such reassignment exists in prod today.
+          # !! SHORTCODES ARE NOT GLOBALLY UNIQUE. There is no UNIQUE constraint on
+          # !! (userid, shortcode) — measured on prod 2026-07-27, 42 of 1040 shortcodes are
+          # !! owned by more than one researcher ('305' by 11, 'reset' by 6), covering 450
+          # !! users in a 24h window. Resolving a shortcode WITHOUT scoping it to an account
+          # !! therefore attributes one researcher's traffic to another. That bug shipped
+          # !! briefly: 166 users on Mark's "TM Project" page hit the global fallback
+          # !! shortcode 305, which resolves to worldbank's real "MENtality" survey, and the
+          # !! board credited them to worldbank.
+          #
+          # So resolution mirrors what formcentral actually does (getSurveyByParams): the
+          # PAGE decides the account, and the shortcode is looked up WITHIN that account.
+          #
+          #   researcher  <- credentials.userid for the page (facebook_page_id is UNIQUE,
+          #                  so this is unambiguous and cannot fan out). This is the right
+          #                  source of truth for "whose traffic is this": the participant
+          #                  arrived through that researcher's page, whatever form they
+          #                  landed on.
+          #   survey      <- newest surveys row matching BOTH shortcode AND that account.
+          #                  No match => "unknown", which is the honest answer for fallback
+          #                  traffic and for typo'd/case-wrong shortcodes in referral links.
+          #
+          # Consequence worth understanding: fallback traffic now reads
+          # researcher="<page owner>", survey="unknown" rather than being credited to
+          # whoever happens to own a survey with that shortcode. survey="unknown" on a page
+          # with real traffic is a SIGNAL — a broken referral link, not a gap in the data.
+          #
+          # Version-awareness is still approximate: the newest surveys row for the account
+          # wins, rather than the row where created <= form_start_time as dashboard-server
+          # does. That is a per-row correlated subquery; for recently-active users the
+          # newest row is right except when a survey is renamed mid-conversation.
+          #
+          # Measured on prod 2026-07-27 after this change: 129 groups, 1 with no researcher
+          # (a page with no credentials row), 9 with survey="unknown" (fallback + the
+          # case-wrong shortcode variants), 2,770 users over 24h.
           #
           # `users` is unqualified like `states` / `surveys` / `credentials` — the DSN
           # points at the chatroach database and CockroachDB's default search_path
@@ -451,7 +473,7 @@ data:
               SELECT
                 a.state AS state,
                 a.reason AS reason,
-                COALESCE(sv.email, 'unknown') AS researcher,
+                COALESCE(pu.email, 'unknown') AS researcher,
                 COALESCE(sv.survey_name, 'unknown') AS survey,
                 a.shortcode AS shortcode,
                 a.page AS page,
@@ -460,12 +482,13 @@ data:
                 a.c1h AS "1h",
                 a.c24h AS "24h"
               FROM agg a
+              LEFT JOIN credentials cr ON cr.facebook_page_id = a.page
+              LEFT JOIN users pu ON pu.id = cr.userid
               LEFT JOIN LATERAL (
-                SELECT s.survey_name, u.email
+                SELECT s.survey_name
                 FROM surveys s
-                LEFT JOIN users u ON u.id = s.userid
                 WHERE s.shortcode = a.shortcode
+                  AND s.userid = cr.userid
                 ORDER BY s.created DESC
                 LIMIT 1
-              ) sv ON true
-              LEFT JOIN credentials cr ON cr.facebook_page_id = a.page;
+              ) sv ON true;
