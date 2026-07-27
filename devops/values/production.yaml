@@ -420,21 +420,22 @@ dashboard:
       value: 'http://gbv-formcentral'
     - name: TYPEFORM_REDIRECT_URL
       value: 'https://fly.vlab.digital/surveys/auth'
-    # Pinned to v22.0 -- the version production ran before 2026-07-26, with no
-    # evidence anything needs a newer one.
+    # v25.0, matching replybot and message-worker.
     #
-    # It was briefly raised to v25.0 that day for "parity with staging". That
-    # reasoning is faulty and should not be repeated: staging runs a DIFFERENT
-    # Facebook app with different granted permissions and different pages, so a
-    # green staging run proves nothing about production. Graph API version is
-    # environment-coupled config, not something to sync for tidiness.
+    # Raised from v22.0 on 2026-07-26. It was briefly reverted that day while
+    # investigating a message-template creation failure, but the version was
+    # NOT the cause: creation failed identically on v22.0, then succeeded for
+    # other pages under other users on the same version, and finally succeeded
+    # on the original page once its Meta page-level permission was sorted.
+    # Restored to v25.0 to confirm that conclusion holds.
     #
-    # (It was reverted while investigating a template-creation failure. The
-    # version turned out NOT to be the cause -- creation failed identically on
-    # v22.0, and worked for other pages under other users on the same version,
-    # so that was a page-level Meta permission issue, not an API-version one.)
+    # Caveat worth keeping: this is environment-coupled config. Staging runs a
+    # different Facebook app, against different pages, with different granted
+    # permissions -- so a green staging run is NOT evidence that a Graph
+    # version change is safe here. If Meta permission errors ever appear on
+    # template CRUD or utility sends, this line is a cheap thing to bisect.
     - name: FACEBOOK_GRAPH_URL
-      value: 'https://graph.facebook.com/v22.0'
+      value: 'https://graph.facebook.com/v25.0'
     - name: KAFKA_BROKERS
       value: *kb
     - name: KAFKA_EXPORTS_TOPIC
