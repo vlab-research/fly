@@ -11,9 +11,13 @@ grafana-dashboards/
 ├── README.md                           # This file
 ├── kafka-consumer-health.json          # Dashboard: Kafka consumer lag/drain/alerts
 ├── kafka-broker-app-health.json        # Dashboard: Kafka broker health + app restarts
+├── study-health.json                   # Dashboard: survey error/blocked/stuck (1h diagnostics)
+├── live-traffic.json                   # Dashboard: who is chatting right now (5m)
 └── templates/
     ├── kafka-consumer-health-cm.yaml   # ConfigMap for consumer health dashboard
-    └── kafka-broker-app-health-cm.yaml # ConfigMap for broker/app health dashboard
+    ├── kafka-broker-app-health-cm.yaml # ConfigMap for broker/app health dashboard
+    ├── study-health-cm.yaml            # ConfigMap for study health dashboard
+    └── live-traffic-cm.yaml            # ConfigMap for live traffic dashboard
 ```
 
 ## Active Dashboards
@@ -50,6 +54,96 @@ Monitors Kafka cluster and application health:
 - `kubelet_volume_stats_available_bytes` / `kubelet_volume_stats_capacity_bytes` (kubelet)
 - `kube_pod_container_status_restarts_total{container="replybot"}` (kube-state-metrics)
 - `ALERTS{alertstate="firing"}` (Prometheus alerting)
+
+### 3. Study Health (`study-health`)
+
+**Job: depth in ONE study.** Which study is bleeding, by how much relative to normal, from
+what cause. 1h windows. These are the metrics the alert rules are built on.
+
+- **Study triage table** (top, full width) — one row per form: active, errors, platform
+  errors, ratio, **excess vs fleet**, actionable blocks, stuck, expired. Sorted by errors.
+- **Study-fault errors by study & tag** — `FORM_NOT_FOUND`, `FIELD_NOT_FOUND`,
+  `INTERPOLATION_ERROR`, `none`. Uses a **negated** regex, so a newly-added tag lands here
+  automatically instead of vanishing (the taxonomy makes platform tags an allow-list).
+- **Platform-fault errors by study & tag** — `INTERNAL`/`STATE_ACTIONS`/`NETWORK`.
+  **Deliberately ignores `$study`, `$form` and the fallback exclusion**: a platform fault
+  is not one study's business and must stay visible while the board is scoped to a study.
+  Includes `form="(none)"`.
+- **Error ratio per form** with the **fleet baseline overlaid**, fallback excluded.
+- **Actionable blocks by study, category & code** — attrition split out to its own small
+  grey panel so it stops squashing everything real.
+- **Stuck users**, and an **Expired waits (total)** stat showing the *sum* that
+  `DeanExpiredWaits` actually alerts on (no per-form panel ever showed that number).
+- **Fallback arrivals (form 305)** — collapsed row at the bottom.
+- **Filters:** `$study`, `$form`, plus a hidden `$fallback` constant.
+
+**Read the `excess` column first.** A 40% error ratio means something completely different
+when the fleet is at 4% (that study is broken — stay here) than when the fleet is at 35%
+(*everything* is broken — go to Live Traffic). That one column tells you which board to be
+on.
+
+**Why 305 gets a panel instead of just being excluded.** It is ~91% of all error volume
+and would drown every other panel, so it is excluded everywhere else — but 333 users a day
+reach the fallback, and a rise means a broken ad link or a study that ended without its
+ads being pulled. Classified as "known-benign noise" it was watched by nobody.
+
+**Metrics source:** `sql_exporter` → CockroachDB (`devops/sql-exporter`), 1h windows, 60s
+scrape, plus four recording rules in `devops/alerts/templates/study-health.yaml`. See
+`/documentation/study-error-alerting.md` for the taxonomy contract.
+
+### 4. Live Traffic (`live-traffic`)
+
+**Job: breadth, RIGHT NOW.** How many studies, how many pages, which reason.
+
+- **Stat row:** chatting now / active studies / active pages / in ERROR now, plus
+  **STUDIES ERRORING** and **PAGES ERRORING**.
+- **Users by state** (stacked — total height is volume, band composition is health).
+- **★ Studies affected per error reason** (bar gauge) — bar length is *how many distinct
+  studies* carry that reason.
+- **Errors by reason** — the why behind the ERROR band, on a live window.
+- **Error rate by page** — **rate, not count**, so a busy page does not automatically look
+  worst. This is what catches "one messaging page is failing".
+- **Blocked by reason & page** — attrition excluded. This board had no blocked view at all
+  before 2026-07-26.
+- **Users by study**, **ERROR by study & form** (fallback excluded), **breakdown table**
+  (study × form × page × state × reason).
+- **Filters:** `$window` (5m / 1h / 24h), `$study`, `$page_name`.
+
+**The two ★ stats ARE the discriminator**, in two numbers:
+
+| Studies | Pages | Read as |
+|---|---|---|
+| 1 | 1 | within-survey → go to Study Health |
+| ≥3 | 1 | **messaging channel** — that page's token, rate limit, or Meta app |
+| ≥3 | ≥2 | **platform regression** — deploys, CockroachDB, Redis, Kafka |
+
+Red at 3 mirrors `MultiSurveyErrorRegression` so the board and the pager tell the same
+story. The bar gauge refines it further: a *study-side* tag appearing across many
+unrelated studies is a **platform** problem, not many simultaneous form edits —
+`FORM_NOT_FOUND` at 12 studies is formcentral, not 12 misconfigured studies.
+
+**Metrics source:** one gauge,
+`survey_recent_states{window,state,form,reason,study,page,page_name}`, from the
+`study_traffic` collector. Three windows from a single 24h index scan, 60s scrape,
+~370ms per query.
+
+**Every window is a distinct-user count** — `states` holds one sticky row per (user, page),
+so `24h` is *distinct people today*, not a sum of `5m` buckets. Leave the error panels on
+`5m`: wider windows smear a spike and hold it visible long after it stopped.
+
+⚠️ **Any new panel must pin the window** (`survey_recent_states{window="$window"}`).
+Omitting it sums all three windows and silently triple-counts.
+
+⚠️ **Any count-of-groups panel must use `> 0`.** These gauges emit zero-valued series for
+every group seen in the 24h scan, so a bare `count()` counts the whole fleet — this bug
+made "Active Studies" read 29 against a true 3. Pair it with `or vector(0)` so the panel
+renders `0` rather than "No data".
+
+**No alert rule reads `survey_recent_states`** — alerting stays on the 1h metrics; this
+board is for looking at.
+
+**Where it deliberately stops.** Aggregates only. User-level drill-down lives in the
+dashboard app's Monitor tab; user ids are never exported to Prometheus.
 
 ## How to Access Dashboards
 

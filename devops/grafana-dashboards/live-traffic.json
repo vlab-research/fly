@@ -1,0 +1,2281 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "How many people are in each state right now, and why. One metric (survey_recent_states), one filter expression shared by every panel, so a headline and its drill-down cannot disagree. Scope with researcher > survey > shortcode; exclude shortcodes (e.g. 305) with the Exclude box. Every window is a DISTINCT-USER count, not a sum of buckets. Consolidated 2026-07-27: this board replaces the separate Study Health board, whose depth views are the 'Drill down' row below — the scope filters made a second board redundant.",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "datasource": null,
+      "description": "The core question. Everything below this is the same numbers with more detail — the panels in this row are the totals that every drill-down must add back up to.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "How many people are in each state",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Distinct people in ANY state within $window. $window is a distinct-user window, so this is a count of PEOPLE, not events. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "text",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "People ($window)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Distinct people whose current state is ERROR. This is exactly the sum of the ERROR bars in the 'ERROR by error tag' row below — same expression, one less aggregation. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "text",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"})",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "In ERROR ($window)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Distinct people whose current state is BLOCKED. This is exactly the sum of the bars in the 'BLOCKED by Facebook error code' row below — same expression, one less aggregation. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "text",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"})",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "In BLOCKED ($window)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Distinct shortcodes with at least one person in $window. The `> 0` is load-bearing: the exporter scans 24h and emits ZERO-VALUED series for the narrower windows, so a bare count() would count everything seen in 24h regardless of $window. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "text",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "count(sum by (shortcode) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0) or vector(0)",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Shortcodes with traffic",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "How many people are in each state right now. These bars sum to the 'People' stat above. $window is a distinct-user window, so this is a count of PEOPLE, not events. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ERROR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "BLOCKED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "USER_BLOCKED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "semi-dark-orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "END"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "QOUT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RESPONDING"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "WAIT_EXTERNAL_EVENT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "START"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RESET"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OFF"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "id": 6,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum by (state) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "People by state — total ($window)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "The same numbers as the bars to the left, over the dashboard time range. Stacked, so total height is volume and band composition is health. A rising ERROR band against a flat total is a problem; a rising total is just a busy hour. $window is a distinct-user window, so this is a count of PEOPLE, not events. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "people",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 35,
+            "gradientMode": "none",
+            "hideFrom": {
+              "graph": false,
+              "legend": false,
+              "tooltip": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ERROR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "BLOCKED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "USER_BLOCKED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "semi-dark-orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "END"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "QOUT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RESPONDING"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "WAIT_EXTERNAL_EVENT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "START"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RESET"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OFF"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "text",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 5
+      },
+      "id": 7,
+      "options": {
+        "graph": {},
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltipOptions": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum by (state) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+          "interval": "",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "People by state — over time ($window)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "description": "Why the people in ERROR are in ERROR. Tags seen in production: FORM_NOT_FOUND (no form/study for that user), FIELD_NOT_FOUND (form refers to a field it does not contain), INTERNAL / STATE_ACTIONS (platform fault), (untagged) (ERROR with no tag set).",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 8,
+      "panels": [],
+      "title": "ERROR — split by error tag",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "One bar per error tag. These bars sum EXACTLY to the 'In ERROR' stat above — it is the same expression without the `by (reason)`. Tags seen in production: FORM_NOT_FOUND (no form/study for that user), FIELD_NOT_FOUND (form refers to a field it does not contain), INTERNAL / STATE_ACTIONS (platform fault), (untagged) (ERROR with no tag set). Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "id": 9,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"})",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ERROR by error tag — total ($window)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "The same split as the bars to the left, over time. Keep $window on 5m when watching for a spike: wider windows smear it and hold it on screen long after it has stopped. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "people",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "graph": false,
+              "legend": false,
+              "tooltip": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 14
+      },
+      "id": 10,
+      "options": {
+        "graph": {},
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltipOptions": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"})",
+          "interval": "",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ERROR by error tag — over time ($window)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "description": "Why the people in BLOCKED are blocked. Raw Facebook codes, unbucketed and unfiltered. 10 / 190 / 551 are ordinary opt-out churn (the user blocked the page or is outside the messaging window); 100 is a missing or unapproved message template; 200 is unsupported; -1 is Meta's own internal error; (none) means we never reached Meta at all (missing page token) and dean cannot retry those. Nothing is hidden here — churn codes are shown alongside real failures so the split is visible rather than assumed.",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 11,
+      "panels": [],
+      "title": "BLOCKED — split by Facebook error code",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "One bar per raw Facebook error code. These bars sum EXACTLY to the 'In BLOCKED' stat above — same expression, one less aggregation. Raw Facebook codes, unbucketed and unfiltered. 10 / 190 / 551 are ordinary opt-out churn (the user blocked the page or is outside the messaging window); 100 is a missing or unapproved message template; 200 is unsupported; -1 is Meta's own internal error; (none) means we never reached Meta at all (missing page token) and dean cannot retry those. Nothing is hidden here — churn codes are shown alongside real failures so the split is visible rather than assumed. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.\n\nLegend shows `code · meaning`. Any code without a mapping renders as the raw number — see the glossary below this row.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "10"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "10 · outside 24h window"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "551"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "551 · user unreachable"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "100"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "100 · invalid parameter"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "190"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "190 · token invalid / expired"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "200"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "200 · missing permission"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "2022"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "2022 · Messenger rate limit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "613"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "613 · app-wide rate limit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "80006"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "80006 · page rate limit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "1200"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "1200 · temporary Meta failure"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "-1"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "-1 · undocumented"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "(none)"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "(none) · never reached Meta"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 23
+      },
+      "id": 12,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"})",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "BLOCKED by Facebook error code — total ($window)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "The same split as the bars to the left, over time. A step change in one code is a channel event; a slow ramp in 10/190/551 is ordinary churn. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.\n\nLegend shows `code · meaning`. Any code without a mapping renders as the raw number — see the glossary below this row.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "people",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "graph": false,
+              "legend": false,
+              "tooltip": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "10"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "10 · outside 24h window"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "551"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "551 · user unreachable"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "100"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "100 · invalid parameter"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "190"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "190 · token invalid / expired"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "200"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "200 · missing permission"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "2022"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "2022 · Messenger rate limit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "613"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "613 · app-wide rate limit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "80006"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "80006 · page rate limit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "1200"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "1200 · temporary Meta failure"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "-1"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "-1 · undocumented"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "(none)"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "(none) · never reached Meta"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 23
+      },
+      "id": 13,
+      "options": {
+        "graph": {},
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltipOptions": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "7.4.2",
+      "targets": [
+        {
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"})",
+          "interval": "",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "BLOCKED by Facebook error code — over time ($window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "description": "Reference for the BLOCKED panels above. Codes are Meta's, as returned on the send that blocked the user.",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 92,
+      "options": {
+        "mode": "markdown",
+        "content": "#### Facebook / Meta error codes — what BLOCKED actually means\n\n| code | short | meaning |\n|---|---|---|\n| `10` | outside 24h window | Send attempted after Meta's 24-hour messaging window closed and no message tag applied. |\n| `551` | user unreachable | \"This person isn't available right now\" — account deactivated or otherwise unreachable. |\n| `100` | invalid parameter | Meta reuses this for three distinct causes here: missing/unapproved template, malformed send payload, or an attachment_id minted on a different page. |\n| `190` | token invalid / expired | Page access token revoked or invalidated. Needs re-provisioning. |\n| `200` | missing permission | The app or page token lacks a permission required for the action. |\n| `2022` | Messenger rate limit | Messenger-specific send-rate limit. Transient. |\n| `613` | app-wide rate limit | Graph API application-level throttle — wider blast radius than 2022. |\n| `80006` | page rate limit | Messenger per-page Conversations API limit. |\n| `1200` | temporary Meta failure | Meta documents this as transient. Retried in-process 3x, but NOT in DEAN_FB_CODES — once those attempts are spent nothing retries it again. |\n| `-1` | undocumented | Not a real Meta code. Present in DEAN_FB_CODES since the earliest git history with no traceable definition; it is retried regardless. |\n| `(none)` | never reached Meta | No code came back at all — the page token lookup failed, or the request never completed. These are NOT retryable: fb_error_code is NULL, and NULL = ANY(...) is never true in SQL, so dean's query can never match them. |\n\n*A code appearing here is not by itself a judgement about fault — codes `10`, `190` and `551` are currently treated as expected churn, but that classification is under review. `(none)` and `1200` are the two where nothing will ever retry the user.*"
+      },
+      "title": "Facebook error code glossary",
+      "type": "text",
+      "pluginVersion": "7.4.2"
+    },
+    {
+      "collapsed": true,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "id": 90,
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "description": "Distinct people per researcher, all states. These bars sum to the 'People' stat at the top of the board. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 38
+          },
+          "id": 100,
+          "options": {
+            "displayMode": "basic",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (researcher) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "{{researcher}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Everyone, by researcher ($window)",
+          "type": "bargauge"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Distinct people per survey, all states. These bars sum to the 'People' stat at the top of the board. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 38
+          },
+          "id": 101,
+          "options": {
+            "displayMode": "basic",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "{{survey}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Everyone, by survey ($window)",
+          "type": "bargauge"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Distinct people per page, all states. These bars sum to the 'People' stat at the top of the board. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 38
+          },
+          "id": 102,
+          "options": {
+            "displayMode": "basic",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (page_name) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "{{page_name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Everyone, by page ($window)",
+          "type": "bargauge"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Distinct people in ERROR or BLOCKED per researcher. These bars sum to 'In ERROR' + 'In BLOCKED' at the top of the board. Read against the panel directly above: a big bar here with a small bar above is a researcher in trouble; big in both is just volume. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 46
+          },
+          "id": 103,
+          "options": {
+            "displayMode": "basic",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (researcher) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"})",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "{{researcher}}",
+              "refId": "A"
+            }
+          ],
+          "title": "In ERROR or BLOCKED, by researcher ($window)",
+          "type": "bargauge"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Distinct people in ERROR or BLOCKED per survey. These bars sum to 'In ERROR' + 'In BLOCKED' at the top of the board. Read against the panel directly above: a big bar here with a small bar above is a survey in trouble; big in both is just volume. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 46
+          },
+          "id": 104,
+          "options": {
+            "displayMode": "basic",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"})",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "{{survey}}",
+              "refId": "A"
+            }
+          ],
+          "title": "In ERROR or BLOCKED, by survey ($window)",
+          "type": "bargauge"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Distinct people in ERROR or BLOCKED per page. These bars sum to 'In ERROR' + 'In BLOCKED' at the top of the board. Read against the panel directly above: a big bar here with a small bar above is a page in trouble; big in both is just volume. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "min": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 46
+          },
+          "id": 105,
+          "options": {
+            "displayMode": "basic",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showUnfilled": true
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (page_name) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"})",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "{{page_name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "In ERROR or BLOCKED, by page ($window)",
+          "type": "bargauge"
+        }
+      ],
+      "title": "Compare — where the same people are",
+      "description": "Same filter, same metric as above, split across the researcher > survey > page hierarchy. Top strip is everyone; bottom strip is only ERROR or BLOCKED. Comparing the two separates 'busy' from 'broken'. Collapsed by default.",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 91,
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "description": "Every ERROR group at full depth. The People column sums EXACTLY to the 'In ERROR' stat at the top — same expression, more `by` labels. Rows with zero people are dropped (`> 0`) so the table shows what is happening now, not everything seen in 24h. Click a column header to sort; the filter icons filter within the result. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 39
+          },
+          "id": 106,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "People"
+              }
+            ]
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (researcher, survey, shortcode, page_name, reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"}) > 0",
+              "format": "table",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "ERROR by researcher > survey > shortcode > tag ($window)",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "instance": true,
+                  "job": true
+                },
+                "indexByName": {},
+                "renameByName": {
+                  "Value": "People",
+                  "page_name": "Page",
+                  "reason": "Error tag",
+                  "researcher": "Researcher",
+                  "shortcode": "Shortcode",
+                  "survey": "Survey"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Every BLOCKED group at full depth. The People column sums EXACTLY to the 'In BLOCKED' stat at the top. Raw Facebook codes, unbucketed and unfiltered. 10 / 190 / 551 are ordinary opt-out churn (the user blocked the page or is outside the messaging window); 100 is a missing or unapproved message template; 200 is unsupported; -1 is Meta's own internal error; (none) means we never reached Meta at all (missing page token) and dean cannot retry those. Nothing is hidden here — churn codes are shown alongside real failures so the split is visible rather than assumed. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 49
+          },
+          "id": 107,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "People"
+              }
+            ]
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (researcher, survey, shortcode, page_name, reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"}) > 0",
+              "format": "table",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "BLOCKED by researcher > survey > shortcode > code ($window)",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "instance": true,
+                  "job": true
+                },
+                "indexByName": {},
+                "renameByName": {
+                  "Value": "People",
+                  "page_name": "Page",
+                  "reason": "Facebook code",
+                  "researcher": "Researcher",
+                  "shortcode": "Shortcode",
+                  "survey": "Survey"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Level 2 of the hierarchy over time. Sums to the 'People' stat at the top of the board. $window is a distinct-user window, so this is a count of PEOPLE, not events. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisLabel": "people",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "graph": false,
+                  "legend": false,
+                  "tooltip": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 59
+          },
+          "id": 108,
+          "options": {
+            "graph": {},
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltipOptions": {
+              "mode": "multi"
+            }
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "interval": "",
+              "legendFormat": "{{survey}}",
+              "refId": "A"
+            }
+          ],
+          "title": "People by survey — over time ($window)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Level 3 of the hierarchy over time — the finest cut available. Also sums to the 'People' stat at the top. $window is a distinct-user window, so this is a count of PEOPLE, not events. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisLabel": "people",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "graph": false,
+                  "legend": false,
+                  "tooltip": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 59
+          },
+          "id": 109,
+          "options": {
+            "graph": {},
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltipOptions": {
+              "mode": "multi"
+            }
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (shortcode) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "interval": "",
+              "legendFormat": "{{shortcode}}",
+              "refId": "A"
+            }
+          ],
+          "title": "People by shortcode — over time ($window)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "description": "Every dimension the metric carries, at full depth. The People column sums EXACTLY to the 'People' stat at the top of the board. `reason` is empty for every state except ERROR (error tag) and BLOCKED (Facebook code) — that is the metric's design, not missing data. This is the aggregate stop: for individual users use the Monitor tab in the dashboard app, because user ids are deliberately never exported to Prometheus. Current value at the latest scrape, not a total over the time range. Respects every filter at the top of the board (Researcher, Survey, Shortcode, Exclude, Page, Window). No panel on this dashboard ignores them.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 67
+          },
+          "id": 110,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "desc": true,
+                "displayName": "People"
+              }
+            ]
+          },
+          "pluginVersion": "7.4.2",
+          "targets": [
+            {
+              "expr": "sum by (researcher, survey, shortcode, page_name, state, reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
+              "format": "table",
+              "instant": true,
+              "interval": "",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "Everything at once ($window)",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "instance": true,
+                  "job": true
+                },
+                "indexByName": {},
+                "renameByName": {
+                  "Value": "People",
+                  "page_name": "Page",
+                  "reason": "Reason",
+                  "researcher": "Researcher",
+                  "shortcode": "Shortcode",
+                  "state": "State",
+                  "survey": "Survey"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        }
+      ],
+      "title": "Drill down — exact rows",
+      "description": "Full-depth tables and per-scope history. Every number here reconciles exactly with the totals above: same expression, fewer aggregations. Collapsed by default.",
+      "type": "row"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 27,
+  "style": "dark",
+  "tags": [
+    "vlab",
+    "survey-health"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "5m",
+          "value": "5m"
+        },
+        "description": "Which distinct-user window to read. EVERY window is a distinct-user count, not a sum of buckets: 5m = who is here right now, 24h = distinct people we talked to today. 24h is NOT the sum of 288 5m buckets. Single-select on purpose: this metric carries all three windows as separate series, so an 'All' option would sum them and triple-count every number on the board. There is deliberately no way to do that.",
+        "error": null,
+        "hide": 0,
+        "includeAll": false,
+        "label": "Window",
+        "multi": false,
+        "name": "window",
+        "options": [
+          {
+            "selected": true,
+            "text": "5m",
+            "value": "5m"
+          },
+          {
+            "selected": false,
+            "text": "1h",
+            "value": "1h"
+          },
+          {
+            "selected": false,
+            "text": "24h",
+            "value": "24h"
+          }
+        ],
+        "query": "5m,1h,24h",
+        "queryValue": "",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": "Prometheus",
+        "definition": "label_values(survey_recent_states{window=\"24h\"}, researcher)",
+        "description": "LEVEL 1 of the hierarchy: the account that owns the survey (users.email). Selecting a researcher narrows the Survey list below it. 'unknown' means the shortcode has no surveys row — those people are still counted, never dropped. Listed from the 24h window so the picker does not empty out on a quiet 5m.",
+        "error": null,
+        "hide": 0,
+        "includeAll": true,
+        "label": "Researcher",
+        "multi": true,
+        "name": "researcher",
+        "options": [],
+        "query": {
+          "query": "label_values(survey_recent_states{window=\"24h\"}, researcher)",
+          "refId": "Prometheus-researcher-Variable-Query"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": "Prometheus",
+        "definition": "label_values(survey_recent_states{window=\"24h\", researcher=~\"$researcher\"}, survey)",
+        "description": "LEVEL 2 of the hierarchy: surveys.survey_name, constrained to the selected Researcher. Resolved from the newest surveys row for the shortcode.",
+        "error": null,
+        "hide": 0,
+        "includeAll": true,
+        "label": "Survey",
+        "multi": true,
+        "name": "survey",
+        "options": [],
+        "query": {
+          "query": "label_values(survey_recent_states{window=\"24h\", researcher=~\"$researcher\"}, survey)",
+          "refId": "Prometheus-survey-Variable-Query"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": "Prometheus",
+        "definition": "label_values(survey_recent_states{window=\"24h\", researcher=~\"$researcher\", survey=~\"$survey\"}, shortcode)",
+        "description": "LEVEL 3 of the hierarchy: surveys.shortcode, constrained to the selected Researcher and Survey. '(none)' means the user had no form resolved yet — usually a platform failure that happened before a form was found, so it is kept, not dropped. To EXCLUDE rather than include, use the Exclude box.",
+        "error": null,
+        "hide": 0,
+        "includeAll": true,
+        "label": "Shortcode",
+        "multi": true,
+        "name": "shortcode",
+        "options": [],
+        "query": {
+          "query": "label_values(survey_recent_states{window=\"24h\", researcher=~\"$researcher\", survey=~\"$survey\"}, shortcode)",
+          "refId": "Prometheus-shortcode-Variable-Query"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "Regex of shortcodes to REMOVE, applied as shortcode!~\"<value>\". Empty = exclude nothing (an empty regex negation is a no-op, so nothing is hidden by default). Type 305 to drop the fallback-target survey, or 305|test for several. This exists because Grafana 7 multi-select can only include, and excluding is the common need — shortcode 305 is both a real live survey and the global fallback target, so it carries most FORM_NOT_FOUND errors. Nothing is excluded anywhere by construction; this box is the only exclusion on either dashboard and it is always visible.",
+        "error": null,
+        "hide": 0,
+        "label": "Exclude shortcodes",
+        "name": "exclude_shortcode",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": "Prometheus",
+        "definition": "label_values(survey_recent_states{window=\"24h\"}, page_name)",
+        "description": "The messaging page/account carrying the conversation. NOT part of the researcher hierarchy — a page is shared across researchers, so it is an independent cut. This is the axis that separates a channel problem (one page, many surveys) from a survey problem.",
+        "error": null,
+        "hide": 0,
+        "includeAll": true,
+        "label": "Page",
+        "multi": true,
+        "name": "page_name",
+        "options": [],
+        "query": {
+          "query": "label_values(survey_recent_states{window=\"24h\"}, page_name)",
+          "refId": "Prometheus-page_name-Variable-Query"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Live Traffic",
+  "uid": "live-traffic",
+  "version": 1
+}
