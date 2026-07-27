@@ -49,17 +49,20 @@ accepted).
 | Section (field refs) | Feature exercised | Type / mechanism |
 |---|---|---|
 | `welcome` | Bot-sent **image** attachment + auto-advance | `attachment` (`keepMoving`) |
-| `favorite_color`, `test_payment`, `try_again`, `test_handoff` | Quick-reply questions + **field logic jumps** | `multiple_choice` |
+| `favorite_color`, `test_payment`, `try_again`, `test_handoff`, `test_utility`, `test_attachments` | Quick-reply questions + **field logic jumps** | `multiple_choice` |
 | `why_red` / `feedback` (B) | Free-text answer | `short_text` |
 | `siblings` | Numeric answer + validation | `number` |
 | `phone` | Phone answer + normalization | `phone_number` |
 | `payment_wait` → `payment_success`/`payment_failure` | **Payment** (Reloadly) via `wait: external` + **hidden-field logic** | `wait` / `payment:reloadly`; branch on `e_payment_reloadly_success` |
 | `handoff_statement` → `handoff_result` | **Thread-control handoff** round trip + metadata flattening | `handoff`; interpolates `e_handover_metadata_*` (needs `smoke-echo`) |
-| `utility_message` | Facebook **UTILITY template** message (choices must match the page's approved button labels — [see below](#the-utility_message-field-page-specific-not-env-specific)) | `utility_message` |
-| `media_video` | Bot-sent **video** attachment | `attachment` (`keepMoving`) |
-| `media_file` | Bot-sent **file/PDF** attachment | `attachment` (`keepMoving`) |
+| `test_utility` → `utility_message` | Facebook **UTILITY template** message, gated behind a yes/no like `test_payment`/`test_handoff` — answering No skips straight to `test_environment` (choices must match the page's approved button labels — [see below](#the-utility_message-field-page-specific-not-env-specific)) | `multiple_choice` → `utility_message` |
+| `test_environment` | **Env pick, asked once up front.** Drives *two* later branches: which `attachment_id` image is sent, and which moviehouse player opens | quick-reply; read by `confirm_file` and `picture_received` logic |
+| `test_attachments` → `media_video` → `confirm_video` | Bot-sent **video** attachment, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole attachment block straight to `send_picture` | `multiple_choice` → `attachment` (`keepMoving`) |
+| `media_file` → `confirm_file` | Bot-sent **file/PDF** attachment | `attachment` (`keepMoving`) |
+| `media_attachment_id_prod` / `_staging` → `confirm_attachment` | Bot-sent **image by `attachment_id`** — media already uploaded to the page, referenced by id instead of URL. **Env-specific: ids are scoped to the page that uploaded them**, so prod and staging carry different ids ([see below](#attachment_id-fields-are-page-scoped)) | `attachment` (`keepMoving`) with `attachment_id` |
+| `confirm_video`, `confirm_file`, `confirm_attachment` | **Did it actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — these are the only signal that a media send silently failed | `multiple_choice` (answers recorded, no branching) |
 | `send_picture` → `picture_received` | **Inbound user media** (user sends a photo); stored URL interpolated back | `upload` (`{type:image}`) → `user_media`/MEDIA event |
-| `test_environment` → `movie_webview_prod`/`movie_webview_staging` → `movie_watched`/`movie_timeout` | **Env pick → webview button → moviehouse external events → logic reacting to them** (works in prod & staging) | quick-reply env branch; `webview` + `wait{op:or,[external moviehouse:play, timeout]}`; branch on `e_moviehouse_play_id` |
+| `movie_webview_prod`/`movie_webview_staging` → `movie_watched`/`movie_timeout` | **Webview button → moviehouse external events → logic reacting to them** (works in prod & staging); branched from `test_environment` by `picture_received` | `webview` + `wait{op:or,[external moviehouse:play, timeout]}`; branch on `e_moviehouse_play_id` |
 | `stitch_statement` | **Form stitch** A → B | `stitch` |
 | `test_timeout` → `timeout_wait` → `welcome_back` (B) | **Timeout / dean followup** | `wait: timeout` |
 
@@ -80,16 +83,19 @@ paths.
 This is the pattern most production surveys use for video: send a **webview
 button**, then **wait** on the video-player events the page reports back.
 
-### Why it's the one environment-specific step
+### Why it's environment-specific
 
 moviehouse bakes its target backend (`SERVER_URL`) in at build time, so the
 **production** player (`virtuallab-videos.netlify.app`) posts events to
 production Hermes and the **staging** player
 (`staging--virtuallab-videos.netlify.app`) posts to staging Hermes — two
 different URLs. For a play event to reach the replybot running *this* survey,
-the button must open the player wired to the *same* environment. Everything
-else in the smoke test is environment-neutral (handoff even shares one
-smoke-echo app across both envs).
+the button must open the player wired to the *same* environment.
+
+This is one of **two** environment-specific steps; the other is
+[`attachment_id`](#attachment_id-fields-are-page-scoped). Both branch off the
+single `test_environment` pick. Everything else in the smoke test is
+environment-neutral (handoff even shares one smoke-echo app across both envs).
 
 ### How the form handles it — an explicit environment pick
 
@@ -151,6 +157,47 @@ once here.
 - **Residual risk:** picking the wrong environment button still misroutes the
   play event (you'd only ever see `movie_timeout`). The on-screen echo-back is
   the guard — read it before pressing play.
+
+## `attachment_id` fields are page-scoped
+
+`media_attachment_id_prod` / `media_attachment_id_staging` send an image that is
+**already uploaded to the page**, referenced by id instead of a URL. Meta scopes
+a reusable attachment id to the page that uploaded it, so **an id minted on one
+page is meaningless on another** — including across environments. Sending a
+staging id from the production page fails with:
+
+```
+(#100) Failed to load attachment from attachment ID.
+```
+
+Hence two fields, branched from `test_environment` by the `confirm_file` logic.
+Only one is ever shown.
+
+### Where the ids come from
+
+You do not need to upload anything by hand. Every URL-based media send in this
+survey passes `is_reusable: true`, so Messenger **mints an attachment id and
+returns it** on the send. Walk the survey in the environment you need, then read
+the id out of the send response:
+
+```bash
+kubectl logs --namespace <vprod|vstag> deploy/gbv-message-worker --tail=2000 \
+  | grep -oE '"message_id":"[^"]+","attachment_id":"[0-9]+"'
+```
+
+The id returned immediately before the `ref=welcome` command is the welcome
+image's. Any id minted on that page works; paste it into the matching field's
+`attachment_id`.
+
+### Distinguishing "wrong id" from "broken code"
+
+Both fail with code 100, but the messages differ, and the difference is the
+whole diagnosis:
+
+| error | meaning |
+|---|---|
+| `... should represent a valid URL` | the request is **malformed** — an attachment descriptor leaked into `media_url`. This was a real bug, fixed in replybot v0.0.211 / message-worker v0.1.17 |
+| `Failed to load attachment from attachment ID.` | the request is **well-formed**; the id just isn't valid for this page. Wrong environment's id |
 
 ## The `utility_message` field (page-specific, not env-specific)
 

@@ -166,12 +166,54 @@
     },
     {
       "type": "multiple_choice",
+      "ref": "test_utility",
+      "title": "Would you like to test Facebook UTILITY template messages? (Choices must match the buttons approved on this page — see the smoke-test README before answering Yes on a new page.)",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_test_utility_yes" },
+          { "label": "No", "ref": "choice_test_utility_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "multiple_choice",
       "ref": "utility_message",
       "title": "Now testing utility template messages. This should arrive as a Facebook UTILITY template (not plain text).",
       "properties": {
         "description": "{\"type\":\"utility_message\",\"template\":\"recontact\",\"language\":\"en_US\",\"params\":[\"300 NGN\"]}",
         "choices": [
           { "label": "OK!", "ref": "choice_utility_continue" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "test_environment",
+      "title": "🌐 Which environment are you testing right now? Asked once, up front: it selects both the attachment_id image (ids are scoped to the page that uploaded them) and the matching moviehouse video player.",
+      "properties": {
+        "choices": [
+          { "label": "Production", "ref": "choice_env_prod" },
+          { "label": "Staging", "ref": "choice_env_staging" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "test_attachments",
+      "title": "📎 Would you like to test bot-sent media attachments (video, PDF, image)? This sends three files back to back and can take a few moments — expect a short pause after you tap Yes.",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_test_attachments_yes" },
+          { "label": "No", "ref": "choice_test_attachments_no" }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
@@ -189,6 +231,20 @@
       }
     },
     {
+      "type": "multiple_choice",
+      "ref": "confirm_video",
+      "title": "Did the VIDEO actually arrive? A failed send is reported and committed rather than retried, so the survey walks on regardless — answer honestly, this is the only signal.",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_confirm_video_yes" },
+          { "label": "No", "ref": "choice_confirm_video_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
       "type": "statement",
       "ref": "media_file",
       "title": "📄 And here's a FILE (PDF) attachment sent by the bot:",
@@ -199,14 +255,52 @@
       }
     },
     {
+      "type": "multiple_choice",
+      "ref": "confirm_file",
+      "title": "Did the PDF actually arrive?",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_confirm_file_yes" },
+          { "label": "No", "ref": "choice_confirm_file_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
+    },
+    {
       "type": "statement",
-      "ref": "media_attachment_id",
-      "title": "🖼️ And here's an IMAGE sent by attachment_id — pre-uploaded to the page rather than fetched from a URL:",
+      "ref": "media_attachment_id_prod",
+      "title": "🖼️ And here's an IMAGE sent by attachment_id (PRODUCTION) — pre-uploaded to the page rather than fetched from a URL:",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1434849748462496\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_attachment_id_staging",
+      "title": "🖼️ And here's an IMAGE sent by attachment_id (STAGING) — pre-uploaded to the page rather than fetched from a URL:",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
         "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1658615935222752\"}}"
       }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "confirm_attachment",
+      "title": "Did the by-attachment_id IMAGE actually arrive? If not, the id is probably scoped to the other environment's page — check message-worker logs for \"Failed to load attachment from attachment ID\".",
+      "properties": {
+        "choices": [
+          { "label": "Yes", "ref": "choice_confirm_attachment_yes" },
+          { "label": "No", "ref": "choice_confirm_attachment_no" }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": { "required": false }
     },
     {
       "type": "short_text",
@@ -225,20 +319,6 @@
         "hide_marks": false,
         "button_text": "Continue"
       }
-    },
-    {
-      "type": "multiple_choice",
-      "ref": "test_environment",
-      "title": "🌐 Which environment are you testing right now? This selects the matching moviehouse video player — the only environment-specific step in this survey.",
-      "properties": {
-        "choices": [
-          { "label": "Production", "ref": "choice_env_prod" },
-          { "label": "Staging", "ref": "choice_env_staging" }
-        ],
-        "allow_multiple_selection": false,
-        "vertical_alignment": true
-      },
-      "validations": { "required": false }
     },
     {
       "type": "statement",
@@ -496,7 +576,7 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "utility_message" }
+            "to": { "type": "field", "value": "test_utility" }
           },
           "condition": {
             "op": "always",
@@ -507,7 +587,110 @@
     },
     {
       "type": "field",
-      "ref": "test_environment",
+      "ref": "test_utility",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "utility_message" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_utility" },
+              { "type": "choice", "value": "choice_test_utility_yes" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "test_environment" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "test_attachments",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "media_video" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_attachments" },
+              { "type": "choice", "value": "choice_test_attachments_yes" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "send_picture" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "confirm_file",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "media_attachment_id_staging" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_environment" },
+              { "type": "choice", "value": "choice_env_staging" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "media_attachment_id_prod" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "media_attachment_id_prod",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "confirm_attachment" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "picture_received",
       "actions": [
         {
           "action": "jump",
