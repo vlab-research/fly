@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "How many people are in each state right now, and why. One metric (survey_recent_states), one filter expression shared by every panel, so a headline and its drill-down cannot disagree. Scope with researcher > survey > shortcode; exclude shortcodes (e.g. 305) with the Exclude box. Every window is a DISTINCT-USER count, not a sum of buckets. Consolidated 2026-07-27: this board replaces the separate Study Health board, whose depth views are the 'Drill down' row below — the scope filters made a second board redundant.",
+  "description": "How many people are in each state right now, and why. One metric (survey_recent_states), one filter expression shared by every panel, so a headline and its drill-down cannot disagree. Scope with researcher > survey > shortcode; exclude shortcodes (e.g. 305) with the Exclude box. Every window is a DISTINCT-USER count, not a sum of buckets. Panels show only what has traffic in the SELECTED window: the exporter emits a series for anything seen in 24h, so every dimension panel filters `> 0` — an absent bar means nobody is there, not missing data. Consolidated 2026-07-27: this board replaces the separate Study Health board, whose depth views are the 'Drill down' row below — the scope filters made a second board redundant.",
   "editable": true,
   "gnetId": null,
   "graphTooltip": 1,
@@ -72,7 +72,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) or vector(0)",
           "instant": true,
           "interval": "",
           "legendFormat": "",
@@ -130,7 +130,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"})",
+          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"}) or vector(0)",
           "instant": true,
           "interval": "",
           "legendFormat": "",
@@ -188,7 +188,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"})",
+          "expr": "sum(survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"}) or vector(0)",
           "instant": true,
           "interval": "",
           "legendFormat": "",
@@ -453,7 +453,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum by (state) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+          "expr": "sum by (state) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
           "instant": true,
           "interval": "",
           "legendFormat": "{{state}}",
@@ -689,7 +689,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum by (state) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+          "expr": "sum by (state) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
           "interval": "",
           "legendFormat": "{{state}}",
           "refId": "A"
@@ -759,7 +759,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"})",
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"}) > 0",
           "instant": true,
           "interval": "",
           "legendFormat": "{{reason}}",
@@ -844,7 +844,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"})",
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"ERROR\"}) > 0",
           "interval": "",
           "legendFormat": "{{reason}}",
           "refId": "A"
@@ -1047,7 +1047,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"})",
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"}) > 0",
           "instant": true,
           "interval": "",
           "legendFormat": "{{reason}}",
@@ -1265,7 +1265,7 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"})",
+          "expr": "sum by (reason) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=\"BLOCKED\"}) > 0",
           "interval": "",
           "legendFormat": "{{reason}}",
           "refId": "A"
@@ -1349,7 +1349,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (researcher) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "expr": "sum by (researcher) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
               "instant": true,
               "interval": "",
               "legendFormat": "{{researcher}}",
@@ -1405,7 +1405,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
               "instant": true,
               "interval": "",
               "legendFormat": "{{survey}}",
@@ -1461,7 +1461,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (page_name) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "expr": "sum by (page_name) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
               "instant": true,
               "interval": "",
               "legendFormat": "{{page_name}}",
@@ -1517,7 +1517,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (researcher) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"})",
+              "expr": "sum by (researcher) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"}) > 0",
               "instant": true,
               "interval": "",
               "legendFormat": "{{researcher}}",
@@ -1573,7 +1573,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"})",
+              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"}) > 0",
               "instant": true,
               "interval": "",
               "legendFormat": "{{survey}}",
@@ -1629,7 +1629,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (page_name) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"})",
+              "expr": "sum by (page_name) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\", state=~\"ERROR|BLOCKED\"}) > 0",
               "instant": true,
               "interval": "",
               "legendFormat": "{{page_name}}",
@@ -1884,7 +1884,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "expr": "sum by (survey) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
               "interval": "",
               "legendFormat": "{{survey}}",
               "refId": "A"
@@ -1968,7 +1968,7 @@
           "pluginVersion": "7.4.2",
           "targets": [
             {
-              "expr": "sum by (shortcode) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"})",
+              "expr": "sum by (shortcode) (survey_recent_states{window=\"$window\", researcher=~\"$researcher\", survey=~\"$survey\", shortcode=~\"$shortcode\", shortcode!~\"$exclude_shortcode\", page_name=~\"$page_name\"}) > 0",
               "interval": "",
               "legendFormat": "{{shortcode}}",
               "refId": "A"
@@ -2249,7 +2249,7 @@
           },
           "targets": [
             {
-              "expr": "sum(survey_expired_waits)",
+              "expr": "sum(survey_expired_waits) or vector(0)",
               "legendFormat": "",
               "refId": "A",
               "interval": ""

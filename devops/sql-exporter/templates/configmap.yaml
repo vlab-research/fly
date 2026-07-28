@@ -366,6 +366,23 @@ data:
           # !! SINGLE-SELECT variable with no "All" option, so `window="$window"` can
           # !! never expand to more than one window. Do not make it multi-select.
           #
+          # !! CONSEQUENCE OF ONE ROW / THREE WINDOWS: the row is selected by the WIDEST
+          # !! window (24h), so a group that was busy this morning and idle since still
+          # !! emits all three series — with 0 in the 5m and 1h columns. "Series exists"
+          # !! therefore means "had traffic in the last 24h", NOT "has traffic in the
+          # !! selected window". Measured on prod 2026-07-28 at window="5m": 121 series
+          # !! present, exactly 1 non-zero; 77 shortcodes and 26 surveys enumerated, 1 of
+          # !! each with anyone on it. Any panel that enumerates a dimension
+          # !! (sum by (survey), sum by (shortcode), ...) MUST therefore append `> 0`, or
+          # !! it draws a wall of empty bars and legend entries for surveys nobody is on.
+          # !! Every such panel on the Live Traffic board does; keep it that way.
+          #
+          # Suppressing the zeros HERE instead was measured and rejected: unpivoting to one
+          # row per (group, window) with `WHERE n > 0` costs 619ms vs 346ms median (the CTE
+          # materializes to a buffer and re-scans it), and unpivoting before the joins costs
+          # 767ms because the surveys LATERAL — the real cost driver — then runs 162 times
+          # instead of 123. `> 0` in PromQL is free and gets the same result.
+          #
           # THE `reason` LABEL IS STATE-DEPENDENT, deliberately. It is the error_tag for
           # ERROR, the raw Facebook error code for BLOCKED, and empty for every other
           # state. One label carries "why is this person here" for the only two states
