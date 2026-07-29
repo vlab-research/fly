@@ -1,6 +1,6 @@
 # Dashboard Study Health
 
-> Surfaces survey health (error / blocked / stuck / expired states) to **survey
+> Surfaces survey health (error / blocked / expired states) to **survey
 > owners** in the dashboard's Monitor tab, complementing the **platform-owner**
 > alerting in Prometheus/AlertManager → Slack.
 >
@@ -93,11 +93,21 @@ inconsistency; monitoring fate-sharing).
   (INTERNAL/STATE_ACTIONS/NETWORK tags). **Alarm (`action`) at count ≥ 1** —
   1-in-1000 here is not a 0.1% error rate; it's proof the door is locked.
 - **Stochastic degradation** (distributed over the population):
-  `error.study` (tag `none`/`FORM_NOT_FOUND`/unknown), `stuck_users`,
-  `expired_waits`. **`action` on proportion (≥5%) + absolute floor (≥3);
-  below that, a muted `note`.** 1-in-1000 must NOT light the badge.
+  `error.study` (tag `none`/`FORM_NOT_FOUND`/unknown), `expired_waits`.
+  **`action` on proportion (≥5%) + absolute floor (≥3); below that, a muted
+  `note`.** 1-in-1000 must NOT light the badge.
 - `blocked.attrition` (fb codes 10/190/551) is **never** a finding —
   expected churn. May appear as a neutral funnel stat later.
+- `stuck_users` is **never** a finding either (rule removed 2026-07-29). It is
+  still aggregated and returned in `aggregates`, and still visible
+  per-respondent as the `stuck_on_question` column in the states list — it just
+  produces no card line. Two reasons: repeating a question is often normal
+  respondent behavior rather than a validation loop, so the finding was not
+  actionable; and `stuck_on_question` is not a filterable dimension in
+  StatesList, so the finding's CTA carried `filter: {}` and landed the
+  researcher on an unfiltered list. **Reinstating it requires building the
+  drill-down first** (a `stuck=true` filter honored by the states-list
+  query-param convention), not just re-adding a rule.
 - Rules are implicitly grouped by metric; the highest matching level per
   metric wins (`action` > `note`), so spike rules supersede their trickle
   siblings. Thresholds are v1 proposals — revisit with real traffic.

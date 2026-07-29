@@ -202,7 +202,7 @@ the inventory below.
 | `fb_error_code` = -1 | `blocked.provider_error` | deterministic (provider-side, retryable) |
 | `fb_error_code` IS NULL or = 0 | `blocked.provider_unreachable` | deterministic (**not** retryable) |
 | any other `fb_error_code` | `blocked.other` | stochastic |
-| `stuck_on_question IS NOT NULL` | `stuck_users` | stochastic |
+| `stuck_on_question IS NOT NULL` | `stuck_users` | stochastic (platform alerting only — **no dashboard rule** since 2026-07-29, see `documentation/dashboard-study-health.md` §4) |
 | `current_state = 'WAIT_EXTERNAL_EVENT' AND timeout_date < NOW()` | `expired_waits` | stochastic |
 | all rows in window | `active_users` | denominator |
 

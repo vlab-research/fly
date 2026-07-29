@@ -110,7 +110,7 @@ describe('Health API', () => {
         },
         updated: now,
       },
-      // stuck user (last 3 qa entries on Q2) -> note
+      // stuck user (last 3 qa entries on Q2) -> aggregated, but no finding
       {
         userid: 'health-user-stuck',
         current_state: 'RESPONDING',
@@ -208,9 +208,11 @@ describe('Health API', () => {
       ids.should.include('template-missing');
       ids.should.include('platform-errors');
       ids.should.include('error-trickle'); // 1/7 -> note, not spike (count < 3)
-      ids.should.include('stuck-trickle');
       ids.should.include('expired-waits');
       ids.should.not.include('error-spike');
+      // stuck_users is still aggregated (asserted above) but reads by no rule
+      ids.should.not.include('stuck-trickle');
+      ids.should.not.include('stuck-spike');
 
       // attrition never produces a finding
       findings.every(f => !f.id.includes('attrition')).should.equal(true);

@@ -102,23 +102,17 @@ module.exports.rules = [
     action: { label: 'View', dest: 'states-list', filter: { state: 'ERROR' } },
   },
 
-  {
-    id: 'stuck-spike',
-    when: { metric: 'stuck_users', ratio_gte: 0.05, count_gte: 3 },
-    level: 'action',
-    message:
-      '{count} respondents appear stuck on a question — possibly a validation loop or confusing wording.',
-    action: { label: 'View stuck respondents', dest: 'states-list', filter: {} },
-  },
-
-  {
-    id: 'stuck-trickle',
-    when: { metric: 'stuck_users', count_gte: 1 },
-    level: 'note',
-    message: '{count} respondent(s) stuck on a question.',
-    action: { label: 'View', dest: 'states-list', filter: {} },
-  },
-
+  // NOTE: `stuck_users` deliberately has NO rule (removed 2026-07-29). The
+  // aggregate is still computed and returned (visible via the `aggregates`
+  // payload, and per-respondent via the states list's `stuck_on_question`
+  // column) — it just no longer produces a finding, because:
+  //  - the signal was not actionable on its own (repeating the same question
+  //    is often normal respondent behavior, not a validation loop), and
+  //  - `stuck_on_question` is not a filterable dimension in StatesList, so the
+  //    finding's CTA had `filter: {}` and dumped the researcher on an
+  //    unfiltered list — a call to action that led nowhere.
+  // Reinstating it requires a real drill-down first (a `stuck=true` filter on
+  // the states-list query-param convention), not just a rule.
   {
     id: 'expired-waits',
     when: { metric: 'expired_waits', count_gte: 1 },

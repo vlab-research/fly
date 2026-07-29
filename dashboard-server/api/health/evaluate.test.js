@@ -183,7 +183,7 @@ describe('health evaluate (pure rule engine)', () => {
         unsupported: 0,
         other: 0,
       },
-      stuck_users: 1,
+      error: { platform: 0, study: 1, by_tag: { none: 1 } },
       expired_waits: 1,
     });
     const findings = evaluate(b, rules, quiet);
@@ -191,6 +191,13 @@ describe('health evaluate (pure rule engine)', () => {
     findings[0].level.should.equal('action');
     findings[0].id.should.equal('template-missing');
     findings.slice(1).forEach(f => f.level.should.equal('note'));
+  });
+
+  it('produces no finding for stuck respondents (rule removed 2026-07-29)', () => {
+    // The aggregate is still folded and returned, but reads by no rule: the
+    // signal was not actionable and its CTA had no drill-down to point at.
+    const b = bag({ active_users: 100, stuck_users: 50 });
+    evaluate(b, rules, quiet).should.deep.equal([]);
   });
 
   it('skips rules with unknown metrics and warns, without failing', () => {
@@ -207,13 +214,13 @@ describe('health evaluate (pure rule engine)', () => {
     ];
     const b = bag({
       active_users: 100,
-      stuck_users: 1,
+      expired_waits: 1,
     });
     const findings = evaluate(b, badRules, msg => warnings.push(msg));
     warnings.length.should.equal(1);
     warnings[0].should.contain('bogus');
     findings.length.should.equal(1);
-    findings[0].id.should.equal('stuck-trickle');
+    findings[0].id.should.equal('expired-waits');
   });
 
   it('clamps the ratio denominator so zero active users cannot divide by zero', () => {
