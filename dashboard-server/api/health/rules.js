@@ -48,6 +48,25 @@ module.exports.rules = [
     },
   },
 
+  // provider_unreachable: we never reached the messaging provider at all
+  // (usually a missing page token). Deliberately NOT phrased as self-healing:
+  // dean retries via `fb_error_code = ANY(...)` and SQL `= ANY` never matches
+  // NULL, so these respondents are structurally unrecoverable and will sit
+  // BLOCKED until someone intervenes. Telling the researcher to wait would be
+  // false. See documentation/study-error-alerting.md (ProviderErrors runbook).
+  {
+    id: 'provider-unreachable',
+    when: { metric: 'blocked.provider_unreachable', count_gte: 1 },
+    level: 'action',
+    message:
+      '{count} respondent(s) could not be reached at all — the platform failed to connect to the messaging provider. This is not caused by your survey configuration, and these respondents will not recover on their own. Please contact support.',
+    action: {
+      label: 'View affected respondents',
+      dest: 'states-list',
+      filter: { state: 'BLOCKED' },
+    },
+  },
+
   {
     id: 'platform-errors',
     when: { metric: 'error.platform', count_gte: 1 },
@@ -112,13 +131,69 @@ module.exports.rules = [
       filter: { state: 'WAIT_EXTERNAL_EVENT' },
     },
   },
+
+  // provider_error (-1): the provider accepted the request and failed its own
+  // way. Genuinely transient and dean DOES retry these, so unlike
+  // provider-unreachable this is stochastic — a trickle is noise, a spike is
+  // a channel problem worth surfacing.
+  {
+    id: 'provider-error-spike',
+    when: { metric: 'blocked.provider_error', ratio_gte: 0.05, count_gte: 3 },
+    level: 'action',
+    message:
+      '{count} of {active} respondents ({ratio}) could not be messaged because the messaging provider returned errors. This is a provider-side issue, not your configuration; delivery is retried automatically.',
+    action: {
+      label: 'View affected respondents',
+      dest: 'states-list',
+      filter: { state: 'BLOCKED' },
+    },
+  },
+
+  {
+    id: 'provider-error-trickle',
+    when: { metric: 'blocked.provider_error', count_gte: 1 },
+    level: 'note',
+    message:
+      '{count} respondent(s) hit a transient messaging-provider error; delivery is retried automatically.',
+    action: { label: 'View', dest: 'states-list', filter: { state: 'BLOCKED' } },
+  },
+
+  // Catch-all notes for the remaining blocked buckets. Before these, both
+  // 'other' and 'unsupported' were classified but read by NO rule, so a
+  // respondent blocked for an unrecognized reason produced a completely clean
+  // Monitor tab. Any future category added to the taxonomy without a rule of
+  // its own still falls into 'other' and at least surfaces here.
+  {
+    id: 'blocked-unsupported',
+    when: { metric: 'blocked.unsupported', count_gte: 1 },
+    level: 'note',
+    message:
+      '{count} respondent(s) could not be messaged because the channel rejected the message type.',
+    action: { label: 'View', dest: 'states-list', filter: { state: 'BLOCKED' } },
+  },
+
+  {
+    id: 'blocked-other',
+    when: { metric: 'blocked.other', count_gte: 1 },
+    level: 'note',
+    message:
+      '{count} respondent(s) blocked for an unrecognized reason. If this number is growing, please contact support.',
+    action: { label: 'View', dest: 'states-list', filter: { state: 'BLOCKED' } },
+  },
 ];
 
 // Platform notices whitelist + translation table for the AlertManager proxy
 // (GET /platform/notices). Keys are AlertManager alertnames; anything not
 // listed here (all infra alerts) is dropped. Values are researcher-facing
 // copy — calm, no-blame, no platform jargon.
+//
+// ⚠️ These keys are a hand-maintained coupling to the `alert:` names in
+// devops/alerts/templates/study-health.yaml. notices.js DROPS any alert not
+// listed here, so renaming an alert there removes a researcher-facing notice
+// with no error anywhere. Verified against that file 2026-07-29.
 module.exports.platformNotices = {
+  ProviderErrors:
+    'The platform is currently unable to deliver messages on one or more channels. Your survey may be affected; this is not caused by your configuration. The team has been alerted.',
   PlatformInternalErrors:
     'The platform is currently experiencing elevated internal errors. Your survey may be affected; this is not caused by your configuration.',
   PlatformRateLimited:

@@ -193,6 +193,20 @@ const STATE_MACHINE_STATES = [
 // Each state row lands in exactly one (form, state, error_tag,
 // fb_category) group; stuck/expired are FILTER counts within the group so
 // the fold can sum them independently of the grouping dimensions.
+//
+// TAXONOMY CONTRACT — site 1 of 6. The fb_error_code CASE below is one copy of
+// a classification hand-maintained across four languages. Single source of
+// truth: documentation/study-error-alerting.md ("Taxonomy contract"); walk its
+// "Consumer inventory" table before changing any mapping here. Note the
+// category names must also agree with FB_CATEGORIES in api/health/aggregate.js,
+// which is a different file and will not fail loudly if it disagrees.
+//
+// NOTE: this CASE is evaluated for EVERY row, not just BLOCKED ones, so a
+// RESPONDING row (fb_error_code IS NULL) is also labelled
+// 'provider_unreachable'. That is harmless — aggregate.js only reads
+// fb_category when state === 'BLOCKED' — but do not "fix" it by narrowing the
+// CASE without checking that guard, and do not read fb_category for
+// non-BLOCKED rows.
 async function healthSummary(email, surveyName, shortcodes) {
   const query = `
     SELECT
@@ -204,6 +218,9 @@ async function healthSummary(email, surveyName, shortcodes) {
         WHEN states.fb_error_code = '100'  THEN 'template_missing'
         WHEN states.fb_error_code = '2022' THEN 'rate_limit'
         WHEN states.fb_error_code = '200'  THEN 'unsupported'
+        WHEN states.fb_error_code = '-1'   THEN 'provider_error'
+        WHEN states.fb_error_code IS NULL
+          OR states.fb_error_code = '0'    THEN 'provider_unreachable'
         ELSE 'other'
       END AS fb_category,
       COUNT(*) FILTER (WHERE states.stuck_on_question IS NOT NULL)::int AS stuck,

@@ -1,5 +1,19 @@
 {{- if .Values.studyHealth.enabled }}
 {{- $runbook := .Values.runbookUrl }}
+{{/*
+  TAXONOMY CONTRACT — sites 5 and 6 of 6.
+
+  Single source of truth: documentation/study-error-alerting.md ("Taxonomy
+  contract"). Walk its "Consumer inventory" table before changing a mapping.
+
+  Two things in this file encode the taxonomy:
+   - `category="..."` matchers pick which BLOCKED categories alert (site 5).
+   - `error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"` is the platform-vs-study
+     split (site 6). sql_exporter exports error_tag RAW, so this regex IS the
+     classification — and it is repeated THREE times below. All three must
+     change together; a partial edit silently reclassifies errors in some
+     rules but not others.
+*/}}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

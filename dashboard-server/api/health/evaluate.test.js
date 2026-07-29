@@ -16,11 +16,16 @@ function bag(overrides = {}) {
       window_hours: 24,
       active_users: 0,
       error: { platform: 0, study: 0, by_tag: {} },
+      // Mirrors FB_CATEGORIES in aggregate.js. evaluate() SKIPS a rule whose
+      // metric is absent from the bag, so a category missing here makes its
+      // rule silently untestable — keep in sync.
       blocked: {
         attrition: 0,
         template_missing: 0,
         rate_limit: 0,
         unsupported: 0,
+        provider_error: 0,
+        provider_unreachable: 0,
         other: 0,
       },
       stuck_users: 0,
@@ -105,17 +110,67 @@ describe('health evaluate (pure rule engine)', () => {
   });
 
   it('attrition produces no findings (expected churn)', () => {
-    const b = bag({
-      active_users: 200,
-      blocked: {
-        attrition: 50,
-        template_missing: 0,
-        rate_limit: 0,
-        unsupported: 0,
-        other: 0,
-      },
-    });
+    // Built from the full default bag rather than a partial override, so this
+    // genuinely proves attrition alone is silent instead of passing because
+    // the other categories were absent and their rules got skipped.
+    const b = bag({ active_users: 200 });
+    b.blocked.attrition = 50;
     evaluate(b, rules, quiet).should.deep.equal([]);
+  });
+
+  it('fires action at count=1 for provider_unreachable, and does not promise recovery', () => {
+    const b = bag({ active_users: 100 });
+    b.blocked.provider_unreachable = 1;
+    const findings = evaluate(b, rules, quiet);
+    findings.should.have.length(1);
+    findings[0].id.should.equal('provider-unreachable');
+    findings[0].level.should.equal('action');
+    // These respondents are structurally unrecoverable (dean's `= ANY` never
+    // matches NULL) — copy must not tell the researcher to wait it out.
+    findings[0].message.should.not.match(/automatic/i);
+    findings[0].message.should.match(/contact support/i);
+  });
+
+  it('treats provider_error as stochastic: note on a trickle, action on a spike', () => {
+    const trickle = bag({ active_users: 100 });
+    trickle.blocked.provider_error = 2;
+    const t = evaluate(trickle, rules, quiet);
+    t.should.have.length(1);
+    t[0].id.should.equal('provider-error-trickle');
+    t[0].level.should.equal('note');
+
+    const spike = bag({ active_users: 100 });
+    spike.blocked.provider_error = 20;
+    const s = evaluate(spike, rules, quiet);
+    s.should.have.length(1);
+    s[0].id.should.equal('provider-error-spike');
+    s[0].level.should.equal('action');
+  });
+
+  it('does not fire the provider_error spike below the absolute floor', () => {
+    // 2/5 = 40% ratio but only 2 respondents — the floor (3) must hold.
+    const b = bag({ active_users: 5 });
+    b.blocked.provider_error = 2;
+    const findings = evaluate(b, rules, quiet);
+    findings.should.have.length(1);
+    findings[0].id.should.equal('provider-error-trickle');
+  });
+
+  it('surfaces every blocked category except attrition (no silent buckets)', () => {
+    // Regression guard: before 2026-07-29 'other' and 'unsupported' were
+    // classified but read by no rule, so a blocked respondent could produce a
+    // completely clean Monitor tab.
+    const silent = ['unsupported', 'other'];
+    silent.forEach(category => {
+      const b = bag({ active_users: 50 });
+      b.blocked[category] = 1;
+      const findings = evaluate(b, rules, quiet);
+      findings.should.have.length(
+        1,
+        `blocked.${category} produced no finding — silent bucket regression`
+      );
+      findings[0].count.should.equal(1);
+    });
   });
 
   it('sorts action findings before notes', () => {
@@ -238,6 +293,20 @@ describe('health buildAggregates (row folding)', () => {
     b.blocked.template_missing.should.equal(2);
     b.blocked.other.should.equal(1);
     b.blocked.rate_limit.should.equal(0);
+  });
+
+  it('buckets the provider categories the SQL CASE emits', () => {
+    // Taxonomy contract site 2: FB_CATEGORIES is an allow-list, so a category
+    // healthSummary emits but aggregate.js omits is silently folded into
+    // 'other'. That is exactly how the 2026-07-26 drift stayed invisible.
+    const rows = [
+      { form: 'A', state: 'BLOCKED', error_tag: 'none', fb_category: 'provider_error', stuck: 0, expired: 0, count: 4 },
+      { form: 'A', state: 'BLOCKED', error_tag: 'none', fb_category: 'provider_unreachable', stuck: 0, expired: 0, count: 7 },
+    ];
+    const b = buildAggregates(rows, 24);
+    b.blocked.provider_error.should.equal(4);
+    b.blocked.provider_unreachable.should.equal(7);
+    b.blocked.other.should.equal(0);
   });
 
   it('sums stuck and expired FILTER counts across groups', () => {

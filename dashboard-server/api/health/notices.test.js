@@ -22,6 +22,14 @@ describe('platform notices translation (pure)', () => {
     notices[0].since.should.equal('2026-07-22T10:00:00Z');
   });
 
+  it('translates ProviderErrors, the critical channel-failure alert', () => {
+    // Was absent from the whitelist until 2026-07-29, so the paging provider
+    // alert produced no researcher-facing notice at all.
+    const notices = translateAlerts([alert('ProviderErrors')], platformNotices);
+    notices.length.should.equal(1);
+    notices[0].message.should.match(/not caused by your configuration/i);
+  });
+
   it('drops unlisted alertnames (infra alerts)', () => {
     const notices = translateAlerts(
       [alert('KubeProxyDown'), alert('TargetDown'), alert('PlatformInternalErrors')],

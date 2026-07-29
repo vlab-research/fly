@@ -5,11 +5,17 @@
 // against. No IO, no Date, no config: rows in, bag out.
 //
 // Taxonomy contract: documentation/study-error-alerting.md ("Taxonomy
-// contract" section). The fb_error_code bucketing happens in SQL
-// (queries/states/states.queries.js healthSummary); the error_tag bucketing
-// happens here. Both consumers of the taxonomy (this module + the
-// sql_exporter ConfigMap in devops/sql-exporter/templates/configmap.yaml)
-// must stay in sync with that contract.
+// contract" section) is the single source of truth. The fb_error_code
+// bucketing happens in SQL (queries/states/states.queries.js healthSummary);
+// the error_tag bucketing happens here.
+//
+// The classification is hand-maintained in SIX places across four languages —
+// do NOT change a mapping here without walking the "Consumer inventory" table
+// in that doc. This file is sites 2 (FB_CATEGORIES) and 3
+// (PLATFORM_ERROR_TAGS). FB_CATEGORIES is an allow-list that must agree with
+// the SQL CASE in healthSummary, which is a separate file: that seam is
+// exactly where the 2026-07-26 provider_error/provider_unreachable drift
+// went unnoticed.
 //
 // error_tag classes:
 //  - INTERNAL / STATE_ACTIONS / NETWORK -> error.platform (deterministic,
@@ -21,11 +27,16 @@
 
 const PLATFORM_ERROR_TAGS = ['INTERNAL', 'STATE_ACTIONS', 'NETWORK'];
 
+// Must agree with the CASE in queries/states/states.queries.js healthSummary
+// (site 1) — this list is only an allow-list, so a category the SQL emits but
+// this array omits is silently folded into 'other'.
 const FB_CATEGORIES = [
   'attrition',
   'template_missing',
   'rate_limit',
   'unsupported',
+  'provider_error',
+  'provider_unreachable',
   'other',
 ];
 

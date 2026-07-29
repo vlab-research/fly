@@ -62,6 +62,9 @@ All metrics are gauges reflecting counts in the last hour:
 |--------|--------|---------|
 | `survey_error_states` | `form`, `error_tag`, `page` | Users in ERROR state by error_tag (INTERNAL, STATE_ACTIONS, NETWORK, FORM_NOT_FOUND, FIELD_NOT_FOUND, INTERPOLATION_ERROR, none) |
 | `survey_blocked_states` | `form`, `category`, `code`, `page` | Users in BLOCKED state by category **and raw provider code** |
+| `survey_stuck_users` | `form` | Users stuck on the same question (validation loop / confusing form) |
+| `survey_expired_waits` | `form` | Users in WAIT_EXTERNAL_EVENT past timeout (Dean not processing) |
+| `survey_active_users` | `form` | Total active users (denominator for error ratios) |
 
 **Changed 2026-07-26 — three things that were destroying signal:**
 
@@ -84,9 +87,9 @@ whole class was silent):
 |---|---|---|
 | `provider_error` | `-1` | Meta's own `(#-1) Unexpected internal error`. We reached Meta; Meta failed. Dean retries these. |
 | `provider_unreachable` | `(none)` / `0` | We never reached Meta — no HTTP request was made, typically a missing page token. **Dean cannot retry these** (`= ANY` never matches NULL), so affected users stay blocked permanently. See `planning/null-fb-error-code-findings.md`. |
-| `survey_stuck_users` | `form` | Users stuck on the same question (validation loop / confusing form) |
-| `survey_expired_waits` | `form` | Users in WAIT_EXTERNAL_EVENT past timeout (Dean not processing) |
-| `survey_active_users` | `form` | Total active users (denominator for error ratios) |
+
+> These two categories exist in **sql_exporter only**. dashboard-server still buckets
+> `-1` and `NULL`/`0` into `other`. See "Known divergences" in the Taxonomy contract below.
 
 **Live traffic metric** (5m window, `study_traffic` collector — *not* alerted on):
 
@@ -183,34 +186,85 @@ nowhere. Downstream needs no change per tag: `DEAN_ERROR_TAGS` and the dashboard
 
 ### Taxonomy contract
 
-The classification above is a **shared contract** with two consumers that
-must stay in sync (both cite this section in code comments):
-
-1. **sql_exporter** — `devops/sql-exporter/templates/configmap.yaml`
-   (Prometheus metrics feeding the platform-owner alerts above; 1h window).
-2. **dashboard-server health API** — `dashboard-server/api/health/`
-   (`aggregate.js` for error_tag bucketing) +
-   `dashboard-server/queries/states/states.queries.js` (`healthSummary`, for
-   fb_error_code bucketing; 24h window). Feeds the researcher-facing Monitor
-   tab — see `documentation/dashboard-study-health.md`.
+**This table is the single source of truth for the classification.** There is no
+code generation and no conformance test — the contract holds only because every
+change to a classification is made here first, then applied to each consumer in
+the inventory below.
 
 | Dimension | Mapping | Class |
 |---|---|---|
 | `error_tag` IN (INTERNAL, STATE_ACTIONS, NETWORK) | `error.platform` | deterministic (platform's fault) |
-| `error_tag` = FORM_NOT_FOUND or NULL (`none`), or any unrecognized tag | `error.study` | stochastic |
+| `error_tag` = FORM_NOT_FOUND, FIELD_NOT_FOUND, INTERPOLATION_ERROR, NULL (`none`), or any unrecognized tag | `error.study` | stochastic |
 | `fb_error_code` IN (10, 190, 551) | `blocked.attrition` | excluded (expected churn) |
 | `fb_error_code` = 100 | `blocked.template_missing` | deterministic |
 | `fb_error_code` = 2022 | `blocked.rate_limit` | deterministic (platform-side) |
 | `fb_error_code` = 200 | `blocked.unsupported` | stochastic |
-| other `fb_error_code` | `blocked.other` | stochastic |
+| `fb_error_code` = -1 | `blocked.provider_error` | deterministic (provider-side, retryable) |
+| `fb_error_code` IS NULL or = 0 | `blocked.provider_unreachable` | deterministic (**not** retryable) |
+| any other `fb_error_code` | `blocked.other` | stochastic |
 | `stuck_on_question IS NOT NULL` | `stuck_users` | stochastic |
 | `current_state = 'WAIT_EXTERNAL_EVENT' AND timeout_date < NOW()` | `expired_waits` | stochastic |
 | all rows in window | `active_users` | denominator |
 
-The two consumers intentionally use **different windows** (1h alerting vs
-24h dashboard) and **different thresholds** — the contract is the
-classification, not the rules on top of it. If the mapping changes, update
-both consumers and this table together.
+Consumers intentionally use **different windows** (1h alerting vs 24h dashboard)
+and **different thresholds** — the contract is the classification, not the rules
+on top of it.
+
+### Consumer inventory — check every row before changing a classification
+
+The classification is hand-maintained in **six places across four languages**.
+"Keep consumers in sync" is not actionable without the list, so here it is. The
+two halves of the taxonomy are classified at *different layers*, which is why
+there is no single place to change:
+
+- **`fb_error_code` → category** is classified **early**, in SQL, so the category
+  becomes a metric label / query column.
+- **`error_tag` → platform-vs-study** is classified **late**, at consumption time.
+  sql_exporter exports `error_tag` **raw** and the split lives in PromQL matchers;
+  dashboard-server does the same split in a JS array.
+
+| # | Site | Form | Covers |
+|---|---|---|---|
+| 1 | `dashboard-server/queries/states/states.queries.js` (`healthSummary`) | SQL `CASE` | `fb_error_code` → category |
+| 2 | `dashboard-server/api/health/aggregate.js` (`FB_CATEGORIES`) | JS array — allow-list that must match site 1 | category names |
+| 3 | `dashboard-server/api/health/aggregate.js` (`PLATFORM_ERROR_TAGS`) | JS array | `error_tag` → platform/study |
+| 4 | `devops/sql-exporter/templates/configmap.yaml` | SQL `CASE` | `fb_error_code` → category |
+| 5 | `devops/alerts/templates/study-health.yaml` | PromQL label matchers on `category` (3 sites) | which categories alert |
+| 6 | `devops/alerts/templates/study-health.yaml` | PromQL regex `error_tag=~"INTERNAL\|STATE_ACTIONS\|NETWORK"` — **repeated 3×** | `error_tag` → platform/study |
+
+A seventh coupling is adjacent but *not* the taxonomy: `rules.js` →
+`platformNotices` is a whitelist keyed on **AlertManager alertnames**, and
+`notices.js` silently drops any alert not in it. Renaming an alert in
+`study-health.yaml` therefore removes a researcher-facing notice with no error.
+AlertManager itself knows nothing about the taxonomy — it routes on `severity`
+only.
+
+### Divergences — resolved 2026-07-29
+
+All consumers now implement the contract table above. Three divergences were
+closed together, because the failure class this doc calls "the serious one" — the
+missing-page-token case that left 131 participants permanently blocked for 12
+days — was **invisible to researchers by three independent routes**:
+
+| Was | Sites | Fix |
+|---|---|---|
+| `provider_error` / `provider_unreachable` missing (added to sql_exporter 2026-07-26, never propagated) | 1, 2 | Both added to the `healthSummary` CASE and to `FB_CATEGORIES`. |
+| No rule read `blocked.other` **or** `blocked.unsupported` — both classified, neither surfaced | `rules.js` | `provider-unreachable` (action), `provider-error-spike`/`-trickle`, `blocked-unsupported` and `blocked-other` (notes). Every blocked category except `attrition` now reaches a rule. |
+| `ProviderErrors` absent from `platformNotices` | `rules.js` | Added. |
+
+Two deliberate copy decisions worth preserving:
+
+- **`provider-unreachable` does not say delivery resumes automatically.** It
+  can't: dean retries via `fb_error_code = ANY(...)` and SQL `= ANY` never
+  matches NULL, so these respondents are structurally unrecoverable and the copy
+  tells the researcher to contact support instead of waiting.
+- **`provider_error` (-1) is treated as stochastic, not deterministic.** The
+  provider was reached and failed its own way; dean *does* retry these, so a
+  trickle is a note and only a spike (≥5% and ≥3) is an action.
+
+`blocked.attrition` remains intentionally rule-free — it is expected churn.
+Because `blocked-other` is now a catch-all note, a future category added to the
+taxonomy without its own rule degrades to a visible note rather than silence.
 
 ### Alerting Logic
 

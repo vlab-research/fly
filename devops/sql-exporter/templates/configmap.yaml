@@ -66,9 +66,15 @@ data:
     # recent activity; labels are ONLY form + tag/category/state — NO user-identifying data.
     #
     # TAXONOMY CONTRACT: the error_tag / fb_error_code bucketing below is a shared contract —
-    # see the "Taxonomy contract" section of documentation/study-error-alerting.md. The other
-    # consumer is dashboard-server/api/health/ (+ the healthSummary query in
-    # dashboard-server/queries/states/states.queries.js). Keep all consumers in sync.
+    # documentation/study-error-alerting.md ("Taxonomy contract") is the single source of
+    # truth. The classification is hand-maintained in SIX places across four languages; this
+    # file is site 4. Do NOT change a mapping here without walking the "Consumer inventory"
+    # table in that doc — the other five sites are in dashboard-server (SQL + two JS arrays)
+    # and devops/alerts/templates/study-health.yaml (PromQL matchers, one regex repeated 3x).
+    #
+    # All six sites were reconciled 2026-07-29. provider_error (-1) and
+    # provider_unreachable (NULL/'0') had lived here alone since 2026-07-26 —
+    # dashboard-server silently bucketed both into 'other' for a month.
     #
     # NOTE ON LABEL NAMES: this collector keeps the legacy names `form` (= shortcode)
     # and `study` (= survey_name) because every alert and recording rule in
