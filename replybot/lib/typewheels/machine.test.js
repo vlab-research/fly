@@ -3054,3 +3054,77 @@ describe('md must always carry startTime', () => {
     next.md.should.have.property('form', 'fallback')
   })
 })
+
+// VIR-17 / VIR-19. Ads whose welcome message carries a quick-reply button
+// deliver the referral INSIDE that button's payload, and Messenger sends the
+// payload as a JSON string. These are RAW webhook shapes run through the real
+// event-normalizer, mirroring production where parseEvent runs per Kafka
+// message -- a normalized fixture would not exercise the defect.
+describe('Referral delivered inside a quick_reply payload string', () => {
+  const REAL_REF = 'creative.3b.gender.men.geography.other_states2.form.hpvintrotriple'
+
+  const rawQuickReplyReferral = {
+    source: 'messenger',
+    sender: { id: USER_ID },
+    recipient: { id: PAGE_ID },
+    timestamp: 1542123799219,
+    message: {
+      mid: 'm_hpv_intro',
+      text: 'Get Started',
+      quick_reply: { payload: `{"referral": {"ref": "${REAL_REF}"}}` }
+    }
+  }
+
+  it('starts the referred form, not FALLBACK_FORM', () => {
+    const state = getState([rawQuickReplyReferral].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.form.should.not.equal(process.env.FALLBACK_FORM)
+    state.forms.should.eql(['hpvintrotriple'])
+  })
+
+  it('carries the referral targeting metadata into state.md', () => {
+    const state = getState([rawQuickReplyReferral].map(parseEvent))
+
+    state.md.creative.should.equal('3b')
+    state.md.gender.should.equal('men')
+    state.md.geography.should.equal('other_states2')
+  })
+
+  // A single ad click produces more than one webhook: the thread-control
+  // handover typically lands ~1.5s before the quick_reply carrying the referral,
+  // and the handover blank-starts FALLBACK_FORM. Once the referral normalizes
+  // correctly the REFERRAL handler switches the user onto the referred form, so
+  // the race is no longer terminal -- but `forms` keeps the transient fallback
+  // entry, so the user still looks like they touched it.
+  it('recovers the referred form when a handover blank-started FALLBACK_FORM first', () => {
+    const rawHandover = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1542123797000,
+      pass_thread_control: { previous_owner_app_id: 263902037430900, metadata: 'new message' }
+    }
+    const state = getState([rawHandover, rawQuickReplyReferral].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.forms.should.eql(['fallback', 'hpvintrotriple'])
+  })
+
+  it('still starts FALLBACK_FORM for a quick_reply that carries no referral', () => {
+    const rawAnswer = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1542123799219,
+      message: {
+        mid: 'm_answer',
+        text: 'Yes',
+        quick_reply: { payload: '{"value":"1","ref":"intro_1"}' }
+      }
+    }
+    const state = getState([rawAnswer].map(parseEvent))
+
+    state.md.form.should.equal('fallback')
+  })
+})

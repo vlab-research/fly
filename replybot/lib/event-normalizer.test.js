@@ -258,6 +258,123 @@ describe('categorizeMessengerEvent - postback', () => {
   })
 })
 
+// VIR-19: Messenger delivers quick_reply and postback payloads as JSON
+// STRINGS. Testing `.referral` against the unparsed string always yielded
+// undefined, so ad clicks arriving via a quick-reply button normalized to
+// user_interaction and lost their form shortcode to FALLBACK_FORM.
+describe('categorizeMessengerEvent - referral inside a payload STRING (VIR-19)', () => {
+  const REAL_REF = 'creative.3b.gender.men.geography.other_states2.form.hpvintrotriple'
+
+  it('treats a quick_reply payload string carrying a referral as conversation_started', () => {
+    const event = {
+      message: {
+        text: 'Get Started',
+        quick_reply: {
+          payload: JSON.stringify({ referral: { ref: REAL_REF } })
+        }
+      }
+    }
+    const result = categorizeMessengerEvent(event)
+    result.event_type.should.equal('conversation_started')
+    result.payload.type.should.equal('conversation_started')
+    result.payload.trigger.should.equal('referral')
+    result.payload.referral.ref.should.equal(REAL_REF)
+  })
+
+  it('treats a postback payload string carrying a referral as conversation_started', () => {
+    const event = {
+      postback: {
+        title: 'Get Started',
+        payload: JSON.stringify({ referral: { ref: REAL_REF } })
+      }
+    }
+    const result = categorizeMessengerEvent(event)
+    result.event_type.should.equal('conversation_started')
+    result.payload.referral.ref.should.equal(REAL_REF)
+  })
+
+  it('still treats a referral object on the quick_reply payload as conversation_started', () => {
+    const event = {
+      message: {
+        text: 'Get Started',
+        quick_reply: { payload: { referral: { ref: REAL_REF } } }
+      }
+    }
+    const result = categorizeMessengerEvent(event)
+    result.event_type.should.equal('conversation_started')
+    result.payload.referral.ref.should.equal(REAL_REF)
+  })
+
+  it('keeps a normal survey answer (payload string, no referral) a quick_reply interaction', () => {
+    const event = {
+      message: {
+        text: 'Yes',
+        quick_reply: { payload: '{"value":"1","ref":"intro_1"}' }
+      }
+    }
+    const result = categorizeMessengerEvent(event)
+    result.should.deep.equal({
+      event_type: 'user_interaction',
+      payload: {
+        type: 'user_interaction',
+        value: '1',
+        label: 'Yes',
+        source_message_id: 'intro_1',
+        interaction_type: 'quick_reply'
+      }
+    })
+  })
+
+  it('keeps a normal survey answer (postback payload string, no referral) a postback interaction', () => {
+    const event = {
+      postback: {
+        title: 'Yes',
+        payload: '{"value":"1","ref":"intro_1"}'
+      }
+    }
+    const result = categorizeMessengerEvent(event)
+    result.payload.interaction_type.should.equal('postback')
+    result.event_type.should.equal('user_interaction')
+  })
+
+  it('still treats the bare get_started postback as conversation_started', () => {
+    const result = categorizeMessengerEvent({
+      postback: { payload: 'get_started', title: 'Get Started' }
+    })
+    result.event_type.should.equal('conversation_started')
+    should.not.exist(result.payload.referral)
+  })
+
+  it('does not throw and does not fabricate a referral for a malformed payload string', () => {
+    const qr = () => categorizeMessengerEvent({
+      message: { text: 'x', quick_reply: { payload: '{"referral": {' } }
+    })
+    qr.should.not.throw()
+    qr().event_type.should.equal('user_interaction')
+
+    const pb = () => categorizeMessengerEvent({
+      postback: { title: 'x', payload: 'not json at all' }
+    })
+    pb.should.not.throw()
+    pb().event_type.should.equal('user_interaction')
+  })
+
+  it('normalizes the real production webhook end-to-end', () => {
+    const result = parseMessengerEvent({
+      sender: { id: 'user_123' },
+      recipient: { id: 'page_456' },
+      message: {
+        mid: 'm_abc',
+        text: 'Get Started',
+        quick_reply: { payload: `{"referral": {"ref": "${REAL_REF}"}}` }
+      }
+    }, 1711100000000)
+
+    result.event_type.should.equal('conversation_started')
+    result.payload.referral.ref.should.equal(REAL_REF)
+  })
+})
+
 describe('parseMessengerEvent', () => {
   it('parses complete quick_reply event with JSON string payload', () => {
     const event = {

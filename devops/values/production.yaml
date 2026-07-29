@@ -22,15 +22,20 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 
 # NOTE ON THE -wa SUFFIX. documentation/staging-tagging-and-deploy.md says a
 # -wa tag must never appear in this file, because the suffix is the guardrail
-# against promoting untested WhatsApp work. That rule is DELIBERATELY suspended
-# for this promotion: these are the exact images validated in vstag, and
-# re-cutting clean tags would ship different bytes than were tested. Clean tags
-# (dashboard-v0.0.68, replybot-v0.0.210, ...) already exist on origin pointing
-# at the same commits; swap to them on the next release and restore the rule.
+# against promoting untested WhatsApp work. That rule was DELIBERATELY suspended
+# for the previous promotion: those were the exact images validated in vstag, and
+# re-cutting clean tags would have shipped different bytes than were tested. The
+# note said to swap to clean tags on the next release and restore the rule.
+#
+# RULE RESTORED FOR REPLYBOT (2026-07-29, VIR-17/VIR-19). The quick-reply
+# referral hotfix is a real code change, so there is no "same bytes as tested"
+# argument to preserve -- it was cut as a clean tag, replybot-v0.0.212.
+# The remaining services below still carry -wa and were out of scope for this
+# hotfix; swap each to a clean tag as it next changes.
 versionDashboard: &vdashboard v0.0.68-wa
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
-versionReplybot: &vreplybot v0.0.211-wa
+versionReplybot: &vreplybot v0.0.212
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32

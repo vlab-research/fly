@@ -18,16 +18,23 @@ function parsePayload(payload) {
 }
 
 function categorizeMessengerEvent(data) {
-  if (data.referral ||
-      (data.postback && data.postback.referral) ||
-      (data.postback && data.postback.payload === 'get_started') ||
-      (data.postback && data.postback.payload && data.postback.payload.referral) ||
-      (data.message && data.message.quick_reply && data.message.quick_reply.payload && data.message.quick_reply.payload.referral)) {
-    const referral = data.referral ||
-      (data.postback && data.postback.referral) ||
-      (data.postback && data.postback.payload && data.postback.payload.referral) ||
-      (data.message && data.message.quick_reply && data.message.quick_reply.payload && data.message.quick_reply.payload.referral)
+  // Messenger delivers quick_reply/postback payloads as JSON STRINGS, so these
+  // must be parsed BEFORE testing for `.referral` -- reading `.referral` off
+  // the raw string always yields undefined (VIR-19), which silently demoted
+  // ad-click entries to user_interaction and lost the form shortcode to
+  // FALLBACK_FORM. parsePayload returns non-JSON strings unchanged, so the
+  // bare 'get_started' postback still compares equal after parsing.
+  const postbackPayload = data.postback ? parsePayload(data.postback.payload) : null
+  const quickReplyPayload = (data.message && data.message.quick_reply)
+    ? parsePayload(data.message.quick_reply.payload)
+    : null
 
+  const referral = data.referral ||
+    (data.postback && data.postback.referral) ||
+    (postbackPayload && postbackPayload.referral) ||
+    (quickReplyPayload && quickReplyPayload.referral)
+
+  if (referral || postbackPayload === 'get_started') {
     return {
       event_type: 'conversation_started',
       payload: {
@@ -60,7 +67,7 @@ function categorizeMessengerEvent(data) {
     }
 
     if (data.message.quick_reply) {
-      const payloadObj = parsePayload(data.message.quick_reply.payload)
+      const payloadObj = quickReplyPayload
       const value = (payloadObj && payloadObj.value !== undefined) ? payloadObj.value : payloadObj
       const ref = payloadObj && payloadObj.ref
 
@@ -99,7 +106,7 @@ function categorizeMessengerEvent(data) {
   }
 
   if (data.postback) {
-    const payloadObj = parsePayload(data.postback.payload)
+    const payloadObj = postbackPayload
     const value = (payloadObj && payloadObj.value !== undefined) ? payloadObj.value : payloadObj
     const ref = payloadObj && payloadObj.ref
 
