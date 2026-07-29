@@ -33,11 +33,11 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 #
 # RULE RESTORED FOR DASHBOARD (2026-07-29). Same reasoning: the study-health
 # taxonomy divergence fixes are a real code change, cut clean as
-# dashboard-v0.0.69.
+# dashboard-v0.0.69; dashboard-v0.0.70 continues on clean tags.
 #
 # The remaining services below still carry -wa and were out of scope for both
 # changes; swap each to a clean tag as it next changes.
-versionDashboard: &vdashboard v0.0.69
+versionDashboard: &vdashboard v0.0.70
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
 versionReplybot: &vreplybot v0.0.212
