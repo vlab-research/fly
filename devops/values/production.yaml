@@ -166,8 +166,20 @@ dean:
     value: "26257"
   - name: BOTSERVER_URL
     value: "http://gbv-hermes/synthetic"
+  # FIELD_NOT_FOUND added 2026-07-29 (VIR-18). The quick_reply-referral
+  # regression (VIR-19) misattributed live participants to FALLBACK_FORM, so
+  # replybot looked their pending question up in the wrong survey and errored.
+  # replybot v0.0.212 fixes the attribution, but state only recomputes when
+  # something replays the event log -- and Dean's Errored() sweep skipped these
+  # because FIELD_NOT_FOUND was not a retryable tag, leaving 59 participants
+  # stranded mid-survey with no path back.
+  #
+  # The tag is not always transient: a genuinely deleted field errors the same
+  # way and will now retry until DEAN_RETRY_MAX_ATTEMPTS. That is bounded and
+  # cheap at current volume (61 such states platform-wide), but if this list is
+  # ever reviewed for noise, this is the entry to question first.
   - name: DEAN_ERROR_TAGS
-    value: "NETWORK,INTERNAL,STATE_ACTIONS"
+    value: "NETWORK,INTERNAL,STATE_ACTIONS,FIELD_NOT_FOUND"
   - name: DEAN_ERROR_INTERVAL
     value: "48 hours"
   - name: DEAN_FB_CODES
