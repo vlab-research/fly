@@ -166,20 +166,25 @@ dean:
     value: "26257"
   - name: BOTSERVER_URL
     value: "http://gbv-hermes/synthetic"
-  # FIELD_NOT_FOUND added 2026-07-29 (VIR-18). The quick_reply-referral
-  # regression (VIR-19) misattributed live participants to FALLBACK_FORM, so
-  # replybot looked their pending question up in the wrong survey and errored.
-  # replybot v0.0.212 fixes the attribution, but state only recomputes when
-  # something replays the event log -- and Dean's Errored() sweep skipped these
-  # because FIELD_NOT_FOUND was not a retryable tag, leaving 59 participants
-  # stranded mid-survey with no path back.
+  # FIELD_NOT_FOUND was temporarily added here on 2026-07-29 and removed on
+  # 2026-07-30, once the VIR-18 recovery it was needed for had run (40 of 54
+  # stranded participants replayed back into their surveys).
   #
-  # The tag is not always transient: a genuinely deleted field errors the same
-  # way and will now retry until DEAN_RETRY_MAX_ATTEMPTS. That is bounded and
-  # cheap at current volume (61 such states platform-wide), but if this list is
-  # ever reviewed for noise, this is the entry to question first.
+  # Do not re-add it as a standing entry. FIELD_NOT_FOUND is usually a permanent
+  # error -- a survey editor deleting a field produces it too -- so as a
+  # retryable tag it burns DEAN_RETRY_MAX_ATTEMPTS (60) attempts per state
+  # forever with no possibility of success. It was only worth enabling because
+  # a deploy had made a whole cohort's errors retroactively transient.
+  #
+  # If you ever need it again, note the trap that cost us the most time: adding
+  # the tag ALONE does nothing. Replybot serves state from a Redis cache and
+  # only replays the event log on a cache MISS, and updateState() rewrites the
+  # key with a fresh 24h TTL on every processed event. So retrying reads the
+  # same corrupt state, re-errors, and keeps the bad entry alive indefinitely --
+  # a sweep of 40 participants recovered exactly zero. You must clear the cached
+  # state first (devops/clear-state-cache.sh), then let the retry fire.
   - name: DEAN_ERROR_TAGS
-    value: "NETWORK,INTERNAL,STATE_ACTIONS,FIELD_NOT_FOUND"
+    value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
     value: "48 hours"
   - name: DEAN_FB_CODES
