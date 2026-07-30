@@ -167,6 +167,20 @@ what `errorOnset` exists for:
 Every transition reachable from `RESPONDING` either consumes `errorOnset` (into
 `error.ts` on `ERROR`/`BLOCKED`) or clears it, so it cannot leak.
 
+## Repeats (`_gatherResponses`)
+
+Every re-send of a question — follow-up nudge, failed validation, repeat
+referral — funnels through `_gatherResponses` in `lib/typewheels/machine.js`,
+which fires on `metadata.repeat`. It emits the nudge/error line first and then
+the question re-rendered by `repeatField` (the normal translator, stamped
+`metadata.isRepeat`).
+
+The one exception is a `utility_message` field, where the nudge is dropped and
+only the template is re-sent: the nudge is free-form text and would be rejected
+out-of-window with `(#10)`, blocking exactly the users a utility message exists
+to reach, and approved template copy cannot carry the nudge anyway. See
+`documentation/utility-messages.md` § "Repeats and follow-ups".
+
 ## Platform Tracking (md.platform)
 
 The conversation's platform (`'messenger'` | `'whatsapp'`) is persisted in

@@ -261,6 +261,79 @@ per button.
 
 ---
 
+## Repeats and follow-ups (out-of-window survival)
+
+A question can be re-sent for three reasons, all of which converge on the same
+code path in `replybot/lib/typewheels/machine.js` (`_gatherResponses`, keyed on
+`metadata.repeat`):
+
+| Trigger | Origin |
+|---|---|
+| Follow-up nudge | dean emits `follow_up`; `exec` returns `{ action: 'RESPOND', followUp: true }` |
+| Failed validation | the user's answer doesn't validate against the field |
+| Repeat referral | the user re-enters a form they are already `QOUT` on (`_repeat`) |
+
+**Ordinary fields** get two outgoing messages: a free-form nudge/error line
+(`label.buttonHint.default` or the relevant `label.error.*`, from the survey's
+`custom_messages`), followed by the question itself re-rendered through the
+normal translator and stamped `metadata.isRepeat: true`. The nudge carries
+`metadata: { repeat: true, ref }`, which the machine's ECHO handler ignores, so
+only the re-rendered question advances the state machine.
+
+**`utility_message` fields get the template alone — no nudge.** Two reasons,
+and they are both hard constraints rather than preferences:
+
+1. The nudge is free-form text. For a user outside the 24-hour window — the
+   entire population a `utility_message` exists to reach — Meta rejects it with
+   `(#10) This message is sent outside of allowed window`, and replybot lands
+   the user in `BLOCKED`. The send is guaranteed to fail and its only effect is
+   to block the respondent.
+2. Approved template copy is fixed at approval time. There is nowhere to put
+   the nudge text even if we wanted to; a repeat can only be a re-send of the
+   same approved template.
+
+So the repeat of a `utility_message` field is exactly one message: the same
+approved template the initial send used, with the same `template` / `language`
+/ `params` metadata, plus `isRepeat: true`.
+
+This is **platform-neutral by construction**. replybot emits one generic
+message; the discriminator is `metadata.type === 'utility_message'`, which is
+the same key both `message-worker/translator.go` (Messenger) and
+`message-worker/translator_whatsapp.go` (WhatsApp) dispatch on. The
+Messenger/WhatsApp payload differences (see
+[`whatsapp-templates.md`](./whatsapp-templates.md)) are resolved downstream, so
+the repeat path needs no platform branch.
+
+**Regression history.** Until replybot v0.0.213 the nudge went out for
+`utility_message` fields too. Confirmed in production on the
+`mentalityendlinebail` bail, whose first field `welcome_back` is a
+`utility_message` (template `recontact_digitalinsights`): the initial bail
+message delivered fine, and the follow-up nudge afterwards blocked people —
+12 users on that bail alone, against 1,724 platform-wide `#10` blocks in July.
+
+Note the ordering, because it makes the bug easy to misread: the *repeat itself*
+was always rendered correctly as the second message. The defect was the
+free-form first message, which could only fail.
+
+**What the failure did and did not do.** It marked the respondent `BLOCKED`. It
+did **not** prevent the template from being sent. Replybot no longer sends
+anything itself: it emits one `send_message` command per outbound message
+(`transition.js buildCommands`) and message-worker consumes them one at a time
+(`worker.go ProcessCommand`), so a `(#10)` on the nudge cannot abort the
+template — the two are independent Kafka messages and nothing waits on the
+first.
+
+This is worth stating explicitly because the older, pre-message-worker replybot
+*did* behave that way: it called the Graph API synchronously inside
+`Machine.act` and awaited each send, so a throw on the first message genuinely
+did abort the rest. Production stack traces from before that migration
+(`lib/messenger/index.js`, a file that no longer exists) show exactly this, and
+reading one of them as current behaviour is an easy and load-bearing mistake to
+make. Under the current architecture the harm of the nudge is a spurious
+`BLOCKED`, not a lost template.
+
+---
+
 ## Database schema
 
 `devops/migrations/13-message-templates.sql` creates the base table:
@@ -315,6 +388,7 @@ Shape: `[{"label": "Yes"}, {"label": "No"}]`. Payloads live in the survey JSON p
 | Send fails with `Invalid keys "index"` on `message[template][components][…]` (code 100) | A `buttons` component has an `index` field (WhatsApp's per-button shape). Messenger rejects it — emit a single `buttons` component with positional POSTBACK parameters instead. Fixed in `@vlab-research/translate-typeform` 0.2.14. |
 | Send fails with `User pass less payload than required for POSTBACK button` (code 100, subcode 1893029) | The `buttons` component has fewer POSTBACK parameters than the approved template has buttons. The Typeform question's `properties.choices` count must equal the approved template's button count. |
 | Button tap answers with "Sorry, please use the buttons provided…" and the template is re-sent, forever | The question's `properties.choices` labels don't match the approved template's button labels **on that page**. The approved template bakes `value == label`, so the postback arrives as `{"value":"<approved label>",…}` while `validateUtilityMessage` only accepts the `choices` labels. Check the delivered payload in `chatroach.messages` (the `is_echo` template shows `buttons[].title` and `payload`) and the approved labels in `chatroach.message_templates.buttons`, then align `choices` — approved templates can't be edited. |
+| User receives the initial utility message fine, then goes `BLOCKED` with code 10 shortly after | The follow-up nudge (or a failed-validation retry) sent free-form text alongside the template. Fixed in replybot v0.0.213 — a repeat of a `utility_message` field now re-sends the template alone. See "Repeats and follow-ups" above. |
 | Replybot crashes on button tap with `There is no translator for the question of type utility_message` | The validator dispatch table in translate-typeform is missing `utility_message`. Fixed in 0.2.15 — bump replybot's lockfile. |
 | Replybot crashes with `There is no translator for the question of type handoff` | Same pattern as above: the translator dispatch table had `handoff` (added in 0.2.17) but the validator did not. Triggered when a user texts during a handoff wait. Fixed in two places: (1) replybot v0.0.202 adds a `_isHandoffWait` guard to TEXT/QUICK_REPLY/POSTBACK/MEDIA handlers so user input is ignored during handoff wait, and (2) translate-typeform 0.2.18 adds `handoff: validateStatement` to the validator lookup as defense-in-depth. See `replybot/HANDOFF_PROTOCOL.md` for details. |
 

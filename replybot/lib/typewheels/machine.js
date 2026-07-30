@@ -853,15 +853,37 @@ function nextQuestion(ctx, qa, question) {
 // TODO: make this work with token recipient
 
 
+// A repeat is always the question itself, re-rendered through the normal
+// translator (so template resolution, interpolation and choices come from one
+// place) and stamped `isRepeat`.
+function repeatField(ctx, qa, ref) {
+  const f = getField(ctx, ref)
+  f.md = { isRepeat: true }
+
+  return translateField(ctx, qa, f)
+}
+
 function _gatherResponses(ctx, qa, q, previous = []) {
   const md = q && q.metadata
 
   if (md && md.repeat) {
+    const repeat = repeatField(ctx, qa, md.ref)
 
-    const f = getField(ctx, md.ref)
-    f.md = { isRepeat: true }
+    // A utility_message is a fixed, pre-approved template -- the only shape
+    // that still reaches a user outside Messenger's/WhatsApp's 24-hour window,
+    // and the reason re-contact flows open on one. The nudge (`q`) that
+    // normally precedes a repeat is free-form text: out of window Meta rejects
+    // it with "(#10) This message is sent outside of allowed window" and the
+    // user lands in BLOCKED -- precisely the population these flows target.
+    // The approved copy cannot carry the nudge either (templates are fixed at
+    // approval time), so the repeat is the template, alone.
+    //
+    // `metadata.type` is the same discriminator message-worker routes on, for
+    // both platforms -- see documentation/utility-messages.md.
+    if (repeat.metadata && repeat.metadata.type === 'utility_message') {
+      return [repeat]
+    }
 
-    const repeat = translateField(ctx, qa, f)
     return [q, repeat]
   }
 

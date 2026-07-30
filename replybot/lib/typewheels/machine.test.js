@@ -7,7 +7,7 @@ const { parseLogJSON } = require('./utils')
 const { followUpMessage, offMessage } = require('../generic-validator')
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 const { parseEvent } = require('../event-normalizer')
 
 const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md.ref ? md : { ref: md } } })
@@ -1982,6 +1982,181 @@ describe('Machine', () => {
 
     const actions = getMessage(log, form, user)
     actions.messages.length.should.equal(0)
+  })
+
+
+  // ---------------------------------------------------------------------
+  // Repeats of utility_message fields (VIR-15)
+  //
+  // A utility_message field's copy is a fixed, pre-approved Meta template --
+  // the only mechanism that still reaches a user outside the 24-hour window.
+  // The nudge / validation-failure line is free-form text, so out of window it
+  // fails with "(#10) This message is sent outside of allowed window" and
+  // BLOCKs exactly the population these re-contact flows exist to reach. There
+  // is also nowhere to put the nudge: approved template copy cannot be edited
+  // per send. So a repeat of a utility_message field re-sends the approved
+  // template, alone.
+  // ---------------------------------------------------------------------
+
+  const UTILITY_MD = 'type: utility_message\ntemplate: recontact_digitalinsights\nlanguage: en_US\nparams:\n  - "5"'
+
+  const utilityFormWithButtons = {
+    logic: [],
+    fields: [{
+      type: 'multiple_choice',
+      title: 'Welcome back!',
+      ref: 'welcome_back',
+      properties: {
+        description: UTILITY_MD,
+        choices: [{ label: 'Yes' }, { label: 'No' }]
+      }
+    }]
+  }
+
+  const utilityFormTextOnly = {
+    logic: [],
+    fields: [{
+      type: 'statement',
+      title: 'Welcome back!',
+      ref: 'welcome_back',
+      properties: { description: UTILITY_MD }
+    }]
+  }
+
+  const shouldBeTheApprovedTemplate = messages => {
+    messages.length.should.equal(1)
+
+    const [msg] = messages
+    msg.metadata.type.should.equal('utility_message')
+    msg.metadata.template.should.equal('recontact_digitalinsights')
+    msg.metadata.language.should.equal('en_US')
+    msg.metadata.params.should.deep.equal(['5'])
+    msg.metadata.ref.should.equal('welcome_back')
+    msg.metadata.isRepeat.should.be.true
+
+    // the free-form nudge cannot leave the 24h window -- it must not be sent
+    should.not.exist(msg.metadata.repeat)
+    messages
+      .some(m => m.text === followUpMessage({}) || (m.text && /^Sorry/.test(m.text)))
+      .should.be.false
+  }
+
+  it('Repeats a utility_message field as its approved template on follow_up', () => {
+    const fu = synthetic({ type: 'follow_up', value: 'welcome_back' })
+    const log = [referral, _echo('welcome_back'), fu]
+
+    const actions = getMessage(log, utilityFormWithButtons, user)
+
+    shouldBeTheApprovedTemplate(actions.messages)
+    actions.messages[0].type.should.equal('question')
+    actions.messages[0].options.map(o => o.label).should.deep.equal(['Yes', 'No'])
+  })
+
+  it('Repeats a text-only utility_message field as its approved template on follow_up', () => {
+    const fu = synthetic({ type: 'follow_up', value: 'welcome_back' })
+    const log = [referral, _echo('welcome_back'), fu]
+
+    const actions = getMessage(log, utilityFormTextOnly, user)
+
+    shouldBeTheApprovedTemplate(actions.messages)
+    // base type is text; metadata.type is the discriminator message-worker
+    // routes on -- see documentation/utility-messages.md
+    actions.messages[0].type.should.equal('text')
+    actions.messages[0].text.should.equal('Welcome back!')
+  })
+
+  it('Repeats a utility_message field as its approved template on failed validation', () => {
+    const log = [referral, _echo('welcome_back'), text]
+
+    const actions = getMessage(log, utilityFormWithButtons, user)
+
+    shouldBeTheApprovedTemplate(actions.messages)
+  })
+
+  it('Repeats a text-only utility_message field as its approved template on failed validation', () => {
+    const log = [referral, _echo('welcome_back'), text]
+
+    const actions = getMessage(log, utilityFormTextOnly, user)
+
+    shouldBeTheApprovedTemplate(actions.messages)
+  })
+
+  it('Repeats a utility_message field as its approved template on WhatsApp too', () => {
+    // replybot emits one platform-neutral message; message-worker renders the
+    // Messenger vs WhatsApp template shape off metadata.type. Same code path,
+    // so the WhatsApp conversation must produce the identical message.
+    const waEcho = {
+      event_id: 'evt_test_wa_echo',
+      user_id: WA_USER_ID,
+      timestamp: 5,
+      source: { type: 'whatsapp', account_id: WA_PHONE_NUMBER_ID },
+      event_type: 'bot_message_sent',
+      payload: {
+        type: 'bot_message_sent',
+        is_echo: true,
+        metadata: { ref: 'welcome_back' },
+        text: 'Welcome back!'
+      }
+    }
+
+    const fu = synthetic(
+      { type: 'follow_up', value: 'welcome_back' },
+      { user_id: WA_USER_ID, source: { type: 'synthetic', platform: 'whatsapp' } }
+    )
+
+    const log = [whatsappReferral, waEcho, fu]
+    const actions = getMessage(log, utilityFormWithButtons, user)
+
+    shouldBeTheApprovedTemplate(actions.messages)
+  })
+
+  it('Still sends the nudge before repeating an ordinary field on follow_up', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }]
+    }
+
+    const fu = synthetic({ type: 'follow_up', value: 'foo' })
+    const log = [referral, echo, fu]
+
+    const actions = getMessage(log, form, user)
+
+    actions.messages.length.should.equal(2)
+    actions.messages[0].type.should.equal('text')
+    actions.messages[0].text.should.equal(followUpMessage({}))
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[1].metadata.isRepeat.should.be.true
+    actions.messages[1].metadata.ref.should.equal('foo')
+    actions.messages[1].metadata.type.should.equal('short_text')
+  })
+
+  it('Still sends the error message before repeating an ordinary field on failed validation', () => {
+    const form = {
+      logic: [],
+      fields: [{ type: 'multiple_choice', title: 'foo', ref: 'foo', properties: { choices: [{ label: 'qux' }] } }]
+    }
+
+    const log = [referral, echo, delivery, text]
+    const actions = getMessage(log, form, user)
+
+    actions.messages.length.should.equal(2)
+    actions.messages[0].metadata.should.deep.equal({ repeat: true, ref: 'foo' })
+    actions.messages[0].text.should.contain('Sorry')
+    actions.messages[1].metadata.isRepeat.should.be.true
+    actions.messages[1].metadata.type.should.equal('multiple_choice')
+  })
+
+  it('Still throws when an ordinary repeat has no text to send', () => {
+    const form = {
+      logic: [],
+      custom_messages: { 'label.buttonHint.default': '' },
+      fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }]
+    }
+
+    const fu = synthetic({ type: 'follow_up', value: 'foo' })
+    const log = [referral, echo, fu];
+
+    (() => getMessage(log, form, user)).should.throw(TypeError)
   })
 
   it('Resends a waiting message with a redo event', () => {
