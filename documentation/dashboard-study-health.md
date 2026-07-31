@@ -28,7 +28,7 @@
 | Concern | Source | Why |
 |---|---|---|
 | Health card aggregates, badge, drill-down (v1) | **CockroachDB direct** (24h window, auth-joined) | Right window semantics only expressible at source; card + drill-down list share one source so numbers always agree; zero new dependencies; auth is a join |
-| Platform notices banner (v1) | **AlertManager proxy** (whitelisted alertnames) | Firing-state IS the semantic; thresholds mean the same for both audiences; avoids logic duplication/drift |
+| Platform notices banner (v1) | **AlertManager proxy** (whitelisted alertnames) | Firing-state IS the semantic; avoids logic duplication/drift. ⚠️ Thresholds do **not** mean the same for both audiences — see §2.1 |
 | Trend/spike signals, sparklines (v2, deferred) | **Prometheus** | Only source with history (sql_exporter snapshots aggregates every 1m — history accrues while we wait) |
 
 Explicitly rejected: driving the researcher surface from AlertManager
@@ -36,6 +36,47 @@ thresholds (they protect the platform owner's attention — wrong for someone
 already looking), and re-deriving study health from Prometheus gauges
 (1h-window gauges cannot produce a 24h distinct-user count; drill-down
 inconsistency; monitoring fate-sharing).
+
+### 2.1 A paging threshold is not a notice threshold (corrected 2026-07-30)
+
+The v1 decision matrix claimed platform-alert thresholds "mean the same for
+both audiences". **They do not, and the asymmetry runs the opposite way to
+intuition.**
+
+- The **platform engineer** wants the *lowest* workable threshold. They are
+  paged, they can read an `error_tag` breakdown, and they can conclude "that's
+  the known stuck population, ignore it" in seconds. A false page costs a
+  glance.
+- The **researcher** must have a *much higher* one. They cannot triage, the
+  banner is unscoped ("the platform is degraded"), and their instinct on
+  reading it is to **stop all their surveys** — halting live fieldwork and
+  losing respondents. A false notice costs real data, and repeated false
+  notices cost the banner its credibility for the outage that actually matters.
+
+The notice is driven by alert **firing state**, so two audiences with different
+bars require **two alert rules**. `PlatformInternalErrorsSevere` is that second
+rule; only it is whitelisted in `platformNotices`.
+
+What went wrong concretely: `PlatformInternalErrors` pages at ≥5 affected users,
+but the measured background is a flat **1–6** — almost entirely the lost-`md`
+stuck population (a fixed set of users Dean re-emits every 30m), not a live
+fault. The paging threshold therefore sat *inside* normal noise, and the alert
+flapped through **4 firing episodes in the 4 days to 2026-07-30** — four
+platform-degraded banners shown to every survey owner, with nothing actually
+wrong.
+
+**When adding a notice, gate on proportion *and* volume, never one alone.**
+Active users swing 13 → 1107 across a day while these error counts stay flat, so
+a bare ratio fires at 3am on a handful of stuck users, and a bare absolute count
+ignores traffic entirely. The two highest platform-error ratios in the measured
+window (30%, 15%) were both quiet-hour artifacts at 13–26 active users, not
+incidents.
+
+Reviewed at the same time: of the five whitelisted notices, `PlatformInternalErrors`
+was the **only** one to fire at all in that window. `ProviderErrors`,
+`PlatformRateLimited`, `MultiSurveyErrorRegression` and `DeanExpiredWaits` were
+left untouched deliberately — they never fired, so there is no evidence they are
+miscalibrated, and re-tuning on no data would be guessing.
 
 ## 3. Two-plane architecture
 

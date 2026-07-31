@@ -80,8 +80,45 @@ studyHealth:
 
   # PlatformInternalErrors: INTERNAL/STATE_ACTIONS/NETWORK error tags (never
   # expected, always actionable platform regression). Pages immediately.
+  #
+  # This threshold is deliberately a LOW noise gate: the platform on-call WANTS
+  # to know at the first sign of a regression. It is calibrated for an audience
+  # that can read an error_tag breakdown and decide "this is the known stuck
+  # population, ignore" — NOT for researchers. See the Severe variant below.
   platformInternalErrorsThreshold: 5
   platformInternalErrorsFor: "10m"
+
+  # PlatformInternalErrorsSevere: the SAME signal, gated for the researcher-facing
+  # notice in the dashboard (dashboard-server/api/health/rules.js -> platformNotices).
+  #
+  # WHY A SECOND ALERT EXISTS. The two audiences need thresholds that differ by an
+  # order of magnitude, and the notice is driven by alert FIRING STATE, so the only
+  # way to give them different thresholds is a second rule. A researcher reading
+  # "the platform is experiencing elevated internal errors" cannot triage it — their
+  # instinct is to stop their surveys. Telling them that during ordinary background
+  # noise is worse than not telling them at all: it burns the credibility of the
+  # banner for the outage that actually matters.
+  #
+  # Measured on prod 2026-07-30, why each gate is here:
+  #  - Absolute background is 1-6 platform errors, essentially FLAT, and is almost
+  #    entirely the lost-`md` stuck population (a fixed set of users Dean re-emits
+  #    every 30m), not a live fault. The paging threshold of 5 sits INSIDE that
+  #    band, so PlatformInternalErrors flapped through 4 firing episodes in 4 days
+  #    — every one of them a researcher-facing banner. 25 is ~4x the observed peak.
+  #  - Ratio alone is NOT sufficient and must never be used on its own: active users
+  #    swing 13 -> 1107 across the day, so a flat 6 errors reads as 30% at a quiet
+  #    hour. The two highest ratios in the window (30%, 15%) were both quiet-hour
+  #    artifacts with 13-26 active users, not incidents.
+  #  - Hence the >=50 active-user floor: it is what makes the ratio mean anything.
+  #
+  # Verified: this combination would NOT have fired at any point in the available
+  # history (2026-07-26 -> 07-30, 10m resolution) while PlatformInternalErrors
+  # fired 4 times. Tune by raising, not lowering — a missed researcher notice is a
+  # far cheaper mistake than a false one.
+  platformInternalErrorsSevereThreshold: 25    # absolute floor (~4x observed peak)
+  platformInternalErrorsSevereRatio: 0.25      # AND >=25% of active users affected
+  platformInternalErrorsSevereMinActive: 50    # AND enough traffic for a ratio to mean anything
+  platformInternalErrorsSevereFor: "30m"       # AND sustained — blips never reach researchers
 
   # PlatformRateLimited: Facebook rate-limiting (code 2022) across all surveys.
   # Platform hitting Meta API limits. Pages immediately.

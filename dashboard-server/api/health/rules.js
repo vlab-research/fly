@@ -184,11 +184,26 @@ module.exports.rules = [
 // ⚠️ These keys are a hand-maintained coupling to the `alert:` names in
 // devops/alerts/templates/study-health.yaml. notices.js DROPS any alert not
 // listed here, so renaming an alert there removes a researcher-facing notice
-// with no error anywhere. Verified against that file 2026-07-29.
+// with no error anywhere. Verified against that file 2026-07-30.
+//
+// ⚠️ A NOTICE IS NOT A PAGE. Whitelisting an alert here shows it to every survey
+// owner, whose only available response is to stop their surveys. So an alert
+// belongs here ONLY if its threshold is calibrated for that audience. Paging
+// thresholds are deliberately low noise gates for an on-call who can triage;
+// reusing one here cries wolf and trains researchers to ignore the banner.
+// When the two audiences need different bars, add a second alert rule (see
+// PlatformInternalErrorsSevere) rather than whitelisting the paging one.
 module.exports.platformNotices = {
   ProviderErrors:
     'The platform is currently unable to deliver messages on one or more channels. Your survey may be affected; this is not caused by your configuration. The team has been alerted.',
-  PlatformInternalErrors:
+  // NOTE: keyed on PlatformInternalErrorsSevere, NOT PlatformInternalErrors.
+  // The paging alert fires at >=5 affected users — inside the flat 1-6 background
+  // of the known lost-`md` stuck population — so it flapped through 4 firing
+  // episodes in the 4 days to 2026-07-30, each one lighting this banner for every
+  // researcher. The Severe variant additionally requires >=25 users, >=25% of all
+  // active users, and >=50 active users for 30m, and would not have fired once in
+  // that window. Do NOT re-add the paging alert here.
+  PlatformInternalErrorsSevere:
     'The platform is currently experiencing elevated internal errors. Your survey may be affected; this is not caused by your configuration.',
   PlatformRateLimited:
     'Facebook is currently rate-limiting the platform. Message delivery may be delayed across surveys.',

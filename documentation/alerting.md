@@ -194,16 +194,43 @@ threshold (quiet notes) with its own alarm rules, via a direct CockroachDB
 query (24h window) — it does not read these alert rules. It shares only the
 classification taxonomy (see the "Taxonomy contract" section of
 `documentation/study-error-alerting.md`). The dashboard additionally proxies
-a whitelist of the alerts on this page (`PlatformInternalErrors`,
-`PlatformRateLimited`, `MultiSurveyErrorRegression`, `DeanExpiredWaits`) as
-in-product platform notices via `GET /platform/notices`. Full design:
+a whitelist of the alerts on this page (`ProviderErrors`,
+`PlatformInternalErrorsSevere`, `PlatformRateLimited`,
+`MultiSurveyErrorRegression`, `DeanExpiredWaits`) as in-product platform
+notices via `GET /platform/notices`. Full design:
 `documentation/dashboard-study-health.md`.
+
+> ⚠️ **A paging threshold is not a notice threshold.** Whitelisting an alert
+> there shows it to every survey owner, and their only available response is to
+> stop their surveys. Paging thresholds are deliberately low noise gates for an
+> on-call who can triage; reused as notices they cry wolf. `PlatformInternalErrors`
+> is whitelisted **only** in its `Severe` variant for exactly this reason (see
+> below). When the two audiences need different bars, add a second alert rule —
+> the notice is driven by firing state, so that is the only way to express it.
 
 ### PlatformInternalErrors
 `sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"}) >= 5` for
 10m — **critical**. Platform bugs (DB failures, state machine errors, network
 issues). Rare and always actionable. See
 `documentation/study-error-alerting.md#platforminternalerrors`.
+
+**Not researcher-facing** — see the Severe variant below.
+
+### PlatformInternalErrorsSevere
+Same signal, gated for the **researcher** audience: `>= 25` affected users AND
+`>= 25%` of active users AND `>= 50` active users, for 30m — **info** (does not
+page; the on-call is already paged by `PlatformInternalErrors`). Its only
+consumer is the dashboard's platform-notices banner.
+
+Added 2026-07-30. The paging threshold of 5 sits *inside* the measured 1–6
+background, which is essentially all the lost-`md` stuck population rather than a
+live fault — so `PlatformInternalErrors` flapped through **4 firing episodes in
+the 4 days to 2026-07-30**, each one banner-ing every researcher. Both extra
+gates are load-bearing: active users swing 13 → 1107 across a day while the error
+count stays flat, so a ratio with no volume floor fires at a quiet hour on 6 stuck
+users, and a floor with no ratio ignores traffic entirely. Verified not to fire at
+any point in the available history. See
+`documentation/study-error-alerting.md#platforminternalerrorssevere`.
 
 ### PlatformRateLimited
 `sum(survey_blocked_states{category="rate_limit"}) >= 10` for 10m — **critical**.

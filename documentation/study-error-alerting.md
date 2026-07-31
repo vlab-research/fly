@@ -239,6 +239,15 @@ A seventh coupling is adjacent but *not* the taxonomy: `rules.js` →
 AlertManager itself knows nothing about the taxonomy — it routes on `severity`
 only.
 
+> ⚠️ **Whitelisting an alert there is a product decision, not a plumbing one.**
+> It shows the alert to every survey owner, whose only available response is to
+> stop their surveys. Paging thresholds are low noise gates for an on-call who
+> can triage and must not be reused as notices — that is why
+> `PlatformInternalErrorsSevere` exists alongside `PlatformInternalErrors` and
+> only the Severe variant is whitelisted. The notice is driven by firing state,
+> so two audiences with different bars require two alert rules. See
+> `documentation/dashboard-study-health.md` §2.1.
+
 ### Divergences — resolved 2026-07-29
 
 All consumers now implement the contract table above. Three divergences were
@@ -269,6 +278,14 @@ taxonomy without its own rule degrades to a visible note rather than silence.
 ### Alerting Logic
 
 Alerts distinguish **platform regressions** (page immediately) from **study issues** (ticket).
+
+Alerts also distinguish **who is being told**: the platform on-call (paged, can
+triage, wants the lowest workable threshold) from **researchers** (see a banner in
+the dashboard, cannot triage, and whose instinct is to stop their surveys). Those
+two bars differ by an order of magnitude, and because the researcher banner is
+driven by alert *firing state*, expressing that difference requires a **second
+alert rule** — hence `PlatformInternalErrorsSevere`. See
+`documentation/dashboard-study-health.md` §2.1.
 
 **Platform signals (critical, page):**
 - Sum of INTERNAL/STATE_ACTIONS/NETWORK errors ≥ 5 (any count is bad; threshold is noise gate).
@@ -391,6 +408,15 @@ class stays unrecoverable by design. See `planning/null-fb-error-code-findings.m
 **Severity:** critical (pages when staged routing is live)  
 **Meaning:** Platform regression — database issues, state machine bugs, network failures, or infrastructure problems. These errors are never expected.
 
+> **⚠️ Check the lost-`md` case first — as of 2026-07-30 it is essentially *all* of the
+> `INTERNAL` volume in production.** The signature is `state_json->'error'->>'message' =
+> 'getForm'` with `state_json->'md'->>'startTime' IS NULL`. It is a metadata-loss bug on
+> the Redis-miss re-fold path, not a live infrastructure fault, so steps 3–5 below
+> (component logs, deploys, consumer lag) will all come back clean. Affected users never
+> self-recover and Dean re-emits the error every 30 minutes per user, so the metric is a
+> *stuck population*, not a rate. Full mechanism and triage queries:
+> `documentation/states-debugging.md` → "The rebuild is lossy".
+
 **What to do:**
 1. **Identify the error_tag breakdown:** Port-forward Prometheus (`kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 9091:9090; exit 0`) and query:
    ```promql
@@ -419,6 +445,39 @@ class stays unrecoverable by design. See `planning/null-fb-error-code-findings.m
 5. **Monitor Kafka consumer lag:** Platform internal errors often correlate with message processing failures. Check `/study-health` or the consumer-lag dashboard.
 
 **Resolution:** Fix the root cause (rollback bad deploy, restart failed service, fix bug). Errors should clear once the platform is healthy again.
+
+---
+
+### platforminternalerrorssevere
+
+**Signal:** `sum(...) >= 25` AND `ratio >= 0.25` AND `sum(survey_active_users) >= 50`, for 30m
+**Severity:** info — **deliberately does not page**
+**Meaning:** The same signal as `platforminternalerrors`, at a bar set for a
+*different audience*. This alert's only consumer is the researcher-facing banner in
+the dashboard (`platformNotices` in `dashboard-server/api/health/rules.js`).
+
+**If this is firing, `PlatformInternalErrors` is already firing too — triage there.**
+The runbook above is the one you want. Nothing here needs separate diagnosis; it does
+not page because escalating would double-page one incident.
+
+**What it changes for you:** while it fires, **every survey owner sees a banner**
+telling them the platform is degraded. That is the cost of this alert being wrong,
+and it is why the threshold is ~4× the observed background rather than a noise gate.
+Researchers cannot triage a platform error and their instinct on reading the banner
+is to stop their surveys — so a false notice halts live fieldwork.
+
+**Why it exists (added 2026-07-30):** the banner used to key on `PlatformInternalErrors`
+itself, which pages at ≥5 while the measured background is a flat 1–6 — essentially all
+lost-`md` stuck population, not a live fault. It flapped through 4 firing episodes in 4
+days, each one a false platform-degraded banner for every researcher.
+
+**If you retune it, raise it — never lower it.** Both non-absolute gates are
+load-bearing and neither is redundant: active users swing 13 → 1107 across a day while
+the error count stays flat, so a ratio without the ≥50 volume floor fires at a quiet
+hour on 6 stuck users, and the floor without the ratio ignores traffic entirely.
+
+⚠️ **Renaming this alert silently removes the researcher notice** — `notices.js` drops
+any alertname absent from the whitelist, with no error anywhere.
 
 ---
 
@@ -612,7 +671,8 @@ are configured in `devops/alerts/values.yaml` under `studyHealth.*`.
 
 | Alert | Threshold | Rationale |
 |-------|-----------|-----------|
-| **PlatformInternalErrors** | ≥5 errors/10m | Any count is bad; 5 is noise gate at current scale |
+| **PlatformInternalErrors** | ≥5 errors/10m | Any count is bad; 5 is noise gate at current scale. **Pages; not researcher-facing.** |
+| **PlatformInternalErrorsSevere** | ≥25 errors AND ≥25% of active AND ≥50 active/30m | Same signal, researcher-facing bar. ~4× observed background; verified never to fire over available history. Does not page. |
 | **PlatformRateLimited** | ≥10 blocks/10m | Facebook rate limits are rare; 10 is significant |
 | **SurveyTemplateMissing** | ≥5 blocks/15m | Per-form; 5 is meaningful at 0–3 users/hr/form |
 | **SurveyErrorSpike** | >50% ratio + ≥5 errors + ≥10 active | Needs volume to avoid noise on low-traffic forms |

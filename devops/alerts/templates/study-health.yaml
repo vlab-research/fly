@@ -107,6 +107,66 @@ spec:
               (v1, tunable — current traffic is ~8 active users/hr total).
             runbook_url: "{{ $runbook }}#platforminternalerrors"
 
+        # SAME SIGNAL AS ABOVE, MUCH HIGHER BAR — and it exists for a different
+        # audience. This alert does not page anyone; its only consumer is the
+        # researcher-facing notice in the dashboard, via the `platformNotices`
+        # whitelist in dashboard-server/api/health/rules.js.
+        #
+        # ⚠️ THIS IS A HAND-MAINTAINED COUPLING. dashboard-server whitelists this
+        # ⚠️ alertname and DROPS anything unlisted, so renaming this alert silently
+        # ⚠️ removes the researcher notice with no error anywhere. The paging alert
+        # ⚠️ above is deliberately NOT in that whitelist — do not re-add it.
+        #
+        # Why two rules instead of one: the notice is driven by alert firing state,
+        # so differing thresholds require differing alerts. The platform on-call
+        # wants the earliest possible warning and can triage an error_tag breakdown;
+        # a researcher cannot, and reads any such banner as "stop my surveys". At
+        # the paging threshold of 5 — which sits inside the flat 1-6 background of
+        # the lost-`md` stuck population — that banner was effectively always on.
+        #
+        # The ratio and the active-user floor are BOTH load-bearing. Active users
+        # swing 13 -> 1107 across a day while the error count stays flat, so a ratio
+        # without a volume floor fires at 3am on 6 stuck users and a floor without a
+        # ratio ignores traffic entirely. Neither gate is redundant; see values.yaml.
+        #
+        # No form!="(none)" guard, for the same reason as the paging alert above.
+        - alert: PlatformInternalErrorsSevere
+          expr: |
+            (
+              sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"}) >= {{ .Values.studyHealth.platformInternalErrorsSevereThreshold }}
+            )
+            and
+            (
+              sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"})
+              /
+              clamp_min(sum(survey_active_users), 1) >= {{ .Values.studyHealth.platformInternalErrorsSevereRatio }}
+            )
+            and
+            (
+              sum(survey_active_users) >= {{ .Values.studyHealth.platformInternalErrorsSevereMinActive }}
+            )
+          for: {{ .Values.studyHealth.platformInternalErrorsSevereFor }}
+          labels:
+            # info, NOT critical: the on-call has already been paged by
+            # PlatformInternalErrors long before this fires. Escalating here would
+            # double-page for one incident.
+            severity: info
+            component: study-health
+            audience: researcher
+          annotations:
+            summary: "Platform internal errors SEVERE ({{`{{ $value }}`}} users) — researchers are being notified"
+            description: >-
+              {{`{{ $value }}`}} survey users hit INTERNAL, STATE_ACTIONS, or NETWORK errors
+              in the past hour — at least {{ .Values.studyHealth.platformInternalErrorsSevereThreshold }}
+              users AND at least {{ .Values.studyHealth.platformInternalErrorsSevereRatio }} of all
+              active users, sustained {{ .Values.studyHealth.platformInternalErrorsSevereFor }}.
+              This is far above the normal background and indicates a broad, live platform
+              failure rather than the known stuck population. THIS ALERT IS VISIBLE TO
+              RESEARCHERS: while it fires, every survey owner sees a banner in their
+              dashboard telling them the platform is degraded. PlatformInternalErrors
+              (the paging alert) will already be firing — triage there.
+            runbook_url: "{{ $runbook }}#platforminternalerrors"
+
         # Facebook API rate-limiting our pages. When this fires, Facebook is actively
         # throttling us across surveys. Immediate platform issue requiring action.
         - alert: PlatformRateLimited
