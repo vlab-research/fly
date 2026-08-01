@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	dingconnect "github.com/vlab-research/go-dingconnect"
 )
@@ -57,49 +56,26 @@ func (p *DingConnectProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*Use
 	return GenericGetUser(p.pool, event)
 }
 
-// Auth fetches the user's DingConnect API key from the credentials table and
-// builds the client that Payout will use.
+// Auth resolves the researcher's DingConnect API key and builds the client
+// that Payout will use.
+//
+// The key is a Generic Secret, named by the survey's `payment.key`. DingConnect
+// deliberately has no credential entity or dashboard screen of its own: its
+// credential is a single opaque string, which is exactly what Generic Secrets
+// already model, and a bespoke entity would be unwritable until someone built a
+// screen for it. See secretForUser.
 func (p *DingConnectProvider) Auth(user *User, key string) error {
 	if key == "" {
-		return fmt.Errorf(`No key provided for DingConnect provider. A key is required for DingConnect Payment Events!`)
+		return fmt.Errorf(`No key provided for DingConnect provider. Set "key" in your survey's payment block to the name of the Generic Secret holding your DingConnect API key.`)
 	}
 
-	crds, err := p.getCredentials(user.Id, key)
+	apiKey, err := secretForUser(p.pool, user.Id, key)
 	if err != nil {
 		return err
 	}
-	if crds == nil {
-		return fmt.Errorf(`No dingconnect credentials were found for user: %s`, user.Id)
-	}
 
-	auth := struct {
-		ApiKey string `json:"api_key"`
-	}{}
-	if err := json.Unmarshal(*crds.Details, &auth); err != nil {
-		return err
-	}
-
-	if auth.ApiKey == "" {
-		return fmt.Errorf(`DingConnect credentials for user %s are missing the "api_key" field`, user.Id)
-	}
-
-	p.client = dingconnect.New(auth.ApiKey, p.opts...)
+	p.client = dingconnect.New(apiKey, p.opts...)
 	return nil
-}
-
-// getCredentials queries the database for DingConnect credentials for a given user and key.
-// Returns nil if no credentials are found (not an error).
-func (p *DingConnectProvider) getCredentials(userid string, key string) (*Credentials, error) {
-	query := `SELECT details FROM credentials WHERE entity='dingconnect' AND userid=$1 AND key=$2 LIMIT 1`
-	row := p.pool.QueryRow(context.Background(), query, userid, key)
-	var c Credentials
-	err := row.Scan(&c.Details)
-
-	if err == pgx.ErrNoRows {
-		return nil, nil
-	}
-
-	return &c, err
 }
 
 // Payout executes a DingConnect transfer and maps the outcome to a Result.

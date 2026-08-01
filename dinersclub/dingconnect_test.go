@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/stretchr/testify/assert"
 	dingconnect "github.com/vlab-research/go-dingconnect"
 )
@@ -108,63 +109,142 @@ const dingSuccessResponse = `{
 	"ErrorCodes": []
 }`
 
-// TestDingConnectAuth_FetchesFromDatabase verifies that Auth() fetches credentials from the database.
-func TestDingConnectAuth_FetchesFromDatabase(t *testing.T) {
+// insertUser adds the researcher the Auth tests authenticate as.
+func insertDingUser(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	mustExec(t, pool, `
+		INSERT INTO users(id, email)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
+	`)
+}
+
+// TestDingConnectAuth_ReadsGenericSecret verifies that Auth() resolves the API
+// key from a Generic Secret named by the survey's payment.key.
+//
+// DingConnect has no credential entity of its own: its credential is a single
+// opaque string, which is what Generic Secrets already model, and a bespoke
+// entity would need a bespoke dashboard screen before anyone could write one.
+func TestDingConnectAuth_ReadsGenericSecret(t *testing.T) {
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
 
 	before(t, pool)
+	insertDingUser(t, pool)
 
-	// Insert test user
-	insertUserSql := `
-		INSERT INTO users(id, email)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
-	`
-	mustExec(t, pool, insertUserSql)
-
-	// Insert DingConnect credentials
-	insertDingConnectSql := `
+	mustExec(t, pool, `
 		INSERT INTO credentials(userid, entity, key, details)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'dingconnect', 'test-key', '{"api_key": "test_api_key_12345"}');
-	`
-	mustExec(t, pool, insertDingConnectSql)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'secrets', 'DINGCONNECT_API_KEY', '{"value": "test_api_key_12345"}');
+	`)
 
 	provider, err := NewDingConnectProvider(pool)
 	assert.Nil(t, err)
 	assert.NotNil(t, provider)
 
 	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
-	err = provider.Auth(user, "test-key")
+	err = provider.Auth(user, "DINGCONNECT_API_KEY")
 	assert.Nil(t, err)
 
-	// Auth builds the client from the stored key.
+	// Auth builds the client from the resolved secret.
 	p := provider.(*DingConnectProvider)
 	assert.NotNil(t, p.client)
 }
 
-// TestDingConnectAuth_MissingCredentials verifies error when credentials not found.
-func TestDingConnectAuth_MissingCredentials(t *testing.T) {
+// TestDingConnectAuth_IgnoresLegacyEntity pins that the old bespoke
+// entity='dingconnect' credential is no longer honoured. It was never writable
+// from the dashboard, so nothing depends on it, and leaving a silent second
+// lookup path would mean two places to check when a payment fails to authenticate.
+func TestDingConnectAuth_IgnoresLegacyEntity(t *testing.T) {
 	cfg := getConfig()
 	pool := getPool(cfg)
 	defer pool.Close()
 
 	before(t, pool)
+	insertDingUser(t, pool)
 
-	// Insert test user but no credentials
-	insertUserSql := `
+	mustExec(t, pool, `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'dingconnect', 'legacy', '{"api_key": "should_be_ignored"}');
+	`)
+
+	provider, _ := NewDingConnectProvider(pool)
+	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
+	err := provider.Auth(user, "legacy")
+
+	assert.NotNil(t, err, "a dingconnect-entity credential must not authenticate")
+	assert.Contains(t, err.Error(), "Generic Secret")
+}
+
+// TestDingConnectAuth_EmptySecretValue covers a secret row that exists but
+// holds nothing. Without this check the empty string reaches DingConnect and
+// returns an opaque authentication failure.
+func TestDingConnectAuth_EmptySecretValue(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+	insertDingUser(t, pool)
+
+	mustExec(t, pool, `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000000', 'secrets', 'EMPTY_KEY', '{"value": ""}');
+	`)
+
+	provider, _ := NewDingConnectProvider(pool)
+	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
+	err := provider.Auth(user, "EMPTY_KEY")
+
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "empty")
+	assert.Contains(t, err.Error(), "EMPTY_KEY", "the error must name the secret")
+}
+
+// TestDingConnectAuth_OtherUsersSecret verifies secrets are scoped per
+// researcher: one researcher's secret must not authenticate another's payment.
+func TestDingConnectAuth_OtherUsersSecret(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+	insertDingUser(t, pool)
+
+	mustExec(t, pool, `
 		INSERT INTO users(id, email)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
-	`
-	mustExec(t, pool, insertUserSql)
+		VALUES ('00000000-0000-0000-0000-000000000001', 'other@test.com');
+	`)
+	mustExec(t, pool, `
+		INSERT INTO credentials(userid, entity, key, details)
+		VALUES ('00000000-0000-0000-0000-000000000001', 'secrets', 'SHARED_NAME', '{"value": "other_users_key"}');
+	`)
+
+	provider, _ := NewDingConnectProvider(pool)
+	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
+	err := provider.Auth(user, "SHARED_NAME")
+
+	assert.NotNil(t, err, "a secret belonging to another researcher must not resolve")
+}
+
+// TestDingConnectAuth_MissingSecret verifies the error when no secret of that
+// name exists. The message must name the secret: this surfaces at payout time,
+// while someone is waiting to be paid, and "not found" alone is not actionable.
+func TestDingConnectAuth_MissingSecret(t *testing.T) {
+	cfg := getConfig()
+	pool := getPool(cfg)
+	defer pool.Close()
+
+	before(t, pool)
+	insertDingUser(t, pool)
 
 	provider, err := NewDingConnectProvider(pool)
 	assert.Nil(t, err)
 
 	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
-	err = provider.Auth(user, "test-key")
+	err = provider.Auth(user, "NO_SUCH_SECRET")
 	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "No dingconnect credentials were found for user")
+	assert.Contains(t, err.Error(), "NO_SUCH_SECRET", "the error must name the missing secret")
+	assert.Contains(t, err.Error(), "Connected Accounts", "the error must say where to fix it")
 }
 
 // TestDingConnectAuth_EmptyKey verifies error when key parameter is empty.
@@ -182,36 +262,6 @@ func TestDingConnectAuth_EmptyKey(t *testing.T) {
 	err = provider.Auth(user, "")
 	assert.NotNil(t, err)
 	assert.Contains(t, err.Error(), "No key provided for DingConnect provider")
-}
-
-// TestDingConnectAuth_InvalidJSON verifies error when credentials JSON is missing the api_key field.
-func TestDingConnectAuth_InvalidJSON(t *testing.T) {
-	cfg := getConfig()
-	pool := getPool(cfg)
-	defer pool.Close()
-
-	before(t, pool)
-
-	// Insert test user
-	insertUserSql := `
-		INSERT INTO users(id, email)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'test@test.com');
-	`
-	mustExec(t, pool, insertUserSql)
-
-	// Insert DingConnect credentials with valid JSON but missing the required api_key field
-	insertDingConnectSql := `
-		INSERT INTO credentials(userid, entity, key, details)
-		VALUES ('00000000-0000-0000-0000-000000000000', 'dingconnect', 'test-key', '{"wrong_field": "value"}');
-	`
-	mustExec(t, pool, insertDingConnectSql)
-
-	provider, err := NewDingConnectProvider(pool)
-	assert.Nil(t, err)
-
-	user := &User{Id: "00000000-0000-0000-0000-000000000000"}
-	err = provider.Auth(user, "test-key")
-	assert.NotNil(t, err)
 }
 
 // TestDingConnectRequestFormat is the regression test for the two defects that
