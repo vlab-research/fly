@@ -83,6 +83,279 @@ User sends message on Facebook Messenger
 
 **Redis is the runtime source of truth for state, not CockroachDB.** Replybot replays state from the Kafka event log with Redis as a cache. The `states` table in CockroachDB is a denormalized dump for observability: it exists so that Dean can automate operational tasks and the dashboard can show participant status. Replybot never reads from the `states` table.
 
+### Blocking a participant destroys `md`: the `getForm`/`INTERNAL` failure
+
+This is the platform's main source of `INTERNAL` errors. **Blocking a participant
+silently discards their `md`, and any later event that wakes them crashes on the
+missing `startTime`.**
+
+> **Framing note.** An earlier revision of this section blamed the Redis-miss re-fold.
+> That is a real secondary path and is described below, but it is **not** the primary
+> mechanism: 12 of 15 production cases traced to a live, cached state with no re-fold
+> involved. Lead with `BLOCK_USER`.
+
+`md` is only ever *created* by `getMetadata()` (`utils.js:75`), which runs on a
+`conversation_started` referral (`_blankStart`) or on `_stitch`. Every other write
+**merges** (`{ ...state.md, ...output.md }`). So nothing downstream can regenerate `md`
+once it is gone — a merge into `undefined` yields `{}`, or a **husk** holding only
+event metadata such as `{"e_handover_metadata": "new message"}`.
+
+The secondary path, for completeness: `StateStore.getState`
+(`replybot/lib/typewheels/statestore.js:76`) checks Redis, and on a miss re-folds from
+the event log via `chatbase-postgres`, whose `get()` is windowed —
+`WHERE userid = $1 AND (message_pointer IS NULL OR message_pointer <= timestamp)`. The
+fold therefore starts at `START` from `states.message_pointer`, not from the beginning
+of the conversation, and `state_json` is never read back (it is write-only for this
+purpose). A window that excludes the original referral cannot rebuild `md` either.
+
+The husk is what makes this fail loudly rather than silently. `transition.js:48`
+guards with `if (!newState.md)`, which a truthy husk passes; `actionsResponses` then
+destructures `const { startTime } = newState.md` → `undefined` and calls
+`getForm(pageId, shortcode, undefined)`, whose arity guard (`ourform.js:29`) throws:
+
+```
+TypeError: Trying to get a form without a pageid or shortcode or timestamp! <page>, <shortcode>, undefined
+```
+
+`iowrap('getForm', 'INTERNAL', ...)` (`transition.js:53`) relabels any non-`MachineIOError`
+as **`INTERNAL`**, so a lost-metadata bug is reported as a platform fault with the
+message `getForm`.
+
+**It is unrecoverable, and it is self-amplifying.** The state is now `ERROR`, so Dean
+retries it with a synthetic `redo` every 30 minutes. Each retry re-folds from the same
+pointer, reproduces the same husk, and throws the identical `TypeError` — emitting two
+`machine_report` errors per attempt, forever. Nothing in the retry path can advance
+`message_pointer` or re-create `md`, so affected participants never recover on their
+own. `states` is never garbage-collected, so they also accumulate.
+
+Commit `3de533a8` fixed one entry point into this — `_handleExternalEvent` calling
+`_blankStart` when `state.state === 'START'` (`machine.js:108`). That guard is
+necessary but **not sufficient**.
+
+> **Corrected 2026-07-30.** An earlier revision of this section said the guard misses
+> "the common case for long-running conversations with handovers." That framing was
+> too broad and is wrong. `pointer` only ever advances at three sites, and ordinary
+> long-running conversations never move it — so their re-fold replays from the true
+> beginning, referral included, and rebuilds `md` correctly. The actual precondition
+> is narrower and is stated below: **it requires a prior `block_user`.**
+
+**The precondition is `BLOCK_USER`.** `BLOCK_USER` (`machine.js:434-443`) returns a
+RESET whose `stateUpdate` is `{ state: 'USER_BLOCKED', pointer: nxt.timestamp, forms:
+state.forms }`. `apply()`'s RESET rebuilds from `_initialState()`, so `forms` survives,
+`pointer` advances to the block event — and **`md` is silently dropped**. It is the only
+`apply()` site that advances the pointer *and* drops `md` *and* leaves the state
+non-`START`. Verified against production 2026-07-30: of the 15 participants then stuck
+in `ERROR`/`INTERNAL`, all 12 that have a `message_pointer` have a `block_user` event
+whose timestamp equals `state_json.pointer` **exactly, to the millisecond**.
+
+Two independent defects then convert that into the husk:
+
+- **`HANDOVER_EVENT` has no `USER_BLOCKED` guard.** It is the only external-event path
+  without one — contrast `EXTERNAL_EVENT` (`machine.js:414-417`), which returns
+  `_noop()`. So a Messenger thread passback still wakes a blocked participant, reaches
+  `_handleExternalEvent` in state `USER_BLOCKED` (not `START`, so `3de533a8`'s guard
+  does not fire), takes the merge branch at `:115-124`, and computes
+  `{ ...undefined, ...handoverMetadata }` — the husk.
+- **`message_pointer` is floored to the whole second**, so the pointer does not
+  actually exclude the event that set it. The generated column is
+  `floor((state_json->>'pointer')::INT8 / 1000)::INT8::TIMESTAMPTZ`
+  (`devops/migrations/04-pointers.sql`), while `chatbase-postgres`'s `get()` filters
+  `message_pointer <= timestamp`. Measured drift on the 12 affected states: 50–979 ms,
+  always positive. The `block_user` event therefore satisfies the filter and is
+  **re-included as the first event of every windowed re-fold** — where it hits
+  `BLOCK_USER`'s own `if (state.state === 'START') return _noop()` guard
+  (`machine.js:434-436`) and is discarded. The re-fold thus never re-establishes
+  `USER_BLOCKED`.
+
+**The trigger is not always a handover.** Of the 12, 9 broke on a `pass_thread_control`
+and **3 broke on a plain inbound `TEXT` or `MEDIA`** (`6891544804295134`,
+`5838894052894040`, `25053076534312947` — their husk is `{}`, with no handover keys).
+That is surprising because `TEXT`/`MEDIA` *do* guard on `USER_BLOCKED`
+(`machine.js:546,560`), and it is consistent with the floor()/no-op path above leaving
+the state at `START` rather than `USER_BLOCKED`. **The exact `apply()` hop for these
+three is not yet pinned down** and needs a `machine.test.js` reproduction rather than
+more log archaeology. The operational consequence is firm either way: **a fix must not
+special-case `HANDOVER_EVENT`** — 25% of observed live cases were not handover-driven.
+
+**A separate, older origin accounts for the rest.** 3 of the 15 (`8269974449750246`,
+`5949070365165277`, `8403086566475919`) have `message_pointer IS NULL`, `forms: []`, and
+**zero `block_user` events ever**. They fail with both `shortcode` and `startTime`
+undefined and trace back to Facebook delivery-error `BLOCKED` episodes from 2023–2024,
+predating both `3de533a8` and this failure mode. Whatever reset them to `forms: []` has
+not been identified. Do not assume a `BLOCK_USER` fix clears them.
+
+**Diagnosing it.** The signature is an `ERROR`/`INTERNAL` state whose `md` has no
+`startTime` — a shape that never occurs on a healthy state:
+
+```sql
+SELECT userid, pageid, current_form, state_json->'md' AS md, updated
+FROM chatroach.states
+WHERE current_state = 'ERROR' AND error_tag = 'INTERNAL'
+  AND state_json->'md'->>'startTime' IS NULL
+  AND updated > NOW() - INTERVAL '24 hours';
+```
+
+Confirm the cause by checking that no referral exists after the pointer — if this
+returns 0, a re-fold provably cannot rebuild `md`:
+
+```sql
+SELECT COUNT(*) FROM chatroach.messages m
+WHERE m.userid = $1 AND m.timestamp >= (SELECT message_pointer FROM chatroach.states WHERE userid = $1)
+  AND (m.content LIKE '%conversation_started%' OR m.content LIKE '%"referral"%');
+```
+
+**Why they were blocked in the first place: Dean's spam/OOM guard.** The `block_user`
+event is synthetic, published by Dean's `Spammers()` sweep (`dean/queries.go:271-284`),
+which selects any non-`USER_BLOCKED` state where **either** the last 25 QA answers are
+identical **or** `jsonb_array_length(state_json->'externalEvents')` exceeds
+`DEAN_SPAMMER_EXTERNAL_EVENTS_MAX` (**100** in production,
+`devops/values/production.yaml:218`). The second branch is an OOM guard, and it is
+reachable without any malicious behaviour: `_handleExternalEvent` appends one
+`externalEvents` entry per handover ping and never caps the array, so a participant
+sitting in `WAIT_EXTERNAL_EVENT` who keeps receiving `pass_thread_control` can cross the
+threshold from ordinary Messenger activity alone.
+
+> **Unverified:** which of the two branches actually fired for the observed cases is
+> *not* established. The RESET wipes both `qa` and `externalEvents`, so the post-block
+> state cannot answer it, and no pre-block `machine_report` survives in the hour before
+> the sweep (Dean reads `states` directly and does not need one). Do not repeat the
+> OOM-branch story as fact without tracing an older report.
+
+Dean sweeps in batches, so blocks arrive in bursts rather than one at a time. On
+2026-05-06 between 22:00 and 23:00 UTC a single sweep blocked **115 participants**; five
+of the fifteen stuck states investigated on 2026-07-30 came from that one hour.
+
+**Blast radius — this is a latent population, not fifteen users.** `BLOCK_USER` drops
+`md` unconditionally, so *every* blocked state is pre-loaded with the fault and waits
+for a handover to detonate it. Measured on prod 2026-07-30:
+
+| | count |
+|---|---|
+| `USER_BLOCKED` states total | 1,983 |
+| ...of those, with `md.startTime` lost | **1,983 (100%)** |
+| ...and with a non-empty `forms` (so they pass `transition.js:48` and reach `getForm`) | **1,982** |
+
+Of the 115 blocked in the 2026-05-06 22:00 sweep, 94 are still sitting in
+`USER_BLOCKED` and 11 have already converted to `ERROR`. The conversion rate is a
+function of how many blocked participants happen to receive a thread passback — which
+is why this presents as a slow, irregular trickle (1–3/day) with occasional jumps
+(11 on 2026-07-30) rather than a clean step change.
+
+**Diagnosing it.** The signature is an `ERROR`/`INTERNAL` state whose `md` has no
+`startTime` — a shape that never occurs on a healthy state:
+
+```sql
+SELECT userid, pageid, current_form, state_json->'md' AS md, updated
+FROM chatroach.states
+WHERE current_state = 'ERROR' AND error_tag = 'INTERNAL'
+  AND state_json->'md'->>'startTime' IS NULL
+  AND updated > NOW() - INTERVAL '24 hours';
+```
+
+Confirm the origin by checking that `state_json.pointer` coincides with a `block_user`
+event. Compare against `state_json->>'pointer'` (exact ms), **not** the `message_pointer`
+column, which is floored to the second:
+
+```sql
+SELECT s.userid, (s.state_json->>'pointer')::bigint AS ptr_ms, m.timestamp AS block_ts
+FROM chatroach.states s
+LEFT JOIN chatroach.messages m
+  ON m.userid = s.userid AND m.content::jsonb->'event'->>'type' = 'block_user'
+WHERE s.userid = $1;
+```
+
+**Fixing it.** `planning/blocked-user-durability-handoff.md` scopes the work as Gap 1
+(`BLOCK_USER` must carry `md: state.md` through its `stateUpdate`), Gap 2
+(`HANDOVER_EVENT` needs the `USER_BLOCKED` guard the other paths already have), and
+Gap 3 (block durability across re-folds). Three constraints on any fix:
+
+- **It must not special-case `HANDOVER_EVENT`** — 3 of 12 traced cases were triggered by
+  a plain `TEXT`/`MEDIA`, not a passback.
+- **It must not simply blank-start a blocked participant.** That appends the fallback
+  form and silently reassigns a real participant mid-survey — the reason `3de533a8`
+  deliberately scoped itself to `START` only.
+- **Gap 1 alone does not clear the existing 1,982.** They have already lost `md`; a
+  forward fix stops new ones but leaves the standing population armed. Draining it needs
+  a backfill, and the three `forms: []` participants are a separate origin that a
+  `BLOCK_USER` fix will not touch at all.
+
+See `documentation/error-events.md` for the error-reporting side — in particular why
+`iowrap` relabels this deterministic input error as `INTERNAL` and pages the platform
+on-call.
+
+## The RESPONDING/Echo Trap
+
+When a user sends a response, replybot transitions to `RESPONDING` (`replybot/lib/typewheels/machine.js:606-625` for `RESPOND`, `:645-649` for `RESPOND_AGAIN`) and waits for Facebook to echo the bot's own message back as confirmation of delivery. The **only** transition out of `RESPONDING` is `WAIT_RESPONSE`, which is emitted by the `ECHO` event handler (`machine.js:445-493`) when the echo arrives (returning `WAIT_RESPONSE` at `:490-493`).
+
+**The trap**: If the echo never arrives — whether due to a network gap, a platform ingestion failure, or a Facebook delivery issue — the user is pinned in `RESPONDING` indefinitely. The two transitions treat `retries` differently, and the asymmetry is what lets the loop accumulate: `RESPOND` clears it (`retries: undefined`, `:621`) because a user answering ends the episode, whereas `RESPOND_AGAIN` deliberately preserves it — the new array arrives via `output.stateUpdate` and the case comment reads "keep retries for backoff" (`:643-649`). So each redo grows the array, and `retries` length is the direct measure of how long a user has been trapped.
+
+### Where the echo comes from differs by platform
+
+This matters because it determines how exposed each platform is to the trap.
+
+| Platform | Source of the echo | Failure exposure |
+|---|---|---|
+| Messenger | Facebook's native `is_echo` webhook (`replybot/lib/event-normalizer.js:49`) | An external round-trip. If Facebook never calls back, nothing local notices. |
+| WhatsApp | A synthetic `bot_echo` that message-worker publishes after a successful send (`message-worker/worker.go:164-168`, `emitWhatsAppEcho` at `:179`) | Local to the send. Fails only if the Kafka publish fails. |
+
+Both normalize to `event_type: bot_message_sent` and are categorized as `ECHO` (`machine.js:170`), so the state machine treats them identically.
+
+WhatsApp is therefore the *more* robust platform here. For Messenger, message-worker emits nothing at all — `emitMessageSent` exists but its call site is commented out (`worker.go:170`, "replybot can't parse message_worker event shape"), and it would not suffice as written because it omits `Message.Metadata`, which the ECHO handler needs to resolve the question ref.
+
+The WhatsApp path has a known, deliberate hole: a failed echo publish is logged at `Warn` and swallowed, on the reasoning that the message really was delivered so reporting a send failure would be untrue. The code comment states the consequence plainly — "it stalls the state machine, not the delivery." A stalled state machine is exactly this trap.
+
+### Dean's Respondings Sweep
+
+Dean's `Respondings()` query (`dean/queries.go:108-119`) selects all `current_state = 'RESPONDING'` users past a grace interval and emits a `redo` event. The sweep is part of the `respondings` job (which also runs `blocked` and `errored` queries, `devops/values/production.yaml:221-223`), scheduled at `*/30 * * * *` (every 30 minutes) with:
+
+- `DEAN_RESPONDING_GRACE: "20 minutes"` — do not redo a user until they have been `RESPONDING` for at least 20 minutes
+- `DEAN_RESPONDING_INTERVAL: "48 hours"` — do not redo a user who has been `RESPONDING` for more than 48 hours (they are aged out)
+- `DEAN_RETRY_MAX_ATTEMPTS: "60"` — do not redo a user if their `retries` array length is already ≥ 60 (the max attempt cap)
+- `DEAN_SEND_DELAY: "3s"` — add 3 seconds of delay between consecutive sends to avoid overwhelming Facebook
+
+`REDO` is handled in `machine.js:366-382`. It no-ops for users in `['QOUT', 'END']` (lines 371-373) — so a healthy user who successfully received the echo and moved to `QOUT` is immune to further redo attempts. For users still in `RESPONDING`, `REDO` replays the previous output as `RESPOND_AGAIN` (`:378-379`), appending the timestamp to the `retries` array (`:375`). **The `retries` array counts Dean redo attempts, not initial send attempts.**
+
+### How the Loop Ends
+
+The loop does not end via `DEAN_RETRY_MAX_ATTEMPTS`. It ends when the send finally fails and the user is marked `BLOCKED`. Dean does not do the marking: the send error comes back as a `machine_report` and replybot's own handler performs the `BLOCKED` transition. The most common failure is Facebook error code 10 (`(#10) This message is sent outside of allowed window`), which occurs when the 24-hour Messenger window closes. Being `BLOCKED` removes the user from the `current_state = 'RESPONDING'` predicate, so the respondings sweep stops seeing them; and because code 10 is not in `DEAN_FB_CODES` (production value: `"2022,613,-1,190,80006,551"`, `devops/values/production.yaml:191`), the `blocked` sweep does not pick them up either. The loop halts by exhausting the user, not by any configured limit.
+
+**The observed cadence** (30–68 minutes, irregular) comes from the half-hourly cron run gated by the 20-minute grace, with per-user drift from the 3-second send delay across users in each sweep batch. It is **not** hourly and **not** exponential backoff.
+
+### Worked Example (Production, Verified)
+
+User `28777805391819468` on form `mentalitybaseline`, question `buttons_instruction`:
+
+- **Jul 16 13:16–13:19**: Answered a button-only question five times with free text ("1", "Hey", "Hey", "Yes", "Hello"). Each response was rejected with "Sorry, I only understand answers to the questions I ask." Last echo received Jul 16 13:19:11.972. State correctly transitioned to `QOUT` after the final rejection and re-ask.
+- **Jul 17 05:05:46**: ONE `follow_up` event fired (Dean followups cron: `0 5-19 * * *`, `DEAN_FOLLOWUP_MIN/MAX` 12h/24h, `devops/values/production.yaml:210-213`). The user had not answered the question in the previous 24 hours, triggering a follow-up. State transitioned to `RESPONDING`.
+- **No echo ever arrives**. The 24-hour Messenger window closes at Jul 17 13:19:08 — measured from the user's last *inbound* message, not from the last echo.
+- **14 `redo` events follow** from 05:36 to 18:36 (13 hours, irregular spacing reflecting the grace + cron cadence). Each redo appends a timestamp to `retries`.
+- **Jul 17 18:36:53**: the send returns error `(#10)`, subcode 2018278, and replybot transitions the user to `BLOCKED`. `state_json.retries` length is 14. `state_json.previousOutput` is still set to the follow-up output. The `stuck_on_question` column holds `buttons_instruction`.
+
+This user is part of the stuck-in-RESPONDING cohort: they cannot proceed because no echo will ever arrive, Dean's redo loop eventually fails with code 10, and the user is blocked.
+
+### Recognising the Pattern
+
+A `BLOCKED` state carrying the echo-trap signature has:
+- `state_json.retries` length ≥ 5 (indicates multiple redo attempts)
+- `state_json.previousOutput` preserved (the message that failed to echo)
+- `stuck_on_question` naming the question the user never got past
+- `error.code` 10 with `error_tag` `FB`, and an `error.payload` whose text matches whatever `previousOutput` was re-sending
+
+### Scale
+
+On the platform as of Jul 31 2026:
+- **68,344 of 164,534 `BLOCKED` states** carry >= 5 retries (a sign of the redo loop).
+- On Jul 17 alone, **88 users were blocked**, of which **85 had >= 5 retries** (96.5% of that day's blocks — a spike). On Jul 16: 3 (background rate).
+- **`RESPONDING` stays small** (815 users platform-wide) precisely because the loop terminates by blocking people.
+
+### Hypothesis: Echo Ingestion Gap on Jul 17
+
+Echo delivery is not broadly broken: 17/17 sampled `QOUT` users on `mentalitybaseline` on Jul 17 had echoes. However, of 400 users whose states updated 05:00–14:00 UTC on Jul 17, only ONE echo appeared all day, with echoes resuming at 16:00. This is **suggestive of an ingestion gap that morning**, but the root cause was not identified. The sample is biased toward users last active during the affected window, and this remains a hypothesis, not a confirmed root cause. The alternative explanations are message delivery issues (timeouts, network partitions, Facebook API slowness) rather than an ingestion-side bug.
+
+### Unresolved Discrepancy
+
+The same user episode (user `28777805391819468`) shows a stored error whose stack trace references `replybot/lib/messenger/index.js` (replybot's own Graph API send path) while the same episode's `machine_report` carries a `commands` array (the message-worker path). These two send paths should not coexist in the same episode. **Which component actually sent the message — replybot directly or message-worker — is unknown.** This needs investigation in the message-worker logs for that user and timestamp.
+
 ## The `states` Table
 
 ### Schema
