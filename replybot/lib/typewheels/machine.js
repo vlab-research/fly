@@ -401,6 +401,13 @@ function exec(state, nxt) {
     }
 
     case 'HANDOVER_EVENT': {
+      // Blocked is a dead end for every other inbound event type -- TEXT,
+      // MEDIA, POSTBACK, QUICK_REPLY, REFERRAL, ECHO and EXTERNAL_EVENT all
+      // no-op here. Without this, a thread passback was the one thing that
+      // could still wake a blocked participant, which is how the getForm husk
+      // was reached in production.
+      if (state.state === 'USER_BLOCKED') return _noop()
+
       const { new_owner_app_id } = nxt.payload
       const ourAppId = process.env.FACEBOOK_APP_ID
       if (new_owner_app_id && ourAppId && String(new_owner_app_id) !== String(ourAppId)) {
@@ -438,7 +445,12 @@ function exec(state, nxt) {
 
       return {
         action: 'RESET',
-        stateUpdate: { state: "USER_BLOCKED", pointer: nxt.timestamp, forms: state.forms }
+        // md is carried across for the same reason forms is: apply()'s RESET
+        // rebuilds from _initialState(), so anything not named here is lost.
+        // Dropping md leaves a blocked participant with no startTime, and the
+        // next event that wakes them merges into `undefined` and produces a
+        // husk that throws in getForm. See documentation/states-debugging.md.
+        stateUpdate: { state: "USER_BLOCKED", pointer: nxt.timestamp, forms: state.forms, md: state.md }
       }
     }
 

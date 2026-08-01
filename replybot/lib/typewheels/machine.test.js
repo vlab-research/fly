@@ -330,7 +330,13 @@ describe('getCurrentForm', () => {
   })
 
 
-  it('Gets ignores texts after block_user, but keeps forms and pointer', () => {
+  // md is asserted here because BLOCK_USER's RESET rebuilds from
+  // _initialState(): forms/pointer are carried across explicitly and md used to
+  // be dropped on the floor. A blocked participant with no md is a landmine --
+  // the next event that wakes them merges into `undefined`, producing a truthy
+  // husk with no startTime that passes transition.js's `!md` guard and then
+  // throws in getForm. See documentation/states-debugging.md.
+  it('Gets ignores texts after block_user, but keeps forms, pointer and md', () => {
 
     const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
 
@@ -338,11 +344,13 @@ describe('getCurrentForm', () => {
     state.forms.should.eql(['FOO'])
     state.state.should.equal('USER_BLOCKED')
     state.pointer.should.equal(20)
+    state.md.should.have.property('startTime')
 
     const state1 = getState([...log, text])
     state1.forms.should.eql(['FOO'])
     state1.state.should.equal('USER_BLOCKED')
     state1.pointer.should.equal(20)
+    state1.md.should.have.property('startTime')
   })
 
   it('Ignores POSTBACK events after block_user', () => {
@@ -422,6 +430,24 @@ describe('getCurrentForm', () => {
     const echoAfterBlock = { ...echo, timestamp: 30 }
     const state1 = getState([...log, echoAfterBlock])
     state1.state.should.equal('USER_BLOCKED')
+  })
+
+  // Completes the enumeration above. HANDOVER_EVENT was the one external-event
+  // path with no USER_BLOCKED guard, so a Messenger thread passback could still
+  // wake a blocked participant -- the production trigger for 9 of the 12 traced
+  // getForm/INTERNAL states on 2026-07-30.
+  it('Ignores HANDOVER_EVENT after block_user', () => {
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+
+    const state = getState(log)
+    state.state.should.equal('USER_BLOCKED')
+
+    const state1 = getState([...log, handover({ metadata: 'new message' }, { timestamp: 30 })])
+    state1.state.should.equal('USER_BLOCKED')
+    // the handover must not accumulate, nor overwrite md with its own metadata
+    should.not.exist(state1.externalEvents)
+    state1.md.should.have.property('startTime')
+    state1.md.should.not.have.property('e_handover_metadata')
   })
 
   it('Changes form with new referral', () => {
