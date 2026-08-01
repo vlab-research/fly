@@ -23,7 +23,13 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 versionDashboard: &vdashboard v0.0.68-wa
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
-versionReplybot: &vreplybot v0.0.211-wa
+# replybot leaves the -wa line here (was v0.0.211-wa, which trailed prod's
+# v0.0.213). v0.0.214 is a clean tag, so staging catches up by three releases:
+# v0.0.212 (quick-reply referral) and v0.0.213 (utility_message repeat), both
+# already prod-validated, plus the md-durability fix. Per
+# documentation/staging-tagging-and-deploy.md, swap each remaining -wa service
+# to a clean tag as it next changes.
+versionReplybot: &vreplybot v0.0.214
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32
