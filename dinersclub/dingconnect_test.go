@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vlab-research/dingconnect"
+	dingconnect "github.com/vlab-research/go-dingconnect"
 )
 
 func init() {

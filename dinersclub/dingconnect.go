@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
-	"github.com/vlab-research/dingconnect"
+	dingconnect "github.com/vlab-research/go-dingconnect"
 )
 
 // DingConnectProvider implements Provider on top of the dingconnect client.

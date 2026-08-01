@@ -41,21 +41,10 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
-	github.com/vlab-research/dingconnect v0.0.0
+	github.com/vlab-research/go-dingconnect v0.1.0
 	github.com/vlab-research/gotils v0.0.2 // indirect
 	golang.org/x/crypto v0.20.0 // indirect
 	golang.org/x/sys v0.17.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-// TEMPORARY -- must be removed before this branch merges.
-//
-// github.com/vlab-research/dingconnect is not published yet. This replace
-// makes the branch build and test locally, but it BREAKS THE DOCKER BUILD:
-// the Dockerfile's build context is dinersclub/ alone, so ../../dingconnect
-// does not exist inside the image.
-//
-// Once the repo is pushed and tagged, delete this and pin a real version:
-//   go get github.com/vlab-research/dingconnect@v0.1.0
-replace github.com/vlab-research/dingconnect => ../../dingconnect
