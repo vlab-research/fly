@@ -47,7 +47,7 @@ services:
     networks:
       - fly
   initdb:
-    image: cockroachdb/cockroach:v21.2.17
+    image: cockroachdb/cockroach:v24.1.28
     depends_on:
       - cockroachdb
     entrypoint: |
@@ -63,7 +63,7 @@ services:
     networks:
       - fly
   cockroachdb:
-    image: cockroachdb/cockroach:v21.2.17
+    image: cockroachdb/cockroach:v24.1.28
     command: start-single-node --insecure
     ports:
       - 26257:26257
