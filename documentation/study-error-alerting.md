@@ -410,12 +410,14 @@ class stays unrecoverable by design. See `planning/null-fb-error-code-findings.m
 
 > **⚠️ Check the lost-`md` case first — as of 2026-07-30 it is essentially *all* of the
 > `INTERNAL` volume in production.** The signature is `state_json->'error'->>'message' =
-> 'getForm'` with `state_json->'md'->>'startTime' IS NULL`. It is a metadata-loss bug on
-> the Redis-miss re-fold path, not a live infrastructure fault, so steps 3–5 below
-> (component logs, deploys, consumer lag) will all come back clean. Affected users never
-> self-recover and Dean re-emits the error every 30 minutes per user, so the metric is a
-> *stuck population*, not a rate. Full mechanism and triage queries:
-> `documentation/states-debugging.md` → "The rebuild is lossy".
+> 'getForm'` with `state_json->'md'->>'startTime' IS NULL`. It is a metadata-loss bug —
+> blocking a participant discarded their `md` — not a live infrastructure fault, so
+> steps 3–5 below (component logs, deploys, consumer lag) will all come back clean.
+> Affected users never self-recover and Dean re-emits the error every 30 minutes per
+> user, so the metric is a *stuck population*, not a rate. replybot v0.0.214 stops new
+> ones occurring; states already carrying the husk still report `INTERNAL`. Full
+> mechanism and triage queries: `documentation/states-debugging.md` → "Blocking a
+> participant destroys `md`".
 
 **What to do:**
 1. **Identify the error_tag breakdown:** Port-forward Prometheus (`kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 9091:9090; exit 0`) and query:
