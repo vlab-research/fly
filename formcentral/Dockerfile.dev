@@ -1,4 +1,8 @@
-FROM golang:alpine
+# Pin the Go minor rather than floating on `golang:alpine`: go.mod requires
+# >= 1.24, and the image runs with GOTOOLCHAIN=local, so an image that drifts
+# either side of go.mod fails at `go mod download`. ./Dockerfile already pins
+# 1.24-alpine; this now matches it.
+FROM golang:1.24-alpine
 
 RUN apk add --no-cache \
     gcc \
@@ -10,4 +14,11 @@ COPY go.mod /app
 WORKDIR /app
 
 RUN go mod download
-RUN go get -u github.com/nathany/looper
+
+# looper drives the live-reload dev loop only; CI (--is-ci) never invokes it.
+# `go get -u` resolved the LATEST version of every transitive dep into this
+# module's graph, so an unrelated upstream release breaks the image --
+# golang.org/x/sys v0.47.0 now requires go >= 1.25. `go install pkg@ver`
+# resolves against looper's own go.mod in isolation and is pinned, so a new
+# upstream release is inert.
+RUN go install github.com/nathany/looper@v0.3.3

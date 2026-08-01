@@ -14,6 +14,15 @@ import (
 	dingconnect "github.com/vlab-research/go-dingconnect"
 )
 
+// setDefaultEnv sets key only when it is not already present, so a caller that
+// has configured the environment (docker compose in CI) wins over the local
+// default.
+func setDefaultEnv(key, value string) {
+	if _, ok := os.LookupEnv(key); !ok {
+		os.Setenv(key, value)
+	}
+}
+
 func init() {
 	// Set required environment variables for tests that use getConfig()
 	os.Setenv("CACHE_TTL", "1h")
@@ -21,12 +30,19 @@ func init() {
 	os.Setenv("CACHE_MAX_COST", "10000")
 	os.Setenv("CACHE_BUFFER_ITEMS", "64")
 	os.Setenv("CHATBASE_DATABASE", "chatroach")
-	os.Setenv("CHATBASE_HOST", "localhost")
-	// 5433 is the canonical test database: `make test-db` in devops/ creates it
-	// (devops/Makefile PORT=5433) and every other module targets it. 26257 came
-	// from ./.env, i.e. the production port -- pointing the suite at whatever
-	// happened to be listening there.
-	os.Setenv("CHATBASE_PORT", "5433")
+	// Host and port are DEFAULTS, not overrides -- the repo has two test-database
+	// conventions and the suite has to satisfy both:
+	//
+	//   local:  `make test-db` in devops/ runs CockroachDB on localhost:5433
+	//           (devops/Makefile PORT=5433), and nothing sets these vars.
+	//   CI:     ./test.sh runs dinersclub/test.yaml, whose compose network puts
+	//           CockroachDB at cockroachdb:26257 and exports it in the env.
+	//
+	// Setting them unconditionally pinned the suite to the local convention and
+	// broke test_dinersclub on CircleCI, where 26257 is the compose service --
+	// not, as previously noted here, the production port.
+	setDefaultEnv("CHATBASE_HOST", "localhost")
+	setDefaultEnv("CHATBASE_PORT", "5433")
 	os.Setenv("CHATBASE_USER", "root")
 	os.Setenv("CHATBASE_MAX_CONNECTIONS", "10")
 	os.Setenv("KAFKA_BROKERS", "localhost:9092")

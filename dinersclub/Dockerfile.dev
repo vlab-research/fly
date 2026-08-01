@@ -1,9 +1,16 @@
-FROM golang:alpine3.18
+# Pin the Go minor, not the Alpine release: go.mod requires >= 1.24 and the
+# image runs with GOTOOLCHAIN=local, so an image older than go.mod fails at
+# `go mod download` rather than fetching a newer toolchain. `golang:alpine3.18`
+# floated to go 1.22.3 and broke CI the moment go.mod moved to 1.24. Matches
+# ./Dockerfile, which already pins 1.24-alpine and leaves librdkafka-dev
+# unpinned -- the =2.1.1-r0 pin was only valid for Alpine 3.18's package index.
+FROM golang:1.24-alpine
 RUN apk add --no-cache \
         gcc \
         libc-dev \
-        librdkafka-dev=2.1.1-r0 \
-        pkgconf
+        librdkafka-dev \
+        pkgconf \
+        readline-dev
 
 
 RUN mkdir /app
@@ -11,5 +18,12 @@ COPY go.mod /app
 WORKDIR /app
 
 RUN go mod download
-RUN go get -u github.com/nathany/looper
-RUN go install github.com/nathany/looper
+
+# looper drives the live-reload dev loop only; CI (--is-ci) never invokes it.
+# It was installed with `go get -u`, which resolves the LATEST version of every
+# transitive dep into this module's graph — so an unrelated upstream release
+# breaks the image. That is what happened: golang.org/x/sys v0.47.0 now requires
+# go >= 1.25, failing the build under any older toolchain. `go install pkg@ver`
+# resolves against looper's own go.mod in isolation and cannot drag this
+# module's dependencies forward. Pinned, so a new upstream release is inert.
+RUN go install github.com/nathany/looper@v0.3.3
