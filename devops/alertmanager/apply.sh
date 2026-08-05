@@ -26,6 +26,13 @@ sed -e "s#\${SLACK_WEBHOOK_WARNING}#${SLACK_WEBHOOK_WARNING}#" \
     -e "s#\${SLACK_WEBHOOK_CRITICAL}#${SLACK_WEBHOOK_CRITICAL}#" \
     -e "s#\${NTFY_TOKEN}#${NTFY_TOKEN}#" alertmanager.yaml > "$RENDER"
 
+# The amtool image runs as `nobody`, but `mktemp -d` is mode 0700 — without this
+# the bind mount is unreadable inside the container and validation dies with
+# "stat /cfg/alertmanager.yaml: permission denied". The file still holds real
+# webhooks, so widen the directory only, and keep the file itself owner-only.
+chmod 0711 "$(dirname "$RENDER")"
+chmod 0644 "$RENDER"
+
 # Validate before touching the live config (a bad config would break ALL alerting).
 docker run --rm --entrypoint amtool -v "$(dirname "$RENDER"):/cfg" \
   prom/alertmanager:v0.24.0 check-config /cfg/alertmanager.yaml

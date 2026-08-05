@@ -85,8 +85,25 @@ studyHealth:
   # to know at the first sign of a regression. It is calibrated for an audience
   # that can read an error_tag breakdown and decide "this is the known stuck
   # population, ignore" — NOT for researchers. See the Severe variant below.
-  platformInternalErrorsThreshold: 5
-  platformInternalErrorsFor: "10m"
+  # RETUNED 2026-08-04 (was 5 / 10m). At 5 this alert was not a low noise gate, it
+  # was a coin flip: measured over the 4 days to 2026-08-04 the signal's MEDIAN was
+  # 4 and its MAX was 8, so the threshold sat *inside* the background band and the
+  # alert flapped across it — 21 firing episodes in 4 days. Every one of those is a
+  # critical, so every one was a #vlab-alerts-critical post AND an ntfy phone push
+  # at priority 4: ~5 pushes a day, none of them a live fault.
+  #
+  # This is the failure the Severe block below already predicted ("flapped through 4
+  # firing episodes in 4 days") — it just got 5x worse as the background population
+  # grew. The background is still what that block says it is: the lost-`md` stuck
+  # users Dean re-emits every 30m, a fixed set, not a regression.
+  #
+  # 15 clears the observed max with headroom while staying well under the Severe
+  # variant's 25, so the on-call is still paged long before any researcher sees a
+  # banner. The 30m `for:` is doing equal work — it is what stops a threshold
+  # crossing from becoming a page when the count wobbles back down on the next
+  # 1m evaluation.
+  platformInternalErrorsThreshold: 15
+  platformInternalErrorsFor: "30m"
 
   # PlatformInternalErrorsSevere: the SAME signal, gated for the researcher-facing
   # notice in the dashboard (dashboard-server/api/health/rules.js -> platformNotices).

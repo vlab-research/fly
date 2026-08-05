@@ -4,8 +4,10 @@
 # secret from it and AlertManager hot-reloads).
 #
 #   severity=critical      -> #vlab-alerts-critical   (e.g. KubeProxyDown, our *page* rules)
-#   severity=warning/info  -> #vlab-alerts            (default)
+#   severity=warning/info  -> #vlab-alerts            (default; info is normally
+#                             inhibited — see inhibit_rules below)
 #   Watchdog               -> silenced (null receiver; no dead-man's-switch yet)
+#   InfoInhibitor          -> silenced (plumbing for the inhibit_rules, not an alert)
 #   KubeJobFailed          -> silenced (fires on ANY single failed Job; replaced
 #   KubeJobNotCompleted       by our CronJobRepeatedlyFailing / CronJobNotSucceeding
 #                             rules in the vlab-alerts chart, which alert only on
@@ -25,6 +27,13 @@ route:
   routes:
     - matchers: [ 'alertname="Watchdog"' ]
       receiver: 'null'
+    # InfoInhibitor is PLUMBING, not an alert. kube-prometheus-stack fires it
+    # (severity=none) purely so the inhibit_rule below has something to key on;
+    # its own annotations say as much. The stock config null-routes it. Ours
+    # didn't, so with `severity=none` it fell through to the default receiver and
+    # posted to #vlab-alerts — 49 firing episodes in the 4 days to 2026-08-04.
+    - matchers: [ 'alertname="InfoInhibitor"' ]
+      receiver: 'null'
     # Default kube-prometheus-stack job alerts: replaced by the vlab-alerts
     # cronjob-health rules (repeated-failure only). Kept in Prometheus, muted here.
     - matchers: [ 'alertname=~"KubeJobFailed|KubeJobNotCompleted"' ]
@@ -33,6 +42,27 @@ route:
       receiver: 'slack-critical'
       group_wait: 30s
       repeat_interval: 4h
+# The stock kube-prometheus-stack inhibit rules (the fourth part of the stock set
+# is the InfoInhibitor null route, up in `routes`). This config replaced the
+# operator-generated default wholesale and dropped them, which is what made
+# #vlab-alerts a firehose: CPUThrottlingHigh (info, chronic on kminion and the
+# vstag redis replica) is meant to be inhibited and instead flapped through 202
+# firing episodes in the 4 days to 2026-08-04 — 65% of ALL alert activity.
+#
+# Deliberately NOT null-routing severity=info outright: the third rule's design is
+# that an info alert stays visible when a warning/critical is firing in the same
+# namespace (that is when InfoInhibitor stops firing), which is exactly when it
+# carries diagnostic value. Muting info unconditionally would throw that away.
+inhibit_rules:
+  - source_matchers: [ 'severity="critical"' ]
+    target_matchers: [ 'severity=~"warning|info"' ]
+    equal: ['namespace', 'alertname']
+  - source_matchers: [ 'severity="warning"' ]
+    target_matchers: [ 'severity="info"' ]
+    equal: ['namespace', 'alertname']
+  - source_matchers: [ 'alertname="InfoInhibitor"' ]
+    target_matchers: [ 'severity="info"' ]
+    equal: ['namespace']
 receivers:
   - name: 'null'
   - name: 'slack-warning'

@@ -267,9 +267,15 @@ spec:
         # Users stuck on a single question (validation loop or confusing form). This is
         # a study UX issue (bad validation logic, impossible-to-answer question). Create
         # a ticket for that study.
+        #
+        # The fallback form is excluded, as it is from every other per-form rule here.
+        # It omits users who never resolve to a real form, so they are "stuck" on it
+        # permanently and by design — there is no study to ticket. That exclusion was
+        # missing until 2026-08-04 and made this the noisiest study alert we had: 13
+        # firing episodes / 29h of firing in 4 days, all of them form 305.
         - alert: SurveyStuckUsersSpike
           expr: |
-            survey_stuck_users{form!="{{ .Values.studyHealth.nullForm }}"} >= {{ .Values.studyHealth.surveyStuckUsersThreshold }}
+            survey_stuck_users{form!="{{ .Values.studyHealth.fallbackForm }}", form!="{{ .Values.studyHealth.nullForm }}"} >= {{ .Values.studyHealth.surveyStuckUsersThreshold }}
           for: {{ .Values.studyHealth.surveyStuckUsersFor }}
           labels:
             severity: warning

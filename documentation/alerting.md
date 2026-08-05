@@ -45,59 +45,67 @@ change — no orphaned operator defaults.
 
 ---
 
-## 2. AlertManager → Slack + PagerDuty + Email
+## 2. AlertManager routing
 
-**Status:** Version-controlled config ready for deployment (NOT YET APPLIED).
+**Status: LIVE.** `devops/alertmanager/alertmanager.yaml` is the deployed config.
+Apply changes with `devops/alertmanager/apply.sh` (injects the webhooks from the
+gitignored `secret.env`, validates with `amtool`, writes the `alertmanager` secret;
+the operator regenerates the mounted config and AlertManager hot-reloads within
+~1m — **no `helm upgrade` needed**).
 
-**Current (live):** All alerts route to Slack `#vlab-alerts` (flat routing, no severity distinction).
+PagerDuty, email/FYI routing and the dead-man's switch were **designed but never
+built** — there is no paging vendor and no heartbeat monitor. Phone paging is
+handled by **ntfy** instead (§8), attached to the `slack-critical` receiver.
 
-**New (designed, validated, GATED):** Severity-based routing with dead-man's switch. Config in Git at `devops/alertmanager/alertmanager.yaml`.
-
-### Routing Model (New, Not Yet Live)
+### Routing model
 
 ```
 All Alerts
     │
-    ├─ Watchdog (liveness) ──────────────────► deadmans-switch (heartbeat)
+    ├─ Watchdog ────────────────────────────► null   (no dead-man's switch yet)
+    ├─ InfoInhibitor ───────────────────────► null   (plumbing, not an alert)
+    ├─ KubeJobFailed / KubeJobNotCompleted ─► null   (replaced by §6 cronjob rules)
     │
-    ├─ severity=critical ───────┬───────────► page (PagerDuty)
-    │                            └───────────► slack-critical (#vlab-alerts-critical)
+    ├─ severity=critical ───────┬───────────► slack-critical (#vlab-alerts-critical)
+    │                           └───────────► ntfy phone push (priority 4)
     │
-    ├─ severity=warning ────────────────────► slack (#vlab-alerts)
-    │
-    └─ default / FYI ───────────────────────► fyi (email)
+    └─ everything else ─────────────────────► slack-warning (#vlab-alerts)
 ```
 
-- **Critical** (`severity=critical`) → **PagerDuty** (page on-call) **AND** **Slack #vlab-alerts-critical** (visibility)
-  - Repeat interval: 1h (re-page if not resolved)
-  - Grouping: 10s wait, 2m interval (fast response)
-- **Warning** (`severity=warning`) → **Slack #vlab-alerts** (ticket, preserves current behavior)
-  - Repeat interval: 12h
-  - Grouping: 30s wait, 5m interval
-- **FYI** (no severity or `severity=info`) → **Email** (`team@vlab-research.org`)
-  - Repeat interval: 24h
-- **Watchdog** (always-firing liveness signal) → **Dead-man's switch** (external heartbeat monitor)
-  - Check-in every ~1-2 minutes; external monitor (healthchecks.io / PagerDuty heartbeat) pages if silent → monitoring stack is down
+Group by `alertname`; `group_wait` 30s, `group_interval` 5m, `repeat_interval` 12h
+(4h for criticals). `send_resolved: true` everywhere — **every episode is two
+messages**, which is what makes a flapping alert so expensive.
 
-### Inhibition Rules
+Note the default receiver is a catch-all: anything without `severity=critical`
+lands in `#vlab-alerts`, **including `severity=info` and `severity=none`**. That
+is why the inhibit rules below are load-bearing rather than cosmetic.
 
-- Platform-wide critical alerts (e.g., `KafkaOfflinePartitions`) mute per-survey/component warnings
-- Critical Kafka broker issues mute consumer-lag warnings
-- Reduces noise when root cause is already firing
+### Inhibition rules
 
-### Deployment Status
+The three stock kube-prometheus-stack rules, plus the `InfoInhibitor` null route:
 
-**Config:** `devops/alertmanager/alertmanager.yaml` (version-controlled, no secrets)  
-**Validation:** Passed `amtool check-config` + routing tests (see `devops/alertmanager/VALIDATION.md`)  
-**Secrets Required:** (see `devops/alertmanager/README.md` §Secrets Required)
-- `#vlab-alerts-critical` Slack webhook (TODO: create channel + webhook)
-- PagerDuty Events API v2 routing key (TODO: create service + integration)
-- Dead-man's switch heartbeat URL (TODO: provision healthchecks.io / PagerDuty heartbeat)
-- SMTP credentials for email (TODO: SendGrid / AWS SES)
+| Source | Mutes | Keyed on |
+|---|---|---|
+| `severity=critical` | `severity=warning\|info` | `namespace`, `alertname` |
+| `severity=warning` | `severity=info` | `namespace`, `alertname` |
+| `alertname=InfoInhibitor` | `severity=info` | `namespace` |
 
-**Cutover:** GATED — do NOT apply until secrets are provisioned and human review is complete. Commands in `devops/alertmanager/CUTOVER.md`.
+> ⚠️ **Restored 2026-08-04 after being silently lost.** This config replaced the
+> operator-generated default *wholesale*, which dropped all `inhibit_rules` and the
+> `InfoInhibitor` null route. `InfoInhibitor` is plumbing — it exists only so the
+> third rule has a source to key on — but with `severity=none` it fell through the
+> catch-all and posted to Slack; and with the third rule gone, chronic `info` alerts
+> were never muted. Between them they produced **251 of the 310 firing episodes (81%)
+> in the 4 days to 2026-08-04**. If you ever regenerate this file from scratch, carry
+> the inhibit rules over.
 
-**Rollback:** Revert `devops/prometheus/values.yaml` to `useExistingSecret: true` + `configSecret: "alertmanager"` → kube-prometheus-stack regenerates the original flat config.
+`severity=info` is deliberately **not** null-routed outright. The third rule's design
+is that an info alert *does* surface when a warning/critical is firing in the same
+namespace — that is precisely when `InfoInhibitor` stops firing, and precisely when
+the info alert has diagnostic value. Muting info unconditionally discards that.
+
+**Rollback:** `apply.sh` writes `alertmanager.live-backup.yaml` (gitignored, contains
+real webhooks) before each apply; the restore command is printed on success.
 
 ---
 
@@ -209,12 +217,22 @@ notices via `GET /platform/notices`. Full design:
 > the notice is driven by firing state, so that is the only way to express it.
 
 ### PlatformInternalErrors
-`sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"}) >= 5` for
-10m — **critical**. Platform bugs (DB failures, state machine errors, network
-issues). Rare and always actionable. See
-`documentation/study-error-alerting.md#platforminternalerrors`.
+`sum(survey_error_states{error_tag=~"INTERNAL|STATE_ACTIONS|NETWORK"}) >= 15` for
+30m — **critical**. Platform bugs (DB failures, state machine errors, network
+issues). See `documentation/study-error-alerting.md#platforminternalerrors`.
 
 **Not researcher-facing** — see the Severe variant below.
+
+> **Retuned 2026-08-04 (was `>= 5` for 10m).** At 5 this was not a low noise gate,
+> it was a coin flip: over the 4 days to 2026-08-04 the signal's **median was 4 and
+> its max 8**, so the threshold sat *inside* the background band and the alert
+> flapped across it — **21 firing episodes in 4 days**, i.e. ~5 phone pushes a day,
+> none a live fault. The background is the known lost-`md` stuck population Dean
+> re-emits every 30m, not a regression. 15 clears the observed max with headroom
+> while staying under the Severe variant's 25, so the on-call is still paged well
+> before any researcher sees a banner. The 30m `for:` does equal work — it stops a
+> threshold crossing becoming a page when the count wobbles back on the next
+> evaluation.
 
 ### PlatformInternalErrorsSevere
 Same signal, gated for the **researcher** audience: `>= 25` affected users AND
@@ -256,8 +274,15 @@ issues. Excludes form 305. See
 
 ### SurveyStuckUsersSpike
 `survey_stuck_users >= 10` for 20m — **warning**. Users stuck on a question
-(validation loop / confusing form). Study UX issue, ticket. See
+(validation loop / confusing form). Study UX issue, ticket. Excludes form 305
+(fallback) and the `"(none)"` sentinel. See
 `documentation/study-error-alerting.md#surveystuckusersspike`.
+
+> **Fallback-form exclusion added 2026-08-04.** This rule excluded the `"(none)"`
+> sentinel but not form 305, unlike every other per-form rule here. 305 holds users
+> who never resolved to a real form, so they are "stuck" permanently and by design
+> and there is no study to ticket — it was the noisiest study alert we had (13
+> episodes / 29h firing in 4 days, **all** of it form 305).
 
 ### DeanExpiredWaits
 `sum(survey_expired_waits) >= 10` for 15m — **warning**. WAIT_EXTERNAL_EVENT past
@@ -447,6 +472,14 @@ paid Grafana Cloud IRM. Karma + ntfy keeps the whole path OSS + self-hosted.
   - `KubeJobFailed` / `KubeJobNotCompleted` — **replaced**: null-routed in
     `devops/alertmanager/alertmanager.yaml`; superseded by the cronjob-health rules
     in §6 (alert on *repeated* failure only). Rules remain in Prometheus for debugging.
-  - `CPUThrottlingHigh` (info, kminion) — left as-is (low-priority noise).
-  - `Watchdog` is an always-on liveness signal (expected); `InfoInhibitor` is plumbing.
+  - `CPUThrottlingHigh` (info; chronic on `kminion` in `default` and
+    `gbv-redis-replicas-0` in `vstag`) — **now inhibited**, not muted. It flaps
+    constantly (202 firing episodes in the 4 days to 2026-08-04, 65% of all alert
+    activity) and the stock `InfoInhibitor` rule exists precisely to swallow it; that
+    rule had been lost and is restored (§2). The rule itself is left enabled — if the
+    underlying throttling ever matters it will surface alongside a real warning in the
+    same namespace.
+  - `Watchdog` is an always-on liveness signal (expected) and is null-routed;
+    `InfoInhibitor` is plumbing and is **also** null-routed (§2) — it is not an alert
+    and must never reach a human.
 - **Redis** alerts ship with the redis subchart (`vlab/charts/redis`).
