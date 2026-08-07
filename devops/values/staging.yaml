@@ -38,7 +38,16 @@ versionReplybot: &vreplybot v0.0.215
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.45
+# HELD AT v0.0.43-wa (2026-08-05). v0.0.45 is built and its code is on main,
+# but DingConnect is not operational yet: v0.0.45 resolves DingConnect
+# credentials from Generic Secrets and deliberately stops honouring the legacy
+# entity='dingconnect' credential (see TestDingConnectAuth_IgnoresLegacyEntity),
+# so deploying it before the secrets are seeded would break DingConnect
+# payments. Nothing else in the v0.0.43-wa..v0.0.45 range touches any other
+# provider -- the diff is dingconnect.go, its tests, a new secrets.go used by
+# nothing else, and the go-dingconnect dep -- so holding it costs nothing.
+# Bump to v0.0.45 when DingConnect is ready to go live.
+versionDinersclub: &vdinersclub v0.0.43-wa
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
