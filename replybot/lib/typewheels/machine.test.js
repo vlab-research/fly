@@ -3328,4 +3328,107 @@ describe('Referral delivered inside a quick_reply payload string', () => {
 
     state.md.form.should.equal('fallback')
   })
+
+  describe('WhatsApp inbound media validation and responseValue', () => {
+    let user = { id: '123' }
+
+    const whatsappMediaEvent = (mediaType, mediaData) => ({
+      event_id: 'evt_test_whatsapp_media',
+      user_id: '27123456789',
+      timestamp: Date.now(),
+      source: { type: 'whatsapp', account_id: 'PHONE_ID_1' },
+      event_type: 'user_media',
+      payload: {
+        type: 'user_media',
+        attachments: [{
+          type: mediaType,
+          payload: mediaData
+        }],
+        stickerId: null
+      }
+    })
+
+    it('captures WhatsApp media id as responseValue', () => {
+      const imageEvent = whatsappMediaEvent('image', {
+        id: 'wamedia_abc123',
+        url: 'https://media-server.example.com/img',
+        mime_type: 'image/jpeg',
+        sha256: 'hash123'
+      })
+
+      const output = exec(getState([referral, echo, delivery].map(parseEvent)), imageEvent)
+      output.action.should.equal('RESPOND')
+      output.responseValue.should.equal('wamedia_abc123')
+    })
+
+    it('captures WhatsApp video id as responseValue', () => {
+      const videoEvent = whatsappMediaEvent('video', {
+        id: 'vid_xyz789',
+        url: 'https://media-server.example.com/video',
+        mime_type: 'video/mp4',
+        sha256: 'videohash'
+      })
+
+      const output = exec(getState([referral, echo, delivery].map(parseEvent)), videoEvent)
+      output.action.should.equal('RESPOND')
+      output.responseValue.should.equal('vid_xyz789')
+    })
+
+    it('regression: Messenger attachment yields url as responseValue when no id present', () => {
+      // Messenger-native attachment shape: has url, no id
+      const messengerMediaEvent = {
+        event_id: 'evt_test_messenger_media',
+        user_id: USER_ID,
+        timestamp: 20,
+        source: { type: 'messenger', account_id: PAGE_ID },
+        event_type: 'user_media',
+        payload: {
+          type: 'user_media',
+          attachments: [{
+            type: 'image',
+            payload: {
+              url: 'https://scontent.xx.fbcdn.net/image.jpg'
+            }
+          }],
+          stickerId: null
+        }
+      }
+
+      const output = exec(getState([referral, echo, delivery].map(parseEvent)), messengerMediaEvent)
+      output.action.should.equal('RESPOND')
+      // Messenger has no id, so falls back to url
+      output.responseValue.should.equal('https://scontent.xx.fbcdn.net/image.jpg')
+    })
+
+    it('all six WhatsApp media types capture their id as responseValue', () => {
+      const mediaTypes = ['image', 'video', 'audio', 'voice', 'document', 'sticker']
+
+      for (const mediaType of mediaTypes) {
+        const mediaEvent = whatsappMediaEvent(mediaType, {
+          id: `media_${mediaType}_123`,
+          url: `https://media.example.com/${mediaType}`,
+          mime_type: `media/${mediaType}`,
+          sha256: `${mediaType}_sha256`
+        })
+
+        const output = exec(getState([referral, echo, delivery].map(parseEvent)), mediaEvent)
+        output.action.should.equal('RESPOND')
+        output.responseValue.should.equal(`media_${mediaType}_123`)
+      }
+    })
+
+    it('still works when media has both id and url (prefers id)', () => {
+      const mediaEvent = whatsappMediaEvent('image', {
+        id: 'media_with_both_123',
+        url: 'https://media.example.com/image',
+        mime_type: 'image/jpeg',
+        sha256: 'hash123'
+      })
+
+      const output = exec(getState([referral, echo, delivery].map(parseEvent)), mediaEvent)
+      output.action.should.equal('RESPOND')
+      // When both id and url present, responseValue should be id
+      output.responseValue.should.equal('media_with_both_123')
+    })
+  })
 })

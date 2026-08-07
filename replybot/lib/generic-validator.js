@@ -206,9 +206,12 @@ function validateUpload(field, messages) {
   const uploadType = validate.type
 
   return r => {
-    const url = r && r.payload && r.payload.url
+    const payload = r && r.payload
+    const id = payload && payload.id
+    const url = payload && payload.url
     const validType = (r && r.type) === uploadType
-    const valid = validType && !!url
+    // Accept if we have either an id or a url (id for WhatsApp, url for Messenger)
+    const valid = validType && !!(id || url)
     return { message: messages['label.error.mustEnter'], valid }
   }
 }

@@ -580,7 +580,7 @@ function exec(state, nxt) {
       return {
         action: 'RESPOND',
         response: attachment,
-        responseValue: attachment && attachment.payload && attachment.payload.url,
+        responseValue: attachment && attachment.payload && (attachment.payload.id || attachment.payload.url),
         question: state.question
       }
     }

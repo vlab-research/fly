@@ -376,7 +376,12 @@ function categorizeWhatsAppEvent(data) {
         type: 'user_media',
         attachments: [{
           type: data.type === 'voice' ? 'audio' : data.type,
-          payload: { id: media.id || null, url: media.link || null }
+          payload: {
+            id: media.id || null,
+            url: media.url || media.link || null,
+            mime_type: media.mime_type || null,
+            sha256: media.sha256 || null
+          }
         }],
         stickerId: null
       }

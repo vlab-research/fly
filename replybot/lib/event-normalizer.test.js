@@ -686,4 +686,136 @@ describe('parseEvent - whatsapp source', () => {
     result.event_type.should.equal('user_interaction')
     result.payload.value.should.equal('Red')
   })
+
+  describe('WhatsApp inbound media with id, url, mime_type, sha256', () => {
+    it('normalizes image with all media fields from real WhatsApp webhook', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'image',
+        image: {
+          id: '1234567890',
+          url: 'https://media.example.com/image123',
+          mime_type: 'image/jpeg',
+          sha256: 'abcdef123456'
+        }
+      })
+      event_type.should.equal('user_media')
+      payload.type.should.equal('user_media')
+      payload.attachments[0].type.should.equal('image')
+      payload.attachments[0].payload.id.should.equal('1234567890')
+      payload.attachments[0].payload.url.should.equal('https://media.example.com/image123')
+      payload.attachments[0].payload.mime_type.should.equal('image/jpeg')
+      payload.attachments[0].payload.sha256.should.equal('abcdef123456')
+    })
+
+    it('normalizes video with all media fields', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'video',
+        video: {
+          id: 'vid_001',
+          url: 'https://media.example.com/video456',
+          mime_type: 'video/mp4',
+          sha256: 'xyz789'
+        }
+      })
+      event_type.should.equal('user_media')
+      payload.attachments[0].type.should.equal('video')
+      payload.attachments[0].payload.id.should.equal('vid_001')
+      payload.attachments[0].payload.mime_type.should.equal('video/mp4')
+    })
+
+    it('normalizes audio with all media fields', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'audio',
+        audio: {
+          id: 'aud_002',
+          url: 'https://media.example.com/audio789',
+          mime_type: 'audio/mpeg',
+          sha256: 'sound123'
+        }
+      })
+      event_type.should.equal('user_media')
+      payload.attachments[0].type.should.equal('audio')
+      payload.attachments[0].payload.id.should.equal('aud_002')
+    })
+
+    it('normalizes voice as audio with all fields', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'voice',
+        voice: {
+          id: 'voice_003',
+          url: 'https://media.example.com/voice999',
+          mime_type: 'audio/ogg',
+          sha256: 'voice_sha'
+        }
+      })
+      event_type.should.equal('user_media')
+      payload.attachments[0].type.should.equal('audio')
+      payload.attachments[0].payload.id.should.equal('voice_003')
+    })
+
+    it('normalizes document with all fields', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'document',
+        document: {
+          id: 'doc_004',
+          url: 'https://media.example.com/document.pdf',
+          mime_type: 'application/pdf',
+          sha256: 'doc_sha256'
+        }
+      })
+      event_type.should.equal('user_media')
+      payload.attachments[0].type.should.equal('document')
+      payload.attachments[0].payload.id.should.equal('doc_004')
+    })
+
+    it('normalizes sticker with all fields', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'sticker',
+        sticker: {
+          id: 'stk_005',
+          url: 'https://media.example.com/sticker.webp',
+          mime_type: 'image/webp',
+          sha256: 'sticker_sha'
+        }
+      })
+      event_type.should.equal('user_media')
+      payload.attachments[0].type.should.equal('sticker')
+      payload.attachments[0].payload.id.should.equal('stk_005')
+    })
+
+    it('handles media with missing optional fields (nulls gracefully)', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'image',
+        image: { id: 'img_only' }
+      })
+      event_type.should.equal('user_media')
+      payload.attachments[0].payload.id.should.equal('img_only')
+      should.equal(payload.attachments[0].payload.url, null)
+      should.equal(payload.attachments[0].payload.mime_type, null)
+      should.equal(payload.attachments[0].payload.sha256, null)
+    })
+
+    it('prefers media.url over media.link when both present', () => {
+      const { payload } = categorizeWhatsAppEvent({
+        type: 'image',
+        image: {
+          id: 'img_prefer',
+          url: 'https://api.example.com/url',
+          link: 'https://api.example.com/link'
+        }
+      })
+      payload.attachments[0].payload.url.should.equal('https://api.example.com/url')
+    })
+
+    it('falls back to media.link if media.url is absent', () => {
+      const { payload } = categorizeWhatsAppEvent({
+        type: 'image',
+        image: {
+          id: 'img_fallback',
+          link: 'https://api.example.com/fallback_link'
+        }
+      })
+      payload.attachments[0].payload.url.should.equal('https://api.example.com/fallback_link')
+    })
+  })
 })
