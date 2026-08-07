@@ -40,7 +40,7 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 versionDashboard: &vdashboard v0.0.71
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
-versionReplybot: &vreplybot v0.0.215
+versionReplybot: &vreplybot v0.0.216
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32
@@ -792,6 +792,11 @@ message-worker:
   - name: FACEBOOK_GRAPH_URL
     value: "https://graph.facebook.com/v25.0"
   - name: MESSENGER_URL
+    value: "https://graph.facebook.com/v25.0"
+  - name: WHATSAPP_GRAPH_URL
+    # MUST be set explicitly. config.go defaults this to v18.0 independently of
+    # FACEBOOK_GRAPH_URL above -- Meta has sunset v18.0, so leaving it unset
+    # means every WhatsApp send fails while Messenger keeps working.
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
     value: "1"
