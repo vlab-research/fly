@@ -37,6 +37,123 @@ into Part B, so a single run covers everything below.
 > After editing choice `ref`s, always run `deploy.py refs` — Typeform can
 > reassign refs on update and silently break logic jumps.
 
+## Deploying a form (read this before your first `update`)
+
+### `update` is a whole-form replace, not a patch
+
+`cmd_update` (`deploy.py:128-138`) issues a single `PUT /forms/{id}` carrying
+the entire local JSON. Typeform replaces the form wholesale: **anything present
+on the live form but absent from the local file is deleted** — fields, logic
+blocks, hidden keys, settings alike. There is no merge, no dry-run, and no
+confirmation prompt; the only output is `form_a: updated id=QJ6d4JHE`.
+
+The practical consequence: **`form-a.json` is the sole source of truth. Never
+edit these forms in the Typeform UI** — the next `update` silently reverts it,
+and because the command is quiet you will not find out until a smoke run fails.
+
+Both inputs are gitignored, so a fresh checkout has neither:
+
+| File | Contents | If missing |
+|---|---|---|
+| `smoke-test/.env` | `TYPEFORM_TOKEN=<personal access token>` | `Error: TYPEFORM_TOKEN not set` |
+| `smoke-test/.ids` | `{"form_a": "QJ6d4JHE", "form_b": "Bkmy2zMh"}` | `update` has no target; use `create` (which writes `.ids`) |
+
+### A live-vs-local diff always reports every field as changed
+
+Worth knowing before you write a pre-flight check, because the raw comparison is
+almost pure noise — the API returns two classes of key the local file never
+carries:
+
+| Key | Why it differs | Real drift? |
+|---|---|---|
+| `fields[].id` | Typeform mints one per field | **No** — all fields, always |
+| `fields[].properties` | server injects defaults (`randomize:false`, `allow_other_choice:false`, `none_of_the_above:false`) plus a `choices[].id` each | **No** |
+| `fields[].title` | your content | **Yes** |
+| `fields[].properties.description` | your content — the custom-type JSON blob | **Yes** |
+| `logic` | your jumps | **Yes** |
+
+On a 33-field form that is 33 `id` diffs and ~14 `properties` diffs with zero
+meaning. Compare **semantically**: titles, `properties.description`, and
+`logic`. Ignore `id`, and ignore any live-only property whose value is
+`false`/empty — those are server defaults, not content you are about to lose.
+
+### Pre-flight: what would this push actually change?
+
+Run this before any `update`. It prints only the diffs that mean something, so
+empty output = the push is a no-op:
+
+```bash
+python3 - <<'PY'
+import json, os, urllib.request
+for line in open('.env'):
+    if '=' in line and not line.startswith('#'):
+        k, v = line.strip().split('=', 1); os.environ.setdefault(k.strip(), v.strip())
+fid = json.load(open('.ids'))['form_a']          # form_b for the other one
+req = urllib.request.Request(f'https://api.typeform.com/forms/{fid}',
+                             headers={'Authorization': "Bearer " + os.environ['TYPEFORM_TOKEN']})
+live = json.load(urllib.request.urlopen(req)); local = json.load(open('form-a.json'))
+lf = {f['ref']: f for f in live['fields']}; cf = {f['ref']: f for f in local['fields']}
+for r in sorted(set(lf) - set(cf)): print(f'DELETED BY PUSH: {r}')
+for r in sorted(set(cf) - set(lf)): print(f'ADDED:           {r}')
+for r in sorted(set(lf) & set(cf)):
+    if lf[r].get('title') != cf[r].get('title'): print(f'TITLE:           {r}')
+    if lf[r].get('properties', {}).get('description') != cf[r].get('properties', {}).get('description'):
+        print(f'DESCRIPTION:     {r}')
+    lost = {k: v for k, v in lf[r].get('properties', {}).items()
+            if k not in cf[r].get('properties', {}) and k != 'choices' and v not in (False, '', None)}
+    if lost: print(f'PROPERTY LOST:   {r} {lost}')
+if json.dumps(live.get('logic')) != json.dumps(local.get('logic')): print('LOGIC differs')
+PY
+```
+
+`DELETED BY PUSH` or `PROPERTY LOST` means someone edited the live form outside
+the repo — reconcile before pushing, or you will destroy their change.
+
+### Choice `ref`s are re-minted on every push
+
+The warning above has a mechanism worth spelling out. Choices written without a
+`ref` in the local JSON (`{"label": "MTN Nigeria"}`) arrive as `ref: null`, so
+**Typeform mints a fresh ULID for them on every `PUT`** — the live refs change
+under you at each deploy, even when the labels do not.
+
+That is harmless *only* while nothing references them. The hazard is a choice
+that has **no explicit `ref` in the repo** but whose server-minted ULID *is*
+referenced — that jump breaks on the next unrelated deploy, far from the change
+that caused it. This check finds exactly that case:
+
+```bash
+python3 - <<'PY'
+import json, os, urllib.request
+for line in open('.env'):
+    if '=' in line and not line.startswith('#'):
+        k, v = line.strip().split('=', 1); os.environ.setdefault(k.strip(), v.strip())
+fid = json.load(open('.ids'))['form_a']
+req = urllib.request.Request(f'https://api.typeform.com/forms/{fid}',
+                             headers={'Authorization': "Bearer " + os.environ['TYPEFORM_TOKEN']})
+live = json.load(urllib.request.urlopen(req)); local = json.load(open('form-a.json'))
+lf = {f['ref']: f for f in live['fields']}; whole = json.dumps(live)
+risk = False
+for f in local['fields']:
+    lch = {c.get('label'): c.get('ref') for c in f.get('properties', {}).get('choices', [])}
+    for c in lf.get(f['ref'], {}).get('properties', {}).get('choices', []):
+        if lch.get(c.get('label')) is None:            # no explicit ref in the repo
+            uses = whole.count(c['ref']) - 1           # minus its own definition
+            if uses:
+                risk = True
+                print(f"AT RISK: {f['ref']}.{c.get('label')} — server ref {c['ref']} used {uses}x")
+print('OK — every referenced choice has an explicit ref in form-a.json' if not risk else 'FIX: pin those refs')
+PY
+```
+
+Note the check that does *not* work: flagging every choice ref referenced more
+than once. That fires on `choice_red`, `choice_env_staging` and friends — which
+are the **correct** pattern (explicit ref in the repo, stable across pushes),
+not a problem.
+
+`operator` is the standing counter-example: four unref'd choices, no logic keyed
+on them, so its ULIDs churn freely and harmlessly. **Give a choice an explicit
+`ref` the moment any logic targets it.**
+
 ## Coverage matrix
 
 Each field/section maps to a Fly feature. Types come from
