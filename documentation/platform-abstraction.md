@@ -517,11 +517,13 @@ Three distinct paths initiate WhatsApp surveys, all routing through the same REF
 
 **Entry Path 1: Click-to-WhatsApp (CTWA) Referral Object (Production)**
 
-User clicks a CTWA ad or explicit Meta referral link. The inbound webhook carries `messages[].referral: { ref: "form.<SHORTCODE>" }`. Event-normalizer's `categorizeWhatsAppEvent` (line 248-259) recognizes the referral object, synthesizes `event_type: 'conversation_started'`, and passes `payload.referral.ref` to machine.js REFERRAL handler. Survey starts with no-retake enforcement.
+User clicks a CTWA ad. The inbound webhook carries `messages[].referral`, which `categorizeWhatsAppEvent` recognizes and turns into `event_type: 'conversation_started'`, passing `payload.referral.ref` to machine.js's REFERRAL handler. Survey starts with no-retake enforcement.
+
+**A real CTWA referral usually has no `ref`** — every documented field on it is Meta-assigned — so since `v0.0.218` the ref is derived from the ad's `autofill_message`, which arrives on `text.body` alongside the referral. An explicit `referral.ref` still wins; `ctwa_clid` is preserved for attribution. **Consequence: the entry token must be set as the ad's autofill/message template**, or every clicker starts on `FALLBACK_FORM`. There is no `m.me?ref=` equivalent on WhatsApp — see `documentation/whatsapp-onboarding.md`.
 
 **Entry Path 2: Bare-Text Reference Token (wa.me links, manual typing, smoke tests)**
 
-Message body matches the strict pattern `/^(?:start\s+)?form\.([A-Za-z0-9_-]+)$/i` (case-insensitive, full-match after trim). Event-normalizer's `categorizeWhatsAppEvent` (line 270-287) tests the text when there is no referral object. On match, synthesizes `event_type: 'conversation_started'`, `payload.referral.ref: "form.<shortcode>"` identically to the CTWA path. Survey starts with no-retake enforcement.
+Message body matches the strict pattern `/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` (case-insensitive, full-match after trim). Event-normalizer's `categorizeWhatsAppEvent` tests the text when there is no referral object — and, since `v0.0.218`, also when a referral is present but carries no usable `ref`; both share one matcher. On match, synthesizes `event_type: 'conversation_started'` with the whole matched ref, so trailing `.key.value` pairs reach `state.md` exactly as on Messenger. Survey starts with no-retake enforcement.
 
 Valid patterns: `form.flysmoke`, `FORM.FLYSMOKE`, `start form.myform`, `START FORM.MYFORM`
 

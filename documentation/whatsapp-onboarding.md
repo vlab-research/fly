@@ -118,11 +118,13 @@ Three ways to start a survey, cheapest-to-set-up first. See
 `documentation/platform-abstraction.md` §6 for the full behaviour of each.
 
 **1. Bare-text form ref — no ad, no Meta setup beyond the webhook.** Text
-`form.<shortcode>` to the number from any phone. The normalizer full-matches
-`/^(?:start\s+)?form\.([A-Za-z0-9_-]+)$/i` and synthesizes the same
-`conversation_started` event a real referral produces. This is the practical
-end-to-end test: it exercises Meta → hermes → Kafka → replybot → message-worker
-→ Cloud API, and back.
+`form.<shortcode>` to the number from any phone (or open
+`wa.me/<number>?text=form.<shortcode>`). The normalizer full-matches
+`/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` and synthesizes
+the same `conversation_started` event a real referral produces; trailing
+`.key.value` pairs ride along into `state.md`. This is the practical end-to-end
+test: it exercises Meta → hermes → Kafka → replybot → message-worker → Cloud
+API, and back.
 
 **2. `POST /synthetic`** — skips Meta ingestion entirely, so it isolates
 everything downstream of the webhook and is repeatable. It still performs a
