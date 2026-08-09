@@ -34,7 +34,7 @@ versionHermes: &vhermes v0.0.3-wa
 # built before the lockfile landed, so its image came from `npm install` against
 # floating ^ ranges and cannot be reproduced from source. v0.0.215 is the first
 # replybot image built with `npm ci` against a committed package-lock.json.
-versionReplybot: &vreplybot v0.0.215
+versionReplybot: &vreplybot v0.0.217
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.44-wa
 versionScribble: &vscribble v0.0.32
