@@ -413,11 +413,71 @@ WhatsApp translation and client stubs already exist from Phase 1:
 | Message Type | WhatsApp Translation |
 |----------|----------|
 | Text | `type: "text"` with `body` |
+| Text + `metadata.type: "webview"` | `type: "interactive"` with `cta_url` — see below |
 | Question (≤3 options) | `type: "interactive"` with `button` sub_type |
 | Question (4-10 options) | `type: "interactive"` with `list` sub_type |
 | Question (>10 options) | Error: `ErrTooManyOptions` |
 | Media | Type-specific field (`image`, `video`, `audio`, `document`) |
 | Utility Message (template) | See `documentation/whatsapp-templates.md` |
+
+**Dispatch on `metadata.type`, not just `MessageContent.Type`.** Several field
+types arrive as base type `text` but render as something richer per platform,
+because the generic layer puts only prose in `text` and the rest in metadata.
+`translateWhatsAppText` would silently drop that metadata. Both platform
+translators therefore branch on `GetTypeFromMetadata()` before the base-type
+switch — `translateMessengerText` handles `webview`, `notify` and
+`notification_messages`; the WhatsApp side handles `webview` (the other two are
+Messenger-only concepts, see *One-Time Notifications* below).
+
+#### webview → `cta_url`
+
+`webview` is the generic "send the user off-platform, optionally wait for an
+event from the page" primitive — ~8% of production participants hit one. It is
+not video-specific: production uses it for moviehouse players, YouTube/Vimeo
+links, article links, `wa.me` deep links, a Box upload form, and a `tel:` call
+button. Two families: `keepMoving: true` fire-and-forget links, and
+moviehouse-style buttons whose field carries a `wait` on `moviehouse:play`.
+
+Messenger renders it as a `web_url` button template. WhatsApp's nearest
+equivalent is an interactive **`cta_url`** message — one URL button whose label
+replaces the raw link, which matters because linksniffer URLs carry the user id
+and tracking params:
+
+```json
+{"type":"interactive","interactive":{
+  "type":"cta_url",
+  "body":{"text":"<field title>"},
+  "action":{"name":"cta_url",
+            "parameters":{"display_text":"<metadata.buttonText>","url":"<metadata.url>"}}}}
+```
+
+Three WhatsApp-specific rules, all in `translateWhatsAppWebview`:
+
+- **`display_text` is capped at 20 characters** and WhatsApp rejects the whole
+  message when it is longer. The translator fails with
+  `ErrWebviewButtonTextTooLong` naming the field ref and the offending label,
+  rather than truncating it into something that no longer says what it meant.
+  That surfaces as a `STATE_ACTIONS` error on the state (see
+  `documentation/error-events.md`), so a researcher testing a form sees which
+  field to shorten. **Messenger has no such cap — a `buttonText` that works on
+  Messenger can stop a WhatsApp survey.**
+- **Scheme-less URLs default to `https://`.** `translate-typeform`'s `makeUrl`
+  passes string urls through untouched while defaulting the object form to
+  `https`, so `"bit.ly/wazzii"` and `{base: "bit.ly/wazzii"}` mean the same
+  link but only one is absolute. `cta_url` needs an absolute URL, so the
+  translator applies the same default.
+- **Any other scheme is an error** (`ErrWebviewURLScheme`). `tel:`/`mailto:`/
+  `sms:` destinations are expected to go through linksniffer's `p` param, which
+  yields an `https://links.vlab.digital/…` URL that redirects — so a bare
+  `tel:` here is a form-authoring mistake worth surfacing.
+
+`metadata.extensions` is ignored: it sets `messenger_extensions` on the
+Messenger button and has no WhatsApp counterpart.
+
+Note that moviehouse's own page works fine from WhatsApp — its default direct
+mode reads the PSID from the URL and needs no Messenger Extensions, and the
+`moviehouse:play` event posted back to `/synthetic` recovers the conversation's
+platform from the persisted `md.platform` (see *Platform Threading* above).
 
 The router in `worker.go` dispatches:
 - `platform: "messenger"` → MessengerClient.SendMessage

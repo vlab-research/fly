@@ -806,6 +806,31 @@ describe('Test Bot flow Survey Integration Testing', () => {
       ]);
     });
 
+    // webview arrives from replybot as a platform-agnostic `text` message with
+    // the destination tucked in metadata.url, so a translator that dispatches
+    // only on MessageContent.Type sends the prose and silently drops the link —
+    // which is exactly what WhatsApp did until translateWhatsAppWebview existed
+    // (the survey then waits forever on a moviehouse event the user can never
+    // trigger). Assert the cta_url envelope itself, not just the body text:
+    // flowMasterWhatsApp compares interactive.body.text and would pass on a
+    // plain-text send that carries no button at all.
+    it('Sends a webview field as a cta_url button carrying the url', async () => {
+      const userId = 'wa_' + uuid();
+
+      await sendMessage(makeWhatsAppReferral(userId, 'webviewTest'));
+
+      await receiveSent(userId);            // introStatement
+      await snooze(1000);                   // let the worker echo advance state
+      const sent = await receiveSent(userId); // webviewField
+
+      sent.type.should.equal('interactive');
+      sent.interactive.type.should.equal('cta_url');
+      sent.interactive.body.text.should.equal('Check out our website!');
+      sent.interactive.action.name.should.equal('cta_url');
+      sent.interactive.action.parameters.display_text.should.equal('Open Website');
+      sent.interactive.action.parameters.url.should.equal('https://example.com/survey-extra');
+    });
+
     ['red', 'blue'].forEach((color, idx) => {
       it(`Follows a WhatsApp interactive choice logic jump: ${color}`, async () => {
         const userId = 'wa_' + uuid();

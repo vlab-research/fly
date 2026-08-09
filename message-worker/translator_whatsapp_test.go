@@ -2,6 +2,8 @@ package messageworker
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vlab-research/fly/message-worker/types"
@@ -338,6 +340,139 @@ func TestTranslateToWhatsApp(t *testing.T) {
 				if string(gotJSON) != string(wantJSON) {
 					t.Errorf("TranslateToWhatsApp() = %s, want %s", gotJSON, wantJSON)
 				}
+			}
+		})
+	}
+}
+
+// TestTranslateToWhatsAppWebview covers the webview -> cta_url path. It is a
+// separate table from TestTranslateToWhatsApp because the failure cases assert
+// on error identity, not just that an error occurred: an over-long buttonText
+// is reported to the researcher via states.error, so the wrong error here is a
+// misleading dashboard entry.
+func TestTranslateToWhatsAppWebview(t *testing.T) {
+	webviewCmd := func(text, metadata string) types.SendMessageCommand {
+		return types.SendMessageCommand{
+			CommandID:      "cmd_wv",
+			ConversationID: "conv_1",
+			UserID:         "user_1",
+			Platform:       types.PlatformWhatsApp,
+			Message: types.MessageContent{
+				Type:     types.MessageTypeText,
+				Text:     stringPtr(text),
+				Metadata: json.RawMessage(metadata),
+			},
+		}
+	}
+
+	cta := func(body, label, url string) types.WhatsAppMessage {
+		return types.WhatsAppMessage{
+			Type: "interactive",
+			Interactive: &types.WhatsAppInteractive{
+				Type: "cta_url",
+				Body: types.WhatsAppText{Text: body},
+				Action: types.WhatsAppAction{
+					Name:       "cta_url",
+					Parameters: &types.WhatsAppCTAParams{DisplayText: label, URL: url},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		cmd     types.SendMessageCommand
+		want    types.WhatsAppMessage
+		wantErr error
+	}{
+		{
+			name: "renders as cta_url with label and hidden url",
+			cmd:  webviewCmd("Take a look!", `{"type":"webview","url":"https://example.com","buttonText":"Visit","ref":"wv_1"}`),
+			want: cta("Take a look!", "Visit", "https://example.com"),
+		},
+		{
+			name: "defaults buttonText to View website",
+			cmd:  webviewCmd("Watch this", `{"type":"webview","url":"https://example.com/v","ref":"wv_2"}`),
+			want: cta("Watch this", "View website", "https://example.com/v"),
+		},
+		{
+			// metadata.extensions drives messenger_extensions on Messenger and
+			// has no WhatsApp equivalent; it must not leak into the payload.
+			name: "ignores messenger-only extensions flag",
+			cmd:  webviewCmd("Hi", `{"type":"webview","url":"https://example.com","buttonText":"Go","extensions":true,"ref":"wv_3"}`),
+			want: cta("Hi", "Go", "https://example.com"),
+		},
+		{
+			// Real production shape: every linksniffer-tracked link arrives
+			// already absolute, with the click-tracking params the button hides.
+			name: "linksniffer tracking url",
+			cmd: webviewCmd("Learn more about the HPV vaccine.",
+				`{"type":"webview","url":"https://links.vlab.digital/?url=unicef.org%2Fnigeria&id=123&pageid=456","buttonText":"UNICEF Nigeria","keepMoving":true,"ref":"hpv_website"}`),
+			want: cta("Learn more about the HPV vaccine.", "UNICEF Nigeria",
+				"https://links.vlab.digital/?url=unicef.org%2Fnigeria&id=123&pageid=456"),
+		},
+		{
+			// translate-typeform's makeUrl passes string urls through untouched
+			// while defaulting the object form to https, so both spellings of
+			// the same link must land on https here. "bit.ly/wazzii" and
+			// "www.youtube.com/..." are both live in production.
+			name: "defaults a scheme-less url to https",
+			cmd:  webviewCmd("Chat to us", `{"type":"webview","url":"bit.ly/wazzii","buttonText":"Chat with Wazzii","ref":"wv_4"}`),
+			want: cta("Chat to us", "Chat with Wazzii", "https://bit.ly/wazzii"),
+		},
+		{
+			name: "keeps an explicit http url",
+			cmd:  webviewCmd("Old link", `{"type":"webview","url":"http://bit.ly/4535gug","buttonText":"Watch the videos","ref":"wv_5"}`),
+			want: cta("Old link", "Watch the videos", "http://bit.ly/4535gug"),
+		},
+		{
+			name: "accepts a label at exactly the limit",
+			cmd:  webviewCmd("Hi", `{"type":"webview","url":"https://example.com","buttonText":"12345678901234567890","ref":"wv_6"}`),
+			want: cta("Hi", "12345678901234567890", "https://example.com"),
+		},
+		{
+			// The flysmoke smoke-test label, which is 23 characters.
+			name:    "rejects an over-long label",
+			cmd:     webviewCmd("Testing", `{"type":"webview","url":"https://example.com","buttonText":"▶️ Watch the test video","ref":"movie_webview_prod"}`),
+			wantErr: types.ErrWebviewButtonTextTooLong,
+		},
+		{
+			// tel:/mailto:/sms: are expected to go through linksniffer's "p"
+			// param, which yields an https URL that redirects.
+			name:    "rejects a non-http scheme",
+			cmd:     webviewCmd("Call us", `{"type":"webview","url":"tel:+234-0700-220-1122","buttonText":"Call NPHCDA","ref":"wv_7"}`),
+			wantErr: types.ErrWebviewURLScheme,
+		},
+		{
+			name:    "rejects a missing url",
+			cmd:     webviewCmd("Take a look!", `{"type":"webview","buttonText":"Visit","ref":"wv_8"}`),
+			wantErr: types.ErrMissingWebviewURL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := TranslateToWhatsApp(tt.cmd)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("TranslateToWhatsApp() error = %v, want %v", err, tt.wantErr)
+				}
+				// The researcher reads this string in the dashboard, so it has
+				// to name the field that needs fixing.
+				if ref := getRefFromMetadata(tt.cmd.Message.Metadata); !strings.Contains(err.Error(), ref) {
+					t.Errorf("error %q does not name the field ref %q", err, ref)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("TranslateToWhatsApp() unexpected error = %v", err)
+			}
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(tt.want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("TranslateToWhatsApp() = %s, want %s", gotJSON, wantJSON)
 			}
 		})
 	}

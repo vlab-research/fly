@@ -57,11 +57,11 @@ type WhatsAppText struct {
 	Text string `json:"text,omitempty"`
 }
 
-// WhatsAppInteractive represents interactive messages (buttons, lists)
+// WhatsAppInteractive represents interactive messages (buttons, lists, cta_url)
 type WhatsAppInteractive struct {
-	Type   string           `json:"type"` // "button", "list"
-	Body   WhatsAppText     `json:"body"`
-	Action WhatsAppAction   `json:"action"`
+	Type   string         `json:"type"` // "button", "list", "cta_url"
+	Body   WhatsAppText   `json:"body"`
+	Action WhatsAppAction `json:"action"`
 }
 
 // WhatsAppAction represents the action part of interactive messages
@@ -70,8 +70,23 @@ type WhatsAppAction struct {
 	Buttons []WhatsAppButton `json:"buttons,omitempty"`
 
 	// For lists
-	Button   string             `json:"button,omitempty"` // Button text (e.g., "Choose")
-	Sections []WhatsAppSection  `json:"sections,omitempty"`
+	Button   string            `json:"button,omitempty"` // Button text (e.g., "Choose")
+	Sections []WhatsAppSection `json:"sections,omitempty"`
+
+	// For cta_url. Name is the literal string "cta_url" — the Cloud API
+	// requires it alongside interactive.type, unlike button/list which carry
+	// no action name.
+	Name       string             `json:"name,omitempty"`
+	Parameters *WhatsAppCTAParams `json:"parameters,omitempty"`
+}
+
+// WhatsAppCTAParams is the action payload of a cta_url interactive message:
+// a single URL button whose label is shown instead of the raw link. WhatsApp
+// allows exactly one such button, which is why webview (always one button)
+// maps onto it cleanly.
+type WhatsAppCTAParams struct {
+	DisplayText string `json:"display_text"`
+	URL         string `json:"url"`
 }
 
 // WhatsAppButton represents a reply button (max 3)
@@ -88,8 +103,8 @@ type WhatsAppButtonReply struct {
 
 // WhatsAppSection represents a section in a list (max 10 rows total)
 type WhatsAppSection struct {
-	Title string         `json:"title,omitempty"`
-	Rows  []WhatsAppRow  `json:"rows"`
+	Title string        `json:"title,omitempty"`
+	Rows  []WhatsAppRow `json:"rows"`
 }
 
 // WhatsAppRow represents a row in a list

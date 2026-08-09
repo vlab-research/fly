@@ -73,6 +73,20 @@ https://virtuallab-videos.netlify.app/?id=123456789&pageId={{hidden:pageid}}&use
 
 When a user clicks a link to this URL from within a Messenger conversation, they'll see the Vimeo video embedded in a full-screen player.
 
+### On WhatsApp
+
+The page itself needs no changes: the default direct mode reads the PSID from
+the URL, so it works in the phone's ordinary browser with no Messenger
+Extensions. `pageId` is the WhatsApp `phone_number_id` and `userId` the user's
+phone number; moviehouse echoes both back on every event, and replybot recovers
+the conversation's platform from the persisted `md.platform`.
+
+What differs is how the *button* is delivered. Messenger gets a `web_url` button
+template; WhatsApp gets an interactive `cta_url` message, whose button label is
+capped at **20 characters** — over that, the send fails outright rather than
+truncating. Keep `buttonText` short for any survey that runs on WhatsApp. See
+`../documentation/platform-abstraction.md` → *webview → `cta_url`*.
+
 ### Tracked Events
 
 All video interactions are automatically sent back to the Fly server:

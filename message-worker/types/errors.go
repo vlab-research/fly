@@ -19,9 +19,19 @@ var (
 
 // Translation errors
 var (
-	ErrTooManyOptions         = errors.New("too many options for platform")
-	ErrUnsupportedMediaType   = errors.New("unsupported media type for platform")
-	ErrInvalidPlatform        = errors.New("invalid platform type")
-	ErrMissingUtilityTemplate = errors.New(`utility_message field missing required "template" in metadata`)
-	ErrMissingUtilityLanguage = errors.New(`utility_message field missing required "language" in metadata`)
+	ErrTooManyOptions           = errors.New("too many options for platform")
+	ErrUnsupportedMediaType     = errors.New("unsupported media type for platform")
+	ErrInvalidPlatform          = errors.New("invalid platform type")
+	ErrMissingUtilityTemplate   = errors.New(`utility_message field missing required "template" in metadata`)
+	ErrMissingUtilityLanguage   = errors.New(`utility_message field missing required "language" in metadata`)
+	ErrMissingWebviewURL        = errors.New(`webview field missing required "url" in metadata`)
+	ErrWebviewButtonTextTooLong = errors.New("webview buttonText is too long for WhatsApp")
+	ErrWebviewURLScheme         = errors.New("webview url scheme is not supported by WhatsApp")
 )
+
+// WhatsAppCTAButtonTextMaxChars is the Cloud API's documented ceiling on a
+// cta_url button's display_text. Exceeding it makes WhatsApp reject the whole
+// message, so the translator fails loudly with the field ref instead — a
+// STATE_ACTIONS error the researcher can see and fix, rather than an opaque
+// delivery failure.
+const WhatsAppCTAButtonTextMaxChars = 20

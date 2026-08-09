@@ -150,6 +150,14 @@ once here.
   *string*, and the wait matcher compares by strict equality (see `_matches` in
   `replybot/lib/typewheels/waiting.js` and `_removeMdLinks` in `form.js`, which
   leaves numbers un-coerced).
+- **`buttonText` is capped at 20 characters on WhatsApp** and WhatsApp rejects
+  the whole message when it is longer — `translateWhatsAppWebview` fails with
+  `ErrWebviewButtonTextTooLong` rather than truncating, so the survey stops with
+  a `STATE_ACTIONS` error naming the field. Messenger has no such cap, so a
+  label that works there can stop a WhatsApp run. Both webview fields here use
+  `Watch test video` (16 chars) for that reason; the emoji lives in the body
+  text instead. See `documentation/platform-abstraction.md` →
+  *webview → `cta_url`*.
 - **Interpolation fails silently.** `getFromMetadata`
   (`replybot/lib/typewheels/form.js`) returns `""` for any unknown key rather
   than throwing, so a typo'd `{{hidden:…}}` yields a URL with an empty param and

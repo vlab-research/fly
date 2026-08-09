@@ -3,6 +3,8 @@ package messageworker
 import (
 	"fmt"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/vlab-research/fly/message-worker/types"
 )
@@ -27,6 +29,14 @@ func TranslateToWhatsApp(cmd types.SendMessageCommand) (types.WhatsAppMessage, e
 
 	switch cmd.Message.Type {
 	case types.MessageTypeText:
+		// Some field types arrive as platform-agnostic "text" but render as
+		// something richer per platform. webview is one: replybot puts the
+		// destination in metadata.url and only the prose in text, so a plain
+		// text send would silently drop the link. Mirrors the same dispatch in
+		// translateMessengerText.
+		if cmd.Message.GetTypeFromMetadata() == "webview" {
+			return translateWhatsAppWebview(cmd.Message)
+		}
 		return translateWhatsAppText(cmd.Message)
 	case types.MessageTypeQuestion:
 		return translateWhatsAppQuestion(cmd.Message)
@@ -112,6 +122,111 @@ func translateWhatsAppText(msg types.MessageContent) (types.WhatsAppMessage, err
 			Body: *msg.Text,
 		},
 	}, nil
+}
+
+// translateWhatsAppWebview renders a webview field as a cta_url interactive
+// message: the field title as the body, metadata.buttonText as the button
+// label, and metadata.url hidden behind it. This is the closest WhatsApp
+// equivalent of the Messenger web_url button template built by
+// translateMessengerWebview, and it keeps the tracking params in
+// links.vlab.digital URLs off the user's screen.
+//
+// Unlike the Messenger path this can fail, by design. WhatsApp caps
+// display_text at 20 characters and rejects the entire message when it is
+// longer, so an over-long buttonText is reported as a STATE_ACTIONS error
+// naming the field and the label — visible in the dashboard — rather than
+// being truncated into something that no longer says what it meant.
+//
+// metadata.extensions is ignored: it sets messenger_extensions on the
+// Messenger button and has no WhatsApp counterpart.
+func translateWhatsAppWebview(msg types.MessageContent) (types.WhatsAppMessage, error) {
+	md := metadataMap(msg.Metadata)
+	ref := getRefFromMetadata(msg.Metadata)
+
+	rawURL := metadataString(md, "url")
+	if rawURL == "" {
+		return types.WhatsAppMessage{}, fmt.Errorf("%w (field %q)", types.ErrMissingWebviewURL, ref)
+	}
+
+	url, err := normalizeWebviewURL(rawURL, ref)
+	if err != nil {
+		return types.WhatsAppMessage{}, err
+	}
+
+	buttonText := metadataString(md, "buttonText")
+	if buttonText == "" {
+		buttonText = "View website"
+	}
+	if n := utf8.RuneCountInString(buttonText); n > types.WhatsAppCTAButtonTextMaxChars {
+		return types.WhatsAppMessage{}, fmt.Errorf(
+			"%w (field %q): buttonText %q is %d characters, max %d",
+			types.ErrWebviewButtonTextTooLong, ref, buttonText, n, types.WhatsAppCTAButtonTextMaxChars)
+	}
+
+	return types.WhatsAppMessage{
+		Type: "interactive",
+		Interactive: &types.WhatsAppInteractive{
+			Type: "cta_url",
+			Body: types.WhatsAppText{
+				Text: *msg.Text,
+			},
+			Action: types.WhatsAppAction{
+				Name: "cta_url",
+				Parameters: &types.WhatsAppCTAParams{
+					DisplayText: buttonText,
+					URL:         url,
+				},
+			},
+		},
+	}, nil
+}
+
+// normalizeWebviewURL makes a webview url safe to hand to cta_url, which
+// loads it in the device browser and so needs an absolute http(s) URL.
+//
+// Scheme-less URLs are real in production ("bit.ly/wazzii",
+// "www.youtube.com/..."): translate-typeform's makeUrl passes string urls
+// through untouched while defaulting the object form to https, so the two
+// spellings of the same link disagree. Default them to https the same way
+// rather than failing on forms that work elsewhere.
+//
+// Any other scheme is an error. tel:/mailto:/sms: destinations are expected to
+// go through linksniffer's "p" param, which yields an https links.vlab.digital
+// URL that redirects — so a bare tel: here is a form authoring mistake worth
+// surfacing, not something to pass to WhatsApp and have rejected opaquely.
+func normalizeWebviewURL(rawURL, ref string) (string, error) {
+	lower := strings.ToLower(rawURL)
+
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return rawURL, nil
+	}
+
+	// A scheme is "<alpha><alnum|+|-|.>*:" before any "/" — anything else
+	// (bit.ly/x, www.youtube.com/watch?v=..., a bare host) is scheme-less.
+	if i := strings.IndexAny(lower, ":/"); i > 0 && lower[i] == ':' && isURLScheme(lower[:i]) {
+		return "", fmt.Errorf(
+			"%w (field %q): %q — use linksniffer's \"p\" param for non-http destinations",
+			types.ErrWebviewURLScheme, ref, rawURL)
+	}
+
+	return "https://" + rawURL, nil
+}
+
+func isURLScheme(s string) bool {
+	if s == "" || !isASCIILetter(s[0]) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !isASCIILetter(c) && !(c >= '0' && c <= '9') && c != '+' && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 func translateWhatsAppQuestion(msg types.MessageContent) (types.WhatsAppMessage, error) {

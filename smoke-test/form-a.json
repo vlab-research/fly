@@ -327,7 +327,7 @@
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"webview\",\"url\":\"https://virtuallab-videos.netlify.app/?id=164118668&pageId={{hidden:pageid}}&userId={{hidden:id}}\",\"buttonText\":\"▶️ Watch the test video\",\"responseMessage\":\"Tap ▶️ above and press play. I'll continue automatically once the video starts (or after 3 minutes if it doesn't).\",\"wait\":{\"op\":\"or\",\"vars\":[{\"type\":\"external\",\"value\":{\"type\":\"moviehouse:play\",\"id\":\"164118668\"}},{\"type\":\"timeout\",\"value\":\"3 minutes\"}]}}"
+        "description": "{\"type\":\"webview\",\"url\":\"https://virtuallab-videos.netlify.app/?id=164118668&pageId={{hidden:pageid}}&userId={{hidden:id}}\",\"buttonText\":\"Watch test video\",\"responseMessage\":\"Tap ▶️ above and press play. I'll continue automatically once the video starts (or after 3 minutes if it doesn't).\",\"wait\":{\"op\":\"or\",\"vars\":[{\"type\":\"external\",\"value\":{\"type\":\"moviehouse:play\",\"id\":\"164118668\"}},{\"type\":\"timeout\",\"value\":\"3 minutes\"}]}}"
       }
     },
     {
@@ -337,7 +337,7 @@
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"webview\",\"url\":\"https://staging--virtuallab-videos.netlify.app/?id=164118668&pageId={{hidden:pageid}}&userId={{hidden:id}}\",\"buttonText\":\"▶️ Watch the test video\",\"responseMessage\":\"Tap ▶️ above and press play. I'll continue automatically once the video starts (or after 3 minutes if it doesn't).\",\"wait\":{\"op\":\"or\",\"vars\":[{\"type\":\"external\",\"value\":{\"type\":\"moviehouse:play\",\"id\":\"164118668\"}},{\"type\":\"timeout\",\"value\":\"3 minutes\"}]}}"
+        "description": "{\"type\":\"webview\",\"url\":\"https://staging--virtuallab-videos.netlify.app/?id=164118668&pageId={{hidden:pageid}}&userId={{hidden:id}}\",\"buttonText\":\"Watch test video\",\"responseMessage\":\"Tap ▶️ above and press play. I'll continue automatically once the video starts (or after 3 minutes if it doesn't).\",\"wait\":{\"op\":\"or\",\"vars\":[{\"type\":\"external\",\"value\":{\"type\":\"moviehouse:play\",\"id\":\"164118668\"}},{\"type\":\"timeout\",\"value\":\"3 minutes\"}]}}"
       }
     },
     {
