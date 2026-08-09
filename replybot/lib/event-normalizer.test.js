@@ -706,6 +706,94 @@ describe('categorizeWhatsAppEvent', () => {
       event_type.should.equal('user_text')
     })
   })
+
+  // A real Click-to-WhatsApp referral object carries only Meta-assigned fields
+  // (source_url / source_id / source_type / headline / body / media_type /
+  // ctwa_clid) — none of which is a form ref. Without a `ref`, getMetadata's
+  // `if (r && r.ref)` guard fails and the user silently lands on FALLBACK_FORM:
+  // the VIR-19 failure shape. The ad's autofill_message prefills the user's
+  // first message with the same entry token the wa.me path uses, so the ref is
+  // recovered from `text.body` when the referral itself has none.
+  describe('CTWA referral without a ref — recover the form from the autofill text', () => {
+    const ctwaReferral = {
+      source_url: 'https://fb.me/3cr4Wqqkv',
+      source_id: '120226305854810726',
+      source_type: 'ad',
+      headline: 'Take our survey',
+      body: 'Tap to start',
+      media_type: 'image',
+      ctwa_clid: 'AAbbCCddEE'
+    }
+
+    it('derives the ref from the autofill text when the referral has none', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'form.hpvintrotriple.creative.3b.gender.men' },
+        referral: ctwaReferral
+      })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.hpvintrotriple.creative.3b.gender.men')
+    })
+
+    it('preserves the rest of the CTWA referral, ctwa_clid especially', () => {
+      // ctwa_clid is what Conversions API attribution keys on — dropping it
+      // would silently break ad attribution.
+      const { payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'form.ABC' },
+        referral: ctwaReferral
+      })
+      payload.referral.ctwa_clid.should.equal('AAbbCCddEE')
+      payload.referral.source_id.should.equal('120226305854810726')
+      payload.referral.headline.should.equal('Take our survey')
+    })
+
+    it('does NOT mutate the inbound referral object', () => {
+      const referral = { ...ctwaReferral }
+      categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC' }, referral })
+      should.not.exist(referral.ref)
+    })
+
+    it('prefers an explicit referral.ref over the text when both are present', () => {
+      const { payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'form.fromtext' },
+        referral: { ...ctwaReferral, ref: 'form.fromref.creative.9z' }
+      })
+      payload.referral.ref.should.equal('form.fromref.creative.9z')
+    })
+
+    it('still starts a conversation (falling back) when neither ref nor a matching text exists', () => {
+      // A CTWA click IS a conversation start even if we cannot resolve a form
+      // from it — it must not degrade into a plain user_text.
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'hello there' },
+        referral: ctwaReferral
+      })
+      event_type.should.equal('conversation_started')
+      should.not.exist(payload.referral.ref)
+    })
+
+    it('still starts a conversation when the CTWA reply is not text at all', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'image',
+        image: { id: 'abc' },
+        referral: ctwaReferral
+      })
+      event_type.should.equal('conversation_started')
+      should.not.exist(payload.referral.ref)
+    })
+
+    it('does not let a non-matching CTWA text bypass entry strictness', () => {
+      const { payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'I already did form.ABC yesterday' },
+        referral: ctwaReferral
+      })
+      should.not.exist(payload.referral.ref)
+    })
+  })
 })
 
 describe('parseWhatsAppEvent', () => {

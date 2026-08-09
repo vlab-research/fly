@@ -251,16 +251,59 @@ function parseSyntheticEvent(data, timestamp) {
 // `statuses[]` item, augmented with `source: 'whatsapp'`, `phone_number_id`,
 // and a normalized (ms) `timestamp`. This maps each to the same event_type
 // vocabulary the machine already understands (see categorizeMessengerEvent).
+// Anchored, full-match pattern for a WhatsApp entry token. STRICT by design: a
+// mid-survey free-text answer that merely contains a ref token must not
+// re-trigger entry, so partial matches are rejected outright.
+const WHATSAPP_ENTRY_REF = /^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i
+
+// Returns the `form.<shortcode>[.key.value...]` ref carried by a text message,
+// or null. Shared by both WhatsApp entry paths — the wa.me prefilled-text link
+// and a CTWA ad's autofill message — so they cannot drift apart.
+//
+// Only the literal `form.` prefix is normalized to lowercase (the pattern is
+// case-insensitive) so getMetadata's `md.form` lookup always finds the
+// shortcode; the shortcode and every metadata token keep the case as typed.
+// The whole ref body is returned as-is — key/value parsing belongs to
+// getMetadata()/_group (typewheels/utils.js) and is not duplicated here.
+function _refFromText(data) {
+  if (data.type !== 'text') return null
+  const body = (data.text && data.text.body) || ''
+  const match = body.trim().match(WHATSAPP_ENTRY_REF)
+  return match ? `form.${match[1]}` : null
+}
+
 function categorizeWhatsAppEvent(data) {
-  // A referral (click-to-WhatsApp / ref link) starts a conversation, exactly
-  // like a Messenger referral — payload.referral.ref carries `form.<shortcode>`.
+  // A referral starts a conversation, exactly like a Messenger referral —
+  // getMetadata() reads the form shortcode off `payload.referral.ref`.
+  //
+  // But a real Click-to-WhatsApp referral is NOT guaranteed to carry `ref`.
+  // Meta's documented CTWA referral fields are source_url / source_id /
+  // source_type / headline / body / media_type / ctwa_clid — all Meta-assigned,
+  // none of them ours, and `ref` appears in exactly one Meta doc with no
+  // explanation of how to set it. A referral without `ref` fails getMetadata's
+  // `if (r && r.ref)` guard and silently resolves to FALLBACK_FORM — the same
+  // failure shape as VIR-19, and just as invisible, because the fallback is a
+  // real survey that looks like a completion.
+  //
+  // The metadata is still recoverable: a CTWA ad's autofill_message prefills
+  // the user's first message, so the SAME `form.<shortcode>[.key.value...]`
+  // token the wa.me path uses arrives on `text.body` alongside the referral.
+  // So when the referral carries no usable `ref`, derive one from the text
+  // rather than short-circuiting past it. The rest of the referral object is
+  // preserved — ctwa_clid in particular is what Conversions API attribution
+  // keys on, so it must survive.
   if (data.referral) {
+    let referral = data.referral
+    if (!referral.ref) {
+      const ref = _refFromText(data)
+      if (ref) referral = { ...referral, ref }
+    }
     return {
       event_type: 'conversation_started',
       payload: {
         type: 'conversation_started',
         trigger: 'referral',
-        referral: data.referral
+        referral
       }
     }
   }
@@ -288,24 +331,14 @@ function categorizeWhatsAppEvent(data) {
   // a time and assigns `undefined` to a trailing unpaired key rather than
   // throwing, so `state.md.creative` ends up `undefined` instead of the
   // request being dropped. See event-normalizer.test.js for coverage.
-  if (data.type === 'text' && !data.referral) {
-    const body = (data.text && data.text.body) || ''
-    const trimmed = body.trim()
-    const refPattern = /^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i
-    const match = trimmed.match(refPattern)
-    if (match) {
-      // Preserve case exactly as typed for the shortcode and any metadata
-      // pairs; only the literal "form." prefix is normalized to lowercase
-      // (matched case-insensitively above) so getMetadata's `md.form` lookup
-      // always finds the shortcode regardless of how the user capitalized it.
-      const refBody = match[1]
-      return {
-        event_type: 'conversation_started',
-        payload: {
-          type: 'conversation_started',
-          trigger: 'referral',
-          referral: { ref: `form.${refBody}` }
-        }
+  const bareRef = _refFromText(data)
+  if (bareRef) {
+    return {
+      event_type: 'conversation_started',
+      payload: {
+        type: 'conversation_started',
+        trigger: 'referral',
+        referral: { ref: bareRef }
       }
     }
   }

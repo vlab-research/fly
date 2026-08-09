@@ -150,6 +150,23 @@ So targeting metadata via CTWA means **one ad creative per targeting cell**. Not
 CTWA context is **mobile-only** — Meta does not deliver it for WhatsApp Web/Desktop
 users — and `referral` arrives on the **first** inbound message only.
 
+**The referral object usually carries no form ref, so we read the ad's autofill
+message instead (since `v0.0.218`).** Nothing in the documented field list is a
+form shortcode, and `getMetadata` guards on `if (r && r.ref)` — so a CTWA click
+would otherwise resolve to `FALLBACK_FORM`, reproducing VIR-19 on the production
+ad path. A CTWA ad's `autofill_message` prefills the user's first message, which
+means the same entry token the `wa.me` path uses arrives on `text.body` next to
+the referral. When the referral has no usable `ref`, the normalizer derives one
+from that text.
+
+**Setting up a CTWA ad therefore requires putting the entry token in the ad's
+autofill/message template**, e.g. `form.hpvintrotriple.creative.3b.gender.men`.
+An ad whose autofill text is a friendly greeting instead will start every clicker
+on `FALLBACK_FORM`. This is the single easiest way to misconfigure a WhatsApp ad.
+
+An explicit `referral.ref` still wins if Meta does send one, and `ctwa_clid` is
+preserved either way for Conversions API attribution.
+
 **`wa.me` strips unknown query params.** `wa.me/<num>?ref=X` 302s to
 `api.whatsapp.com/send/?phone=…&text=…&type=phone_number&app_absent=0` with `ref`
 dropped. (`wa.me` is a pure shortener in front of `api.whatsapp.com`, not the other

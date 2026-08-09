@@ -3480,3 +3480,55 @@ describe('WhatsApp bare-text entry carries Messenger-parity metadata', () => {
     state.md.form.should.equal('fallback')
   })
 })
+
+// The production ad path. A real CTWA referral object carries no form ref --
+// every documented field is Meta-assigned -- so before this was handled, an ad
+// click resolved to FALLBACK_FORM: the VIR-19 failure, and equally invisible
+// because the fallback is a real survey that looks like a completion. The ad's
+// autofill_message puts the entry token on text.body, so the form is recovered
+// from there. Driven as a RAW webhook through parseEvent to prove the whole
+// chain, not just the regex.
+describe('WhatsApp CTWA ad entry resolves the form from the autofill message', () => {
+  const ctwaReferral = {
+    source_url: 'https://fb.me/3cr4Wqqkv',
+    source_id: '120226305854810726',
+    source_type: 'ad',
+    headline: 'Take our survey',
+    body: 'Tap to start',
+    media_type: 'image',
+    ctwa_clid: 'AAbbCCddEE'
+  }
+
+  const rawCtwaArrival = {
+    source: 'whatsapp',
+    from: WA_USER_ID,
+    phone_number_id: WA_PHONE_NUMBER_ID,
+    timestamp: 1542123799219,
+    type: 'text',
+    text: { body: 'form.hpvintrotriple.creative.3b.gender.men.geography.other_states2' },
+    referral: ctwaReferral
+  }
+
+  it('starts the advertised form, not FALLBACK_FORM', () => {
+    const state = getState([rawCtwaArrival].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.form.should.not.equal(process.env.FALLBACK_FORM)
+    state.forms.should.eql(['hpvintrotriple'])
+  })
+
+  it('carries the ad targeting metadata into state.md', () => {
+    const state = getState([rawCtwaArrival].map(parseEvent))
+
+    state.md.creative.should.equal('3b')
+    state.md.gender.should.equal('men')
+    state.md.geography.should.equal('other_states2')
+  })
+
+  it('falls back when the ad sends no resolvable ref, without erroring', () => {
+    const rawUnresolvable = { ...rawCtwaArrival, text: { body: 'hello' } }
+    const state = getState([rawUnresolvable].map(parseEvent))
+
+    state.md.form.should.equal('fallback')
+  })
+})

@@ -502,7 +502,33 @@ Meta sends WhatsApp CTWA ads with a referral object on the inbound message:
 4. `getMetadata(event)` (utils.js:75-105) extracts `form` from `payload.referral.ref` only
 5. Extra fields (`source_id`, `ctwa_clid`, `headline`, `body`) are **not extracted or mapped to state metadata**
 
-**Key limitation:** Unlike Messenger's `m.me?ref=form.ABC.key.value`, WhatsApp CTWA ads cannot pass arbitrary metadata. Only the `ref` field is used; extra fields are silently discarded. This is a platform API limitation.
+**A CTWA referral usually has no `ref` at all.** Every documented field on the
+object (`source_url`, `source_id`, `source_type`, `headline`, `body`,
+`media_type`, `ctwa_clid`) is Meta-assigned; `ref` appears in a single Meta doc
+with no explanation of how to set it, and nobody has confirmed it can be. Since
+`getMetadata` guards on `if (r && r.ref)`, a referral without one resolves to
+`FALLBACK_FORM` — the VIR-19 failure shape, and just as invisible, because the
+fallback is a real survey whose users look like completions.
+
+**The autofill message is the actual carrier (since `replybot-v0.0.217+`).** A
+CTWA ad's `autofill_message` prefills the user's first message, so the same
+`form.<shortcode>[.key.value...]` token the `wa.me` path uses arrives on
+`text.body` alongside the referral. When the referral carries no usable `ref`,
+`categorizeWhatsAppEvent` derives one from that text instead of short-circuiting
+past it. Precedence and guarantees:
+
+- An explicit `referral.ref` always **wins** over the text.
+- The rest of the referral object is preserved — `ctwa_clid` in particular, which
+  is what Conversions API attribution keys on. The inbound object is not mutated.
+- A CTWA arrival with neither a `ref` nor a matching autofill text still emits
+  `conversation_started` (falling back to `FALLBACK_FORM`); it must not degrade
+  into a plain `user_text`.
+- The autofill text is held to the same anchored full-match strictness, so a
+  non-matching ad reply cannot bypass entry rules.
+
+So targeting metadata does reach `state.md` from ads — but it is authored **per ad
+creative**, not per click. N targeting cells means N creatives, unlike Messenger
+where one ad backs unlimited `m.me?ref=` variants.
 
 ### 2. Bare-Text Entry Fallback (wa.me links, manual typing)
 
