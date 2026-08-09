@@ -115,7 +115,7 @@ src/
 - **DurationReport** — survey duration/timing analytics
 - **BailSystems** — bail-out monitoring (participants who abandon surveys)
 - **Media** — uploads reusable attachments (images/video) to Facebook's `message_attachments` API for use in chatbot templates
-- **MessageTemplates** — creates/manages Facebook Utility Message templates per `(page, name, language)` for out-of-window sends; see `documentation/utility-messages.md`
+- **MessageTemplates** — creates/manages utility message templates per `(account_id, name, language)` for out-of-window sends, on **both** Messenger pages and WhatsApp numbers (`accounts.js` merges the two). Listed name-first, since a survey field names a template but not a platform, so one name is normally registered once per account with independent statuses. **Duplicate** (`/message-templates/new?duplicate=<id>`) pre-fills body and buttons from an existing registration so placeholder and button shape stays in agreement across accounts. See `documentation/utility-messages.md` (Messenger) and `documentation/whatsapp-templates.md` (WhatsApp, and the cross-platform model)
 - **Tickets** — support inbox UI (split list/detail layout with open/closed tabs, Markdown-rendered conversations via the shared `src/components/Markdown` component) backed entirely by Linear (no local storage); see `documentation/tickets.md`
 - **StatesExplorer** — participant state debugging (where participants are in survey flow, error tracking)
   - **StatesSummary** — aggregated state counts per form and state, topped by the **HealthCard**
