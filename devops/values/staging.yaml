@@ -42,7 +42,7 @@ versionDinersclub: &vdinersclub v0.0.45
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.17-wa
+versionMessageWorker: &vmessageworker v0.1.18
 
 # Kafka consumer-group lag/health alerting is NOT defined here — it lives at the
 # infra level (one rule set for the shared cluster, covering both envs) in
