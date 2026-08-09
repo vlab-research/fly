@@ -274,20 +274,37 @@ function categorizeWhatsAppEvent(data) {
   // question must not be interrupted by a ref token in their text reply.
   // On match, synthesize a referral shape so machine.js's REFERRAL logic
   // (no-retake, ignore rules) applies identically to both entry paths.
+  //
+  // Messenger parity: `wa.me/<number>?text=form.ABC.creative.x.gender.men`
+  // carries the same dot-separated key.value metadata as an `m.me?ref=`
+  // link. The character class after `form.` additionally accepts further
+  // `.`-separated tokens, still anchored/full-match so strictness against
+  // mid-survey free text is unchanged. We pass the WHOLE matched ref body
+  // through as-is and let getMetadata()/_group (utils.js) do the key/value
+  // parsing — this normalizer does not duplicate that logic.
+  //
+  // An odd number of tokens (e.g. `form.ABC.creative`, a dangling key with
+  // no value) is deliberately allowed to match: _group() pairs tokens two at
+  // a time and assigns `undefined` to a trailing unpaired key rather than
+  // throwing, so `state.md.creative` ends up `undefined` instead of the
+  // request being dropped. See event-normalizer.test.js for coverage.
   if (data.type === 'text' && !data.referral) {
     const body = (data.text && data.text.body) || ''
     const trimmed = body.trim()
-    const refPattern = /^(?:start\s+)?form\.([A-Za-z0-9_-]+)$/i
+    const refPattern = /^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i
     const match = trimmed.match(refPattern)
     if (match) {
-      // Preserve shortcode case exactly as typed; prefix is always lowercase
-      const shortcode = match[1]
+      // Preserve case exactly as typed for the shortcode and any metadata
+      // pairs; only the literal "form." prefix is normalized to lowercase
+      // (matched case-insensitively above) so getMetadata's `md.form` lookup
+      // always finds the shortcode regardless of how the user capitalized it.
+      const refBody = match[1]
       return {
         event_type: 'conversation_started',
         payload: {
           type: 'conversation_started',
           trigger: 'referral',
-          referral: { ref: `form.${shortcode}` }
+          referral: { ref: `form.${refBody}` }
         }
       }
     }

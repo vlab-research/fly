@@ -227,11 +227,27 @@ Production path for ad-driven conversions. User clicks a Click-to-WhatsApp ad or
 
 **Flow:**
 1. User clicks a CTWA ad (configured on Meta's Ad Manager, or a direct click-to-WhatsApp link with referral data)
-2. User's first inbound message arrives at Hermes (`POST /whatsapp`) with `messages[].referral: { ref: "form.<SHORTCODE>" }`
-3. Replybot's event-normalizer (`categorizeWhatsAppEvent`, line 248-259) recognizes the referral object
-4. Returns `event_type: 'conversation_started'`, `payload.referral.ref: "form.flysmoke"`
-5. Machine's REFERRAL case calls `getForm(phone_number_id, "flysmoke")` → formcentral resolves user and survey
-6. Survey starts with no-retake enforcement
+2. User's first inbound message arrives at Hermes (`POST /whatsapp`, handlers.rs:124) with `messages[].referral: { ref: "form.<SHORTCODE>", source, source_id, ctwa_clid, headline, body }`
+3. Hermes stamps with `source: "whatsapp"` and `phone_number_id` (event.rs:73-97), publishes raw event to Kafka unchanged
+4. Replybot's event-normalizer (`categorizeWhatsAppEvent`, line 257-265) recognizes `data.referral`
+5. Returns `event_type: 'conversation_started'`, `payload.referral: data.referral` (preserves entire referral object)
+6. `getMetadata(event)` (utils.js:75-105) extracts form shortcode from `payload.referral.ref`
+7. Machine's REFERRAL case resolves survey by shortcode via formcentral
+8. Survey starts with no-retake enforcement
+
+**Referral object structure (from Meta webhook):**
+```javascript
+{
+  "ref": "form.ABC123",                 // Required: form shortcode
+  "source": "ads",                      // "ads", "message", "id_matching", etc.
+  "source_id": "ad_campaign_123",       // Campaign or source identifier
+  "ctwa_clid": "click_to_whatsapp_id",  // Click tracking ID
+  "headline": "ad headline text",       // Ad creative headline
+  "body": "ad body text"                // Ad creative body
+}
+```
+
+**Important limitation:** Only the `ref` field is used for form resolution. The extra fields (`source`, `source_id`, `ctwa_clid`, `headline`, `body`) are **preserved in the raw event but not extracted or mapped to state metadata**. Unlike Messenger's `m.me?ref=form.ABC.key.value` links, WhatsApp CTWA ads provide no mechanism to pass targeted metadata (cohort, segment, variant) into the survey state. This is a platform API limitation, not a code gap.
 
 **Key:** The referral object is a Meta-level webhook field; it comes ONLY from CTWA ads or explicit Meta referral links, not from plain wa.me links or manual user typing.
 
@@ -239,33 +255,55 @@ Production path for ad-driven conversions. User clicks a Click-to-WhatsApp ad or
 
 Fallback path for testing and direct wa.me links. Any plain text message matching a specific pattern triggers survey entry.
 
-**Pattern:** Message body (trimmed) must exactly match `/^(?:start\s+)?form\.([A-Za-z0-9_-]+)$/i` (case-insensitive).
+**Pattern:** Message body (trimmed) must exactly match
+`/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` (case-insensitive).
 - Valid: `form.flysmoke`, `FORM.FLYSMOKE`, `start form.myform`, ` form.flysmoke ` (surrounding whitespace is trimmed before matching)
+- Valid with metadata (since v0.0.217): `form.flysmoke.creative.3b.gender.men` → `md` gets `creative`/`gender`, matching `m.me?ref=` on Messenger
 - Invalid: `tell me form.flysmoke` (extra text—no match), `form.` (no shortcode)
+
+Only the literal `form.` prefix is lowercased; the shortcode and all metadata
+tokens keep the case as typed. An odd token count (`form.ABC.creative`) matches
+deliberately — `_group` leaves the dangling key `undefined` rather than throwing,
+so the survey still starts.
+
+**Encoding caveat for link authors:** raw `&` and `#` inside a `wa.me?text=`
+value silently truncate the prefilled message. Percent-encode them (`%26`, `%23`)
+if a targeting value could ever contain one.
 
 **Flow:**
 1. User sends plain text via wa.me link (e.g., `https://wa.me/1023456789?text=form.flysmoke`), manual SMS-like typing, or smoke testing
 2. Inbound message arrives with `messages[].text.body = "form.flysmoke"` and NO `referral` field
-3. Replybot's event-normalizer (`categorizeWhatsAppEvent`, line 270-287) tests the text against the pattern
-4. On match, synthesizes `event_type: 'conversation_started'`, `payload.referral.ref: "form.flysmoke"`
-5. Machine's REFERRAL case processes it identically to the CTWA referral path
-6. Survey starts with no-retake enforcement
+3. Hermes stamps and publishes raw event to Kafka
+4. Replybot's event-normalizer (`categorizeWhatsAppEvent`, line 277-293) tests the text against the pattern when no referral is present
+5. On match, **synthesizes** `event_type: 'conversation_started'`, `payload.referral: { ref: "form.flysmoke" }`
+6. `getMetadata(event)` extracts form shortcode from synthesized referral
+7. Machine's REFERRAL case processes identically to CTWA referral path
+8. Survey starts with no-retake enforcement
 
-**Why strict full-match:** Prevents mid-survey user replies from accidentally re-triggering a survey entry. An existing user answering a question must not be interrupted if their answer happens to be "form.myform". The pattern is STRICT (anchored, full-match) to ensure only explicit form tokens at message start trigger entry.
+**Why strict full-match:** Prevents mid-survey user replies from accidentally re-triggering a survey entry. An existing user answering a question must not be interrupted if their answer happens to be "form.myform". The pattern is STRICT (anchored, full-match) to ensure only explicit form tokens at message start trigger entry (event-normalizer.js:280-281).
 
-**e2e-tested paths:**
+**Shortcode extraction and case:**
+- Pattern regex captures shortcode in group 1: `match[1]` (line 284)
+- Case is preserved exactly as typed (line 284)
+- Example: `FORM.MyForm` captures as `MyForm`, ref becomes `form.MyForm`
+
+**e2e-tested paths** (event-normalizer.test.js:567-651):
 - `form.<shortcode>` typed manually or via wa.me?text= prefill
 - `start form.<shortcode>` (user explicitly says "start")
-- Case-insensitive (user types FORM.MYFORM or Form.MyForm)
+- Case-insensitive regex but case-preserving shortcode (user types FORM.MYFORM or Form.MyForm)
+- Whitespace tolerance (leading/trailing spaces stripped before matching, line 279)
+- Underscore and hyphen in shortcode allowed
+- Rejects mid-text refs (line 601-604)
+- Rejects bare `form.` without shortcode (line 606-609)
 
 ### Entry Point 3: Pre-Normalized UniversalEvent (/synthetic)
 
 Staging and testing path. No Meta webhook required; inject a fully-formed UniversalEvent directly.
 
 **Flow:**
-1. POST a pre-normalized UniversalEvent JSON to `POST /synthetic` (hermes endpoint)
+1. POST a pre-normalized UniversalEvent JSON to `POST /synthetic` (hermes handlers.rs:297+)
 2. Event includes `source.type: 'whatsapp'`, `event_type: 'conversation_started'`, `payload.referral.ref: "form.<SHORTCODE>"`
-3. Hermes publishes to Kafka as-is (no re-parsing needed; `parseEvent` recognizes pre-formed events)
+3. Hermes publishes to Kafka as-is (no re-parsing needed; `parseEvent` recognizes pre-formed events with `event_type` field)
 4. Replybot consumes and routes to REFERRAL handler
 5. Machine calls `getForm` with WhatsApp account_id and shortcode
 6. Survey starts
@@ -292,11 +330,22 @@ Staging and testing path. No Meta webhook required; inject a fully-formed Univer
 ### Non-Entry: Plain Text Not Matching Reference Pattern
 
 A WhatsApp user sending plain text that does NOT match the form ref pattern (e.g., "hi", "help", "how do I join") with no referral object:
-- Normalizes as `event_type: 'user_text'`
+- Normalizes as `event_type: 'user_text'` (event-normalizer.js:328-336)
 - Machine's TEXT handler finds no active conversation and ignores the message (no-op)
 - User receives no bot reply
 
 This is intentional: WhatsApp is a customer-service platform, not a broadcast tool. Users must explicitly request a survey via an entry point (CTWA ad, form-ref link, or /synthetic), not stumble into one via casual text. Unlike Messenger (which has a "Get Started" button offering opt-in), WhatsApp conversations are always user-initiated and require explicit entry.
+
+### Metadata Extraction (getMetadata in utils.js:75-105)
+
+All three entry paths converge on the same `getMetadata(event)` function:
+- Only `event_type: 'conversation_started'` events extract metadata (line 80-87)
+- Parses the `referral.ref` string by splitting on `.` and grouping pairs via `_group()` (line 85-86)
+- **Messenger example:** `form.ABC.creative.x.gender.men` → `{ form: "ABC", creative: "x", gender: "men" }`
+- **WhatsApp CTWA example:** `form.ABC123` → `{ form: "ABC123" }` (only the shortcode; extra CTWA fields not parsed or mapped)
+- **WhatsApp bare-text example:** synthesized as `{ ref: "form.ABC123" }` → `{ form: "ABC123" }`
+
+**Platform tracking (line 99):** `md.platform = eventPlatform(event)` persists `'messenger'` or `'whatsapp'` with the conversation state, so synthetic re-entry events (dean timeouts, follow-ups) recover the correct platform.
 
 ### Testing
 

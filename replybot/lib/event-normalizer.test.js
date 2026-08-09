@@ -650,6 +650,62 @@ describe('categorizeWhatsAppEvent', () => {
       event_type.should.equal('user_text')
     })
   })
+
+  describe('bare-text form ref entry — Messenger-parity metadata (dot-separated key.value pairs)', () => {
+    it('carries multiple key.value metadata pairs through as the whole matched ref', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC.creative.x.gender.men' } })
+      event_type.should.equal('conversation_started')
+      payload.trigger.should.equal('referral')
+      payload.referral.ref.should.equal('form.ABC.creative.x.gender.men')
+    })
+
+    it('still works for the plain single-shortcode case', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.flysmoke' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.flysmoke')
+    })
+
+    it('supports the optional start prefix with metadata pairs', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'start form.ABC.creative.x' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.ABC.creative.x')
+    })
+
+    it('preserves case of the shortcode and metadata pairs exactly as typed', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'FORM.MyForm.Creative.X.Gender.Men' } })
+      event_type.should.equal('conversation_started')
+      // "form." prefix is normalized to lowercase (matched case-insensitively);
+      // everything after it is preserved verbatim.
+      payload.referral.ref.should.equal('form.MyForm.Creative.X.Gender.Men')
+    })
+
+    it('handles a dangling odd-numbered token without throwing', () => {
+      let result
+      ;(() => { result = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC.creative' } }) }).should.not.throw()
+      result.event_type.should.equal('conversation_started')
+      result.payload.referral.ref.should.equal('form.ABC.creative')
+    })
+
+    it('still rejects mid-survey free text containing dots and a form-like token', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'I already did form.ABC.creative.x yesterday' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('still rejects any whitespace inside the ref, even between metadata pairs', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC. creative.x' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('still rejects invalid characters anywhere in the metadata chain', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC.creative@x' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('still rejects an empty trailing token (double dot)', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC..creative' } })
+      event_type.should.equal('user_text')
+    })
+  })
 })
 
 describe('parseWhatsAppEvent', () => {

@@ -3432,3 +3432,51 @@ describe('Referral delivered inside a quick_reply payload string', () => {
     })
   })
 })
+
+// WhatsApp has no `ref` query param (see documentation/whatsapp-onboarding.md,
+// "Entry links: there is no `ref` on WhatsApp"). The only carrier for entry
+// metadata is prefilled text: wa.me/<number>?text=form.ABC.creative.x.gender.men
+// arrives as an ordinary text.body. This drives a RAW WhatsApp webhook through
+// the real event-normalizer (parseEvent), mirroring the Messenger
+// string-payload-referral test above, to prove bare-text entry now carries
+// Messenger-parity targeting metadata into state.md.
+describe('WhatsApp bare-text entry carries Messenger-parity metadata', () => {
+  const rawWhatsAppTextReferral = {
+    source: 'whatsapp',
+    from: WA_USER_ID,
+    phone_number_id: WA_PHONE_NUMBER_ID,
+    timestamp: 1542123799219,
+    type: 'text',
+    text: { body: 'form.hpvintrotriple.creative.3b.gender.men.geography.other_states2' }
+  }
+
+  it('starts the referred form, not FALLBACK_FORM', () => {
+    const state = getState([rawWhatsAppTextReferral].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.form.should.not.equal(process.env.FALLBACK_FORM)
+    state.forms.should.eql(['hpvintrotriple'])
+  })
+
+  it('carries the targeting metadata into state.md', () => {
+    const state = getState([rawWhatsAppTextReferral].map(parseEvent))
+
+    state.md.creative.should.equal('3b')
+    state.md.gender.should.equal('men')
+    state.md.geography.should.equal('other_states2')
+  })
+
+  it('still starts FALLBACK_FORM for plain WhatsApp text carrying no ref', () => {
+    const rawPlainText = {
+      source: 'whatsapp',
+      from: WA_USER_ID,
+      phone_number_id: WA_PHONE_NUMBER_ID,
+      timestamp: 1542123799219,
+      type: 'text',
+      text: { body: 'Hi there' }
+    }
+    const state = getState([rawPlainText].map(parseEvent))
+
+    state.md.form.should.equal('fallback')
+  })
+})

@@ -469,14 +469,125 @@ To support per-page default forms:
 
 ---
 
+## WhatsApp Entry Point Mechanics
+
+WhatsApp differs fundamentally from Messenger in referral delivery:
+
+### 1. CTWA Referral Object (Click-to-WhatsApp Ads)
+
+Meta sends WhatsApp CTWA ads with a referral object on the inbound message:
+
+```json
+{
+  "messages": [{
+    "from": "27123456789",
+    "type": "text",
+    "text": { "body": "Hi" },
+    "referral": {
+      "ref": "form.ABC123",
+      "source": "ads",
+      "source_id": "campaign_123",
+      "ctwa_clid": "click_id",
+      "headline": "ad headline",
+      "body": "ad copy"
+    }
+  }]
+}
+```
+
+**Flow:**
+1. Hermes receives webhook, stamps with `source: "whatsapp"` and `phone_number_id` (hermes/event.rs:73-97), publishes to Kafka unchanged
+2. Replybot's `categorizeWhatsAppEvent()` (event-normalizer.js:257-265) checks `if (data.referral)` — matches
+3. Emits `event_type: 'conversation_started'`, `payload.referral: data.referral` (preserves entire object)
+4. `getMetadata(event)` (utils.js:75-105) extracts `form` from `payload.referral.ref` only
+5. Extra fields (`source_id`, `ctwa_clid`, `headline`, `body`) are **not extracted or mapped to state metadata**
+
+**Key limitation:** Unlike Messenger's `m.me?ref=form.ABC.key.value`, WhatsApp CTWA ads cannot pass arbitrary metadata. Only the `ref` field is used; extra fields are silently discarded. This is a platform API limitation.
+
+### 2. Bare-Text Entry Fallback (wa.me links, manual typing)
+
+WhatsApp users can start a survey by typing plain text matching
+`/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i`
+(case-insensitive, full-match):
+
+```
+User: "form.ABC123"
+User: "FORM.ABC123" 
+User: "start form.ABC123"
+User: "form.ABC123.creative.3b.gender.men"   → md gets creative/gender too
+```
+
+Since `replybot-v0.0.217` the trailing `.key.value` pairs are carried through to
+`getMetadata()`/`_group`, giving prefilled-text `wa.me` links the same metadata
+capability as `m.me?ref=`. The pattern stays anchored/full-match, so a mid-survey
+free-text answer still cannot re-trigger entry. An odd token count
+(`form.ABC.creative`) matches deliberately and leaves the dangling key
+`undefined` rather than throwing.
+
+**Flow:**
+1. Hermes receives webhook, stamps and publishes to Kafka
+2. Replybot's `categorizeWhatsAppEvent()` (line 277-293): `if (data.type === 'text' && !data.referral)` + pattern test
+3. On match, **synthesizes** `event_type: 'conversation_started'`, `payload.referral: { ref: "form.XYZ" }`
+4. Rest of flow identical to CTWA path
+5. Pattern is intentionally strict to prevent mid-survey answers from re-triggering entry (line 280-281)
+
+**Shortcode case preservation (line 284):**
+- Pattern matches case-insensitively (`/i` flag)
+- Captured shortcode case preserved exactly as typed
+- Example: `FORM.MyForm` → captured as `MyForm` → ref becomes `form.MyForm`
+
+**Full test coverage** (event-normalizer.test.js:567-651):
+- Valid: `form.abc`, `FORM.ABC`, `start form.abc`, `  form.abc  ` (whitespace tolerated)
+- Invalid: `tell me form.abc` (extra text), `form.` (no shortcode), `form.abc@def` (invalid chars)
+- Allows underscore/hyphen in shortcode
+- Rejects mid-sentence refs
+
+### 3. Metadata Constraints (getMetadata, utils.js:75-105)
+
+All platforms converge at `getMetadata()`:
+
+```javascript
+if (r && r.ref) {
+  const pairs = r.ref.split('.')
+  md = _group(pairs.map(decodeURIComponent))
+}
+```
+
+**Messenger capability:**
+- Input: `form.ABC.creative.x.gender.men`
+- Output: `{ form: "ABC", creative: "x", gender: "men" }`
+- Arbitrary key-value pairs can ride along
+
+**WhatsApp CTWA capability:**
+- Input: `form.ABC123` (only the ref field is mapped; extra CTWA fields ignored)
+- Output: `{ form: "ABC123" }`
+- No targeted metadata transport
+
+**WhatsApp bare-text capability:**
+- Input: `form.ABC123` (synthesized by normalizer)
+- Output: `{ form: "ABC123" }`
+- No targeted metadata transport
+
+---
+
 ## Related Code
 
+**Messenger:**
 - **Webhook handler**: `botserver/server/handlers.js:handleMessengerEvents()`
-- **Event normalization**: `replybot/lib/event-normalizer.js:categorizeMessengerEvent()` (Messenger), `categorizeWhatsAppEvent()` (WhatsApp)
+- **Event normalization**: `replybot/lib/event-normalizer.js:categorizeMessengerEvent()`
 - **Payload parsing**: `replybot/lib/event-normalizer.js:parsePayload()`
+
+**WhatsApp:**
+- **Hermes webhook handler**: `hermes/src/handlers.rs:handle_whatsapp()` (line 124)
+- **Hermes event stamping**: `hermes/src/event.rs:stamp_whatsapp_event()` (line 73-97)
+- **Event normalization**: `replybot/lib/event-normalizer.js:categorizeWhatsAppEvent()` (line 254-395)
+- **Bare-text pattern**: `/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` (event-normalizer.js)
+- **Pattern tests**: `replybot/lib/event-normalizer.test.js:567-651`
+
+**Cross-platform:**
 - **Event categorization**: `replybot/lib/typewheels/machine.js:categorizeEvent()`
 - **REFERRAL handler**: `replybot/lib/typewheels/machine.js:285-310`
-- **Blank start**: `replybot/lib/typewheels/machine.js:_blankStart()`, `_handleExternalEvent()`
-- **Metadata extraction**: `replybot/lib/typewheels/utils.js:getMetadata()`
-- **Field lookup** (source of `FIELD_NOT_FOUND`): `replybot/lib/typewheels/form.js:getField()`
-- **Tests**: `replybot/lib/typewheels/utils.test.js`, `machine.test.js`, `events.test.js`
+- **Blank start**: `replybot/lib/typewheels/machine.js:_blankStart()`
+- **Metadata extraction**: `replybot/lib/typewheels/utils.js:getMetadata()` (line 75-105)
+- **Field lookup**: `replybot/lib/typewheels/form.js:getField()`
+- **Tests**: `replybot/lib/event-normalizer.test.js`, `machine.test.js`
