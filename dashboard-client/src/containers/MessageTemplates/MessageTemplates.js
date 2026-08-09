@@ -23,6 +23,16 @@ function renderButtons(btns) {
   return btns.map(b => b.label).join(' · ');
 }
 
+const cmp = (a, b) => String(a || '').localeCompare(String(b || ''));
+
+// Name is the axis that matters: one template name is registered once per
+// messaging account, with independent statuses. Sorting by name puts every
+// account's registration of a name together so their statuses read side by
+// side. Ties fall through to language then account so the grouping is stable.
+const byName = (a, b) => cmp(a.name, b.name)
+  || cmp(a.language, b.language)
+  || cmp(a.account_id, b.account_id);
+
 const MessageTemplates = () => {
   const history = useHistory();
   const [templates, setTemplates] = useState([]);
@@ -124,6 +134,15 @@ const MessageTemplates = () => {
       >
         View
       </Button>
+      <Tooltip title="Create the same template on another messaging account">
+        <Button
+          size="small"
+          type="link"
+          onClick={() => history.push(`/message-templates/new?duplicate=${row.id}`)}
+        >
+          Duplicate
+        </Button>
+      </Tooltip>
       <Popconfirm
         title="Delete this template?"
         okText="Delete"
@@ -135,27 +154,50 @@ const MessageTemplates = () => {
     </Space>
   );
 
+  const accountLabel = id => pageMap[id] || id;
+
   const columns = [
     {
-      title: 'Name', dataIndex: 'name', key: 'name', render: renderName,
+      title: 'Name',
+      dataIndex: 'name',
+      key: 'name',
+      render: renderName,
+      sorter: byName,
+      defaultSortOrder: 'ascend',
     },
     {
-      title: 'Language', dataIndex: 'language', key: 'language', render: renderLanguage,
+      title: 'Language',
+      dataIndex: 'language',
+      key: 'language',
+      render: renderLanguage,
+      sorter: (a, b) => cmp(a.language, b.language) || byName(a, b),
     },
     {
-      title: 'Account', dataIndex: 'account_id', key: 'page', render: id => pageMap[id] || id,
+      title: 'Account',
+      dataIndex: 'account_id',
+      key: 'page',
+      render: accountLabel,
+      sorter: (a, b) => cmp(accountLabel(a.account_id), accountLabel(b.account_id)) || byName(a, b),
     },
     {
       title: 'Buttons', dataIndex: 'buttons', key: 'buttons', render: renderButtons,
     },
     {
-      title: 'Status', dataIndex: 'status', key: 'status', render: statusCell,
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      render: statusCell,
+      sorter: (a, b) => cmp(a.status, b.status) || byName(a, b),
     },
     {
-      title: 'Created', dataIndex: 'created', key: 'created', render: d => new Date(d).toLocaleDateString(),
+      title: 'Created',
+      dataIndex: 'created',
+      key: 'created',
+      render: d => new Date(d).toLocaleDateString(),
+      sorter: (a, b) => new Date(a.created) - new Date(b.created),
     },
     {
-      title: '', key: 'actions', width: 80, render: renderActions,
+      title: '', key: 'actions', width: 200, render: renderActions,
     },
   ];
 
@@ -173,6 +215,11 @@ const MessageTemplates = () => {
             </Button>
           )}
         >
+          <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+            Sorted by name, so every account&apos;s registration of a template sits
+            together and their statuses can be compared. A survey that runs on both
+            Messenger and WhatsApp needs the same name approved on each account.
+          </Text>
           <Table
             dataSource={templates}
             rowKey="id"

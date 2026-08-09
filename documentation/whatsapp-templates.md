@@ -212,6 +212,45 @@ values, quick-reply buttons); the form itself is shared — sample-value
 inputs already appear for any body with `{{n}}` placeholders, which both
 platforms require server-side.
 
+### Name is the list's primary axis
+
+The list is sorted by **name** (then language, then account), matching the
+`ORDER BY` the `list`/`listAll` queries already apply. A survey field names a
+template but not a platform, so one name is normally registered once per
+messaging account with **independent statuses** — sorting by name puts those
+registrations adjacent so an APPROVED-on-page / REJECTED-on-WABA split is
+visible. Every column is re-sortable; ties always fall back to name order so
+the grouping survives a re-sort. Sorting cannot show *absence*: an account
+with no row for a name has no row to sort.
+
+### Duplicate to another account
+
+Each row has a **Duplicate** action → `/message-templates/new?duplicate=<id>`.
+The create form fetches that template and pre-fills name, language, body and
+buttons, leaving the **account picker empty** (the source account is labelled
+`(source)` in the dropdown). The point is that nothing is retyped, which is
+what keeps shapes in agreement:
+
+> **Placeholder count, button count and button order must match across every
+> registration of a name.** The survey supplies one `params` array and one set
+> of choices to every platform, so a mismatch is invisible until a send fails.
+> Body *wording* may differ freely — only params and choices come from the
+> survey, and WhatsApp review rejects phrasing Messenger accepts.
+
+This is a convention the form encourages, not a rule it enforces — there is no
+cross-account shape validation.
+
+**Sample values are not copied.** `message_templates` never stores the
+`examples` array (Meta only needs it at approval), so placeholder samples must
+be re-entered on each duplicate.
+
+Create failures on a taken name get a specific message rather than the raw
+Graph error, because the two causes have different remedies: a name that
+already exists on the target account (change account or language) versus one
+Meta still reserves for 30 days after an **approved** template was deleted
+(wait, or pick a new name). A rejected template can be deleted and recreated
+under the same name immediately — rejection never burns a name.
+
 ---
 
 ## Failure modes (fail fast, no silent fallbacks)
