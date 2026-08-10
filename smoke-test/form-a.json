@@ -209,59 +209,11 @@
     {
       "type": "multiple_choice",
       "ref": "test_attachments",
-      "title": "📎 Would you like to test bot-sent media attachments (video, PDF, images)? This sends several files back to back and can take a few moments — expect a short pause after you tap Yes.",
+      "title": "📎 Would you like to test bot-sent media attachments (a legacy image, a third-party image, and uploaded image/video/PDF assets)? This sends several files back to back and can take a few moments — expect a short pause after you tap Yes.",
       "properties": {
         "choices": [
           { "label": "Yes", "ref": "choice_test_attachments_yes" },
           { "label": "No", "ref": "choice_test_attachments_no" }
-        ],
-        "allow_multiple_selection": false,
-        "vertical_alignment": true
-      },
-      "validations": { "required": false }
-    },
-    {
-      "type": "statement",
-      "ref": "media_video",
-      "title": "🎥 Now testing rich media. Here's a VIDEO attachment sent by the bot:",
-      "properties": {
-        "hide_marks": false,
-        "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"video\",\"url\":\"https://download.samplelib.com/mp4/sample-5s.mp4\"}}"
-      }
-    },
-    {
-      "type": "multiple_choice",
-      "ref": "confirm_video",
-      "title": "Did the VIDEO actually arrive? A failed send is reported and committed rather than retried, so the survey walks on regardless — answer honestly, this is the only signal.",
-      "properties": {
-        "choices": [
-          { "label": "Yes", "ref": "choice_confirm_video_yes" },
-          { "label": "No", "ref": "choice_confirm_video_no" }
-        ],
-        "allow_multiple_selection": false,
-        "vertical_alignment": true
-      },
-      "validations": { "required": false }
-    },
-    {
-      "type": "statement",
-      "ref": "media_file",
-      "title": "📄 And here's a FILE (PDF) attachment sent by the bot:",
-      "properties": {
-        "hide_marks": false,
-        "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"file\",\"url\":\"https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf\"}}"
-      }
-    },
-    {
-      "type": "multiple_choice",
-      "ref": "confirm_file",
-      "title": "Did the PDF actually arrive?",
-      "properties": {
-        "choices": [
-          { "label": "Yes", "ref": "choice_confirm_file_yes" },
-          { "label": "No", "ref": "choice_confirm_file_no" }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
@@ -280,18 +232,8 @@
     },
     {
       "type": "statement",
-      "ref": "media_asset_url",
-      "title": "🖼️ Now an image sent by a dashboard asset URL — the new upload path. ⚠️ PLACEHOLDER: the UUID below is not a real uploaded asset (the dashboard upload path doesn't exist yet); this field will fail to send until it is swapped for a real https://media.vlab.digital/a/<uuid>/<filename> URL.",
-      "properties": {
-        "hide_marks": false,
-        "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/00000000-0000-0000-0000-000000000000/PLACEHOLDER-replace-with-real-asset.png\"}}"
-      }
-    },
-    {
-      "type": "statement",
       "ref": "media_third_party_url",
-      "title": "🖼️ And here's an ordinary third-party image URL — not a dashboard asset, proving that plain third-party URLs still work unaccelerated (no handle, no mirroring):",
+      "title": "🖼️ And here's an ordinary third-party image URL — not a dashboard asset, proving that plain third-party URLs still work unaccelerated (no handle, no mirroring). This is the only field in the survey testing a not-uploaded URL besides the welcome screen:",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
@@ -300,18 +242,48 @@
     },
     {
       "type": "statement",
-      "ref": "media_asset_repeat",
-      "title": "🖼️ And the SAME dashboard asset URL again — this second send is the only proof that the handle is being reused rather than silently falling back to a fresh by-URL send every time:",
+      "ref": "media_asset_image",
+      "title": "🖼️ Now an IMAGE sent by a dashboard asset URL — the modern upload path. ⚠️ PLACEHOLDER: the UUID below is not a real uploaded asset (the dashboard upload path doesn't exist yet); this field will fail to send until it is swapped for a real https://media.vlab.digital/a/<uuid>/<filename> URL.",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/00000000-0000-0000-0000-000000000000/PLACEHOLDER-replace-with-real-asset.png\"}}"
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/11111111-1111-1111-1111-111111111111/PLACEHOLDER-image.png\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_repeat",
+      "title": "🖼️ And the SAME dashboard image asset again — this second send is the only proof that the handle is being reused rather than silently falling back to a fresh by-URL send every time. ⚠️ PLACEHOLDER — same UUID as the field above, on purpose:",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/11111111-1111-1111-1111-111111111111/PLACEHOLDER-image.png\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_video",
+      "title": "🎥 Now a VIDEO sent by a dashboard asset URL — the modern upload path (replaces the old direct-URL video test). ⚠️ PLACEHOLDER: swap for a real uploaded video URL once one exists; the real asset must be ≤16MB MP4/3GPP per §11.5.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"video\",\"url\":\"https://media.vlab.digital/a/22222222-2222-2222-2222-222222222222/PLACEHOLDER-video.mp4\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_file",
+      "title": "📄 And a FILE (PDF) sent by a dashboard asset URL — the modern upload path (replaces the old direct-URL PDF test). ⚠️ PLACEHOLDER: swap for a real uploaded PDF URL once one exists; the real asset must be ≤100MB per §11.5.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"file\",\"url\":\"https://media.vlab.digital/a/33333333-3333-3333-3333-333333333333/PLACEHOLDER-document.pdf\"}}"
       }
     },
     {
       "type": "multiple_choice",
       "ref": "confirm_attachment",
-      "title": "Did those four images actually arrive — legacy attachment_id, dashboard asset URL, third-party URL, and the repeated asset URL? A failed send is reported and committed rather than retried, so answer honestly. On WhatsApp the legacy attachment_id one is EXPECTED to fail (WhatsApp never supported attachment ids) — the other three should still arrive there.",
+      "title": "Did those six attachments actually arrive — legacy attachment_id image, third-party image URL, uploaded image asset, the repeated image asset, uploaded video asset, and uploaded PDF asset? A failed send is reported and committed rather than retried, so answer honestly. On WhatsApp the legacy attachment_id one is EXPECTED to fail (WhatsApp never supported attachment ids) — the other five should still arrive there.",
       "properties": {
         "choices": [
           { "label": "Yes", "ref": "choice_confirm_attachment_yes" },
@@ -641,7 +613,7 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "media_video" }
+            "to": { "type": "field", "value": "media_legacy_attachment_id" }
           },
           "condition": {
             "op": "is",

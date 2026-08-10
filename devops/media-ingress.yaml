@@ -62,44 +62,46 @@ spec:
 # ---------------------------------------------------------------------------
 # STAGING
 # ---------------------------------------------------------------------------
-# REQUIRED AND STILL MISSING: the staging media hostname. §4.7 names only
-# media.vlab.digital, and there is no established staging convention to derive
-# one from safely — the existing staging hosts are inconsistent
-# (staging.links.vlab.digital, but fly-botserver.vlab.digital shared across
-# environments). Inventing one here would put a hostname in the repo that does
-# not resolve, and the first symptom would be a stuck cert-manager Order rather
-# than an obvious error.
+# staging.media.vlab.digital — the convention here is the production host with
+# a `staging.` prefix, as in staging.links.vlab.digital and
+# staging.fly-dashboard-api.vlab.digital.
 #
-# Supply the host, then uncomment this document AND set the matching
-# MEDIA_PUBLIC_BASE in devops/values/staging.yaml. The two must agree exactly:
-# the dashboard mints URLs from MEDIA_PUBLIC_BASE and this is what answers them.
+# This must agree EXACTLY with MEDIA_PUBLIC_BASE in devops/values/staging.yaml.
+# The dashboard mints asset URLs from that value and this is what answers them;
+# a mismatch does not error, it produces URLs that resolve to nothing, and the
+# first symptom is a broken image in a respondent's chat.
 #
-# apiVersion: networking.k8s.io/v1
-# kind: Ingress
-# metadata:
-#   name: media-proxy
-#   namespace: vstag
-#   labels:
-#     app.kubernetes.io/name: media-proxy
-#     app.kubernetes.io/instance: gbv
-#   annotations:
-#     cert-manager.io/cluster-issuer: letsencrypt-prod
-#     nginx.ingress.kubernetes.io/proxy-buffering: "off"
-#     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
-# spec:
-#   ingressClassName: nginx
-#   tls:
-#     - hosts:
-#         - <REQUIRED: staging media host>
-#       secretName: gbv-media-proxy-cert
-#   rules:
-#     - host: <REQUIRED: staging media host>
-#       http:
-#         paths:
-#           - path: /
-#             pathType: Prefix
-#             backend:
-#               service:
-#                 name: gbv-media-proxy
-#                 port:
-#                   number: 80
+# PREREQUISITE: the DNS A/AAAA record for staging.media.vlab.digital must point
+# at the same nginx ingress load balancer as the other vlab.digital hosts
+# BEFORE this is applied, or the ACME HTTP-01 challenge cannot complete and
+# cert-manager leaves a stuck Order rather than failing visibly.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: media-proxy
+  namespace: vstag
+  labels:
+    app.kubernetes.io/name: media-proxy
+    app.kubernetes.io/instance: gbv
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - staging.media.vlab.digital
+      secretName: gbv-media-proxy-cert
+  rules:
+    - host: staging.media.vlab.digital
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gbv-media-proxy
+                port:
+                  number: 80

@@ -67,9 +67,13 @@ Current versions (as of 2026-02-08):
 ## Testing
 
 - Framework: Jest (via react-scripts)
-- Only 1 test file exists: `src/containers/App/App.test.js` (smoke test)
-- No @testing-library/react or enzyme installed
-- Test coverage is effectively zero
+- No @testing-library/react or enzyme installed, so **nothing renders in tests**
+- The established shape is therefore: extract the logic into a pure module next
+  to the container, and test that module. `StatesExplorer/healthNav.test.js` and
+  `Media/format.test.js` both follow it
+- Test files: `containers/App/App.test.js` (smoke),
+  `containers/StatesExplorer/healthNav.test.js`, `containers/Media/format.test.js`
+- Coverage is otherwise low; containers themselves are untested
 
 ## Authentication
 
@@ -114,13 +118,79 @@ src/
 - **TopQuestionsReport** — question-level analytics
 - **DurationReport** — survey duration/timing analytics
 - **BailSystems** — bail-out monitoring (participants who abandon surveys)
-- **Media** — uploads reusable attachments (images/video) to Facebook's `message_attachments` API for use in chatbot templates
+- **Media** — the media library: upload a file, get a permanent URL to paste into a survey. See "Media library" below
 - **MessageTemplates** — creates/manages utility message templates per `(account_id, name, language)` for out-of-window sends, on **both** Messenger pages and WhatsApp numbers (`accounts.js` merges the two). Listed name-first, since a survey field names a template but not a platform, so one name is normally registered once per account with independent statuses. **Duplicate** (`/message-templates/new?duplicate=<id>`) pre-fills body and buttons from an existing registration so placeholder and button shape stays in agreement across accounts. See `documentation/utility-messages.md` (Messenger) and `documentation/whatsapp-templates.md` (WhatsApp, and the cross-platform model)
 - **Tickets** — support inbox UI (split list/detail layout with open/closed tabs, Markdown-rendered conversations via the shared `src/components/Markdown` component) backed entirely by Linear (no local storage); see `documentation/tickets.md`
 - **StatesExplorer** — participant state debugging (where participants are in survey flow, error tracking)
   - **StatesSummary** — aggregated state counts per form and state, topped by the **HealthCard**
   - **StatesList** — filterable list of all participants with their current states
   - **StateDetail** — detailed view of a single participant's state including QA transcript and error details
+
+### Media Library
+
+`containers/Media/` — a researcher uploads a file and gets back a permanent
+public URL to paste into their survey. See `planning/media-abstraction.md` §3
+for the model and `documentation/media.md` once written.
+
+API consumed (`dashboard-server/api/media`):
+
+| Call | Result |
+|---|---|
+| `POST /media/upload` (multipart, field `file`) | `201` with the new asset; **`200` with the existing asset** on a dedupe hit (`UNIQUE (userid, content_hash)`) |
+| `GET /media` | the caller's assets, newest first |
+| `DELETE /media/:id` | `204`; `404` if not the caller's |
+
+Asset shape: `{id, filename, mediaType, mimeType, byteSize, created, url}`. The
+field is **`url`** — §3's prose says `public_url`, but the implementation emits
+`url` and the implementation wins. `url` is derived server-side from
+`MEDIA_PUBLIC_BASE` and is never stored.
+
+**Three deliberate absences.** Each one is a thing a reasonable person would add
+back, so each is written down:
+
+1. **No account/page selector.** Asset creation is platform-independent (§3), so
+   there is no account for the author to choose and no connected-page
+   requirement — upload works with zero connected accounts. This page previously
+   called `GET /media/pages`, which was deleted server-side along with the
+   concept; the page 404'd on load until this rewrite. (`MessageTemplates/accounts.js`
+   was the endpoint's only other caller and now reads `/credentials`.)
+2. **No handle state.** No "uploaded to N accounts", no expiry, no platform
+   anything. §3: *"Handle state is not shown — it is our problem."* Showing it
+   would put platform detail back on the authoring surface, which is what the
+   media abstraction exists to remove.
+3. **No client-side size or type validation**, and no `accept` filter on the
+   dragger. The server owns eligibility (§11.5); a second copy of those rules
+   here could only drift out of agreement with it.
+
+**Upload errors are the feature, not the sad path.** §11.5 decided the dashboard
+refuses ineligible files rather than transcoding them — no downscaling, no
+re-encoding. That is only fair because the server's refusal names both the
+problem and the fix ("image is 6.2 MB, maximum is 5.0 MB"; "GIF is not
+supported; use JPEG or PNG"). So the client surfaces the server's string
+**verbatim**, in a persistent `Alert` inside the upload card rather than a toast
+that disappears while the researcher is fixing the file. `parseApiError`
+(`Media/format.js`) does the extraction — `services/api/fetcher.js` throws
+`new Error(await res.text())`, so the raw response body arrives as `err.message`.
+Collapsing that into "upload failed" would break the decision, and there is a
+test pinning that it doesn't.
+
+**The capability-URL warning** (§4.6) is a persistent `warning` Alert at the top
+of the library card, directly above the URLs it describes — asset URLs are
+unguessable but permanently readable by anyone who obtains one, in researcher
+terms: *"anyone with the link can view the file, forever; don't upload anything
+confidential."* Not a footnote and not dismissible.
+
+**Delete warns about the missing reference count** (§11.6). Nothing checks
+whether a live survey references an asset, so deletion silently breaks that
+survey's media. The confirmation says so in plain language rather than asking
+"are you sure?".
+
+`Media/format.js` holds the pure logic — `formatBytes` (base 1024, one decimal
+at MB, matching dashboard-server's error strings so a "6.2 MB" refusal and the
+"6.2 MB" row agree), `parseApiError`, `mergeAsset` (replace-by-id, so the 200
+dedupe response doesn't duplicate a row) and `isPreviewable`. Tested in
+`format.test.js` at the level `StatesExplorer/healthNav.test.js` set: pure
+logic and regressions, no rendering.
 
 ### Monitor Tab Health Surface
 

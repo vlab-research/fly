@@ -174,10 +174,8 @@ accepted).
 | `handoff_statement` → `handoff_result` | **Thread-control handoff** round trip + metadata flattening | `handoff`; interpolates `e_handover_metadata_*` (needs `smoke-echo`) |
 | `test_utility` → `utility_message` | Facebook **UTILITY template** message, gated behind a yes/no like `test_payment`/`test_handoff` — answering No skips straight to `test_environment` (choices must match the page's approved button labels — [see below](#the-utility_message-field-page-specific-not-env-specific)) | `multiple_choice` → `utility_message` |
 | `test_environment` | **Env pick, asked once up front.** The account/environment picker for media (attachment_id vs. URL) is gone now that the handle layer scopes by account — this question survives only because moviehouse's webview host is baked in per environment at build time and there is no other way to route the play event | quick-reply; read by `picture_received` logic |
-| `test_attachments` → `media_video` → `confirm_video` | Bot-sent **video** attachment, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole attachment block straight to `send_picture` | `multiple_choice` → `attachment` (`keepMoving`) |
-| `media_file` → `confirm_file` | Bot-sent **file/PDF** attachment | `attachment` (`keepMoving`) |
-| `media_legacy_attachment_id` → `media_asset_url` → `media_third_party_url` → `media_asset_repeat` → `confirm_attachment` | Four media-abstraction paths back to back — see [Media fields](#media-fields-what-each-one-proves) below | `attachment` (`keepMoving`), three by `url` + one by legacy `attachment_id` |
-| `confirm_video`, `confirm_file`, `confirm_attachment` | **Did it actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — these are the only signal that a media send silently failed | `multiple_choice` (answers recorded, no branching) |
+| `test_attachments` → `media_legacy_attachment_id` → `media_third_party_url` → `media_asset_image` → `media_asset_repeat` → `media_asset_video` → `media_asset_file` → `confirm_attachment` | Six media-abstraction paths back to back, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole block straight to `send_picture` — see [Media fields](#media-fields-what-each-one-proves) below | `multiple_choice` → `attachment` (`keepMoving`), one legacy `attachment_id`, one not-uploaded `url`, four uploaded-asset `url`s |
+| `confirm_attachment` | **Did they actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — this is the only signal that a media send silently failed | `multiple_choice` (answers recorded, no branching) |
 | `send_picture` → `picture_received` | **Inbound user media** (user sends a photo); stored URL interpolated back | `upload` (`{type:image}`) → `user_media`/MEDIA event |
 | `movie_webview_prod`/`movie_webview_staging` → `movie_watched`/`movie_timeout` | **Webview button → moviehouse external events → logic reacting to them** (works in prod & staging); branched from `test_environment` by `picture_received` | `webview` + `wait{op:or,[external moviehouse:play, timeout]}`; branch on `e_moviehouse_play_id` |
 | `stitch_statement` | **Form stitch** A → B | `stitch` |
@@ -287,30 +285,65 @@ once here.
 
 ## Media fields — what each one proves
 
-Four media-abstraction fields run back to back (`media_legacy_attachment_id` →
-`media_asset_url` → `media_third_party_url` → `media_asset_repeat`), each
-exercising a different resolution path from `planning/media-abstraction.md`
-§8.3. `confirm_attachment` is the single arrival check for all four.
+Six media-abstraction fields run back to back (`media_legacy_attachment_id` →
+`media_third_party_url` → `media_asset_image` → `media_asset_repeat` →
+`media_asset_video` → `media_asset_file`), each exercising a resolution path
+from `planning/media-abstraction.md` §8.3. `confirm_attachment` is the single
+arrival check for all six.
+
+The balance is deliberate: **exactly one** legacy test, **exactly one**
+not-uploaded (third-party URL) test, and the rest on the modern uploaded-asset
+path — the thing this build actually added. An earlier version of this survey
+had four different fields pointing at third-party URLs (including two
+duplicates of the same imgur image) and only two exercising real assets, which
+meant the suite barely touched the code path it exists to test. See
+`planning/media-abstraction.md` §11.4 for that history.
 
 | Field | Proves | Expected on Messenger | Expected on WhatsApp |
 |---|---|---|---|
 | `media_legacy_attachment_id` | **The BC regression guard.** §8.3 rule 1: `media_attachment_id` present + Messenger → send by that id, byte-for-byte unchanged from today. Per the production audit (§11.1), legacy `attachment_id` fields carry ~100% of live Messenger media traffic — this is the single most important field in the file. Its `attachment_id` value must never be changed; Meta offers no way to recover the original file from an id, so a wrong value cannot be fixed, only replaced by a fresh upload elsewhere. | Sends | **Fails cleanly** — `ErrAttachmentIDUnsupported` (`translator_whatsapp.go:309`). This is correct and intended, not a bug: attachment ids were never supported on WhatsApp. |
-| `media_asset_url` | The new dashboard-issued asset URL path (§8.3 rule 2: `/a/<uuid>` parsed, handle looked up for `(asset, platform, account)`, sent by handle if found else by URL). **⚠️ Currently a placeholder** — see below. | Sends (by URL until real handles exist) | Sends (by URL until real handles exist) |
-| `media_third_party_url` | An ordinary, unmirrored third-party URL (the imgur image already used elsewhere in production surveys) still works — §2's "third-party URLs are out of scope" means no handle, no acceleration, just a plain URL send | Sends | Sends |
-| `media_asset_repeat` | **Handle reuse.** The same asset URL as `media_asset_url`, sent a second time. This is the only field that can tell a reused handle apart from a silent per-send URL fallback — without it every send could be falling back to URL and the suite would still pass | Sends | Sends |
+| `media_third_party_url` | **The only not-uploaded test.** An ordinary, unmirrored third-party URL (the imgur image already used elsewhere in production surveys) still works — §2's "third-party URLs are out of scope" means no handle, no acceleration, just a plain URL send | Sends | Sends |
+| `media_asset_image` | The modern dashboard-issued asset URL path, image (§8.3 rule 2: `/a/<uuid>` parsed, handle looked up for `(asset, platform, account)`, sent by handle if found else by URL). **⚠️ Currently a placeholder** — see below. | Sends (by URL until real handles exist) | Sends (by URL until real handles exist) |
+| `media_asset_repeat` | **Handle reuse.** The exact same asset URL as `media_asset_image` (same UUID), sent a second time. This is the only field that can tell a reused handle apart from a silent per-send URL fallback — without it every send could be falling back to URL and the suite would still pass | Sends | Sends |
+| `media_asset_video` | The modern path, video — replaces the old direct-URL video test (`media_video`, which pointed at a random `samplelib.com` file instead of our own storage). **⚠️ Currently a placeholder.** | Sends | Sends |
+| `media_asset_file` | The modern path, document/PDF — replaces the old direct-URL PDF test (`media_file`, which pointed at `w3.org`). **⚠️ Currently a placeholder.** | Sends | Sends |
 
-### The `media_asset_url` / `media_asset_repeat` placeholder
+### The three placeholder assets
 
-Both fields currently point at
-`https://media.vlab.digital/a/00000000-0000-0000-0000-000000000000/PLACEHOLDER-replace-with-real-asset.png`.
-**This is not a real asset** — the dashboard upload path that would create one
-does not exist yet (`planning/media-abstraction.md` §3, §11.4). The all-zero
-UUID and the `PLACEHOLDER-` filename prefix are deliberate markers, not a typo.
+No real assets exist yet — the dashboard upload path (`planning/media-abstraction.md`
+stage D) is still being built. Each placeholder uses a distinct, obviously-fake
+UUID so it's unambiguous which field needs which kind of file substituted:
 
-Before these two fields can pass: build the upload path, upload a real file
-through it, and replace the URL in both fields with the real `public_url` the
-dashboard returns. Until then, expect these two sends to fail (no such object
-in storage) — that failure is expected, not a regression.
+| Field(s) | Placeholder URL | Substitute with |
+|---|---|---|
+| `media_asset_image`, `media_asset_repeat` (same UUID — reused on purpose) | `https://media.vlab.digital/a/11111111-1111-1111-1111-111111111111/PLACEHOLDER-image.png` | a real uploaded **image** asset URL |
+| `media_asset_video` | `https://media.vlab.digital/a/22222222-2222-2222-2222-222222222222/PLACEHOLDER-video.mp4` | a real uploaded **video** asset URL, ≤16MB MP4/3GPP (§11.5) |
+| `media_asset_file` | `https://media.vlab.digital/a/33333333-3333-3333-3333-333333333333/PLACEHOLDER-document.pdf` | a real uploaded **PDF** asset URL, ≤100MB (§11.5) |
+
+**This is not real media** — the all-1s/2s/3s UUIDs and the `PLACEHOLDER-`
+filename prefixes are deliberate markers, not a typo. `media_asset_repeat`
+**must** keep the exact same UUID as `media_asset_image` when substituted —
+that identity is the whole point of the field; giving it a different asset
+turns it into a second first-send and proves nothing about reuse.
+
+Before these four fields can pass: build the upload path, upload one real
+image, one real video, and one real PDF through it, and replace the
+placeholder URL in each field (and both `media_asset_image` /
+`media_asset_repeat` together) with the real `public_url` the dashboard
+returns. Until then, expect these four sends to fail (no such object in
+storage) — that failure is expected, not a regression.
+
+### Why `welcome` stays on a third-party URL, deliberately
+
+`welcome` is the survey's welcome screen — the very first message a respondent
+receives, before any other field runs. It is **intentionally left pointing at
+the imgur URL** rather than converted to an asset URL. If it pointed at a
+placeholder or an as-yet-unsubstituted asset URL, the survey would fail at
+message one and every other media test below it would be unreachable — a
+smoke test should never be able to lose all its coverage to a single bad
+value. Keeping `welcome` on a stable, already-working third-party URL is
+defensive by design, not an oversight or inconsistency with the rest of this
+section.
 
 ### Distinguishing "wrong id" from "broken code" (legacy `attachment_id`)
 
@@ -372,9 +405,11 @@ survey is what moves.
   the prompt repeats. That is intentional — the point is to prove the
   `user_media` → MEDIA path. (Proven in `replybot/.../machine.test.js`, the
   "Adds the URL given an attachment as responseValue" test.)
-- **Sample media URLs** (`media_video`, `media_file`) point at public sample
-  hosts and must be reachable by Facebook's fetchers; swap them if a host goes
-  away.
+- **`media_third_party_url`** (and `welcome`) point at an imgur URL, which must
+  stay reachable by Facebook's fetchers; swap it if the host goes away. There
+  is no longer a public-sample-host dependency for video/PDF — those moved to
+  dashboard-issued asset URLs (`media_asset_video`, `media_asset_file`); see
+  [Media fields](#media-fields-what-each-one-proves).
 - **Handoff** needs `smoke-echo` deployed and `target_app_id` in
   `handoff_statement` pointing at that app — see `../smoke-echo/README.md`.
 - No local state: any interrupted run can just be restarted from the `m.me`
