@@ -6,6 +6,7 @@ use (
 	./exodus
 	./formcentral
 	./linksniffer
+	./media-proxy
 	./message-worker
 	./scribble
 	./system

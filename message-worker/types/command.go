@@ -24,6 +24,11 @@ type SendMessageCommand struct {
 	PlatformAccountID string          `json:"platform_account_id"`
 	Message           MessageContent  `json:"message"`
 	PlatformContext   json.RawMessage `json:"platform_context,omitempty"`
+
+	// ResolvedMedia is how this media message should be addressed on the wire,
+	// computed by the worker before translation. Never serialised -- it is a
+	// derived input to the pure translators, not wire data.
+	ResolvedMedia *MediaSendable `json:"-"`
 }
 
 type HandoffCommand struct {

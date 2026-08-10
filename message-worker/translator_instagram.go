@@ -20,7 +20,7 @@ func TranslateToInstagram(cmd types.SendMessageCommand) (types.InstagramMessage,
 	case types.MessageTypeQuestion:
 		return translateInstagramQuestion(cmd.Message)
 	case types.MessageTypeMedia:
-		return translateInstagramMedia(cmd.Message)
+		return translateInstagramMedia(cmd.Message, cmd.ResolvedMedia)
 	default:
 		return types.InstagramMessage{}, fmt.Errorf("%w: %s", types.ErrUnsupportedMessageType, cmd.Message.Type)
 	}
@@ -56,7 +56,7 @@ func translateInstagramQuestion(msg types.MessageContent) (types.InstagramMessag
 	}, nil
 }
 
-func translateInstagramMedia(msg types.MessageContent) (types.InstagramMessage, error) {
+func translateInstagramMedia(msg types.MessageContent, resolved *types.MediaSendable) (types.InstagramMessage, error) {
 	if types.Blank(msg.MediaURL) {
 		return types.InstagramMessage{}, types.ErrAttachmentIDUnsupported
 	}
@@ -76,11 +76,19 @@ func translateInstagramMedia(msg types.MessageContent) (types.InstagramMessage, 
 		return types.InstagramMessage{}, fmt.Errorf("%w: %s", types.ErrUnsupportedMediaType, *msg.MediaType)
 	}
 
+	// Instagram has no fan-out, so in practice resolved is always ByURL -- but
+	// route through it rather than reading MediaURL directly, so this doesn't
+	// silently diverge from the other two platforms.
+	url := *msg.MediaURL
+	if resolved != nil && resolved.Kind == types.MediaByURL && resolved.URL != "" {
+		url = resolved.URL
+	}
+
 	return types.InstagramMessage{
 		Attachment: &types.Attachment{
 			Type: attachmentType,
 			Payload: types.AttachmentPayload{
-				URL: *msg.MediaURL,
+				URL: url,
 			},
 		},
 	}, nil

@@ -71,6 +71,131 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
 
+### Media functional core (`api/media/media.core.js`)
+
+The media feature is moving from page-scoped Facebook `attachment_id`s to an
+asset/handle model (`planning/media-abstraction.md`; migration
+`24-media-assets.sql`). `media.core.js` is its pure decision layer — **no fs, no
+network, no database, no `Date.now()`**; anything time-dependent takes `now` as a
+parameter, so expiry behaviour is asserted by passing a clock instead of waiting
+30 days.
+
+#### Upload Validation and Eligibility (§11.5)
+
+**The dashboard refuses ineligible uploads rather than transcoding or downscaling them.**
+Uploads must be both of an allowed MIME type and within the per-type byte limit. Limits
+are enforced at the **strictest supported platform's limit**, making eligibility a system-wide
+invariant: every asset that exists is guaranteed sendable on every supported platform.
+This removes the need for any later per-platform eligibility check.
+
+Limits verified 2026-08-10 against Meta's WhatsApp Cloud API media reference and the
+Messenger `saving-assets` page (`planning/media-abstraction.md` §11.5).
+
+| Type | Allowed MIME types | Max size | Rationale |
+|---|---|---|---|
+| Image | JPEG, PNG (8-bit only) | 5 MB | WhatsApp strictest limit |
+| Video | MP4, 3GPP | 16 MB | WhatsApp strictest limit |
+| Audio | AAC, MP4, MPEG, AMR, OGG | 16 MB | WhatsApp strictest limit |
+| Document | PDF, DOCX, XLSX, PPTX | 100 MB | Meta's list, minus what cannot be identified |
+
+Rejected types (GIF, WebP, WebM, QuickTime, WAV) are not WhatsApp-sendable, so they are
+refused with a specific error message naming both the rejected type and the accepted
+alternatives for that media class.
+
+**Acceptance is bounded by identification, never by the claimed type or the extension.**
+`sniffContentType` returns `application/octet-stream` for anything it cannot positively
+name — the same result it returns for an HTML/SVG payload relabelled as an image — and
+octet-stream is always refused. That is a deliberate XSS guard (uploaded content is served
+back from our own domain), not a gap to "fix" by loosening the check. Widening support
+means teaching the sniffer new magic bytes, never accepting unclassified bytes.
+
+Meta lists **eight** document MIME types. Four are accepted, four are not, and each
+omission is a decision:
+
+- **PDF** — `%PDF-` magic.
+- **DOCX / XLSX / PPTX** — ZIP containers (`PK\x03\x04`). The subtype is read out of the
+  package's own `[Content_Types].xml` (inflated from the first ZIP entry) by matching the
+  declared `…main+xml` part type, so it is identification rather than a guess. A ZIP that
+  does not resolve is reported as `application/zip` — named, so the error can say "ZIP
+  archive", but not accepted. Macro-enabled packages (docm/xlsm/pptm) declare a different
+  main part, so they fall through to plain ZIP and are refused, which is welcome: they
+  carry executable content.
+- **DOC / XLS / PPT** — OLE2/CFB compound files (`D0 CF 11 E0 A1 B1 1A E1`). The magic
+  names the container, which `.msi` and `.msg` share; telling the three Office types apart
+  needs a CFB directory walk down the FAT sector chain, which is out of proportion here.
+  Reported as `application/x-ole-storage` and refused with an error naming the format.
+- **`text/plain`** — **deliberately not supported.** Text has no magic bytes, so "is this
+  text?" cannot be answered; every HTML and SVG payload the octet-stream rejection exists
+  to catch is also plain text. Accepting it would mean accepting anything. Pinned by test.
+
+**PNG bit depth is checked; codecs are not.** Meta requires images to be "8-bit, RGB or
+RGBA". A 16-bit PNG passes every size and MIME check and is then refused by WhatsApp at
+fan-out, leaving an asset that gets no handle and sends by URL forever with nothing
+erroring. The depth is one byte at a fixed offset (byte 24 of the IHDR), so it is enforced
+and the error names the actual depth. Colour type is **not** enforced — 8-bit greyscale and
+palette PNGs are accepted in practice. Video/audio codec constraints (H.264, AAC, OPUS)
+need demuxing and are **not** enforced, so the "every asset is sendable everywhere"
+invariant holds for size and MIME but not for codecs: the by-URL health signal has a small
+non-zero floor rather than being provably zero (§11.5).
+
+#### Core Functions
+
+| Function | Contract |
+|---|---|
+| `hashContent(buffer)` | sha256 hex. Dedupe **detection** only (`UNIQUE (userid, content_hash)`) — identity is the asset's UUID |
+| `storageKeyFor(assetId)` | `a/<uuid>`; throws on anything that is not a UUID, which is what keeps a key inside the prefix |
+| `publicUrlFor(base, assetId, filename)` | `<base>/a/<uuid>/<filename>`; the filename segment is cosmetic and percent-encoded |
+| `parseAssetId(url)` | uuid or null. **Host-independent** — path shape only |
+| `sniffContentType(buffer, claimed)` | Magic-byte detection. A claim can only narrow within the same container, never widen trust; anything unrecognised is `application/octet-stream`. ZIPs are resolved to docx/xlsx/pptx via the package manifest, or reported as plain `application/zip`; OLE2 is named but not resolved |
+| `pngBitDepth(buffer)` | The depth byte from a PNG's IHDR, or `null` when there is no readable header. `validateUpload` accepts only 8 |
+| `validateUpload(file)` | `{ok:true, filename, mimeType, mediaType, byteSize}` / `{ok:false, error}` — every client-asserted fact is recomputed. Size limits are enforced using the **sniffed** MIME type, never the client's claim |
+| `buildAssetRecord(email, hash, meta)` | The write-once `media_asset` row |
+| `planReconcile(now, assets, accounts, handles, policy)` | The reconciler's entire decision layer — see below |
+
+Two properties are load-bearing and are pinned by tests:
+
+- **`parseAssetId` is the JS twin of `message-worker/mediaresolve.ParseAssetID`.**
+  Both decide the same question on opposite sides of the system, and the test
+  tables are deliberately identical. Host-independence is what lets a production
+  media URL pasted into a survey run on staging: it parses, misses the local
+  lookup, and sends the production URL, which the production proxy serves.
+- **Handles are matched on `account_id` alone, never on `(platform, account_id)`.**
+  `credentials.entity` says `facebook_page`/`whatsapp_business` while
+  `SendMessageCommand` says `messenger`/`whatsapp`, so a two-part key would let
+  the writer and reader disagree — and the failure would be invisible, since a
+  lookup miss is the designed URL fallback rather than an error. `platform` is
+  descriptive only. See the comment in `devops/migrations/24-media-assets.sql`.
+
+#### Reconciliation
+
+`planReconcile` compares desired state (each asset × each of its owner's
+messaging accounts) with the handle rows it is given and returns
+`{type: 'create'|'refresh'|'prune', assetId, accountId, platform, reason}`
+actions. One mechanism covers missing handles, near-expiry handles, accounts
+connected after upload, and disconnected accounts. Refresh keys off
+`uploaded_at` plus a per-platform TTL — **never off last use** — and applying the plan makes a
+re-run return nothing, so it is safe on a tick. Since eligibility is enforced
+at upload time, there is no per-platform eligibility check in reconciliation —
+every stored asset is sendable everywhere.
+
+**Handle TTLs (`DEFAULT_RECONCILE_POLICY`), verified 2026-08-10 against Meta's docs:**
+
+| Platform | TTL from `uploaded_at` | Source |
+|---|---|---|
+| Messenger | **90 days** | Meta: "Attachment IDs expire after 90 days" |
+| WhatsApp | 30 days | Meta: "Media IDs returned by the API expire after 30 days" |
+
+Handles are refreshed `refreshMarginMs` (3 days) before end of life, so in practice a
+Messenger handle is replaced at 87 days and a WhatsApp one at 27.
+
+**Every platform we fan out to must have a finite TTL here.** Messenger was recorded as
+never expiring until 2026-08-10. That is a silent-failure bug, not a nit: with no TTL,
+`endOfLife` cannot place the handle's death, `planReconcile` never refreshes it by age, and
+because a handle is only ever an optimisation, nothing errors when it dies — every send
+just falls back to URL, forever, on the platform carrying ~100% of live media traffic
+(§11.1). The reconcile tests run against the shipped constants precisely so this cannot
+regress unnoticed.
+
 ### Database and Query Pattern
 
 - Direct CockroachDB queries via a `pg` connection pool

@@ -173,10 +173,10 @@ accepted).
 | `payment_wait` → `payment_success`/`payment_failure` | **Payment** (Reloadly) via `wait: external` + **hidden-field logic** | `wait` / `payment:reloadly`; branch on `e_payment_reloadly_success` |
 | `handoff_statement` → `handoff_result` | **Thread-control handoff** round trip + metadata flattening | `handoff`; interpolates `e_handover_metadata_*` (needs `smoke-echo`) |
 | `test_utility` → `utility_message` | Facebook **UTILITY template** message, gated behind a yes/no like `test_payment`/`test_handoff` — answering No skips straight to `test_environment` (choices must match the page's approved button labels — [see below](#the-utility_message-field-page-specific-not-env-specific)) | `multiple_choice` → `utility_message` |
-| `test_environment` | **Env pick, asked once up front.** Drives *two* later branches: which `attachment_id` image is sent, and which moviehouse player opens | quick-reply; read by `confirm_file` and `picture_received` logic |
+| `test_environment` | **Env pick, asked once up front.** The account/environment picker for media (attachment_id vs. URL) is gone now that the handle layer scopes by account — this question survives only because moviehouse's webview host is baked in per environment at build time and there is no other way to route the play event | quick-reply; read by `picture_received` logic |
 | `test_attachments` → `media_video` → `confirm_video` | Bot-sent **video** attachment, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole attachment block straight to `send_picture` | `multiple_choice` → `attachment` (`keepMoving`) |
 | `media_file` → `confirm_file` | Bot-sent **file/PDF** attachment | `attachment` (`keepMoving`) |
-| `media_attachment_id_prod` / `_staging` → `confirm_attachment` | Bot-sent **image by `attachment_id`** — media already uploaded to the page, referenced by id instead of URL. **Env-specific: ids are scoped to the page that uploaded them**, so prod and staging carry different ids ([see below](#attachment_id-fields-are-page-scoped)) | `attachment` (`keepMoving`) with `attachment_id` |
+| `media_legacy_attachment_id` → `media_asset_url` → `media_third_party_url` → `media_asset_repeat` → `confirm_attachment` | Four media-abstraction paths back to back — see [Media fields](#media-fields-what-each-one-proves) below | `attachment` (`keepMoving`), three by `url` + one by legacy `attachment_id` |
 | `confirm_video`, `confirm_file`, `confirm_attachment` | **Did it actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — these are the only signal that a media send silently failed | `multiple_choice` (answers recorded, no branching) |
 | `send_picture` → `picture_received` | **Inbound user media** (user sends a photo); stored URL interpolated back | `upload` (`{type:image}`) → `user_media`/MEDIA event |
 | `movie_webview_prod`/`movie_webview_staging` → `movie_watched`/`movie_timeout` | **Webview button → moviehouse external events → logic reacting to them** (works in prod & staging); branched from `test_environment` by `picture_received` | `webview` + `wait{op:or,[external moviehouse:play, timeout]}`; branch on `e_moviehouse_play_id` |
@@ -209,10 +209,12 @@ production Hermes and the **staging** player
 different URLs. For a play event to reach the replybot running *this* survey,
 the button must open the player wired to the *same* environment.
 
-This is one of **two** environment-specific steps; the other is
-[`attachment_id`](#attachment_id-fields-are-page-scoped). Both branch off the
-single `test_environment` pick. Everything else in the smoke test is
-environment-neutral (handoff even shares one smoke-echo app across both envs).
+This is now the **only** environment-specific step in the survey — the
+`attachment_id` prod/staging split that used to be the other one is gone; the
+handle layer scopes by account instead of asking the respondent (see
+[Media fields](#media-fields-what-each-one-proves)). Everything else in the
+smoke test is environment-neutral (handoff even shares one smoke-echo app
+across both envs).
 
 ### How the form handles it — an explicit environment pick
 
@@ -283,46 +285,42 @@ once here.
   play event (you'd only ever see `movie_timeout`). The on-screen echo-back is
   the guard — read it before pressing play.
 
-## `attachment_id` fields are page-scoped
+## Media fields — what each one proves
 
-`media_attachment_id_prod` / `media_attachment_id_staging` send an image that is
-**already uploaded to the page**, referenced by id instead of a URL. Meta scopes
-a reusable attachment id to the page that uploaded it, so **an id minted on one
-page is meaningless on another** — including across environments. Sending a
-staging id from the production page fails with:
+Four media-abstraction fields run back to back (`media_legacy_attachment_id` →
+`media_asset_url` → `media_third_party_url` → `media_asset_repeat`), each
+exercising a different resolution path from `planning/media-abstraction.md`
+§8.3. `confirm_attachment` is the single arrival check for all four.
 
-```
-(#100) Failed to load attachment from attachment ID.
-```
+| Field | Proves | Expected on Messenger | Expected on WhatsApp |
+|---|---|---|---|
+| `media_legacy_attachment_id` | **The BC regression guard.** §8.3 rule 1: `media_attachment_id` present + Messenger → send by that id, byte-for-byte unchanged from today. Per the production audit (§11.1), legacy `attachment_id` fields carry ~100% of live Messenger media traffic — this is the single most important field in the file. Its `attachment_id` value must never be changed; Meta offers no way to recover the original file from an id, so a wrong value cannot be fixed, only replaced by a fresh upload elsewhere. | Sends | **Fails cleanly** — `ErrAttachmentIDUnsupported` (`translator_whatsapp.go:309`). This is correct and intended, not a bug: attachment ids were never supported on WhatsApp. |
+| `media_asset_url` | The new dashboard-issued asset URL path (§8.3 rule 2: `/a/<uuid>` parsed, handle looked up for `(asset, platform, account)`, sent by handle if found else by URL). **⚠️ Currently a placeholder** — see below. | Sends (by URL until real handles exist) | Sends (by URL until real handles exist) |
+| `media_third_party_url` | An ordinary, unmirrored third-party URL (the imgur image already used elsewhere in production surveys) still works — §2's "third-party URLs are out of scope" means no handle, no acceleration, just a plain URL send | Sends | Sends |
+| `media_asset_repeat` | **Handle reuse.** The same asset URL as `media_asset_url`, sent a second time. This is the only field that can tell a reused handle apart from a silent per-send URL fallback — without it every send could be falling back to URL and the suite would still pass | Sends | Sends |
 
-Hence two fields, branched from `test_environment` by the `confirm_file` logic.
-Only one is ever shown.
+### The `media_asset_url` / `media_asset_repeat` placeholder
 
-### Where the ids come from
+Both fields currently point at
+`https://media.vlab.digital/a/00000000-0000-0000-0000-000000000000/PLACEHOLDER-replace-with-real-asset.png`.
+**This is not a real asset** — the dashboard upload path that would create one
+does not exist yet (`planning/media-abstraction.md` §3, §11.4). The all-zero
+UUID and the `PLACEHOLDER-` filename prefix are deliberate markers, not a typo.
 
-You do not need to upload anything by hand. Every URL-based media send in this
-survey passes `is_reusable: true`, so Messenger **mints an attachment id and
-returns it** on the send. Walk the survey in the environment you need, then read
-the id out of the send response:
+Before these two fields can pass: build the upload path, upload a real file
+through it, and replace the URL in both fields with the real `public_url` the
+dashboard returns. Until then, expect these two sends to fail (no such object
+in storage) — that failure is expected, not a regression.
 
-```bash
-kubectl logs --namespace <vprod|vstag> deploy/gbv-message-worker --tail=2000 \
-  | grep -oE '"message_id":"[^"]+","attachment_id":"[0-9]+"'
-```
+### Distinguishing "wrong id" from "broken code" (legacy `attachment_id`)
 
-The id returned immediately before the `ref=welcome` command is the welcome
-image's. Any id minted on that page works; paste it into the matching field's
-`attachment_id`.
-
-### Distinguishing "wrong id" from "broken code"
-
-Both fail with code 100, but the messages differ, and the difference is the
-whole diagnosis:
+If `media_legacy_attachment_id` fails on Messenger, both of these read as HTTP
+code 100 from Meta, but the message text is the whole diagnosis:
 
 | error | meaning |
 |---|---|
 | `... should represent a valid URL` | the request is **malformed** — an attachment descriptor leaked into `media_url`. This was a real bug, fixed in replybot v0.0.211 / message-worker v0.1.17 |
-| `Failed to load attachment from attachment ID.` | the request is **well-formed**; the id just isn't valid for this page. Wrong environment's id |
+| `Failed to load attachment from attachment ID.` | the request is **well-formed**; the id just isn't valid for the page this smoke test is currently running against. Attachment ids are still page-scoped — pasting one minted on a different page fails this way |
 
 ## The `utility_message` field (page-specific, not env-specific)
 

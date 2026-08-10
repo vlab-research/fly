@@ -43,6 +43,11 @@ type Config struct {
 
 	// Error reporting
 	BotserverURL string // For reporting errors to botserver /synthetic endpoint
+
+	// Media handle layer (planning/media-abstraction.md). Off by default --
+	// this ships dark; see §8.5 for the staged rollout.
+	MediaHandleUse    bool
+	MediaHandleMargin time.Duration
 }
 
 // LoadConfigFromEnv loads configuration from environment variables
@@ -82,6 +87,10 @@ func LoadConfigFromEnv() (*Config, error) {
 
 		// Error reporting
 		BotserverURL: os.Getenv("BOTSERVER_URL"),
+
+		// Media handle layer -- DEFAULT OFF, ships dark.
+		MediaHandleUse:    getEnvAsBool("MEDIA_HANDLE_USE", false),
+		MediaHandleMargin: getEnvAsDuration("MEDIA_HANDLE_MARGIN", time.Hour),
 	}
 
 	// Validate required config
@@ -124,6 +133,24 @@ func getEnvAsInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if durValue, err := time.ParseDuration(value); err == nil {
+			return durValue
 		}
 	}
 	return defaultValue

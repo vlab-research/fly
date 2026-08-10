@@ -114,8 +114,10 @@ type WhatsAppRow struct {
 	Description string `json:"description,omitempty"`
 }
 
-// WhatsAppMedia represents media content
+// WhatsAppMedia represents media content. Exactly one of Link/ID is set --
+// omitempty on both keeps only the populated one on the wire.
 type WhatsAppMedia struct {
-	Link    string `json:"link"`
+	Link    string `json:"link,omitempty"`
+	ID      string `json:"id,omitempty"`
 	Caption string `json:"caption,omitempty"`
 }

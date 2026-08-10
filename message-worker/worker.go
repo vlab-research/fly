@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vlab-research/botparty"
+	"github.com/vlab-research/fly/message-worker/mediaresolve"
 	"github.com/vlab-research/fly/message-worker/types"
 	"go.uber.org/zap"
 )
@@ -60,6 +61,10 @@ type Worker struct {
 	config   RetryConfig
 	bp       *botparty.BotParty
 	logger   *zap.Logger
+
+	mediaStore     MediaStore
+	mediaHandleUse bool
+	mediaMargin    time.Duration
 }
 
 func NewWorker(clients map[types.PlatformType]MessageSender, producer EventProducer, botserverURL string, logger *zap.Logger) *Worker {
@@ -71,6 +76,16 @@ func NewWorker(clients map[types.PlatformType]MessageSender, producer EventProdu
 		bp:       bp,
 		logger:   logger,
 	}
+}
+
+// WithMediaStore enables the media handle layer. A Worker without one sends
+// all media by URL -- the handle layer is an optimisation, never a
+// requirement.
+func (w *Worker) WithMediaStore(store MediaStore, use bool, margin time.Duration) *Worker {
+	w.mediaStore = store
+	w.mediaHandleUse = use
+	w.mediaMargin = margin
+	return w
 }
 
 func (w *Worker) ProcessCommand(ctx context.Context, rawCmd json.RawMessage) error {
@@ -108,6 +123,8 @@ func (w *Worker) ProcessCommand(ctx context.Context, rawCmd json.RawMessage) err
 }
 
 func (w *Worker) processSendMessage(ctx context.Context, cmd types.SendMessageCommand) error {
+	w.resolveMedia(ctx, &cmd)
+
 	var platformMsg interface{}
 	var err error
 
@@ -170,6 +187,68 @@ func (w *Worker) processSendMessage(ctx context.Context, cmd types.SendMessageCo
 	// Event emission is temporarily disabled - replybot can't parse message_worker event shape
 	// return w.emitMessageSent(ctx, cmd, resp.MessageID, 1)
 	return nil
+}
+
+// resolveMedia decides, once, how a media message should be addressed on the
+// wire, and stashes the decision on cmd.ResolvedMedia for the translators to
+// read. See planning/media-abstraction.md §8.3 for the three resolution rules
+// (order-sensitive) and §13 for the failure-mode table this implements.
+func (w *Worker) resolveMedia(ctx context.Context, cmd *types.SendMessageCommand) {
+	msg := &cmd.Message
+	if msg.Type != types.MessageTypeMedia {
+		return
+	}
+	// Rule 1 (§8.3): a legacy attachment id wins and is passed through
+	// byte-for-byte. Never resolved, never touched.
+	if !types.Blank(msg.MediaAttachmentID) {
+		return
+	}
+	if types.Blank(msg.MediaURL) {
+		return
+	}
+	url := *msg.MediaURL
+
+	// Default to a URL send. EVERY early return below leaves this in place,
+	// which is what makes the handle layer optional.
+	cmd.ResolvedMedia = &types.MediaSendable{Kind: types.MediaByURL, URL: url}
+
+	if !w.mediaHandleUse || w.mediaStore == nil {
+		return
+	}
+	assetID, ok := mediaresolve.ParseAssetID(url)
+	if !ok {
+		return // third-party URL: no lookup, send as-is
+	}
+
+	handle, err := w.mediaStore.GetHandle(ctx, assetID, cmd.PlatformAccountID)
+	if err != nil {
+		// §13: a lookup failure MUST be logged and treated as a miss. This
+		// is what makes "the handle layer can fail entirely" true rather
+		// than aspirational.
+		w.logger.Warn("media handle lookup failed, sending by URL",
+			zap.Error(err),
+			zap.String("asset_id", assetID),
+			zap.String("platform_account_id", cmd.PlatformAccountID),
+		)
+		return
+	}
+	resolved := mediaresolve.Resolve(time.Now(), url, handle, w.mediaMargin)
+	cmd.ResolvedMedia = &resolved
+
+	if resolved.Kind == types.MediaByURL {
+		// §8.5: the by-URL counter is the health signal for the handle layer.
+		// A by-URL send for dashboard-uploaded media (asset URL parsed
+		// successfully) is an anomaly and should sit near zero -- if it is
+		// not, the fan-out or the reconciler is broken. No metrics
+		// infrastructure (promauto/client_golang) exists in message-worker
+		// today, so this is a structured log line rather than a counter; see
+		// the implementation report for the metrics decision this needs.
+		w.logger.Info("media resolved by_url",
+			zap.String("kind", resolved.Kind.String()),
+			zap.String("asset_id", assetID),
+			zap.String("platform_account_id", cmd.PlatformAccountID),
+		)
+	}
 }
 
 // emitWhatsAppEcho publishes a replybot-shaped WhatsApp event (type "bot_echo")

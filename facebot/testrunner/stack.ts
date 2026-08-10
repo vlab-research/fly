@@ -383,6 +383,17 @@ export async function startStack(): Promise<Stack> {
     WHATSAPP_GRAPH_URL: 'http://facebot:3000',
     NUM_WORKERS: '1',
     TOKEN_CACHE_TTL: '300',
+    // Media handle layer (planning/media-abstraction.md §8.5). This DEFAULTS TO
+    // OFF in message-worker/config.go because the feature ships dark in
+    // production. It must be ON here or every media resolution test silently
+    // passes by sending everything by URL — a handle miss is not an error, it is
+    // the designed fallback, so the suite would look green while resolution was
+    // never exercised at all.
+    MEDIA_HANDLE_USE: 'true',
+    // Expiry margin. The seeded WhatsApp handle expires 30 days out, so any
+    // small margin keeps it usable; pinning it here stops a future default
+    // change from quietly turning the by-id tests into by-url tests.
+    MEDIA_HANDLE_MARGIN: '1h',
   };
 
   const messageWorker = await new GenericContainer(messageWorkerImageName)

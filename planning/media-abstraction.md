@@ -989,7 +989,7 @@ decoding the file:
 
 | Constraint | Enforceable? |
 |---|---|
-| *"Images must be 8-bit, RGB or RGBA"* | **Partly** — PNG bit depth is byte 24 of the IHDR, cheap to read. Worth doing. |
+| *"Images must be 8-bit, RGB or RGBA"* | **Partly — SHIPPED 2026-08-10.** PNG bit depth is byte 24 of the IHDR, cheap to read, and a non-8-bit PNG is now refused with an error naming its actual depth. Colour type is deliberately not enforced: 8-bit greyscale and palette PNGs are accepted in practice, and refusing them would cost real files for no observed gain. |
 | *"OPUS codecs only; base audio/ogg not supported; mono input only"* | **Partly** — an `OpusHead` marker in the first Ogg page is cheap; channel count needs a little more. |
 | *"Only H.264 video codec and AAC audio codec … single audio stream or no audio stream"* | **No** — requires demuxing. Out of proportion. |
 
@@ -1008,9 +1008,24 @@ omission is a decision rather than a gap.
 `sniffContentType`, which returns `application/octet-stream` for *anything it cannot
 positively identify* — and that includes an HTML or SVG payload renamed `.png`. So
 "accept any document" would mean "accept unidentifiable bytes", which is exactly the
-active-content class §4.6 refuses to serve from our own domain. Documents are therefore
-**PDF only**. Widening this means teaching the sniffer new document magic bytes, never
-loosening the octet-stream rejection.
+active-content class §4.6 refuses to serve from our own domain. Widening document support
+means teaching the sniffer new document magic bytes, never loosening the octet-stream
+rejection.
+
+**What shipped (2026-08-10): four of Meta's eight document types.**
+
+| Meta type | Shipped | How |
+|---|---|---|
+| `application/pdf` | accepted | `%PDF-` magic |
+| the three OOXML types | accepted | ZIP magic (`PK\x03\x04`), then the subtype read from the package's own `[Content_Types].xml` — the first ZIP entry is inflated and its declared `…main+xml` part type matched. Identification, never a guess from the extension |
+| `application/msword`, `…ms-excel`, `…ms-powerpoint` | refused | OLE2/CFB magic names the container — which `.msi` and `.msg` share — but telling the three Office types apart needs a CFB directory walk down the FAT sector chain. Reported as `application/x-ole-storage` and refused with an error naming the format |
+| `text/plain` | refused | no magic bytes at all; see above. Deliberate, pinned by test |
+
+A ZIP that does not resolve to an OOXML package — a plain archive, an ODT, or a
+macro-enabled `docm` whose main part type differs — is reported as `application/zip`:
+named, so the error can say "ZIP archive", but never accepted. Refusing macro-enabled
+packages falls out of matching the exact main part type, and is welcome rather than
+incidental: they carry executable content.
 
 This **narrows** the previous `ALLOWED_MIME_TYPES`: GIF, WebP, QuickTime, WebM and WAV
 were accepted before and are not WhatsApp-sendable, so they are now refused. Each has a
@@ -1026,12 +1041,9 @@ container and for an HTML/SVG payload relabelled as an image (§4.6's "believing
 for these bytes would serve executable HTML from our own domain" guard, pinned by the
 `refuses to identify an html payload` / `rejects an svg` tests). Trusting octet-stream as
 "a document" would defeat that guard. So in `media.core.js`, "any" is implemented as "any
-container the sniffer can positively name as a document" — currently `application/pdf`
-only, since that is the only document magic-byte pattern `sniffContentType` recognises.
-Extending document support to more formats (docx, csv, xlsx, …) means teaching the sniffer
-their magic bytes first, not widening the accept check to include octet-stream. Treat the
-table above as the target once the sniffer covers more formats, and `MEDIA_TYPE_LIMITS.file`'s
-comment in `media.core.js` as the current, narrower truth.
+container the sniffer can positively name as a document" — today PDF and the three OOXML
+types, per the table above. Extending that further (csv, rtf, …) means teaching the sniffer
+their magic bytes first, not widening the accept check to include octet-stream.
 
 **11.6 Orphaned assets.** Much smaller now that identity is a UUID and deletion is safe —
 delete the row, delete the object, handles cascade. Remaining question is only whether to

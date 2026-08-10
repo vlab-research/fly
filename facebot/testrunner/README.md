@@ -114,6 +114,53 @@ await flowMaster(userId, [[ok, fields[1].question, []]]);
 
 **Watch out for the `QOUT` race**: dean's followups query only matches rows where `current_state = 'QOUT'`. If your test waits for "any state row" before calling `triggerDean(...)`, it can race the scribble upsert and dean will find zero overdue users. Always `waitFor` the specific `'QOUT'` state before triggering followups (see the inline comment above the followups test in `test.tc.ts`).
 
+### Asserting the full outbound payload: `receiveSent` and `receiveAndEcho`
+
+`flowMaster` only ever compares `data.message`, and `getFields` only returns
+`translator(f).message` — so neither can see top-level fields like
+`messaging_type`/`tag`, nor assert which *keys* a payload does and does not carry.
+For those, use `receiveSent(userId)` (in `socket.ts`), which returns the full POST
+body the worker sent and acks it.
+
+`receiveAndEcho(userId)` (local to `test.tc.ts`) is `receiveSent` plus the echo
+`flowMaster` would have sent, built from the metadata facebot actually received —
+so a test can assert an arbitrary payload shape and still drive the conversation
+forward without depending on the JS translator agreeing with the Go one.
+
+**Consume every message your form produces.** The stack runs message-worker with
+`NUM_WORKERS: '1'`, so one un-acked send blocks the only worker goroutine for
+facebot's 10s timeout. Inside `mocha.parallel` that starves every other test in
+the block, and it surfaces as a wave of unrelated 45s timeouts rather than a
+failure in the test that left the message behind.
+
+### Media resolution tests
+
+`forms/media*.json` drive the media handle layer (`planning/media-abstraction.md`).
+They follow the `multi-part-attachment.json` shape — the attachment config is a
+JSON blob in a `statement` field's `properties.description` — and each ends in an
+unanswered `multiple_choice`, which is where the conversation stops.
+
+The fixture rows live in `seed-db.ts` (`media_asset` + `media_handle`, created by
+`devops/migrations/24-media-assets.sql`, which `stack.ts` applies on boot):
+
+| Asset UUID | Handle |
+|---|---|
+| `1111…1111` | Messenger, `account_id` = page `935593143497601`, `platform_media_id` `900000000000001`, no expiry |
+| `2222…2222` | WhatsApp, `account_id` = phone_number_id `106540352242922`, `platform_media_id` `900000000000002`, expires +30d |
+| `3333…3333` | none — the miss case, on both platforms |
+
+The handle key is `(asset_id, account_id)` with **no platform component**, so the
+seeded `account_id` must be exactly the platform account id the rest of `seed-db.ts`
+creates credentials for. If they drift apart every lookup misses, and a miss is
+not an error — it is the designed URL fallback, so the suite stays green while the
+handle layer does nothing.
+
+`stack.ts` sets `MEDIA_HANDLE_USE: 'true'` for message-worker. It defaults to
+**off** (the feature ships dark), and with it off the three by-id tests fail while
+the by-URL and legacy-`attachment_id` tests still pass — those are insensitive to
+the flag by construction, since sending by URL is exactly what a disabled resolver
+does.
+
 ### Parallel vs. serial test blocks
 
 Only the `Basic Functionality` `describe`/`it` block uses `mocha.parallel`. The `Timeouts` and `Phone normalization via e164 transform` blocks in `test.tc.ts` (and the `Timeouts` block in `test.ts`) run serially. Don't assume tests elsewhere in the suite run concurrently with each other.
@@ -215,7 +262,7 @@ This is only relevant when testing deployment to the dev cluster.
 | `responses.ts` | Reads response/state rows back from CockroachDB for assertions |
 | `utils.ts` | `snooze()` and `waitFor()` polling helpers |
 | `sender.ts` | Sends messages to botserver |
-| `seed-db.ts` | Seeds test forms and clears state between tests |
+| `seed-db.ts` | Seeds test forms, credentials, and the `media_asset`/`media_handle` fixture |
 | `schema.sql` | CockroachDB test schema |
 | `forms/*.json` | Test form definitions |
 

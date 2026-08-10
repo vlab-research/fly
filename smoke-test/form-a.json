@@ -195,7 +195,7 @@
     {
       "type": "multiple_choice",
       "ref": "test_environment",
-      "title": "🌐 Which environment are you testing right now? Asked once, up front: it selects both the attachment_id image (ids are scoped to the page that uploaded them) and the matching moviehouse video player.",
+      "title": "🌐 Which environment are you testing right now? Asked once, up front, purely to pick the matching moviehouse video player later — production and staging run separate players that only talk to their own backend.",
       "properties": {
         "choices": [
           { "label": "Production", "ref": "choice_env_prod" },
@@ -209,7 +209,7 @@
     {
       "type": "multiple_choice",
       "ref": "test_attachments",
-      "title": "📎 Would you like to test bot-sent media attachments (video, PDF, image)? This sends three files back to back and can take a few moments — expect a short pause after you tap Yes.",
+      "title": "📎 Would you like to test bot-sent media attachments (video, PDF, images)? This sends several files back to back and can take a few moments — expect a short pause after you tap Yes.",
       "properties": {
         "choices": [
           { "label": "Yes", "ref": "choice_test_attachments_yes" },
@@ -270,8 +270,8 @@
     },
     {
       "type": "statement",
-      "ref": "media_attachment_id_prod",
-      "title": "🖼️ And here's an IMAGE sent by attachment_id (PRODUCTION) — pre-uploaded to the page rather than fetched from a URL:",
+      "ref": "media_legacy_attachment_id",
+      "title": "🖼️ And here's an IMAGE sent by a legacy attachment_id — the old pre-upload method, kept permanently for backwards compatibility since Meta offers no way to migrate an existing attachment_id into an asset. Should work on Messenger; on WhatsApp it is expected to fail cleanly, since attachment ids were never supported there.",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
@@ -280,18 +280,38 @@
     },
     {
       "type": "statement",
-      "ref": "media_attachment_id_staging",
-      "title": "🖼️ And here's an IMAGE sent by attachment_id (STAGING) — pre-uploaded to the page rather than fetched from a URL:",
+      "ref": "media_asset_url",
+      "title": "🖼️ Now an image sent by a dashboard asset URL — the new upload path. ⚠️ PLACEHOLDER: the UUID below is not a real uploaded asset (the dashboard upload path doesn't exist yet); this field will fail to send until it is swapped for a real https://media.vlab.digital/a/<uuid>/<filename> URL.",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1658615935222752\"}}"
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/00000000-0000-0000-0000-000000000000/PLACEHOLDER-replace-with-real-asset.png\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_third_party_url",
+      "title": "🖼️ And here's an ordinary third-party image URL — not a dashboard asset, proving that plain third-party URLs still work unaccelerated (no handle, no mirroring):",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://i.imgur.com/ZSHauqq.png\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_repeat",
+      "title": "🖼️ And the SAME dashboard asset URL again — this second send is the only proof that the handle is being reused rather than silently falling back to a fresh by-URL send every time:",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/00000000-0000-0000-0000-000000000000/PLACEHOLDER-replace-with-real-asset.png\"}}"
       }
     },
     {
       "type": "multiple_choice",
       "ref": "confirm_attachment",
-      "title": "Did the by-attachment_id IMAGE actually arrive? If not, the id is probably scoped to the other environment's page — check message-worker logs for \"Failed to load attachment from attachment ID\".",
+      "title": "Did those four images actually arrive — legacy attachment_id, dashboard asset URL, third-party URL, and the repeated asset URL? A failed send is reported and committed rather than retried, so answer honestly. On WhatsApp the legacy attachment_id one is EXPECTED to fail (WhatsApp never supported attachment ids) — the other three should still arrive there.",
       "properties": {
         "choices": [
           { "label": "Yes", "ref": "choice_confirm_attachment_yes" },
@@ -635,51 +655,6 @@
           "action": "jump",
           "details": {
             "to": { "type": "field", "value": "send_picture" }
-          },
-          "condition": {
-            "op": "always",
-            "vars": []
-          }
-        }
-      ]
-    },
-    {
-      "type": "field",
-      "ref": "confirm_file",
-      "actions": [
-        {
-          "action": "jump",
-          "details": {
-            "to": { "type": "field", "value": "media_attachment_id_staging" }
-          },
-          "condition": {
-            "op": "is",
-            "vars": [
-              { "type": "field", "value": "test_environment" },
-              { "type": "choice", "value": "choice_env_staging" }
-            ]
-          }
-        },
-        {
-          "action": "jump",
-          "details": {
-            "to": { "type": "field", "value": "media_attachment_id_prod" }
-          },
-          "condition": {
-            "op": "always",
-            "vars": []
-          }
-        }
-      ]
-    },
-    {
-      "type": "field",
-      "ref": "media_attachment_id_prod",
-      "actions": [
-        {
-          "action": "jump",
-          "details": {
-            "to": { "type": "field", "value": "confirm_attachment" }
           },
           "condition": {
             "op": "always",

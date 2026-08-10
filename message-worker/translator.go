@@ -30,7 +30,7 @@ func TranslateToMessenger(cmd types.SendMessageCommand) (types.MessengerMessage,
 	case types.MessageTypeQuestion:
 		return translateMessengerQuestion(cmd.Message, metadata)
 	case types.MessageTypeMedia:
-		return translateMessengerMedia(cmd.Message, metadata)
+		return translateMessengerMedia(cmd.Message, metadata, cmd.ResolvedMedia)
 	default:
 		return types.MessengerMessage{}, fmt.Errorf("%w: %s", types.ErrUnsupportedMessageType, cmd.Message.Type)
 	}
@@ -331,7 +331,7 @@ func ptrBool(b bool) *bool {
 	return &b
 }
 
-func translateMessengerMedia(msg types.MessageContent, metadata string) (types.MessengerMessage, error) {
+func translateMessengerMedia(msg types.MessageContent, metadata string, resolved *types.MediaSendable) (types.MessengerMessage, error) {
 	var attachmentType string
 	switch *msg.MediaType {
 	case types.MediaTypeImage:
@@ -350,9 +350,13 @@ func translateMessengerMedia(msg types.MessageContent, metadata string) (types.M
 	// one of them is set; is_reusable belongs only to the URL form.
 	payload := types.AttachmentPayload{}
 	if types.Blank(msg.MediaAttachmentID) {
-		payload.URL, payload.IsReusable = *msg.MediaURL, ptrBool(true)
+		if resolved != nil && resolved.Kind == types.MediaByID {
+			payload.AttachmentID = resolved.ID
+		} else {
+			payload.URL, payload.IsReusable = *msg.MediaURL, ptrBool(true)
+		}
 	} else {
-		payload.AttachmentID = *msg.MediaAttachmentID
+		payload.AttachmentID = *msg.MediaAttachmentID // UNCHANGED
 	}
 
 	return types.MessengerMessage{

@@ -41,7 +41,7 @@ func TranslateToWhatsApp(cmd types.SendMessageCommand) (types.WhatsAppMessage, e
 	case types.MessageTypeQuestion:
 		return translateWhatsAppQuestion(cmd.Message)
 	case types.MessageTypeMedia:
-		return translateWhatsAppMedia(cmd.Message)
+		return translateWhatsAppMedia(cmd.Message, cmd.ResolvedMedia)
 	default:
 		return types.WhatsAppMessage{}, fmt.Errorf("%w: %s", types.ErrUnsupportedMessageType, cmd.Message.Type)
 	}
@@ -304,13 +304,16 @@ func translateWhatsAppList(msg types.MessageContent) (types.WhatsAppMessage, err
 	}, nil
 }
 
-func translateWhatsAppMedia(msg types.MessageContent) (types.WhatsAppMessage, error) {
+func translateWhatsAppMedia(msg types.MessageContent, resolved *types.MediaSendable) (types.WhatsAppMessage, error) {
 	if types.Blank(msg.MediaURL) {
 		return types.WhatsAppMessage{}, types.ErrAttachmentIDUnsupported
 	}
 
-	media := types.WhatsAppMedia{
-		Link: *msg.MediaURL,
+	media := types.WhatsAppMedia{}
+	if resolved != nil && resolved.Kind == types.MediaByID {
+		media.ID = resolved.ID
+	} else {
+		media.Link = *msg.MediaURL
 	}
 	if msg.Caption != nil {
 		media.Caption = *msg.Caption

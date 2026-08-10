@@ -126,6 +126,21 @@ func main() {
 	worker := messageworker.NewWorker(clients, eventProducer, config.BotserverURL, logger)
 	logger.Info("worker initialized with botserver", zap.String("botserver_url", config.BotserverURL))
 
+	// Media handle layer (planning/media-abstraction.md). A lookup failure here
+	// must not stop the worker from starting -- the handle layer is an
+	// optimisation, never a requirement, so a store that failed to initialize
+	// degrades to URL-only sends the same way a nil store does.
+	mediaStore, err := messageworker.NewPostgresMediaStore(ctx, config.DatabaseURL)
+	if err != nil {
+		logger.Warn("failed to create media store, media will send by URL only", zap.Error(err))
+	} else {
+		defer mediaStore.Close()
+		worker = worker.WithMediaStore(mediaStore, config.MediaHandleUse, config.MediaHandleMargin)
+	}
+	logger.Info("media handle layer configured",
+		zap.Bool("media_handle_use", config.MediaHandleUse),
+		zap.Duration("media_handle_margin", config.MediaHandleMargin))
+
 	// Create Burrow pool for concurrent processing
 	burrowConfig := burrow.DefaultConfig(logger)
 	burrowConfig.NumWorkers = config.NumWorkers

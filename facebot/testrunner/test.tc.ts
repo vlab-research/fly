@@ -5,7 +5,14 @@ import sendMessage from './sender';
 import { makeQR, makePostback, makeTextResponse, makeReferral, makeSynthetic, getFields, fieldsFromForm, makeNotify, makeEcho, makeHandover, makeWhatsAppReferral, makeWhatsAppText, makeWhatsAppReply, makeWhatsAppTextStart, Field } from './mox';
 import { v4 as uuid } from 'uuid';
 import farmhash from 'farmhash';
-import { seed } from './seed-db';
+import {
+  seed,
+  LEGACY_ATTACHMENT_ID,
+  MESSENGER_PLATFORM_MEDIA_ID,
+  WHATSAPP_PLATFORM_MEDIA_ID,
+  MEDIA_URL_NO_HANDLE,
+  THIRD_PARTY_MEDIA_URL,
+} from './seed-db';
 import { flowMaster, flowMasterWhatsApp, TestFlow, ErrorResponse, SuccessResponse, receiveSent } from './socket';
 import { snooze, waitFor } from './utils';
 import { getResponses, getState } from './responses';
@@ -71,6 +78,24 @@ function interpolate(str: string, values: Record<string, string>): string {
 }
 
 const get = { text: 'get message' }; // Define get message
+
+// Receive one outbound Messenger payload, ack it, and echo it back into the
+// pipeline — exactly what flowMaster does per interaction, minus the equality
+// assertion, so a test can assert the FULL POST body (which flowMaster hides,
+// since it only ever compares data.message) and still drive the conversation.
+//
+// Every message a form produces MUST be consumed this way. The stack runs
+// message-worker with NUM_WORKERS=1, so a single un-acked send blocks the only
+// worker goroutine for facebot's full 10s timeout — which starves every other
+// test in the same mocha.parallel block, not just the one that left the mess.
+async function receiveAndEcho(userId: string): Promise<any> {
+  const sent = await receiveSent(userId);
+  await sendMessage(makeEcho({
+    metadata: sent.message?.metadata,
+    text: sent.message?.text,
+  } as Field, userId));
+  return sent;
+}
 
 ///////////////////////////////////////////////
 // TESTS -----------------------------------
@@ -570,6 +595,126 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(userId, testFlow);
     });
 
+    ///////////////////////////////////////////////
+    // MEDIA RESOLUTION (planning/media-abstraction.md §8.3, §10 section 4)
+    //
+    // These assert the SHAPE of the attachment payload that reached facebot —
+    // which key is present and, just as importantly, which is absent — because
+    // `attachment_id` and `url` are both `omitempty` on
+    // types.AttachmentPayload. Asserting only "a message arrived" would pass
+    // with the resolver disabled entirely and would therefore prove nothing.
+    //
+    // They live in `Basic Functionality` because they are ordinary Messenger
+    // send-path tests: each uses its own uuid user, reads only seeded rows and
+    // never triggers dean, so it satisfies the one constraint mocha.parallel
+    // imposes here. The serial blocks exist for dean/QOUT ordering
+    // (documentation/testing.md, "Cross-cutting harness gotchas"), which none
+    // of this touches.
+    //
+    // Each media form ends in an unanswered multiple_choice, which is where the
+    // conversation stops. Every test below therefore drains BOTH messages the
+    // form produces (see receiveAndEcho): leaving the trailing question un-acked
+    // costs facebot's 10s send timeout on the stack's single worker goroutine
+    // and cascades into unrelated failures across this whole parallel block.
+
+    // Rule 1 (§8.3): a legacy `media_attachment_id` is passed through
+    // byte-for-byte and never resolved. §11.1's production audit found this
+    // path carries ~100% of live media traffic, so this is the regression that
+    // matters most. `is_reusable` and `url` belong only to the URL form; their
+    // presence would mean the legacy branch had been rerouted.
+    it('Legacy Messenger attachment_id is sent untouched, with no url or is_reusable', async () => {
+      const userId = uuid();
+
+      await sendMessage(makeReferral(userId, 'mediaLegacyId'));
+      const sent = await receiveAndEcho(userId);
+
+      sent.message.attachment.type.should.equal('image');
+      const payload = sent.message.attachment.payload;
+      payload.should.have.property('attachment_id', LEGACY_ATTACHMENT_ID);
+      payload.should.not.have.property('url');
+      payload.should.not.have.property('is_reusable');
+
+      await receiveAndEcho(userId); // drain the terminal question
+    });
+
+    // Rule 2, hit: the asset URL parses, the handle row exists for THIS page id,
+    // so the send carries the seeded platform_media_id rather than the URL.
+    it('Asset URL with a live Messenger handle sends by attachment_id, not by url', async () => {
+      const userId = uuid();
+
+      await sendMessage(makeReferral(userId, 'mediaAssetHandle'));
+      const sent = await receiveAndEcho(userId);
+
+      const payload = sent.message.attachment.payload;
+      payload.should.have.property('attachment_id', MESSENGER_PLATFORM_MEDIA_ID);
+      payload.should.not.have.property('url');
+      payload.should.not.have.property('is_reusable');
+
+      await receiveAndEcho(userId); // drain the terminal question
+    });
+
+    // Rule 2, miss: an asset of ours with no handle row on any account. The
+    // handle layer is an optimisation, never a requirement — a miss degrades to
+    // a URL send rather than failing the message (§13).
+    it('Asset URL with no handle degrades to a url send', async () => {
+      const userId = uuid();
+
+      await sendMessage(makeReferral(userId, 'mediaAssetNoHandle'));
+      const sent = await receiveAndEcho(userId);
+
+      const payload = sent.message.attachment.payload;
+      payload.should.have.property('url', MEDIA_URL_NO_HANDLE);
+      payload.should.have.property('is_reusable', true);
+      payload.should.not.have.property('attachment_id');
+
+      await receiveAndEcho(userId); // drain the terminal question
+    });
+
+    // A third-party URL is deliberately out of scope (§2, "Third-party URLs are
+    // out of scope"): it fails ParseAssetID, so no lookup happens at all and it
+    // is sent exactly as it is today. This is the no-regression pin for authors
+    // who paste imgur links.
+    it('Third-party URL is always sent by url, never resolved', async () => {
+      const userId = uuid();
+
+      await sendMessage(makeReferral(userId, 'mediaThirdParty'));
+      const sent = await receiveAndEcho(userId);
+
+      const payload = sent.message.attachment.payload;
+      payload.should.have.property('url', THIRD_PARTY_MEDIA_URL);
+      payload.should.have.property('is_reusable', true);
+      payload.should.not.have.property('attachment_id');
+
+      await receiveAndEcho(userId); // drain the terminal question
+    });
+
+    // HANDLE REUSE — the single most important case here (§10 section 4).
+    // The worker resolves per command, so a handle that worked once must work
+    // every time. Without this, every send in the suite could be a silent URL
+    // fallback and everything would still pass green. The echo between the two
+    // sends is built from the metadata facebot actually received, so it does not
+    // depend on the JS translator agreeing with the Go one.
+    it('Sending the same asset twice in one flow sends by attachment_id both times', async () => {
+      const userId = uuid();
+
+      await sendMessage(makeReferral(userId, 'mediaHandleReuse'));
+
+      const first = await receiveAndEcho(userId);
+      first.message.attachment.payload.should.have.property('attachment_id', MESSENGER_PLATFORM_MEDIA_ID);
+      first.message.attachment.payload.should.not.have.property('url');
+
+      const second = await receiveAndEcho(userId);
+      second.message.attachment.payload.should.have.property('attachment_id', MESSENGER_PLATFORM_MEDIA_ID);
+      second.message.attachment.payload.should.not.have.property('url');
+
+      // Distinct fields, so this really is a second resolution and not the same
+      // message observed twice.
+      JSON.parse(second.message.metadata).ref
+        .should.not.equal(JSON.parse(first.message.metadata).ref);
+
+      await receiveAndEcho(userId); // drain the terminal question
+    });
+
     it('Waits for external event and continues after event', async () => {
       const userId = uuid();
       const fields = getFields('forms/Ep5wnS.json');
@@ -829,6 +974,45 @@ describe('Test Bot flow Survey Integration Testing', () => {
       sent.interactive.action.name.should.equal('cta_url');
       sent.interactive.action.parameters.display_text.should.equal('Open Website');
       sent.interactive.action.parameters.url.should.equal('https://example.com/survey-extra');
+    });
+
+    // MEDIA RESOLUTION on WhatsApp (§10 section 4, case 5). types.WhatsAppMedia
+    // has `omitempty` on BOTH `link` and `id`, so exactly one must be present
+    // and the other absent — a payload carrying both, or neither, is something
+    // the Cloud API would reject and that an "a message arrived" assertion would
+    // miss entirely. These live in the WhatsApp block for the same reason every
+    // other WhatsApp send-shape test does: the outbound envelope is a different
+    // shape, and the flow is advanced by the worker's own bot_echo rather than
+    // by an echo the test sends.
+    it('WhatsApp asset URL with a live handle sends {id} and no {link}', async () => {
+      const userId = 'wa_' + uuid();
+
+      await sendMessage(makeWhatsAppReferral(userId, 'mediaAssetHandleWa'));
+      const sent = await receiveSent(userId);
+
+      sent.type.should.equal('image');
+      sent.image.should.have.property('id', WHATSAPP_PLATFORM_MEDIA_ID);
+      sent.image.should.not.have.property('link');
+
+      // Drain the terminal question. On WhatsApp the worker emits the bot_echo
+      // itself, so the next message arrives whether or not this test wants it;
+      // leaving it un-acked burns facebot's 10s timeout on the single worker.
+      await snooze(1000);
+      await receiveSent(userId);
+    });
+
+    it('WhatsApp asset URL with no handle sends {link} and no {id}', async () => {
+      const userId = 'wa_' + uuid();
+
+      await sendMessage(makeWhatsAppReferral(userId, 'mediaAssetNoHandle'));
+      const sent = await receiveSent(userId);
+
+      sent.type.should.equal('image');
+      sent.image.should.have.property('link', MEDIA_URL_NO_HANDLE);
+      sent.image.should.not.have.property('id');
+
+      await snooze(1000);
+      await receiveSent(userId); // drain the terminal question
     });
 
     ['red', 'blue'].forEach((color, idx) => {

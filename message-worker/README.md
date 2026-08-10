@@ -28,15 +28,19 @@ message-worker/
 │       └── main.go      # Service entry point
 ├── chart/               # Helm deployment chart
 ├── types/
-│   ├── command.go       # SendMessageCommand, MessageContent (including native & pass_thread_control)
+│   ├── command.go       # SendMessageCommand (incl. ResolvedMedia), MessageContent (including native & pass_thread_control)
 │   ├── errors.go        # Error types
 │   ├── events.go        # Event envelope types
+│   ├── media.go          # MediaSendable/MediaSendKind/MediaHandle -- data shapes for the media handle layer
 │   ├── messenger.go     # Messenger API types
-│   ├── whatsapp.go      # WhatsApp API types
+│   ├── whatsapp.go      # WhatsApp API types (WhatsAppMedia: Link or ID)
 │   └── instagram.go     # Instagram API types
+├── mediaresolve/
+│   └── mediaresolve.go  # Pure resolver: Resolve() decides by-id vs by-url; ParseAssetID() parses /a/<uuid>
 ├── client.go            # MessageSender interface
 ├── messenger_client.go  # Messenger API client (SendMessage, SendNativeMessage, PassThreadControl)
-├── worker.go            # Worker orchestration with routing by message type
+├── mediastore.go        # MediaStore interface + PostgresMediaStore (read-only handle lookup)
+├── worker.go            # Worker orchestration; Worker.resolveMedia runs the media resolution shell
 ├── translator.go        # Messenger translation
 ├── translator_whatsapp.go  # WhatsApp translation
 ├── translator_instagram.go # Instagram translation
@@ -44,7 +48,7 @@ message-worker/
 ├── tokenstore.go        # Token storage/caching
 ├── kafka.go             # Kafka producer
 ├── stub_clients.go      # Stub implementations for unimplemented platforms
-└── *_test.go            # Comprehensive tests including native and handoff
+└── *_test.go            # Comprehensive tests including native, handoff, and media resolution
 ```
 
 ## Usage
@@ -430,6 +434,55 @@ account id (`facebook_page` page_id, `whatsapp_business` phone_number_id).
 Tokens are cached per `platform + ":" + accountID` with a TTL (`PostgresTokenStore`).
 `StaticTokenStore` serves a fixed token for tests/facebot mock. See
 `documentation/platform-abstraction.md` ("Account ID Routing").
+
+## Media handle layer
+
+See `planning/media-abstraction.md` for the full design (§8.3 resolution rules, §13 failure
+modes). Summary of how it plugs into this service:
+
+- `mediaresolve/mediaresolve.go` is the pure, clock-injected core: `Resolve(now, url, handle,
+  margin) MediaSendable` decides `MediaByID` vs `MediaByURL`; `ParseAssetID(url)` extracts the
+  asset UUID from a `/a/<uuid>` path, host-independent, and reports `false` for any
+  third-party URL (no lookup is attempted for those).
+- `mediastore.go` (`MediaStore` interface, `PostgresMediaStore` impl) is the sole IO: a
+  read-only, uncached primary-key lookup of `(asset_id, account_id)` against
+  `chatroach.media_handle`. The worker never writes media state.
+- `Worker.resolveMedia` (in `worker.go`) is the impure shell that runs once at the top of
+  `processSendMessage`, before the platform switch, and sets
+  `SendMessageCommand.ResolvedMedia` (`json:"-"`, never serialised — a derived translation
+  input, not wire data). It implements the three order-sensitive resolution rules:
+  1. A legacy `media_attachment_id` (Messenger only) wins outright — resolver never runs,
+     `ResolvedMedia` stays nil, and the translator's existing byte-for-byte-pinned branch
+     handles it (`translator_attachment_id_test.go`).
+  2. Otherwise, default `ResolvedMedia` to `MediaByURL`. If the handle layer is enabled
+     (`WithMediaStore(..., use=true, ...)`) and the URL parses as one of our asset URLs, look
+     up the handle and let `mediaresolve.Resolve` decide. **A store lookup error is logged
+     and treated as a miss** — degrading to `MediaByURL`, never surfaced as a send failure.
+     This is the design's core invariant: the handle layer can fail entirely (CRDB down, no
+     handle yet, expired with the margin not yet caught by the reconciler) and messages still
+     send.
+  3. Neither URL nor attachment id present — existing validation error, unchanged.
+- The three translators (`translateMessengerMedia`, `translateWhatsAppMedia`,
+  `translateInstagramMedia`) take `resolved *types.MediaSendable` as an added parameter and
+  branch on `resolved.Kind` when no legacy attachment id is present. The exported
+  `TranslateToMessenger` / `TranslateToWhatsApp` / `TranslateToInstagram` signatures are
+  unchanged — only the unexported inner functions gained the parameter, so the ~40 existing
+  translator test call sites did not need touching.
+- `types.WhatsAppMedia` (`types/whatsapp.go`) gained an `ID` field alongside `Link`, both
+  `omitempty`, so exactly one of `{"link": ...}` / `{"id": ...}` is ever sent.
+- **Config**: `MEDIA_HANDLE_USE` (bool, default `false` — ships dark) and
+  `MEDIA_HANDLE_MARGIN` (duration, default `1h`, e.g. `MEDIA_HANDLE_MARGIN=90m`). Wired in
+  `cmd/message-worker/main.go` via `worker.WithMediaStore(mediaStore, config.MediaHandleUse,
+  config.MediaHandleMargin)`; a `PostgresMediaStore` construction failure at startup logs a
+  warning and leaves the worker on URL-only sends rather than failing to start — consistent
+  with "the handle layer is an optimisation, never a requirement."
+- **Metrics**: message-worker has no `promauto`/`client_golang` metrics infrastructure today
+  (checked: no import of either anywhere in this module or its siblings). The by-URL health
+  signal from §8.5 ("a by-URL send for dashboard-uploaded media is an anomaly and should sit
+  near zero") is therefore emitted as a structured log line
+  (`w.logger.Info("media resolved by_url", ...)`) rather than a counter. Wiring this into
+  real metrics is an open follow-up — see the implementation notes in
+  `planning/media-abstraction-build-notes.md`.
 
 ## Components
 
