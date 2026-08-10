@@ -2,26 +2,53 @@
 
 const multer = require('multer');
 const router = require('express').Router();
-const { Credential, Media } = require('../../queries');
-const { upload, makeHandlers } = require('./media.controller');
-const { facebookUploadAttachment } = require('./media.facebook');
 
-// Wire real IO dependencies into the controller
+const { Credential, Media } = require('../../queries');
+const { STORAGE } = require('../../config');
+const { makeHandlers } = require('./media.controller');
+const { makeStorage } = require('./storage');
+const { uploadToPlatform } = require('./media.platform-upload');
+const { MEDIA_TYPE_LIMITS } = require('./media.core');
+
+/*
+ * The multer cap is DERIVED from the core's per-type limits, never hardcoded.
+ *
+ * It used to be a flat 25 MB, which preempted validateUpload: a 40 MB video
+ * died inside multer with "File exceeds maximum size of 25 MB" instead of
+ * "video is 40.0 MB, maximum is 16.0 MB". §11.5's whole bargain is that we
+ * refuse rather than transcode, and the refusal is only fair if it names the
+ * actual problem and the actual fix — so multer must be a backstop against
+ * unbounded memory, not the thing that decides eligibility.
+ *
+ * Set to the LARGEST per-type limit (documents, 100 MB) so every per-type error
+ * message comes from the core. A file over that is beyond every limit we have,
+ * and its message can safely be generic.
+ */
+const MAX_UPLOAD_BYTES = Math.max(
+  ...Object.values(MEDIA_TYPE_LIMITS).map(limit => limit.maxBytes),
+);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+}).single('file');
+
 const handlers = makeHandlers({
   credentialQuery: Credential,
   mediaQuery: Media,
-  facebookClient: facebookUploadAttachment,
+  storage: makeStorage(STORAGE),
+  platformUpload: uploadToPlatform,
 });
 
 /**
- * Wraps the multer middleware to catch MulterError (e.g. file too large)
- * and return a proper 400 JSON response instead of letting it bubble
- * to the global error handler.
+ * Turns multer's errors into JSON 400s rather than letting them reach the
+ * global error handler.
  */
 function handleMulterError(err, req, res, next) {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'File exceeds maximum size of 25 MB' });
+      const maxMB = (MAX_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
+      return res.status(400).json({ error: `file exceeds the maximum upload size of ${maxMB} MB` });
     }
     return res.status(400).json({ error: err.message });
   }
@@ -31,9 +58,17 @@ function handleMulterError(err, req, res, next) {
   next();
 }
 
+/*
+ * GET /pages IS GONE, on purpose (§3). Asset creation is platform-independent:
+ * there is no page selector, no connected-page requirement, and no account
+ * scope for the author to choose. Fan-out goes to all of the owner's accounts
+ * and is best-effort, so a researcher with no accounts connected yet uploads
+ * fine and handles appear when they connect one.
+ */
 router
   .post('/upload', upload, handleMulterError, handlers.uploadMedia)
   .get('/', handlers.listMedia)
-  .get('/pages', handlers.listPages);
+  .delete('/:id', handlers.deleteMedia);
 
 module.exports = router;
+module.exports.MAX_UPLOAD_BYTES = MAX_UPLOAD_BYTES;

@@ -1,0 +1,9 @@
+# Env files hold the scoped MinIO credential and are the source of truth for
+# the `media-proxy` Kubernetes secret (documentation/secrets.md). The committed
+# template is re-included.
+.env
+.env-*
+!.env-example
+
+# Built binary
+/media-proxy

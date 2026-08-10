@@ -1,20 +1,68 @@
-# MinIO — S3-compatible object storage for transient CSV exports.
+# MinIO — S3-compatible object storage for transient CSV exports and (new)
+# permanent media assets.
 #
-# This is a hand-rolled single-node MinIO (upstream minio/minio image), NOT the
-# Bitnami helm chart. It was previously deployed via `kubectl apply` from
-# manifests that were never committed; this file recovers them into the repo as
-# infrastructure-as-code. Apply with:
+# This is a hand-rolled MinIO (upstream minio/minio image), NOT the Bitnami helm
+# chart. `devops/values/minio.yaml` is Bitnami-shaped and is NOT what deploys
+# this — see the header of that file. THIS FILE IS THE APPLIED SOURCE OF TRUTH.
 #
 #     kubectl apply -f devops/minio/
 #
 # The `minio-auth` Secret (keys root-user / root-password) is managed
 # out-of-band and is intentionally NOT templated here — it holds credentials.
-# The exporter and dashboard reach this via the `minio` Service
-# (minio.minio.svc:9000) and the storage-api.vlab.digital / storage.vlab.digital
-# ingresses (see devops/minio/ingress.yaml).
+# Consumers reach this via the `minio` Service (minio.minio.svc:9000) and the
+# storage-api.vlab.digital / storage.vlab.digital ingresses (ingress.yaml).
 #
-# Retention of export objects is enforced server-side by a bucket lifecycle rule
-# applied by the exporter itself (see documentation/exports-storage.md), not here.
+# Retention of *export* objects is enforced server-side by a bucket lifecycle
+# rule applied by the exporter itself (documentation/exports-storage.md).
+# The `media` bucket deliberately has NO lifecycle rule — media is permanent —
+# which is why capacity alerting exists (devops/alerts/templates/media-storage-capacity.yaml).
+#
+# ---------------------------------------------------------------------------
+# DISTRIBUTED MODE (planning/media-abstraction.md §4.2)
+# ---------------------------------------------------------------------------
+# Previously a single-node Deployment with one 25Gi RWO PVC: one disk, one node,
+# no redundancy. Media is unrecoverable by construction — we hold the only copy
+# of a researcher's uploaded bytes — so a single disk is not an acceptable floor.
+#
+# This is now a 4-replica StatefulSet, one PVC each, which is MinIO's minimum
+# viable erasure set. With 4 drives MinIO defaults to EC:2 — two data shards and
+# two parity shards — so the cluster survives the loss of any two drives or two
+# nodes, and USABLE CAPACITY IS HALF OF RAW:
+#
+#     4 x 50Gi raw  =  200Gi raw  =  ~100Gi usable
+#
+# Sizing rationale: exports need ~25Gi of headroom over their 3-day window
+# (single full_messages exports reach ~1.6G), leaving ~75Gi for media, which
+# only grows. standard-rwo (GKE pd.csi) supports online expansion, so growing a
+# volumeClaimTemplate's size is a non-destructive change; SHRINKING IS NOT, and
+# neither is changing the replica count of an erasure set. Size up, never down.
+#
+# Distributed mode covers disk and node failure. It does NOT cover loss of the
+# cluster's disks, which is why devops/backup/minio-media-mirror.yaml exists.
+#
+# ---------------------------------------------------------------------------
+# APPLYING THIS IS A DESTROY-AND-RECREATE MAINTENANCE WINDOW
+# ---------------------------------------------------------------------------
+# A Deployment cannot be converted into a StatefulSet in place, and a single-node
+# backend format cannot be converted into a 4-node erasure set in place. Applying
+# this DESTROYS ALL EXISTING OBJECTS.
+#
+# That is safe today, and only because of two properties that must be re-checked
+# before ever doing it again:
+#   * exports are transient (3-day lifecycle) and are re-generated on demand;
+#   * the exporter recreates its bucket and lifecycle rule on the next run, in
+#     `_ensure_client` / `_ensure_lifecycle` (exporter/exporter/storage.py).
+# Once the `media` bucket holds real assets this is NO LONGER TRUE — from then
+# on, a change here requires a restore from the mirror target.
+#
+# Sequence (see planning/media-abstraction.md §9.2 step 1):
+#   kubectl delete deployment minio -n minio        # the old single-node pod
+#   kubectl delete pvc minio -n minio               # the old single-node volume
+#   kubectl apply -f devops/minio/
+#   bash devops/minio/media-svcacct.sh              # media bucket + scoped accounts
+# Gate: the exporter still writes exports, and anonymous access to the media
+# bucket is denied — including through storage-api.vlab.digital.
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -24,27 +72,36 @@ metadata:
     app.kubernetes.io/instance: minio
     app.kubernetes.io/name: minio
 ---
+# Headless Service: gives each StatefulSet pod a stable DNS name
+# (minio-N.minio-headless.minio.svc.cluster.local) so the MinIO nodes can find
+# each other. This is what makes the server args below resolvable; it is not a
+# client entry point.
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: Service
 metadata:
-  name: minio
+  name: minio-headless
   namespace: minio
   labels:
     app.kubernetes.io/instance: minio
     app.kubernetes.io/name: minio
 spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: standard-rwo
-  resources:
-    requests:
-      # 25Gi (was 10Gi): headroom over the 3-day export retention window;
-      # single full_messages exports can reach ~1.6G. standard-rwo (GKE pd.csi)
-      # supports online expansion, so growing this is a non-destructive patch.
-      storage: 25Gi
+  type: ClusterIP
+  clusterIP: None
+  # Peers must resolve each other before they are Ready — a distributed MinIO
+  # only becomes Ready once it has formed quorum, so requiring readiness first
+  # would deadlock the cluster on startup.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/instance: minio
+    app.kubernetes.io/name: minio
+  ports:
+    - name: minio-api
+      port: 9000
+      protocol: TCP
+      targetPort: minio-api
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: minio
   namespace: minio
@@ -52,12 +109,15 @@ metadata:
     app.kubernetes.io/instance: minio
     app.kubernetes.io/name: minio
 spec:
-  replicas: 1
-  # Recreate (not RollingUpdate): the RWO PVC can only attach to one pod, so the
-  # old pod must terminate before the new one starts. Expect a brief outage on
-  # deploy.
-  strategy:
-    type: Recreate
+  serviceName: minio-headless
+  # 4 is the erasure-set size. Changing it is not a rolling change — MinIO
+  # cannot resize an erasure set — so treat this number as fixed for the life
+  # of the data. Growing capacity means growing the PVCs, or adding a second
+  # server pool, never editing this.
+  replicas: 4
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       app.kubernetes.io/instance: minio
@@ -72,17 +132,36 @@ spec:
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+      # Spread the erasure set across nodes. Preferred, not required: on a small
+      # node pool a `required` rule would leave pods Pending and the cluster
+      # below quorum, which is worse than two shards sharing a node.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: minio
+                    app.kubernetes.io/name: minio
       containers:
         - name: minio
-          # Pinned to the release that was running under the old :latest tag, so
-          # applying this does not silently upgrade MinIO.
+          # Pinned deliberately: applying this file must never silently upgrade
+          # MinIO, least of all during the maintenance window above.
           image: minio/minio:RELEASE.2025-09-07T16-13-09Z
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -c
           args:
-            - minio server /data --console-address :9001
+            # The {0...3} expansion is MinIO's own, not the shell's — it must
+            # reach the minio binary literally, hence the quoting. It must also
+            # match `replicas` above exactly.
+            - >-
+              minio server
+              http://minio-{0...3}.minio-headless.minio.svc.cluster.local/data
+              --console-address :9001
           ports:
             - name: minio-api
               containerPort: 9000
@@ -112,19 +191,24 @@ spec:
               path: /minio/health/live
               port: minio-api
               scheme: HTTP
-            initialDelaySeconds: 5
-            periodSeconds: 5
+            # Generous relative to the old single-node values: a distributed
+            # node is legitimately not live until its peers appear, and killing
+            # it during formation turns a slow start into a crash loop.
+            initialDelaySeconds: 30
+            periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 5
+            failureThreshold: 6
           readinessProbe:
+            # /minio/health/ready reports quorum, so a node that has lost its
+            # peers is correctly taken out of the `minio` Service.
             httpGet:
               path: /minio/health/ready
               port: minio-api
               scheme: HTTP
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 1
-            failureThreshold: 5
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             requests:
               cpu: 250m
@@ -135,11 +219,24 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: minio
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/instance: minio
+          app.kubernetes.io/name: minio
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: standard-rwo
+        resources:
+          requests:
+            # See the sizing arithmetic in the header: 4 x 50Gi raw is ~100Gi
+            # usable under EC:2. Expandable online; not shrinkable.
+            storage: 50Gi
 ---
+# Client entry point for the S3 API. Selects only Ready pods, so requests are
+# never sent to a node that has lost quorum.
 apiVersion: v1
 kind: Service
 metadata:
@@ -156,6 +253,14 @@ spec:
   ports:
     - name: minio-api
       port: 9000
+      protocol: TCP
+      targetPort: minio-api
+    # Named port for the ServiceMonitor in servicemonitor.yaml. Same container
+    # port as the API — MinIO serves /minio/v2/metrics/* on 9000 — but a
+    # ServiceMonitor selects by port NAME, and reusing `minio-api` for both
+    # would make the scrape config ambiguous to read.
+    - name: metrics
+      port: 9002
       protocol: TCP
       targetPort: minio-api
 ---
@@ -177,3 +282,20 @@ spec:
       port: 9090
       protocol: TCP
       targetPort: minio-console
+---
+# A distributed erasure set tolerates losing 2 of 4 nodes. A voluntary
+# disruption (node drain, upgrade) must never take a third.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app.kubernetes.io/instance: minio
+    app.kubernetes.io/name: minio
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: minio
+      app.kubernetes.io/name: minio

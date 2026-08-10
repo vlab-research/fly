@@ -1,0 +1,100 @@
+# Local development and test stack for dashboard-server's media path.
+#
+# CockroachDB + MinIO, nothing else. The media tests need a real object store
+# (the Content-Type / Content-Disposition metadata media-proxy serves back is
+# only observable against one) and a real CockroachDB (the dedupe asymmetry
+# under UNIQUE (userid, content_hash) is a database property, not a code one).
+#
+# NO SECRETS IN THIS FILE. Credentials come from a gitignored `.env` next to it,
+# with `.env-dev-example` as the committed template — documentation/secrets.md.
+# (`.env-example` is a different thing: the template for the PRODUCTION media
+# secret, which holds only the two scoped service-account keys and leaves them
+# empty. Keeping the local template separate stops a working root credential
+# from sitting one copy-paste away from a cluster secret.)
+#
+#   cp .env-dev-example .env
+#   docker compose up -d
+#   npm run test:media
+#
+# Ports are chosen to match config/index.js's test defaults: CockroachDB on
+# 5433 (what DATABASE_CONFIG uses when NODE_ENV=test) and MinIO on 9000.
+
+services:
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.1.0
+    command: start-single-node --insecure
+    ports:
+      - '5433:26257'
+      - '8081:8080'
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost:8080/health?ready=1']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Applies devops/migrations/*.sql in sorted order, exactly as
+  # facebot/testrunner/stack.ts does for the message-pipeline stack. Sharing the
+  # production migration files rather than a hand-maintained dev schema is the
+  # point: a migration that does not apply cleanly here has not been tested.
+  #
+  # Runs to completion and exits. Re-running is safe — every migration is
+  # written IF NOT EXISTS / OR REPLACE.
+  migrate:
+    image: cockroachdb/cockroach:v24.1.0
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+    volumes:
+      - ../devops/migrations:/migrations:ro
+    entrypoint: ['/bin/bash', '-c']
+    command:
+      - |
+        set -e
+        SQL="./cockroach sql --insecure --host=cockroachdb:26257"
+        $$SQL -e 'CREATE DATABASE IF NOT EXISTS chatroach;'
+        for f in $$(ls /migrations/*.sql | sort); do
+          echo "applying $$f"
+          $$SQL --database=chatroach -f "$$f"
+        done
+        echo "migrations complete"
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address ':9001'
+    env_file:
+      - .env
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Creates the `media` bucket and leaves it PRIVATE.
+  #
+  # No anonymous policy, deliberately, mirroring production (§4.3): MinIO's
+  # canned `download` policy grants s3:ListBucket alongside s3:GetObject — it
+  # permits exactly the enumeration it appears to prevent — and `public` grants
+  # anonymous writes. The only public read path is media-proxy. Granting
+  # anonymous access here would make local dev quietly more permissive than
+  # production, which is how a bad assumption ships.
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/"$$MEDIA_BUCKET"
+        echo "bucket $$MEDIA_BUCKET ready (private)"
+
+volumes:
+  minio-data:

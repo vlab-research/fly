@@ -14,6 +14,41 @@ async function get ({email}) {
   return rows
 }
 
+/*
+ * Every messaging account a user owns — the fan-out target set for media
+ * uploads (planning/media-abstraction.md §2).
+ *
+ * The findings doc rejected pre-upload because a survey resolves under ANY of
+ * its owner's accounts, so the target account is unknown at authoring time.
+ * That is true, but "unknown" and "one of these" are different problems: this
+ * query IS the set, so you do not predict the account, you upload to all of
+ * them. Served as an index-only scan by migration 20's unique_messaging_account.
+ *
+ * `key` is what becomes media_handle.account_id — the page id or phone number
+ * id, NOT the entity and NOT details->>'page_id'. It is the one identifier the
+ * writer and the reader already agree on in production, because tokenstore.go
+ * resolves access tokens by that same equality.
+ *
+ * Deduped newest-first per (entity, key) exactly like `get`: credentials rotate
+ * and old rows are kept, so without this a rotated page would be uploaded to
+ * twice — once with a dead token.
+ */
+async function getMessagingAccounts ({email}) {
+  const q = `
+    WITH t AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY entity, key ORDER BY created DESC) AS n
+               FROM credentials
+               JOIN users ON userid=id
+               WHERE email = $1
+               AND entity IN ('facebook_page', 'whatsapp_business'))
+    SELECT entity, key, details
+    FROM t
+    WHERE n = 1
+  `
+
+  const {rows} = await this.query(q, [email])
+  return rows
+}
+
 async function getOne ({email, entity, key}) {
    const q = `
      SELECT entity, key, details, created
@@ -70,5 +105,6 @@ module.exports = {
     update: update.bind(pool),
     get: get.bind(pool),
     getOne: getOne.bind(pool),
+    getMessagingAccounts: getMessagingAccounts.bind(pool),
   }),
 };

@@ -193,3 +193,38 @@ studyHealth:
   # planning/core-visibility-alerting-plan.md W5.
   providerErrorsThreshold: 10
   providerErrorsFor: "30m"
+
+# ---- Media object storage capacity ------------------------------------------
+# planning/media-abstraction.md §4.5. Metrics come from devops/minio/servicemonitor.yaml
+# (new — MinIO was not a Prometheus target before this).
+#
+# WHY MEDIA NEEDS THIS AND EXPORTS DOES NOT: exports are bounded by a server-side
+# 3-day lifecycle rule, so their footprint is self-limiting. The media bucket has
+# NO lifecycle rule and only grows, by design (§4.6 — an asset URL is permanently
+# readable). Nothing else in the system will notice it filling.
+mediaStorage:
+  enabled: true
+
+  # % free on a MinIO data volume. Deliberately more headroom than Kafka's
+  # equivalents (20/10): Kafka can be recovered by cutting retention, and MinIO
+  # cannot — media has no retention to cut, so the only remedy is a volume
+  # expansion, which takes a human and a change.
+  #
+  # NOTE the EC:2 arithmetic (devops/minio/minio.yaml): usable capacity is HALF
+  # of raw, and these percentages are measured against RAW. 25% raw free is
+  # already tight in usable terms.
+  pvcWarnPercentFree: 25
+  pvcCritPercentFree: 12
+
+  # Absolute bucket size at which to start planning, in bytes. 20Gi.
+  #
+  # This is a v1 PLANNING THRESHOLD AND WILL NEED TUNING, and unusually it is
+  # not calibrated against observed data because there is none — §11.1 measured
+  # zero adoption of the media tab, so the bucket starts empty. It is derived
+  # from the volume instead: 4 x 50Gi raw is ~100Gi usable, exports need ~25Gi
+  # of that, so 20Gi of media is the point at which the remaining headroom stops
+  # being comfortable rather than the point at which anything is wrong.
+  #
+  # Raise it once real growth is visible; do not lower it to make the alert
+  # "sensitive". The failure this guards against arrives over months.
+  bucketWarnBytes: 21474836480

@@ -24,11 +24,55 @@ Env files sit next to the app they configure, suffixed by environment:
 | `replybot/.env-staging` | `gbv-bot-envs` | `vstag` |
 | `exporter/.env` | — (local dev only) | local |
 | `exporter/.env-staging` | `exporter` | `vstag` |
+| `dashboard-server/.env-media-production` | `dashboard-media` | `vprod` |
+| `dashboard-server/.env-media-staging` | `dashboard-media` | `vstag` |
+| `media-proxy/.env-media-production` | `media-proxy` | `vprod` |
+| `media-proxy/.env-media-staging` | `media-proxy` | `vstag` |
+| `devops/backup/.env-media-mirror` | `minio-media-mirror` | `minio` |
 
 Each app's `.gitignore` ignores `.env` and `.env-*`, with `!.env-example`
 re-included. **`.env-example` is the committed template** — it carries every key
 with placeholder values and any gotchas worth recording, and should be updated
-whenever a key is added or removed.
+whenever a key is added or removed. (`devops/.gitignore` re-includes
+`.env-*-example` instead, because its templates are named per-secret.)
+
+## Scoped service accounts for object storage
+
+Storage credentials are **never** the MinIO root credential, and never typed by
+hand. The pattern, established for the media buckets:
+
+1. The **policy is a checked-in JSON file** — `devops/minio-media-policy.json`
+   (dashboard-server: Get/Put/Delete on `media/*`),
+   `devops/minio-media-readonly-policy.json` (media-proxy: Get only, **no
+   ListBucket**), `devops/minio-media-backup-policy.json` (the mirror CronJob:
+   Get + List). The file is the source of truth; nothing is composed at a prompt.
+2. A **script applies it** — `devops/minio/media-svcacct.sh <production|staging>`
+   creates the bucket, runs `mc` *inside the cluster* so the root credential is
+   read from the `minio-auth` Secret by the pod and never touches a shell or the
+   repo, creates each service account against its policy file, and writes the
+   generated keys into the gitignored `.env` files above.
+3. Then the ordinary flow: `devops/secrets.sh`, then `kubectl rollout restart`.
+
+Re-running rotates the key pairs. The predecessor,
+`devops/minio/staging-svcacct.sh`, embeds its policy in the script — the media
+scripts read theirs from a file instead, so the policy is reviewable in a diff on
+its own.
+
+**Why three accounts and not one.** They want different halves and the
+differences are load-bearing, not tidiness: the public read path must not hold
+`s3:ListBucket`, because asset URLs are unguessable capability URLs and a list
+permission would turn the bucket into a directory listing; `mc mirror` *does*
+need `ListBucket`, so it is a separate identity rather than a reason to widen the
+proxy's; and none of them can reach the exports buckets, which hold respondent
+data.
+
+### Never `__FILL_` in a committed file
+
+`devops/secrets.sh` refuses to apply an env file whose values still contain
+`__FILL_...__`. `devops/backup/.env-media-mirror-example` uses that deliberately
+for the backup endpoint and its credentials: the operator must choose an
+off-cluster S3 target, and the placeholder turns "not chosen yet" into a loud
+failure at apply time instead of a nightly CronJob mirroring into nowhere.
 
 ## Applying
 

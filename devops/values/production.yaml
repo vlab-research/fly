@@ -49,6 +49,13 @@ versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
 versionMessageWorker: &vmessageworker v0.1.18
+# REQUIRED BEFORE APPLYING: media-proxy has never been released, so this tag
+# does not exist in ghcr.io yet. It is created by pushing the git tag
+# `media-proxy-v0.0.1` (.github/workflows/release.yml resolves the build context
+# and image name from the tag). Applying with a tag that does not exist gives an
+# ImagePullBackOff, and because media-proxy is on the media send path (§13) that
+# is a real outage for media sends with no handle, not a cosmetic failure.
+versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
 # Kafka cluster, Prometheus and kminion are singletons shared by prod+staging,
@@ -478,6 +485,53 @@ dashboard:
     - name: ALERTMANAGER_URL
       value: 'http://alertmanager-operated.monitoring:9093'
 
+    # ---- Media object storage (planning/media-abstraction.md §4.7) ----------
+    # The dashboard is the only WRITER of media objects. It uploads bytes, then
+    # hands the researcher a public URL that media-proxy answers.
+    #
+    # THE TWO CREDENTIALS ARE NOT HERE AND MUST NEVER BE. They live in the
+    # `dashboard-media` secret, applied from the gitignored
+    # dashboard-server/.env-media-production by devops/secrets.sh (see
+    # dashboard-server/.env-example). They are a MinIO service account scoped to
+    # Get/Put/Delete on media/* — not the root credential, and unable to reach
+    # the exports bucket that holds respondent data.
+    - name: STORAGE_BACKEND
+      value: 's3'
+    - name: MEDIA_BUCKET
+      value: 'media'
+    - name: MEDIA_PREFIX
+      # Must match media-proxy's MEDIA_PREFIX and its path regex. config/index.js
+      # throws at boot on any other value rather than silently writing objects
+      # the proxy can never serve.
+      value: 'a/'
+    - name: MEDIA_PUBLIC_BASE
+      # The origin the researcher pastes into a survey. Deliberately a SEPARATE
+      # ORIGIN from fly.vlab.digital (§4.6): an uploaded HTML/SVG has no
+      # dashboard session to reach. Served by devops/media-ingress.yaml.
+      #
+      # Not stored on the asset row — the URL derives from this plus the uuid
+      # (§5), so moving the domain is this line, not a data migration.
+      value: 'https://media.vlab.digital'
+    - name: S3_ENDPOINT
+      # In-cluster and plaintext, on purpose: the write path has no reason to
+      # leave the cluster, and routing it through storage-api.vlab.digital would
+      # put nginx, cert-manager and the public internet on the upload path for
+      # no gain.
+      value: 'http://minio.minio.svc.cluster.local:9000'
+    - name: S3_REGION
+      # MinIO ignores it; the S3 protocol requires one.
+      value: 'us-east-1'
+    - name: S3_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: dashboard-media
+          key: S3_ACCESS_KEY_ID
+    - name: S3_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: dashboard-media
+          key: S3_SECRET_ACCESS_KEY
+
   resources:
     requests:
       cpu: 10m
@@ -806,6 +860,120 @@ message-worker:
     value: "100"
   - name: MAX_BACKOFF_MS
     value: "1000"
+
+  # ---- Media handle layer (planning/media-abstraction.md §8.5, §9.2) --------
+  #
+  # OFF. THIS SHIPS DARK, AND FLIPPING IT IS THE ONLY STEP IN THIS FEATURE THAT
+  # A RESPONDENT CAN OBSERVE.
+  #
+  # With this off, the worker never queries media_handle and the send path is
+  # byte-for-byte what it is today: legacy `attachment_id` passthrough (rule 1),
+  # everything else by URL. §11.1 measured that 27 live shortcodes across 3
+  # owners carry attachment_id and account for essentially all live media
+  # traffic — including surveys taking 29k responses/90d — so "we did not
+  # disturb the existing path" is the single most important property of this
+  # build, and this flag is what preserves it.
+  #
+  # ENABLEMENT IS STAGED AND ORDERED (§9.2 step 5), never a single edit here:
+  #   1. off everywhere; confirm media_handle rows appear from upload fan-out
+  #   2. staging on
+  #   3. ONE production account on
+  #   4. all of production
+  # Gate at each step: send-failure rate flat, logs show id sends, and the
+  # by-URL counter (§8.5) near zero for dashboard-uploaded media. That counter
+  # is the health signal — in this design a by-URL send for dashboard-uploaded
+  # media is an anomaly, not an expected first-send.
+  #
+  # Every message under this flag has a URL fallback beneath it, so the rollback
+  # is this line back to "false" plus a rollout restart.
+  - name: MEDIA_HANDLE_USE
+    value: "false"
+
+# media-proxy — the sole public read path for media assets (§4.4).
+#
+# ON THE CRITICAL PATH: if this is down, every media send with no cached
+# platform handle fails (§13). Handle sends are unaffected, which is the
+# strongest single argument for the handle layer existing — and the reason the
+# replica floor and the PDB below are requirements, not hardening.
+#
+# It has NO DATABASE, deliberately (§4.4): Content-Type and Content-Disposition
+# come from S3 object metadata written by dashboard-server at PutObject, so this
+# service cannot be the thing that breaks when CockroachDB is slow.
+media-proxy:
+  enabled: true
+  # >= 2 (§9.2, §13). Do not lower this to save a pod.
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  image:
+    repository: ghcr.io/vlab-research/media-proxy
+    tag: *vmediaproxy
+    pullPolicy: IfNotPresent
+
+  # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY, under exactly those names, from a
+  # secret applied by devops/secrets.sh from the gitignored
+  # media-proxy/.env-media-production. Read-only on media/* and without
+  # s3:ListBucket — see media-proxy/.env-example for why.
+  envFrom: media-proxy
+
+  env:
+    - name: S3_ENDPOINT
+      value: 'http://minio.minio.svc.cluster.local:9000'
+    - name: S3_REGION
+      value: 'us-east-1'
+    - name: MEDIA_BUCKET
+      value: 'media'
+    - name: MEDIA_PREFIX
+      # Must equal the dashboard's MEDIA_PREFIX above. The proxy will not serve
+      # any other prefix — that is the whole point of the path contract.
+      value: 'a/'
+    - name: PORT
+      value: '8080'
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  service:
+    type: ClusterIP
+    port: 80
+
+# ---- Media handle reconciler (§7, §11.3) ------------------------------------
+#
+# NOT YET DEPLOYABLE — DELIBERATELY. §11.3 leaves the reconciler's deployment
+# shape open ("CronJob calling an internal dashboard-server endpoint, or a
+# standalone job sharing its modules — decide at stage F"), and the `dashboard`
+# chart (OCI 0.0.2) has no CronJob template to render either into. Publishing a
+# new chart version to pick a shape this file has no authority to pick would be
+# the wrong order.
+#
+# The schedule is settled and recorded here so it is one value to wire up rather
+# than one to re-derive:
+#
+#   Hourly. The reconciler's job is desired-state convergence, not freshness
+#   racing an expiry — handles last 30 days (WhatsApp) and 90 days (Messenger),
+#   refreshed off `uploaded_at` (§11.2), so the expiry clock does not want a
+#   fast tick. What does is the OTHER two cases it covers: a researcher who
+#   connects a new page, and a partial upload-time fan-out failure. Both are
+#   "how long until this heals", and an hour is short enough that neither is
+#   ever noticed while being 24x cheaper than the fan-out width would make a
+#   per-minute tick (§11.1b: one production user has 29 accounts).
+#
+# Left disabled so this block is inert until stage F wires a template to it.
+mediaReconciler:
+  enabled: false
+  schedule: "17 * * * *"
+  # Refresh a handle once it is within this margin of expiry, so a handle the
+  # reconciler has not reached yet degrades to a URL send rather than failing
+  # (§6, mediaresolve.Resolve). Must be comfortably larger than the schedule
+  # interval, or a handle can expire between ticks.
+  refreshMargin: "72h"
 
 cockroachdb:
   image:

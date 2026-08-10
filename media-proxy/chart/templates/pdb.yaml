@@ -1,0 +1,20 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+# Required by planning/media-abstraction.md §9.2 and §13, not optional hardening.
+#
+# replicaCount >= 2 alone only guarantees two pods exist; it says nothing about
+# how many the cluster may evict at once. A node drain or cluster upgrade will
+# happily take both, and while they are gone every media send with no cached
+# platform handle fails. This is the file that makes ">=2 replicas" mean
+# something during exactly the maintenance events when it matters.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "media-proxy.fullname" . }}
+  labels:
+    {{- include "media-proxy.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "media-proxy.selectorLabels" . | nindent 6 }}
+{{- end }}

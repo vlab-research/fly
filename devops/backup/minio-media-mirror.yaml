@@ -1,0 +1,169 @@
+# Off-cluster backup of the media bucket, by `mc mirror`.
+#
+#     kubectl apply -f devops/backup/minio-media-mirror.yaml
+#
+# planning/media-abstraction.md §4.5.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS
+# ---------------------------------------------------------------------------
+# MinIO is distributed across 4 nodes with erasure coding (devops/minio/), which
+# covers disk failure and node failure. It does NOT cover loss of the cluster's
+# disks — and media is UNRECOVERABLE BY CONSTRUCTION: we hold the only copy of a
+# researcher's uploaded bytes. Meta offers no download for an attachment id
+# (§8.2), so there is nothing to re-derive from. Exports can be regenerated;
+# media cannot.
+#
+# THE TARGET MUST BE OFF-CLUSTER. A second bucket on this same MinIO shares the
+# same disks and is not a backup — it survives an accidental `mc rm`, which is
+# the least likely way to lose this data, and nothing else. Residency and
+# provider are the operator's choice; the only requirement this file makes is
+# that BACKUP_S3_ENDPOINT does not resolve to the MinIO above.
+#
+# NO CLOUD PROVIDER IS NAMED ANYWHERE IN THIS FILE, and none may be added.
+# §4.1: no component depends on a cloud provider's SDK or identity system;
+# storage is reached over the S3 API and nothing else. `mc` speaks S3 to
+# whatever endpoint it is given.
+#
+# ---------------------------------------------------------------------------
+# CONFIGURATION — ALL OF IT FROM ONE SECRET
+# ---------------------------------------------------------------------------
+# Non-secret values (endpoint, bucket) live in the same secret as the keys
+# rather than being split across a values file. Not for secrecy — because the
+# four are useless apart, and because devops/secrets.sh already REFUSES to apply
+# an env file that still contains __FILL_...__ placeholders. That turns "the
+# operator has not supplied the endpoint yet" into a loud failure at apply time
+# instead of a CronJob that runs nightly and mirrors into nowhere.
+#
+#   cp devops/backup/.env-media-mirror-example devops/backup/.env-media-mirror
+#   $EDITOR devops/backup/.env-media-mirror       # fill the __FILL_...__ values
+#   bash devops/secrets.sh minio minio-media-mirror devops/backup/.env-media-mirror
+#   kubectl apply -f devops/backup/minio-media-mirror.yaml
+#
+# Keys: BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET, BACKUP_S3_ACCESS_KEY_ID,
+#       BACKUP_S3_SECRET_ACCESS_KEY, SOURCE_S3_ACCESS_KEY_ID,
+#       SOURCE_S3_SECRET_ACCESS_KEY.
+#
+# ---------------------------------------------------------------------------
+# A BACKUP NEVER RESTORED IS NOT A BACKUP
+# ---------------------------------------------------------------------------
+# §4.5 and §9.2 step 2 both require a RESTORE REHEARSAL before the feature is
+# called done: mirror the target back into a clean MinIO and serve an object
+# from it. That is a deploy gate, not a test — see §10, "Deploy gates, not
+# tests".
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: minio-media-mirror
+  namespace: minio
+  labels:
+    app.kubernetes.io/instance: minio
+    app.kubernetes.io/name: minio-media-mirror
+spec:
+  # Daily, off-peak. Media is written by researchers at authoring time, not by
+  # respondent traffic, so the RPO that matters is "a day's uploads", and a
+  # researcher who loses today's upload still has the source file on their
+  # laptop — which is exactly not true of anything older.
+  schedule: "0 3 * * *"
+  # A mirror that overruns its window must not be joined by a second one racing
+  # it over the same objects.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Deliberately generous: a first full mirror of a large bucket is slow, and a
+  # deadline that kills it produces a permanently-incomplete backup that still
+  # reports failures rather than one that finishes once and then runs fast.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # Long enough for a full first mirror; short enough that a wedged job is
+      # noticed rather than running until the next schedule.
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/instance: minio
+            app.kubernetes.io/name: minio-media-mirror
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: mc
+              # Pinned. `latest` in a backup job means the one command standing
+              # between us and permanent data loss can change without a diff.
+              image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+              envFrom:
+                - secretRef:
+                    name: minio-media-mirror
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - |
+                  set -eu
+
+                  # Fail loudly and immediately on missing configuration. A
+                  # mirror job that starts with an empty endpoint would either
+                  # error obscurely inside mc or, worse, succeed against
+                  # nothing. Neither is discoverable until a restore is needed.
+                  for v in BACKUP_S3_ENDPOINT BACKUP_S3_BUCKET \
+                           BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_SECRET_ACCESS_KEY \
+                           SOURCE_S3_ACCESS_KEY_ID SOURCE_S3_SECRET_ACCESS_KEY; do
+                      eval "val=\${$v:-}"
+                      if [ -z "$val" ]; then
+                          echo "FATAL: $v is not set. See devops/backup/.env-media-mirror-example" >&2
+                          exit 1
+                      fi
+                  done
+
+                  # Guard the one requirement this file actually makes: the
+                  # target must not be the MinIO we are backing up. A second
+                  # bucket on the same disks is not a backup (§4.5), and the
+                  # mistake is invisible once made -- the job goes green
+                  # forever.
+                  case "$BACKUP_S3_ENDPOINT" in
+                      *minio.minio*|*minio:9000*|*minio-headless*|*storage-api.vlab.digital*)
+                          echo "FATAL: BACKUP_S3_ENDPOINT points back at this cluster's MinIO." >&2
+                          echo "       A second bucket on the same disks is not a backup." >&2
+                          exit 1
+                          ;;
+                  esac
+
+                  mc alias set src http://minio:9000 \
+                      "$SOURCE_S3_ACCESS_KEY_ID" "$SOURCE_S3_SECRET_ACCESS_KEY"
+                  mc alias set dst "$BACKUP_S3_ENDPOINT" \
+                      "$BACKUP_S3_ACCESS_KEY_ID" "$BACKUP_S3_SECRET_ACCESS_KEY"
+
+                  # --overwrite, but NOT --remove.
+                  #
+                  # --remove would propagate deletions, which makes the mirror a
+                  # replica rather than a backup: an accidental or malicious
+                  # delete on the source would be copied to the only other copy
+                  # on the next run, typically before anyone noticed. The cost
+                  # of omitting it is that the target accumulates objects
+                  # deleted upstream -- paid for by capacity, which is the
+                  # cheap side of this trade.
+                  #
+                  # Asset objects are immutable (the uuid IS the identity, §5),
+                  # so --overwrite only ever matters for a re-put of identical
+                  # bytes.
+                  echo "Mirroring media -> $BACKUP_S3_BUCKET"
+                  mc mirror --overwrite src/media "dst/$BACKUP_S3_BUCKET"
+
+                  # A count on both sides, in the log, every night. This is what
+                  # makes "the backup is running" checkable without a restore --
+                  # it is not a substitute for the restore rehearsal.
+                  echo "source objects: $(mc ls --recursive src/media | wc -l)"
+                  echo "target objects: $(mc ls --recursive "dst/$BACKUP_S3_BUCKET" | wc -l)"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]

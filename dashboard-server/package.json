@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "precommit": "npm run lint",
     "start": "node index.js",
-    "test": "NODE_ENV=test mocha --colors --timeout 5000 './{,!(node_modules)/**}/*.test.js'"
+    "test": "NODE_ENV=test mocha --colors --timeout 5000 --exclude './**/*.integration.test.js' './{,!(node_modules)/**}/*.test.js'",
+    "test:integration": "NODE_ENV=test mocha --colors --timeout 30000 './{,!(node_modules)/**}/*.integration.test.js'",
+    "test:media": "NODE_ENV=test mocha --colors --timeout 30000 './api/media/*.test.js'"
   },
   "repository": {
     "type": "git",
@@ -52,6 +54,7 @@
     "joi": "14.3.1",
     "jwks-rsa": "1.4.0",
     "kafkajs": "^2.2.4",
+    "minio": "^8.0.7",
     "morgan": "^1.9.1",
     "multer": "^2.0.2",
     "node-fetch": "^2.6.0",

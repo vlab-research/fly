@@ -1,0 +1,105 @@
+# Public ingress for media.vlab.digital -> media-proxy (vprod).
+#
+#     kubectl apply -f devops/media-ingress.yaml
+#
+# planning/media-abstraction.md §4.4 / §9's IaC table. This is a raw manifest
+# rather than an ingress template in media-proxy/chart because §9 specifies it
+# as one, and because it makes the single public entry point for media a file
+# you can read end to end without rendering a chart. The chart's ingress is
+# deliberately left disabled — nginx will not admit two Ingresses claiming the
+# same host.
+#
+# WHY A SEPARATE HOST AND NOT A PATH ON THE DASHBOARD (§4.6):
+# media.vlab.digital is a SEPARATE ORIGIN from fly.vlab.digital by design. An
+# uploaded HTML or SVG served from the dashboard's own origin could reach
+# dashboard sessions; served from here it has no same-origin session to reach,
+# even before the media-proxy's `Content-Security-Policy: default-src 'none'`
+# takes effect. Moving media under a dashboard path would silently delete that
+# control.
+#
+# TLS is issued by cert-manager (letsencrypt-prod) into gbv-media-proxy-cert.
+# The DNS A/AAAA record for media.vlab.digital must point at the same nginx
+# ingress load balancer as the other vlab.digital hosts BEFORE this is applied,
+# or the ACME HTTP-01 challenge cannot complete and no certificate is issued.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: media-proxy
+  namespace: vprod
+  labels:
+    app.kubernetes.io/name: media-proxy
+    app.kubernetes.io/instance: gbv
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # No proxy-body-size override, deliberately. This host serves GET and HEAD
+    # only — the media-proxy rejects every other method (media-proxy/README.md)
+    # — so there is no upload path here to size for. Uploads go to the
+    # dashboard's own ingress, which already carries a 200m cap.
+    #
+    # Assets run to video size (16MB cap, §11.5) and are streamed, so give
+    # nginx room to pass a large response through without buffering it to disk.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - media.vlab.digital
+      secretName: gbv-media-proxy-cert
+  rules:
+    - host: media.vlab.digital
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # Release `gbv` + chart `media-proxy` (devops/vlab).
+                name: gbv-media-proxy
+                port:
+                  number: 80
+
+# ---------------------------------------------------------------------------
+# STAGING
+# ---------------------------------------------------------------------------
+# REQUIRED AND STILL MISSING: the staging media hostname. §4.7 names only
+# media.vlab.digital, and there is no established staging convention to derive
+# one from safely — the existing staging hosts are inconsistent
+# (staging.links.vlab.digital, but fly-botserver.vlab.digital shared across
+# environments). Inventing one here would put a hostname in the repo that does
+# not resolve, and the first symptom would be a stuck cert-manager Order rather
+# than an obvious error.
+#
+# Supply the host, then uncomment this document AND set the matching
+# MEDIA_PUBLIC_BASE in devops/values/staging.yaml. The two must agree exactly:
+# the dashboard mints URLs from MEDIA_PUBLIC_BASE and this is what answers them.
+#
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: media-proxy
+#   namespace: vstag
+#   labels:
+#     app.kubernetes.io/name: media-proxy
+#     app.kubernetes.io/instance: gbv
+#   annotations:
+#     cert-manager.io/cluster-issuer: letsencrypt-prod
+#     nginx.ingress.kubernetes.io/proxy-buffering: "off"
+#     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+# spec:
+#   ingressClassName: nginx
+#   tls:
+#     - hosts:
+#         - <REQUIRED: staging media host>
+#       secretName: gbv-media-proxy-cert
+#   rules:
+#     - host: <REQUIRED: staging media host>
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: gbv-media-proxy
+#                 port:
+#                   number: 80

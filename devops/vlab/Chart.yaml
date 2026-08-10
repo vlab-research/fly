@@ -94,3 +94,13 @@ dependencies:
     version: 0.1.0
     repository: "file://../../hermes/chart"
     condition: hermes.enabled
+
+  # media-proxy — the sole public read path for media assets (§4.4). Vendored
+  # from the in-repo chart, following hermes rather than the OCI registry: the
+  # chart's shape changes in lockstep with devops/values/<env>.yaml, and a
+  # separately-versioned artifact would let the two drift.
+  # Gated off by default; devops/values/{production,staging}.yaml turn it on.
+  - name: media-proxy
+    version: 0.1.0
+    repository: "file://../../media-proxy/chart"
+    condition: media-proxy.enabled

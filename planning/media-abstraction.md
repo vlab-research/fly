@@ -268,14 +268,33 @@ no handle (§13).
 
 ### 4.5 Backup and capacity
 
-**`mc mirror` CronJob to an S3-compatible endpoint set by environment** —
-`BACKUP_S3_ENDPOINT` / `BACKUP_S3_BUCKET` plus credentials, **no provider named**.
-Requirements: **off-cluster** (a second bucket on the same MinIO shares the same disks
-and is not a backup); residency is the operator's choice.
+**Backup is DEFERRED — decided 2026-08-10. Not on the critical path; planned separately in
+`planning/media-backup.md` and implemented later.**
 
-Also: **a restore rehearsal before the feature is done** (a backup never restored is not
-a backup), and **capacity alerting** on bucket size and PVC utilisation, because media
-has no lifecycle rule and only grows.
+The design is unchanged: an **`mc mirror` CronJob to an S3-compatible endpoint set by
+environment** — `BACKUP_S3_ENDPOINT` / `BACKUP_S3_BUCKET` plus credentials, **no provider
+named**; **off-cluster** (a second bucket on the same MinIO shares the same disks and is
+not a backup); residency the operator's choice. Plus **a restore rehearsal**, because a
+backup never restored is not a backup. The manifest is written and reviewable; it is simply
+not in the initial deploy, and its endpoint value is still unset.
+
+**The risk, stated once.** Distributed MinIO covers disk and node failure. It does **not**
+cover loss of the cluster's disks, and media is unrecoverable by construction — we hold the
+only copy of every researcher's file. Until the mirror runs, a cluster-level loss loses the
+media library permanently: assets 404, surveys show broken images, and there is no
+re-upload path because the bytes exist nowhere else.
+
+**Why deferring is safe now, and when it stops being.** The bucket is empty. Exposure is a
+function of *adoption*, not time — it grows with every file uploaded. The feature also ships
+dark, so nothing is uploaded until the media tab reaches users.
+
+> **Trigger: the mirror must be running before researchers are told the media tab exists.**
+> Not before merge, not before the flag flips — before anyone uploads a file they cannot
+> reproduce. An adoption event, not a date.
+
+**Capacity alerting is NOT deferred** and stays in the initial deploy: bucket size and PVC
+utilisation, because media has no lifecycle rule and only grows — unlike exports, which have
+a 3-day rule. Without it, the first symptom of a full volume is failed uploads.
 
 ### 4.6 Security model, stated plainly
 
@@ -677,9 +696,10 @@ and is staged by flag.
    policy, **no anonymous policy** — a maintenance window, destroy-and-recreate (§4.2).
    *Gate:* exporter still writes exports; anonymous access to the media bucket denied
    entirely, including via `storage-api`.
-2. **media-proxy** (≥2 replicas + PDB), `media.vlab.digital` ingress + TLS, `mc mirror`
-   CronJob. *Gate:* `curl` an object over TLS from outside; non-`a/<uuid>` path 404s;
-   non-GET rejected; mirror runs and a **restore rehearsal** succeeds.
+2. **media-proxy** (≥2 replicas + PDB), `media.vlab.digital` ingress + TLS, capacity
+   alerting. *Gate:* `curl` an object over TLS from outside; non-`a/<uuid>` path 404s;
+   non-GET rejected. **The `mc mirror` CronJob and the restore rehearsal are deferred
+   out of this step** (§4.5) — they gate *researcher adoption*, not deploy.
 3. **Migration 24** via `devops/run-migration.sh`. *Gate:* applied on staging, grants
    verified as `chatreader`/`chatroach`.
 4. **Merge and deploy the branch with `MEDIA_HANDLE_USE=off`.** Nothing a respondent can
@@ -696,7 +716,22 @@ live traffic, and every message under it has a URL fallback beneath it.
 
 | File | Change |
 |---|---|
+| **`devops/minio/minio.yaml`** — the file that actually deploys MinIO | Deployment + single PVC → 4-replica StatefulSet with a PVC each, headless peer service, anti-affinity, PDB |
 | `devops/values/minio.yaml` | `mode: distributed`, `replicaCount: 4`, PVC sizing; `media` in `defaultBuckets`. **No anonymous policy.** |
+
+> **This table originally named only `devops/values/minio.yaml`, which would have been a
+> no-op.** That file is Bitnami-chart-shaped and is *not* what deploys MinIO here — the live
+> path is `kubectl apply -f devops/minio/`, as `documentation/exports-storage.md` states.
+> Both are now maintained and cross-referenced.
+>
+> Also: §4.3 specifies **one** scoped credential, and **three** are needed — a writer for
+> dashboard-server (Get/Put/Delete), a **read-only** one for media-proxy (`GetObject`, and
+> deliberately **no `ListBucket`**, so a compromised proxy cannot enumerate the bucket), and
+> a Get+List one for the mirror job. The proxy must not hold the writer's credential and the
+> mirror's List must not be granted to the proxy.
+>
+> And MinIO had **no ServiceMonitor at all**, so §4.5's capacity alerting on bucket size was
+> unbuildable until one was added.
 | `devops/values/production.yaml`, `staging.yaml` | Media env vars (§4.7); media-proxy deployment; reconciler CronJob; `MEDIA_HANDLE_USE` |
 | new `devops/media-ingress.yaml` | `media.vlab.digital`, nginx, cert-manager `letsencrypt-prod` → media-proxy |
 | new `devops/minio-media-policy.json` | Scoped service-account policy, checked in, applied from file |
@@ -792,13 +827,16 @@ handler, not configuration.
 ### 7. Smoke survey — the only real-Meta coverage
 
 §11.4, both platforms, reworked in this branch. The legacy BC field must pass on Messenger
-and fail cleanly on WhatsApp. This is also where §11.2 finally gets answered.
+and fail cleanly on WhatsApp. (§11.2's questions were answered from Meta's documentation
+instead — see that section; the smoke survey now confirms behaviour rather than discovering
+it.)
 
 ### Deploy gates, not tests
 
 These are one-time verifications in §9.2, not suite items: **anonymous bucket access denied**
 (MinIO policy config), **restore rehearsal** from the mirror target into a clean MinIO
-(required before the feature is called done), and **forced-expiry rehearsal** on a staging
+(deferred with backup itself — §4.5 — and gating researcher adoption rather than deploy),
+and **forced-expiry rehearsal** on a staging
 handle.
 
 ---

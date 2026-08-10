@@ -67,15 +67,166 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
 | `/platform/notices` | Platform-wide notices proxied from AlertManager (whitelisted alertnames, fail-soft) |
-| `/media` | Facebook `message_attachments` uploads (reusable image/video attachments) |
+| `/media` | Researcher media library — upload bytes, get back a permanent public URL. Platform-independent: no page selector, no connected-page requirement. See "Media endpoints" below |
 | `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
 
-### Media functional core (`api/media/media.core.js`)
+### Media
 
-The media feature is moving from page-scoped Facebook `attachment_id`s to an
+The media feature moved from page-scoped Facebook `attachment_id`s to an
 asset/handle model (`planning/media-abstraction.md`; migration
-`24-media-assets.sql`). `media.core.js` is its pure decision layer — **no fs, no
+`24-media-assets.sql`).
+
+| File | Role |
+|---|---|
+| `api/media/media.core.js` | Pure decision layer — validation, hashing, keys, URLs, reconcile planning. No IO |
+| `api/media/media.controller.js` | The imperative shell: sequences IO, maps outcomes onto HTTP |
+| `api/media/storage/index.js` | S3 client (`minio`), `{put, delete, publicUrl}` |
+| `api/media/media.platform-upload.js` | Pre-upload of bytes to Messenger / WhatsApp, producing a handle |
+| `api/media/media.routes.js` | Multer wiring and the three endpoints |
+| `queries/media/media.queries.js` | `media_asset` reads/writes and the `media_handle` upsert |
+| `queries/credentials` → `getMessagingAccounts` | The fan-out target set |
+
+#### Media endpoints
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /media/upload` | multipart `file`. `201` with the new asset, or **`200` with the existing one** on a dedupe hit |
+| `GET /media` | The caller's assets, newest first |
+| `DELETE /media/:id` | `204`. Removes the row and the object; handles cascade. `404` if it is not the caller's |
+
+The response shape is `{id, filename, mediaType, mimeType, byteSize, created, url}`.
+**`url` is the whole product** — it is what a researcher pastes into a survey.
+It is derived from the asset id and `MEDIA_PUBLIC_BASE` rather than stored (§5),
+so moving the media domain is a helm edit and not a data migration. No platform
+identifier and no handle state is ever returned: handle freshness is our problem,
+not the author's.
+
+**`GET /media/pages` was deleted.** Asset creation is platform-independent, so
+there is no page for the author to select. An account picker at upload was
+considered and rejected in design (§2): it is the prod/staging environment
+question moved one screen earlier, the author still lacks the information to
+choose correctly since a survey resolves under *any* of its owner's accounts,
+and a wrong pick fails **silently** as a URL send that looks fine.
+
+#### The upload pipeline
+
+```
+validate -> hash -> dedupe -> put -> insert asset -> respond -> fan out
+```
+
+Two things about that order are deliberate.
+
+**`put` before `insert`.** The asset id is generated in the controller rather
+than defaulted by the database, because the object key derives from it. That
+makes the failure mode the better one: a stored object with no row is
+unreachable garbage, while a row with no object is a broken image in a
+respondent's chat.
+
+**Fan-out runs after the response is sent and can never fail the upload.** A
+handle is always an optimisation, never a requirement, so an upload must succeed
+with zero connected accounts, with a dead page token, or with Meta down — and it
+does, pinned by test in all three cases. Failures are `Promise.allSettled` +
+logged; the reconciler backfills. `uploadMedia` still *returns* a promise that
+resolves after fan-out, purely so tests can observe it.
+
+**Dedupe is per researcher, never global** (`UNIQUE (userid, content_hash)`).
+The same user re-uploading identical bytes gets the existing asset back with no
+second row and no second object; a *different* user uploading the same bytes
+gets their own row. Global dedupe would give them one shared row, and the second
+researcher's media tab — which filters by `userid` — would not show their own
+file. That asymmetry is pinned against a real database.
+
+#### Fan-out writes `account_id = credentials.key`
+
+This is the one seam that matters. `message-worker` looks a handle up by
+`(asset_id, account_id)` alone, and `account_id` is `credentials.key` — the page
+id or phone number id. **Not** `credentials.entity`, **not**
+`details->>'page_id'`. Writing anything else produces handles nothing ever
+reads, and the failure is *invisible*, because a lookup miss is the designed URL
+fallback rather than an error. Both the unit and the integration suite assert
+this against decoy fields planted in `details`.
+
+`platform` is written as the canonical spelling (`messenger`/`whatsapp`, not
+`facebook_page`/`whatsapp_business`) and is descriptive only — never a lookup key.
+
+#### Platform pre-upload (`media.platform-upload.js`)
+
+Both platforms are one code path: the same multipart POST with a different
+endpoint, form shape and response field.
+
+| Platform | Endpoint | Id field | Handle TTL |
+|---|---|---|---|
+| Messenger | `POST /me/message_attachments` | `attachment_id` | **90 days** |
+| WhatsApp | `POST /{phone_number_id}/media` | `id` | 30 days |
+
+The TTLs are read from `DEFAULT_RECONCILE_POLICY.ttlMs` in the core rather than
+duplicated here, so the reconciler's notion of when a handle dies and the
+writer's notion of when it expires cannot drift. **Never write a handle with a
+null expiry** — see the warning in the reconciliation section below.
+
+#### Object storage (`api/media/storage/index.js`)
+
+The S3 API and nothing else (§4.1): no cloud-provider SDK, no provider identity
+system, no two-backend abstraction. The client is **`minio` (minio-js)** for the
+same reason `media-proxy` uses `minio-go` — it is an S3 client rather than a
+vendor SDK, it is a fraction of the dependency weight of `@aws-sdk/client-s3`,
+and both sides of the read/write pair then speak the same library's semantics.
+
+**`put` sets `Content-Type` and `Content-Disposition` as object metadata at
+PutObject, and that is load-bearing.** media-proxy reads them back off the
+object and never sniffs at serve time, which is exactly what keeps the proxy
+database-free — it cannot be the thing that breaks when CockroachDB is slow. If
+they stop being written, the proxy serves media with no content type, browsers
+sniff, and an uploaded payload becomes active content on our own domain. Pinned
+by an integration test that `statObject`s a real MinIO.
+
+`STORAGE_BACKEND=none` is a dev no-op that discards bytes (matching the
+exporter's convention) and warns on every write.
+
+#### Upload size cap
+
+The multer `fileSize` limit is **derived** from `MEDIA_TYPE_LIMITS` — the
+largest per-type limit — and never hardcoded. It used to be a flat 25 MB, which
+preempted `validateUpload`: a 40 MB video died inside multer with a generic
+"file too large" instead of "video is 40.0 MB, maximum is 16.0 MB". Since §11.5's
+bargain is that we refuse rather than transcode, the refusal has to name the
+actual problem and the actual fix, so multer must be a backstop against
+unbounded memory and never the thing that decides eligibility.
+
+#### Local development and tests
+
+`dashboard-server/docker-compose.yml` brings up CockroachDB and MinIO. It
+applies `devops/migrations/*.sql` in sorted order — the same production
+migration files `facebot/testrunner/stack.ts` uses, rather than a hand-maintained
+dev schema, because a migration that does not apply cleanly there has not been
+tested. The `media` bucket is created **private**, with no anonymous policy,
+mirroring production: MinIO's canned `download` policy grants `s3:ListBucket`
+alongside `s3:GetObject`, and `public` grants anonymous writes. Local dev being
+more permissive than production is how a bad assumption ships.
+
+```bash
+cd dashboard-server
+cp .env-dev-example .env      # gitignored; local throwaway credentials
+docker compose up -d
+npm run test:media            # unit + integration for api/media
+npm test                      # unit only; *.integration.test.js excluded
+npm run test:integration      # every integration suite
+```
+
+`.env-dev-example` is the template for the local stack. It is deliberately a
+**different file** from `.env-example`, which is the template for the production
+`dashboard-media` secret and holds only the two scoped S3 keys, left empty — so a
+working root credential never sits one copy-paste away from a cluster secret.
+See `documentation/secrets.md`.
+
+`*.integration.test.js` is excluded from `npm test` because it needs the stack
+up, and failing loudly beats a suite that silently skips the only tests that
+touch bytes.
+
+#### Media functional core (`api/media/media.core.js`)
+
+`media.core.js` is the pure decision layer — **no fs, no
 network, no database, no `Date.now()`**; anything time-dependent takes `now` as a
 parameter, so expiry behaviour is asserted by passing a clock instead of waiting
 30 days.

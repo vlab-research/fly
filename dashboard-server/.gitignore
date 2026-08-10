@@ -54,8 +54,12 @@ typings/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
+# dotenv environment variables file. `.env-example` is the committed template
+# (documentation/secrets.md) — the real .env never enters the repo.
 .env
+.env-*
+!.env-example
+!.env-dev-example
 
 # next.js build output
 .next

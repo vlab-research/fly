@@ -1,3 +1,55 @@
+# Bitnami MinIO chart values.
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE EDITING: THIS FILE IS NOT THE APPLIED DEPLOYMENT.
+# ---------------------------------------------------------------------------
+# Production MinIO is a hand-rolled StatefulSet applied with
+# `kubectl apply -f devops/minio/` — see devops/minio/minio.yaml, which is the
+# source of truth, and documentation/exports-storage.md, which records that
+# these Bitnami values files predate it and are not used.
+#
+# planning/media-abstraction.md §9's IaC table names THIS file for the
+# distributed-mode change. That was written on the assumption that the Bitnami
+# chart was the deploy path; it is not. The change has therefore been made in
+# BOTH places: here, so the two do not disagree if the chart migration in
+# devops/BITNAMI_MIGRATION_PLAN.md ever happens, and in devops/minio/minio.yaml,
+# where it actually takes effect. If you edit one, edit the other.
+# ---------------------------------------------------------------------------
+
+# Distributed mode, 4 nodes, one PVC each — MinIO's minimum viable erasure set
+# (planning/media-abstraction.md §4.2). Media is unrecoverable by construction
+# (we hold the only copy), so a single disk is not an acceptable floor.
+#
+# With 4 drives MinIO defaults to EC:2 — 2 data + 2 parity — so the cluster
+# survives any 2 drive/node failures and USABLE CAPACITY IS HALF OF RAW:
+# 4 x 50Gi = 200Gi raw = ~100Gi usable.
+#
+# Switching mode is a destroy-and-recreate, not a migration: see the maintenance
+# window notes in devops/minio/minio.yaml.
+mode: distributed
+statefulset:
+  replicaCount: 4
+  # Fixed for the life of the data — MinIO cannot resize an erasure set.
+  drivesPerNode: 1
+
+# Two buckets, deliberately separate rather than two prefixes in one:
+#   fly/staging — respondent data, transient, 3-day lifecycle rule applied by
+#                 the exporter itself (documentation/exports-storage.md)
+#   media       — researcher-uploaded assets, permanent, NO lifecycle rule
+# Different posture, different blast radius (§4.3).
+#
+# NO ANONYMOUS POLICY IS SET ON ANY OF THESE, AND NONE MAY EVER BE.
+# The chart's `defaultBuckets` accepts a `name:policy` form; do not use it here.
+# MinIO's canned anonymous policies are traps: `download` grants s3:GetObject
+# AND s3:ListBucket — it permits exactly the enumeration it appears to prevent,
+# turning unguessable capability URLs into a directory listing — and `public`
+# is read *and write*, so a mis-set policy allows anonymous uploads into a
+# bucket served under our own domain. The media bucket is fully private and the
+# media-proxy is the only read path (§4.3, §4.4).
+# media-staging mirrors the existing fly/staging exports split -- a shared
+# media bucket would give a staging deploy DeleteObject on production media.
+defaultBuckets: "fly,staging,media,media-staging"
+
 ingress:
   enabled: true
   ingressClassName: nginx
@@ -22,6 +74,13 @@ extraEnvVars:
     value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
 persistence:
   storageClass: standard-rwo
-  size: 25Gi
+  # Per node, not in total. See the EC:2 arithmetic above.
+  size: 50Gi
 auth:
   existingSecret: minio-auth
+
+# A 4-node erasure set tolerates losing 2 nodes; a voluntary disruption must
+# never take a third.
+pdb:
+  create: true
+  maxUnavailable: 1

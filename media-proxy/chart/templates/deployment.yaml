@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "media-proxy.fullname" . }}
+  labels:
+    {{- include "media-proxy.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never drop below the running replica count during a deploy. See §13:
+      # media-proxy down means media sends with no handle fail.
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "media-proxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "media-proxy.selectorLabels" . | nindent 8 }}
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      {{- if .Values.affinity }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else }}
+      # Keep the replicas off one node by preference. `preferred`, not
+      # `required`: a pod left Pending because no second node was schedulable
+      # would be a worse outcome than two pods sharing one.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "media-proxy.selectorLabels" . | nindent 20 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # /health reports on the process and deliberately never touches
+          # storage (media-proxy/README.md). A dead MinIO must raise a 502 alert,
+          # not get this pod restarted by kubelet — restarting it fixes nothing
+          # and removes the only thing still serving cached responses.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 12
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+          {{- if .Values.envFrom }}
+          # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY, read by config.go under
+          # exactly those names. Applied from a gitignored .env by
+          # devops/secrets.sh — never inline, never `kubectl create secret`.
+          envFrom:
+            - secretRef:
+                name: "{{ .Values.envFrom }}"
+          {{- end }}
+          env:
+            {{- toYaml .Values.env | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+    {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}

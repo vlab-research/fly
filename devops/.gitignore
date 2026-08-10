@@ -1,3 +1,8 @@
 .env*
+# ...but `.env-*-example` files are COMMITTED TEMPLATES, not secrets: every key
+# present with a __FILL_...__ placeholder value, per documentation/secrets.md.
+# devops/secrets.sh refuses to apply a file that still contains a placeholder,
+# which is what makes an unsupplied value a loud failure instead of a silent one.
+!.env-*-example
 # alertmanager directory is now version-controlled
 # Only ignore the secret.yaml file (tracked in root .gitignore)

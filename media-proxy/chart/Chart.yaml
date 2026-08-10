@@ -1,0 +1,11 @@
+apiVersion: v2
+name: media-proxy
+description: >-
+  The sole public read path for media assets (media.vlab.digital). Stateless,
+  database-free, on the critical path for every media send with no cached
+  platform handle — hence >=2 replicas and a PodDisruptionBudget by default.
+  See media-proxy/README.md and planning/media-abstraction.md §4.4.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/vlab-research/fly

@@ -1,0 +1,128 @@
+{{- if .Values.mediaStorage.enabled }}
+{{- $ms := .Values.mediaStorage }}
+{{- $runbook := .Values.runbookUrl }}
+# Capacity alerting for media object storage
+# (planning/media-abstraction.md §4.5).
+#
+# WHY THIS EXISTS AND EXPORTS HAS NOTHING LIKE IT: exports are bounded by a
+# server-side 3-day lifecycle rule, so their footprint is self-limiting and a
+# growth alert would only ever report normal operation. THE MEDIA BUCKET HAS NO
+# LIFECYCLE RULE AND ONLY GROWS — that is the design (§4.6: an asset URL is
+# permanently readable), not an oversight — so the only thing standing between
+# it and a full volume is somebody noticing.
+#
+# A full MinIO does not degrade gracefully. Uploads fail at the dashboard, where
+# a human sees it (§13), but so does `mc mirror`'s target-side work and every
+# export write sharing the same disks.
+#
+# Metrics come from devops/minio/servicemonitor.yaml, which is also new — MinIO
+# was not a Prometheus target at all before this. The bucket-usage series are
+# produced by MinIO's background SCANNER, not per scrape, so they step on the
+# order of minutes to hours. Every rule here therefore uses a long `for:` and a
+# threshold with real headroom; none of this is a real-time gauge and none of it
+# should ever be tuned as if it were.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: media-storage-capacity
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: vlab-alerts
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: media-storage-capacity
+      interval: 1m
+      rules:
+        # ---- PVC utilisation: the hard floor -------------------------------
+        #
+        # Per-PVC, not summed. A distributed erasure set writes shards evenly,
+        # so one volume filling is the cluster filling — and taking a min/avg
+        # across four would hide the first one to go.
+        - alert: MinioPVCSpaceCritical
+          expr: |
+            min(
+              kubelet_volume_stats_available_bytes{namespace="minio", persistentvolumeclaim=~"data-minio-.*"}
+              / kubelet_volume_stats_capacity_bytes{namespace="minio", persistentvolumeclaim=~"data-minio-.*"} * 100
+            ) by (persistentvolumeclaim) < {{ $ms.pvcCritPercentFree }}
+          for: 10m
+          labels:
+            severity: critical
+            component: media-storage
+          annotations:
+            summary: "MinIO PVC {{`{{ $labels.persistentvolumeclaim }}`}} has < {{ $ms.pvcCritPercentFree }}% free"
+            description: >-
+              A MinIO data volume is nearly full. Media uploads and CSV exports
+              both fail when it fills, and media cannot be freed by waiting —
+              it has no lifecycle rule. Expand the volumeClaimTemplate in
+              devops/minio/minio.yaml now (standard-rwo expands online).
+            runbook_url: "{{ $runbook }}#miniopvcspace"
+
+        - alert: MinioPVCSpaceLow
+          expr: |
+            min(
+              kubelet_volume_stats_available_bytes{namespace="minio", persistentvolumeclaim=~"data-minio-.*"}
+              / kubelet_volume_stats_capacity_bytes{namespace="minio", persistentvolumeclaim=~"data-minio-.*"} * 100
+            ) by (persistentvolumeclaim) < {{ $ms.pvcWarnPercentFree }}
+          for: 30m
+          labels:
+            severity: warning
+            component: media-storage
+          annotations:
+            summary: "MinIO PVC {{`{{ $labels.persistentvolumeclaim }}`}} has < {{ $ms.pvcWarnPercentFree }}% free"
+            description: >-
+              A MinIO data volume is filling up. Plan an expansion before it
+              becomes critical. Under EC:2 usable capacity is HALF of raw, so
+              growth against the raw figure here understates how close the
+              cluster is to its usable ceiling.
+            runbook_url: "{{ $runbook }}#miniopvcspace"
+
+        # ---- Bucket size: the leading indicator ----------------------------
+        #
+        # The PVC alerts above fire when the problem has already arrived. This
+        # one fires while there is still time to decide whether the answer is a
+        # bigger volume or a delete feature (§11.6). It is a plain absolute
+        # threshold rather than a growth rate deliberately: the bucket starts
+        # empty and adoption is a step function (§11.1 — nobody uses the media
+        # tab yet), so a rate-of-change alert would fire on the first week of
+        # normal use and then never again.
+        - alert: MediaBucketSizeHigh
+          expr: |
+            max(minio_bucket_usage_total_bytes{bucket=~"media|media-staging"}) by (bucket)
+              > {{ $ms.bucketWarnBytes }}
+          for: 1h
+          labels:
+            severity: warning
+            component: media-storage
+          annotations:
+            summary: "Media bucket {{`{{ $labels.bucket }}`}} is {{`{{ $value | humanize1024 }}`}}B"
+            description: >-
+              The media bucket has passed its planning threshold. It has NO
+              lifecycle rule and only grows — this will not recover on its own.
+              Decide between expanding the MinIO PVCs and offering researchers a
+              delete action (planning/media-abstraction.md §11.6), and check
+              that the mirror target has room too.
+            runbook_url: "{{ $runbook }}#mediabucketsizehigh"
+
+        # ---- The cluster itself --------------------------------------------
+        #
+        # Distributed MinIO tolerates 2 of 4 drives offline and then stops
+        # tolerating anything. The gap between "degraded" and "unavailable" is
+        # one more failure, so a degraded set is worth waking someone for even
+        # though nothing is failing yet.
+        - alert: MinioDrivesOffline
+          expr: |
+            sum(minio_cluster_drive_offline_total) > 0
+          for: 10m
+          labels:
+            severity: critical
+            component: media-storage
+          annotations:
+            summary: "MinIO has {{`{{ $value }}`}} drive(s) offline"
+            description: >-
+              The erasure set is degraded. It survives 2 of 4 drives offline and
+              no more; media is unrecoverable by construction (we hold the only
+              copy), so a further failure is permanent data loss, not an outage.
+              Check the minio StatefulSet pods and their PVCs.
+            runbook_url: "{{ $runbook }}#miniodrivesoffline"
+{{- end }}

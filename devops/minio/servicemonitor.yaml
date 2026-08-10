@@ -1,0 +1,47 @@
+# Scrape MinIO into Prometheus.
+#
+# This did not exist before. MinIO was never a Prometheus target at all, which
+# is why devops/alerts/templates/media-storage-capacity.yaml could not have been
+# written against bucket metrics without it: the `media` bucket has NO lifecycle
+# rule and only grows (planning/media-abstraction.md §4.5), so bucket size is a
+# signal we now have to be able to read.
+#
+# MINIO_PROMETHEUS_AUTH_TYPE=public is already set on the pods
+# (devops/minio/minio.yaml), so these endpoints need no bearer token.
+#
+# Prometheus targets ALL ServiceMonitors in all namespaces
+# (serviceMonitorSelector: {} in devops/prometheus/values.yaml), so no release
+# label is required here.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app.kubernetes.io/instance: minio
+    app.kubernetes.io/name: minio
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: minio
+      app.kubernetes.io/name: minio
+  namespaceSelector:
+    matchNames:
+      - minio
+  endpoints:
+    # Cluster-level: capacity, drives online/offline, healing.
+    - port: metrics
+      path: /minio/v2/metrics/cluster
+      interval: 30s
+      scrapeTimeout: 25s
+    # Per-bucket: minio_bucket_usage_total_bytes / minio_bucket_usage_object_total.
+    #
+    # These are produced by MinIO's background SCANNER, not computed per scrape,
+    # so they move in steps on the order of minutes-to-hours rather than
+    # continuously. That is fine for a capacity signal and is exactly why the
+    # alerts built on it use long `for:` windows and generous thresholds — it
+    # must never be read as a real-time gauge.
+    - port: metrics
+      path: /minio/v2/metrics/bucket
+      interval: 5m
+      scrapeTimeout: 1m

@@ -1,0 +1,58 @@
+# Defaults only. Real values live in devops/values/<env>.yaml, applied by helm
+# through the devops/vlab umbrella chart. The two S3 keys are NEVER set here or
+# there — they come from a Kubernetes secret applied by devops/secrets.sh from a
+# gitignored .env file (documentation/secrets.md).
+
+# >= 2 is a requirement, not a default worth trimming. If media-proxy is down,
+# every media send that has no cached platform handle FAILS
+# (planning/media-abstraction.md §13). Handle sends are unaffected — that is the
+# strongest single argument for the handle layer existing, and it is also the
+# reason this service must not be a single pod.
+replicaCount: 2
+
+image:
+  repository: ghcr.io/vlab-research/media-proxy
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Public TLS termination is NOT here. media.vlab.digital is a raw manifest,
+# devops/media-ingress.yaml, applied with kubectl — per §9's IaC table.
+# Enabling an ingress from this chart as well would give nginx two Ingresses
+# claiming one host, which it refuses to admit.
+
+# Guards the replicaCount above against voluntary disruption (node drain,
+# cluster upgrade). Without it, a drain can take both replicas at once and the
+# "we always have a second one" property is only true between maintenance
+# windows.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# The secret holding S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY, mounted with
+# envFrom so the key names reach the process unchanged (config.go reads them by
+# those exact names). Applied from media-proxy/.env-media-<env> via
+# devops/secrets.sh. Empty here so a `helm template` of the bare chart renders.
+envFrom: ""
+
+# Non-secret configuration (§4.7). Set per environment in devops/values/.
+env: []
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

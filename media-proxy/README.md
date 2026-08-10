@@ -191,14 +191,51 @@ policy denies anonymous access, that the ingress and certificate resolve. §10 a
 that class to the **deploy gates** in §9.2 — configuration bugs never survive first
 contact with a smoke test, and a test for them costs maintenance forever.
 
+## Deployment
+
+All from files, per `CLAUDE.md` — nothing here is applied imperatively.
+
+| Concern | File | Applied by |
+|---|---|---|
+| Deployment, Service, PDB | `media-proxy/chart/` | `helm upgrade gbv devops/vlab -f devops/values/<env>.yaml -n <ns>` |
+| Per-env config (§4.7) | `devops/values/{production,staging}.yaml`, under `media-proxy:` | same |
+| Public host + TLS | `devops/media-ingress.yaml` | `kubectl apply -f devops/media-ingress.yaml` |
+| The two S3 keys | gitignored `media-proxy/.env-media-<env>` (template: `.env-example`) | `bash devops/secrets.sh <ns> media-proxy media-proxy/.env-media-<env>` |
+| The credential itself | `devops/minio-media-readonly-policy.json` | `bash devops/minio/media-svcacct.sh <production\|staging>` |
+
+The chart is vendored into the `devops/vlab` umbrella as a `file://` dependency,
+following hermes, rather than published to the OCI registry: this service's chart
+changes in lockstep with the values files above, and a separately-versioned
+artifact would let the two drift.
+
+The chart has **no ingress template** on purpose — the public host is the raw
+manifest, and nginx will not admit two Ingresses claiming one host.
+
+**Pods do not reload secrets.** After `secrets.sh`, roll the deployment:
+`kubectl rollout restart deployment/gbv-media-proxy -n <ns>`.
+
 ## Operations
 
 Run **≥2 replicas with a PodDisruptionBudget**. §13: if media-proxy is down, media
 sends that have no cached handle fail — handle sends are unaffected, which is the
 strongest single argument for the handle layer existing.
 
+Both are set in the values files, and both are requirements rather than defaults
+worth trimming. `replicaCount: 2` alone only guarantees two pods *exist*; the PDB
+is what stops a node drain or a cluster upgrade from evicting both at once — which
+is exactly the window in which "there is always a second one" is being relied on.
+The Deployment also rolls with `maxUnavailable: 0`, so a deploy never dips below
+the running count either.
+
 Alert on 502 rate (storage backend failing), not on 404 rate — capability URLs get
 pasted into chats and crawled, so misses are ordinary traffic.
+
+`/health` never touches storage (above), so a dead MinIO surfaces as 502s rather
+than as kubelet restarting these pods. Restarting them would fix nothing and would
+remove the only thing still able to serve.
+
+Storage capacity has its own alerts and runbooks — `documentation/alerting.md`
+§10. The `media` bucket has no lifecycle rule and only grows.
 
 ## Known gaps
 

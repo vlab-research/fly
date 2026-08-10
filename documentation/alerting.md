@@ -18,10 +18,11 @@ namespace and are versioned as Helm charts.
 
 | Source (repo path) | Release / how applied | Alerts |
 |---|---|---|
-| **`devops/alerts/`** | Helm `vlab-alerts` (monitoring) | Kafka **broker health** + **app health** + **study health** (this doc) |
+| **`devops/alerts/`** | Helm `vlab-alerts` (monitoring) | Kafka **broker health** + **app health** + **study health** + **media storage capacity** (this doc) |
 | **`devops/kafka-consumer-health/`** | Helm `kafka-consumer-health` (monitoring) | Kafka **consumer-lag** — see the dedicated doc |
 | `devops/kminion/` | Helm `kminion` (default) | *(metrics source for consumer-lag; no alerts)* |
 | `devops/sql-exporter/` | Helm `sql-exporter` (monitoring) | *(metrics source for study health; no alerts)* |
+| `devops/minio/servicemonitor.yaml` | `kubectl apply -f devops/minio/` | *(metrics source for media storage capacity; no alerts)* |
 | `devops/vlab/charts/redis/templates/prometheusrule.yaml` | vlab umbrella (`gbv`) | Redis health (subchart) |
 | `devops/prometheus/values.yaml` → `defaultRules` | kube-prometheus-stack | Kubernetes/node/Prometheus infra alerts (`Kube*`, `Node*`, `Watchdog`, …) |
 
@@ -483,3 +484,106 @@ paid Grafana Cloud IRM. Karma + ntfy keeps the whole path OSS + self-hosted.
     `InfoInhibitor` is plumbing and is **also** null-routed (§2) — it is not an alert
     and must never reach a human.
 - **Redis** alerts ship with the redis subchart (`vlab/charts/redis`).
+
+---
+
+## 10. Media object storage capacity — runbooks
+
+Defined in `devops/alerts/templates/media-storage-capacity.yaml`. Thresholds in
+`devops/alerts/values.yaml` (`mediaStorage:`). Metrics come from
+`devops/minio/servicemonitor.yaml` — **MinIO was not a Prometheus target at all
+before media landed**, so these series only exist from that apply onward.
+
+### Why this section exists at all
+
+CSV exports have never needed a capacity alert, because they are bounded by a
+server-side **3-day lifecycle rule** (`documentation/exports-storage.md`) — the
+footprint is self-limiting, so a growth alert would only ever report normal
+operation.
+
+**The `media` bucket has no lifecycle rule and only grows.** That is the design,
+not an oversight: an asset URL is permanently readable
+(`planning/media-abstraction.md` §4.6), so nothing may expire objects out from
+under a published survey. The consequence is that the only thing between the
+bucket and a full volume is somebody noticing — which is what these rules are.
+
+Two further facts shape every threshold here:
+
+- **Usable capacity is half of raw.** MinIO runs distributed across 4 nodes with
+  EC:2 (2 data + 2 parity shards). `devops/minio/minio.yaml` provisions 4 × 50Gi
+  = 200Gi raw ≈ 100Gi usable. The PVC alerts measure **raw**, so 25% raw free is
+  already tight in usable terms.
+- **Bucket-usage metrics come from MinIO's background scanner**, not from the
+  scrape. They move in steps on the order of minutes to hours. Nothing here is a
+  real-time gauge, and none of it should be tuned as if it were — hence the long
+  `for:` windows.
+
+### MinioPVCSpace
+`MinioPVCSpaceLow` (< 25% free, 30m, **warning**) and `MinioPVCSpaceCritical`
+(< 12% free, 10m, **critical**), per PVC in the `minio` namespace.
+
+Per-PVC and not summed, deliberately: a distributed erasure set writes shards
+evenly, so one volume filling *is* the cluster filling, and an average across
+four would hide the first one to go.
+
+More headroom than the Kafka equivalents (20/10) because **Kafka can be recovered
+by cutting retention and MinIO cannot** — media has no retention to cut. The only
+remedy is a volume expansion, which takes a human.
+
+1. `kubectl -n minio get pvc` — which volume, and how much is actually left.
+2. Decide what is consuming it: `minio_bucket_usage_total_bytes` per bucket in
+   Prometheus separates media (permanent) from exports (transient, `fly` /
+   `staging`). A spike in *exports* is usually a large `full_messages` run and
+   will clear within the 3-day window; a rise in *media* will not clear.
+3. **Expand, in the repo, not in the cluster.** Raise the
+   `volumeClaimTemplates` size in `devops/minio/minio.yaml` and re-apply.
+   `standard-rwo` (GKE pd.csi) expands online, so this is non-destructive.
+   Do **not** `kubectl edit` the StatefulSet — the change would be reverted by
+   the next apply and the wrong value would stay wrong in the file it came from.
+4. Note that the replica count is **not** the lever: MinIO cannot resize an
+   erasure set. Grow the volumes, or add a second server pool.
+
+### MediaBucketSizeHigh
+`minio_bucket_usage_total_bytes{bucket=~"media|media-staging"} > 20Gi` for 1h —
+**warning**.
+
+The leading indicator: `MinioPVCSpace` fires when the problem has arrived, this
+one fires while there is still time to choose a response. It is an absolute
+threshold rather than a growth rate on purpose — the bucket starts empty and
+adoption is a step function, so a rate-of-change rule would fire through the
+first week of real use and then never again.
+
+**This threshold is v1 and is not calibrated against observed data**, because
+there is none: §11.1 measured zero adoption of the media tab. It is derived from
+the volume (≈100Gi usable, ≈25Gi of it wanted by exports), so it marks the point
+where remaining headroom stops being comfortable, not the point where anything
+is wrong. Tune it **upward** as real growth appears; do not lower it to make the
+alert feel sensitive.
+
+1. Confirm the trend in Prometheus rather than reacting to one sample — the
+   scanner-derived series is steppy.
+2. Choose between the two real answers: **expand the PVCs** (above), or **give
+   researchers a delete action** (`planning/media-abstraction.md` §11.6 — safe
+   now that identity is a UUID: delete the row, delete the object, handles
+   cascade).
+3. Check the mirror target has room too — a backup that starts failing on a full
+   destination is the one failure mode that turns a capacity problem into a data
+   loss problem.
+
+### MinioDrivesOffline
+`sum(minio_cluster_drive_offline_total) > 0` for 10m — **critical**.
+
+Pages even though nothing is failing yet, and that is the point. The erasure set
+tolerates 2 of 4 drives offline and then tolerates nothing; **media is
+unrecoverable by construction — we hold the only copy** (Meta offers no download
+for an attachment id), so the next failure is permanent data loss rather than an
+outage.
+
+1. `kubectl -n minio get pods -l app.kubernetes.io/name=minio` — which replica.
+2. `kubectl -n minio logs minio-<n>` and `kubectl -n minio describe pvc data-minio-<n>`.
+3. If a node is gone, let the StatefulSet reschedule; MinIO heals the shard.
+4. **Do not take a second replica down for maintenance while this is firing.**
+   The PDB (`maxUnavailable: 1`) blocks a drain, which is exactly its job — do
+   not override it.
+5. Verify the `mc mirror` CronJob (`devops/backup/minio-media-mirror.yaml`) ran
+   recently. A degraded cluster is the moment the off-cluster copy matters.
