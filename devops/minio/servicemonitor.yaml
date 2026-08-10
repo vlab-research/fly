@@ -7,23 +7,21 @@
 #
 # CORRECTION (verified 2026-08-10, during the distributed cutover): an earlier
 # version of this comment said MinIO "was never a Prometheus target at all".
-# That is false. A THIRD ServiceMonitor also named `minio` -- left behind by the
-# Bitnami chart (minio-12.6.4) that no longer deploys this -- has lived in the
-# `monitoring` namespace for three years, scraping /minio/v2/metrics/cluster on
-# port `minio-api`. It is orphaned IaC drift: no file in this repo governs it.
+# That is false. A SECOND ServiceMonitor also named `minio` -- left behind by
+# the Bitnami chart (minio-12.6.4) that no longer deploys this -- had lived in
+# the `monitoring` namespace for three years, scraping /minio/v2/metrics/cluster
+# on port `minio-api`. Bucket metrics are new here; cluster metrics were not.
 #
-# It now DOUBLE-matches, because its selector matches both `minio` and the new
-# `minio-headless` Service, and both expose a port named `minio-api`. Together
-# with this file, cluster metrics are ingested THREE TIMES per pod:
+# It double-matched once this file landed, because its selector matched both
+# `minio` and the new `minio-headless` Service and both expose a port named
+# `minio-api`, so cluster metrics were briefly ingested THREE times per pod. It
+# was deleted on 2026-08-10 (`kubectl -n monitoring delete servicemonitor
+# minio`) after confirming no helm release owned it; scraping is now single-
+# sourced from this file. See planning/minio-distributed-redeploy.md §12.
 #
-#   job=minio           endpoint=metrics     <- this file
-#   job=minio           endpoint=minio-api   <- legacy SM, via svc/minio
-#   job=minio-headless  endpoint=minio-api   <- legacy SM, via svc/minio-headless
-#
-# `max()`-based alerts are unaffected. `sum()`-based ones are not: see the
-# MinioDrivesOffline note in media-storage-capacity.yaml. The legacy
-# ServiceMonitor should be deleted, but deleting live state that no file governs
-# is itself a decision -- do it deliberately, not as a side effect.
+# The lesson that outlived it: `sum()` over a MinIO CLUSTER metric is wrong even
+# with one ServiceMonitor, because every node reports the cluster-wide value.
+# Use max(). See the MinioDrivesOffline note in media-storage-capacity.yaml.
 #
 # MINIO_PROMETHEUS_AUTH_TYPE=public is already set on the pods
 # (devops/minio/minio.yaml), so these endpoints need no bearer token.

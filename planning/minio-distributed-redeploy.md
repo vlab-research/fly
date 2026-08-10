@@ -371,16 +371,28 @@ to a *different* release and so would not be swept: the upgrade added 2 rules an
 the command also works on a fresh cluster. Its one cost is that a mistyped release name
 silently creates a new release instead of erroring.)
 
-### Still outstanding
+### The orphaned ServiceMonitor — deleted 2026-08-10
 
-**The orphaned Bitnami ServiceMonitor is still in `monitoring`.** Confirmed a true tombstone —
-no helm release named `minio` exists, not even a failed one, and there are no release secrets
-for it. Deleting it needs a permission this session does not have:
+Confirmed a true tombstone first: no helm release named `minio` exists, not even a failed one,
+and no release secrets for it. Then `kubectl -n monitoring delete servicemonitor minio`.
+A copy of the manifest was taken beforehand.
 
-```bash
-kubectl -n monitoring delete servicemonitor minio
+Triplication resolved, verified rather than assumed:
+
+- **Before:** 12 series for `minio_cluster_capacity_usable_free_bytes` across three
+  `(job, endpoint)` pairs. **After:** 4, from one — `job=minio, endpoint=metrics`.
+- Active scrape pools are now only `serviceMonitor/minio/minio/{0,1}` (this repo's).
+
+**A trap worth knowing if you ever re-verify this:** for several minutes after the delete, an
+instant query still returns the dead series. That is not a failed deletion — Prometheus looks
+back 5 minutes, so a removed target's last sample stays visible until it ages out. Waiting for
+the count to drop looks like a hang. The signal that actually distinguishes "still scraped"
+from "already dead" is **sample age**:
+
+```promql
+max by (endpoint) (time() - timestamp(minio_cluster_capacity_usable_free_bytes))
 ```
 
-Until then cluster metrics stay triple-scraped. Nothing is *wrong* — the deployed alerts use
-`max()` and are immune — but any future `sum()` over MinIO cluster metrics will be silently
-3× off. A copy of the manifest was taken before attempting the delete.
+A live endpoint sits near the scrape interval (~25s here); a dead one climbs without bound
+(236s and rising, at the moment of checking). Age answers in one query what a count takes five
+minutes to answer.
