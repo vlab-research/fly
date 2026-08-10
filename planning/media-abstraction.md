@@ -575,11 +575,13 @@ the prod proxy serves.
 
 **New: media-proxy** (§4.4).
 
-**New: reconciler.** Desired state is `assets × their owner's messaging accounts`. A
-CronJob is the IaC-legible option, either calling an authenticated internal endpoint on
-dashboard-server or running a small script that shares its modules — it needs the same
-S3 client, the same `credentials` lookup, and `planReconcile`. You are adding a CronJob
-for `mc mirror` anyway; follow that pattern. Decide at stage F (§11.3).
+**New: reconciler — BUILT, stage F.** Desired state is
+`assets × their owner's messaging accounts`. Shape decided (see §11.3): a **standalone
+script**, `dashboard-server/scripts/media-reconcile.js`, run as a **CronJob out of the
+dashboard image** (`devops/vlab/templates/media-reconciler-cronjob.yaml`), hourly. The
+decision layer is `planReconcile`, unchanged; `api/media/media.reconcile.js` is the shell
+around it, and the only new logic it adds is `prioritiseActions` — the per-run bound, which
+is pure for the same reason `planReconcile` is.
 
 ---
 
@@ -678,7 +680,7 @@ break is attributable to one stage rather than to the whole branch. All of it me
 | C | dashboard-server storage backend + endpoint rewrite; `generic-translator` passes both fields | Upload returns a public URL fetchable over TLS |
 | D | dashboard-client media page | Researcher uploads without a connected page and copies a URL |
 | E | Upload-time fan-out, both platforms, one path | `media_handle` rows appear while `USE=off` |
-| F | Reconciler | Forced-expiry rehearsal re-uploads and stays green; a newly connected account gets backfilled |
+| F | Reconciler — **DONE** | Forced-expiry rehearsal re-uploads and stays green; a newly connected account gets backfilled. Both are covered by `media.reconcile.integration.test.js` against real CockroachDB + MinIO with an injected clock, so the rehearsal does not wait 90 days |
 | G | IaC + migration files (below), smoke survey rework (§11.4) | Reviewed as files; applied in 9.2 |
 
 Stages A–B are the ones to hold the line on. With `MEDIA_HANDLE_USE=off` the deployed
@@ -711,6 +713,39 @@ and is staged by flag.
 
 Steps 1–4 change nothing a respondent can observe. Step 5 is the first behaviour change on
 live traffic, and every message under it has a URL fallback beneath it.
+
+### 9.3 Release artifacts — what must exist before step 1
+
+Two images this branch introduces or changes do not exist yet. **Both must be built before
+any values file is applied**, and neither can be built before merge: a tag builds the image
+from the tagged commit, and tagging an unmerged feature branch would publish an image built
+from code that is not on the release line (see `documentation/release-lineages.md` — feature
+branches merge into `staging`, and `staging` is what `vstag` builds from).
+
+So this is a **post-merge, pre-deploy** step, in this order:
+
+| # | Artifact | Why |
+|---|---|---|
+| 1 | **`media-proxy-v0.0.1`** | New service, never released. `versionMediaProxy: v0.0.1` in both values files refers to an image that does not exist. |
+| 2 | **A new `dashboard` tag**, and `versionDashboard` bumped to match in both values files | The reconciler CronJob runs `node scripts/media-reconcile.js` **out of the dashboard image**, and that script does not exist in `v0.0.71` (production) or `v0.0.68-wa` (staging). |
+
+`media-proxy` was absent from `.github/workflows/release.yml`'s service map and would have
+failed with *"Unknown service"* rather than building. That is fixed; the tag now works.
+
+**Choosing the dashboard version is not mechanical.** Production is on `v0.0.71` and staging
+on `v0.0.68-wa` — separate lineages by design, and `release-lineages.md` additionally flags
+`main`'s post-cutover role as unresolved. Whoever merges picks the version for the line they
+merged into; do not assume `+1` on both.
+
+**If this step is skipped:** the reconciler CronJob crashes hourly with `Cannot find module`.
+That is *not* silent — `defaultRules.create: true` with `kubernetesApps: true` in
+`devops/prometheus/values.yaml` means `KubeJobFailed` / `KubeCronJobRepeatedlyFailing` fire
+to `#vlab-alerts`. Loud, but a wholly avoidable page. The media-proxy equivalent is an
+`ImagePullBackOff`, equally visible.
+
+Note the **ordering constraint**: media-proxy must be deployed (step 2) before the dashboard
+starts issuing asset URLs (step 4), because a URL minted from `MEDIA_PUBLIC_BASE` is
+worthless until something answers it.
 
 ### IaC
 
@@ -922,8 +957,59 @@ invalidation of good handles plus a re-upload storm. **Age-based expiry is the m
 error-driven invalidation is not to be built** unless someone first observes real expired-id
 error payloads in production and writes a classifier against what was actually seen.
 
-**11.3 Reconciler deployment shape** — CronJob calling an internal dashboard-server
-endpoint, or a standalone job sharing its modules. Decide at stage F.
+**11.3 Reconciler deployment shape — DECIDED & BUILT 2026-08-10 (stage F): a standalone
+script sharing dashboard-server's modules, run as a CronJob.**
+
+Not an internal HTTP endpoint on dashboard-server. That option would need **its own
+authentication** — one more secret to issue, rotate and get wrong — and would exist for
+exactly one caller, cron. It would also put a job that re-uploads up to hundreds of
+megabytes on the process serving the researcher UI, where a long pass competes with request
+handling and a crash takes the dashboard with it. The script runs from the **dashboard
+image**, so it still shares the same S3 client, the same `getMessagingAccounts` lookup and
+the same `planReconcile`, while getting process isolation, its own resource limits and its
+own failure surface for free.
+
+The CronJob template lives in the **umbrella** chart (`devops/vlab/templates/`) rather than
+the `dashboard` subchart, which is a versioned OCI artifact. That is what lets it reuse
+`.Values.dashboard.env` and `.Values.dashboard.envFrom` verbatim instead of restating the
+database host, the S3 endpoint, the bucket and the two scoped MinIO keys. A second copy of
+those is a copy that can silently disagree — and a reconciler pointed at the wrong bucket
+does **not** error: it finds no bytes, logs failures, and every send quietly falls back to
+URL.
+
+**What §11.3 did not say, and had to be decided here — the per-run bound.** §7 and §11.3
+describe the reconciler as if the work were free. It is not: desired state is
+`assets × accounts`, which grows multiplicatively, and §11.1b's 29-account user makes that
+concrete. Every action is a **file upload to Meta of up to 100 MB**, so connecting one
+account for that user would otherwise turn their whole library into uploads inside a single
+tick. Two bounds, because count alone is the wrong unit — 200 actions is a few seconds of
+thumbnails or 20 GB of documents:
+
+| Bound | Production | Staging |
+|---|---|---|
+| `maxActions` | 200 | 20 |
+| `maxBytes` | 512 MiB | 128 MiB |
+
+Work is ordered by urgency — `expiring` (works today, dies soon: the only class where
+deferring makes something *worse*) before `dead` and `missing` (both already sending by
+URL); within `expiring`, soonest `expires_at` first rather than oldest `uploaded_at`, or a
+30-day WhatsApp handle sorts behind a 90-day Messenger one. Prunes are never deferred (one
+DELETE, no bytes). **Whatever is deferred is NAMED in the log, not just counted** — §10 is
+explicit that a silent cap reads as "covered everything" when it did not.
+
+**Also decided here: exit codes.** `0` whenever the pass ran, whatever it found. Individual
+upload failures are expected and every one of those messages still sends by URL, so exiting
+non-zero would fire `CronJobRepeatedlyFailing` for something nobody needs to be woken for —
+and an alert that cries wolf gets muted, taking the real signal with it. `1` only when the
+pass could not run at all. The health signal for the handle layer is the by-URL counter
+(§8.5), not this exit code.
+
+**Storage grew a reader.** §4.3 lists no in-application reader of object storage — the
+worker never touches it and the public path is media-proxy. But refresh re-uploads the same
+bytes and we hold the only copy, so `storage.get` exists for exactly one caller, the
+reconciler. Under `STORAGE_BACKEND=none` it **throws** rather than returning an empty
+buffer, and the script refuses to start: handing the reconciler zero bytes would write a
+handle pointing at nothing, which is worse than no handle at all.
 
 **11.4 Smoke survey rework** (`smoke-test/form-a.json`), part of stage G — **DONE**, with
 one correction to the spec below.
@@ -1083,10 +1169,22 @@ container the sniffer can positively name as a document" — today PDF and the t
 types, per the table above. Extending that further (csv, rtf, …) means teaching the sniffer
 their magic bytes first, not widening the accept check to include octet-stream.
 
-**11.6 Orphaned assets.** Much smaller now that identity is a UUID and deletion is safe —
-delete the row, delete the object, handles cascade. Remaining question is only whether to
-offer researchers a delete action and whether to reference-count against surveys, or
-accept the growth with capacity alerting (§4.5).
+**11.6 Orphaned assets.** **Deletion is NOT in v1.** The reasons:
+
+1. **No backup.** We hold the only copy of every researcher's file. Distributed MinIO
+   covers disk and node failure but not loss of the cluster's disks. Once backup
+   (VIR-24 / `planning/media-backup.md`) exists and runs, deletion becomes safe.
+2. **No reference counting against surveys.** Nothing checks whether a live survey
+   references an asset before deleting it, so a deletion silently breaks any live
+   respondent flow that references that asset with zero signal to anyone. The
+   design (§11.5) rejects ineligible files at upload — we can do the same
+   here: accept that deletion exists, but require explicit opt-in (reference
+   counting) before surfacing it.
+
+The accidental-confidential-upload case is handled out-of-band: a researcher tells us
+and we delete it after a human considers whether the URL escaped. This trades friction
+for the ability to make an informed decision. Deletion can be revisited once backup
+exists AND reference counting against surveys is implemented.
 
 **11.7 Video, audio, documents.** Different size limits; larger uploads make the
 reconciler's re-upload work non-trivial. The smoke survey already exercises a video and
