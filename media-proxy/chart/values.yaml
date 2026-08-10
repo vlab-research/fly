@@ -23,10 +23,23 @@ service:
   type: ClusterIP
   port: 80
 
-# Public TLS termination is NOT here. media.vlab.digital is a raw manifest,
-# devops/media-ingress.yaml, applied with kubectl — per §9's IaC table.
-# Enabling an ingress from this chart as well would give nginx two Ingresses
-# claiming one host, which it refuses to admit.
+# Public TLS termination. Chart-managed, like every other application ingress in
+# the devops/vlab umbrella — gbv-dashboard, gbv-hermes and gbv-linksniffer all
+# carry `app.kubernetes.io/managed-by: Helm`. The raw ingress manifests under
+# devops/ (minio, karma, ntfy) belong to infrastructure deployed OUTSIDE the
+# umbrella, which is a different category.
+#
+# `host` has no default on purpose: it differs per environment and the template
+# `required`s it, so a misconfigured environment fails at render rather than
+# deploying an Ingress claiming "". Set it in devops/values/<env>.yaml and keep
+# it identical to MEDIA_PUBLIC_BASE there — the dashboard mints asset URLs from
+# that value and this is what answers them.
+ingress:
+  enabled: false
+  className: nginx
+  clusterIssuer: letsencrypt-prod
+  host: ""
+  annotations: {}
 
 # Guards the replicaCount above against voluntary disruption (node drain,
 # cluster upgrade). Without it, a drain can take both replicas at once and the

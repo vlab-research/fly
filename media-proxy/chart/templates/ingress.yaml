@@ -1,0 +1,67 @@
+{{- if .Values.ingress.enabled -}}
+# Public TLS entry point for media assets — the SOLE public read path (§4.4).
+#
+# Lives in this chart, not as a raw manifest applied with kubectl, because
+# media-proxy is a subchart of the devops/vlab umbrella and every other
+# application ingress here is chart-managed: gbv-dashboard, gbv-hermes and
+# gbv-linksniffer all carry `app.kubernetes.io/managed-by: Helm`. The raw
+# manifests in devops/ (minio, karma, ntfy) are infrastructure deployed OUTSIDE
+# the umbrella — a different category.
+#
+# A raw manifest here would also mean `helm upgrade` could not reconcile the
+# ingress and `helm uninstall` would leave it behind, which is exactly the drift
+# CLAUDE.md's IaC rule exists to prevent.
+#
+# WHY A SEPARATE HOST AND NOT A PATH ON THE DASHBOARD (§4.6):
+# media.vlab.digital is a SEPARATE ORIGIN from fly.vlab.digital by design. An
+# uploaded HTML or SVG served from the dashboard's own origin could reach
+# dashboard sessions; served from here it has no same-origin session to reach,
+# even before the proxy's `Content-Security-Policy: default-src 'none'` applies.
+# Moving media under a dashboard path would silently delete that control.
+#
+# PREREQUISITE: the DNS A/AAAA record for .Values.ingress.host must resolve to
+# the same nginx ingress load balancer as the other vlab.digital hosts BEFORE
+# this is applied. Otherwise the ACME HTTP-01 challenge cannot complete and
+# cert-manager leaves a stuck Order rather than failing visibly.
+#
+# The host MUST match MEDIA_PUBLIC_BASE in the same environment's values file:
+# the dashboard mints asset URLs from that value and this is what answers them.
+# A mismatch does not error — it produces URLs that resolve to nothing, and the
+# first symptom is a broken image in a respondent's chat.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "media-proxy.fullname" . }}
+  labels:
+    {{- include "media-proxy.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer | quote }}
+    # No proxy-body-size override, deliberately. This host serves GET and HEAD
+    # only — media-proxy rejects every other method — so there is no upload path
+    # to size for. Uploads go to the dashboard's own ingress.
+    #
+    # Assets run to video size (16MB cap, §11.5) and are streamed, so give nginx
+    # room to pass a large response through without buffering it to disk.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ required "ingress.host is required when ingress.enabled" .Values.ingress.host | quote }}
+      secretName: {{ include "media-proxy.fullname" . }}-cert
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "media-proxy.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}
