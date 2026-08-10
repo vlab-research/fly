@@ -1,7 +1,8 @@
 # MinIO: Single-Node → Distributed Redeploy
 
-**Status:** Planned, not executed. Can be done now, independently of the media abstraction
-build — and there are two reasons it is *better* done now than later (§3).
+**Status: EXECUTED 2026-08-10.** Outcome, verification results, and the one problem it
+surfaced are in §11. The sections below are kept as written — they are the record of why this
+was done and how, and §7's remaining steps still need a human-triggered export.
 
 **Related:** `planning/media-abstraction.md` §4.2, `planning/media-staging-runbook.md`,
 `planning/media-backup.md` (VIR-24), `documentation/exports-storage.md`.
@@ -35,9 +36,11 @@ build — and there are two reasons it is *better* done now than later (§3).
 **Note the usable figure.** Erasure coding halves it: provisioning 8× the raw disk buys 4× the
 usable capacity. Exports want ~25Gi of that; the rest is media headroom.
 
-**MinIO gets a ServiceMonitor for the first time.** It was not a Prometheus target at all
-before, which is why `media-abstraction.md` §4.5's capacity alerting was unbuildable until
-now.
+**MinIO gets a ServiceMonitor for bucket metrics**, which is why `media-abstraction.md` §4.5's
+capacity alerting was unbuildable until now. An earlier draft said MinIO "was not a Prometheus
+target at all before" — false, and it matters: a three-year-old orphaned ServiceMonitor from
+the retired Bitnami chart lives in `monitoring` and now triple-scrapes cluster metrics. See
+§11.
 
 ## 2. Why it is a destroy-and-recreate, not a migration
 
@@ -271,3 +274,59 @@ would not, which is the whole reason for §3a's window.
 - **This is production infrastructure shared with staging.** There is no way to rehearse it
   on staging first, because staging *is* the same MinIO. That asymmetry is worth stating out
   loud: unlike everything else in the media build, this step has no staging dress rehearsal.
+
+## 11. Executed 2026-08-10 — outcome and one thing it surfaced
+
+Executed in full. Result: 4/4 pods `Running` on four distinct nodes, `1 set(s), 4 drives per
+set` formatted, PDB allowing 1 disruption, all four 50Gi PVCs Bound, `service/minio`
+**configured in place** (confirming §8 — no delete was needed).
+
+Verified, not assumed:
+
+| Check | Result |
+|---|---|
+| No in-flight export | Both exporter pods idle since 2026-08-07 18:21, last line `finished` |
+| Round-trip write/read | 3MB object, sha256 match |
+| **Kill a pod, keep serving** | `minio-2` deleted; read *and* write both succeeded while it was `0/1`, sha256 match; pod recovered to `1/1` |
+| Anonymous access | 403 on `GET`/list for `media` and `media-staging`, via `storage-api.vlab.digital` |
+| Prometheus | All 4 pods `up=1` |
+| Buckets + accounts | `media`, `media-staging` created; six service accounts minted; four secrets applied; both `gbv-dashboard` deployments restarted |
+
+**Still outstanding — needs a human-triggered export** (§7 steps 2 and 3). The `fly` and
+`staging` buckets are gone and are recreated by the exporter's next run, so nothing proves
+that path works until someone triggers an export from the dashboard. When you do, also check
+the lifecycle rule landed — `_ensure_lifecycle` is best-effort and fails silently, and without
+it exports accumulate forever:
+
+```bash
+kubectl -n minio port-forward svc/minio 9900:9000 &
+mcli alias set m http://127.0.0.1:9900 "$ROOT_USER" "$ROOT_PASSWORD"
+mcli ilm ls m/fly          # expect expire-exports-3d
+```
+
+### The orphaned ServiceMonitor
+
+The cutover surfaced a pre-existing problem it did not cause. A **second ServiceMonitor named
+`minio`, in the `monitoring` namespace, 3 years old**, left by the retired Bitnami chart
+(`minio-12.6.4`), scrapes `/minio/v2/metrics/cluster` on port `minio-api`. Nothing in this
+repo governs it — it is pure drift, and it invalidated the claim that MinIO had no
+ServiceMonitor.
+
+Because its selector matches the labels on **both** `minio` and the new `minio-headless`
+Service, and both expose a port named `minio-api`, cluster metrics are now ingested **three
+times per pod** — measured: 12 series for `minio_cluster_capacity_usable_free_bytes` where 4
+are expected.
+
+Consequences, in order of importance:
+
+1. **`MinioDrivesOffline` reports a wrong number.** Its expression is
+   `sum(minio_cluster_drive_offline_total) > 0`. `minio_cluster_drive_offline_total` is a
+   *cluster-wide* value reported by *every* node, so `sum()` already over-counted 4× before
+   this change; it is now 12×. The alert still fires correctly (0 sums to 0), but its summary
+   would say "12 drive(s) offline" when one is. **`max()` is the correct aggregator here**, as
+   `MediaBucketSizeHigh` already uses.
+2. `MediaBucketSizeHigh` is unaffected — `max() by (bucket)` is idempotent over duplicates.
+3. Three times the storage for those series.
+
+Not fixed, deliberately: deleting live state that no repo file governs, and changing an
+alert's aggregation, are both decisions rather than cleanup.

@@ -1,10 +1,29 @@
 # Scrape MinIO into Prometheus.
 #
-# This did not exist before. MinIO was never a Prometheus target at all, which
-# is why devops/alerts/templates/media-storage-capacity.yaml could not have been
-# written against bucket metrics without it: the `media` bucket has NO lifecycle
-# rule and only grows (planning/media-abstraction.md §4.5), so bucket size is a
-# signal we now have to be able to read.
+# Bucket metrics did not exist before: devops/alerts/templates/media-storage-capacity.yaml
+# could not have been written without this endpoint, because the `media` bucket
+# has NO lifecycle rule and only grows (planning/media-abstraction.md §4.5), so
+# bucket size is a signal we now have to be able to read.
+#
+# CORRECTION (verified 2026-08-10, during the distributed cutover): an earlier
+# version of this comment said MinIO "was never a Prometheus target at all".
+# That is false. A THIRD ServiceMonitor also named `minio` -- left behind by the
+# Bitnami chart (minio-12.6.4) that no longer deploys this -- has lived in the
+# `monitoring` namespace for three years, scraping /minio/v2/metrics/cluster on
+# port `minio-api`. It is orphaned IaC drift: no file in this repo governs it.
+#
+# It now DOUBLE-matches, because its selector matches both `minio` and the new
+# `minio-headless` Service, and both expose a port named `minio-api`. Together
+# with this file, cluster metrics are ingested THREE TIMES per pod:
+#
+#   job=minio           endpoint=metrics     <- this file
+#   job=minio           endpoint=minio-api   <- legacy SM, via svc/minio
+#   job=minio-headless  endpoint=minio-api   <- legacy SM, via svc/minio-headless
+#
+# `max()`-based alerts are unaffected. `sum()`-based ones are not: see the
+# MinioDrivesOffline note in media-storage-capacity.yaml. The legacy
+# ServiceMonitor should be deleted, but deleting live state that no file governs
+# is itself a decision -- do it deliberately, not as a side effect.
 #
 # MINIO_PROMETHEUS_AUTH_TYPE=public is already set on the pods
 # (devops/minio/minio.yaml), so these endpoints need no bearer token.
