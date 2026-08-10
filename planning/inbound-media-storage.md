@@ -164,12 +164,16 @@ design. Restating why each alternative loses:
 - **hermes** — it is the webhook receiver and must return 200 to Meta fast. Putting a
   multi-megabyte download in that path is the same coupling the media-proxy README
   rejects when it declines to be folded into hermes.
-- **message-worker** — it *does* hold credentials (`message-worker/tokenstore.go:84`,
-  `GetToken(ctx, platform, platformAccountID)` against `chatroach.credentials`) and is
-  the tempting answer. Rejected: it is the **outbound** send path, on the critical path
-  for message delivery. A download backlog would contend with sends. Its failure mode
-  is "messages stop going out," which is the worst thing in the system to put behind a
-  bulk byte-mover.
+- **message-worker** — it *does* hold credentials (`message-worker/tokenstore.go:81-119`,
+  `GetToken(ctx, platform, platformAccountID)` against `chatroach.credentials`, with a
+  TTL cache) and is the tempting answer. It is also the only service that holds them
+  *and* consumes Kafka. Rejected on two grounds: it subscribes **only** to
+  `vlab-prod-commands` (`cmd/message-worker/main.go:86`), so it does not see inbound
+  events at all — this is not "add a filter," it is a second subscription with an
+  unrelated lifecycle; and it is the **outbound** send path, on the critical path for
+  message delivery. A download backlog would contend with sends, and its failure mode is
+  "messages stop going out," which is the worst thing in the system to put behind a bulk
+  byte-mover.
 - **the exporter** — wrong clock entirely. It is a polled batch job; the deadline here
   is a stream deadline.
 
@@ -232,6 +236,20 @@ chat-events topic — a Messenger asset whose URL is dying while it waits. Commi
 offset, leave the row `pending`, and let a **sweeper** re-drive `pending` rows on a
 timer. The sweeper is the retry mechanism; Kafka is only the discovery mechanism.
 
+**There is no dead-letter topic anywhere in this system**, so "dead-letter it" is not an
+available primitive — the `inbound_media` row *is* the dead-letter queue, which is
+another reason step 2 writes it before attempting anything. The two existing patterns
+are both worse and neither should be copied:
+
+- **replybot** catches per-event errors, logs them, and commits the offset
+  (`replybot/lib/index.js:82-90`) — the event is silently lost. Acceptable for a
+  conversational turn the respondent can retry; unacceptable for bytes that expire.
+- **scribble** `log.Fatalf`s on unhandled errors (`scribble/scribble.go:32-40`) and runs
+  the `messages` sink in strict mode (`production.yaml:327-328`), so a poison message
+  restarts the pod and wedges the partition until Kafka retention expires.
+
+Row-based retry avoids both: nothing is lost and nothing wedges.
+
 For WhatsApp the sweeper works because the id is durable for 7 days. **For Messenger
 the sweeper cannot help**, because the URL it would retry is already dead. A Messenger
 download that fails on first attempt beyond a few in-process retries is `failed`
@@ -241,10 +259,30 @@ someone will assume the sweeper covers both.
 ### 3.4 Backlog
 
 Existing inbound media stores dead URLs and, before `471475a2`, no id at all. Findings
-§7.5 raises this. **Decision: write it off explicitly.** Anything older than 7 days is
-unrecoverable regardless of what we build; anything newer is a handful of rows
-(findings §3: six hours of production logs across eight pods contained exactly one
-media event). Record the count once so it is a known number, then stop.
+§7.5 raises this and recommends writing it off.
+
+**That recommendation should be revisited, because a recovery source exists that the
+findings doc did not account for.** The raw hermes-stamped webhook item — media id,
+`mime_type`, `sha256` and all — is stored **verbatim and indefinitely** in
+`chatroach.messages.content` by scribble (`scribble/message.go:40`;
+`01-init.sql:17-27`). There is no TTL, no row-level TTL and no pruning job anywhere in
+the repo. Kafka additionally retains the raw event for **31 days**
+(`devops/values/production.yaml:68-72`).
+
+So the id is recoverable for *every* inbound media message ever received, not just those
+that reached `responses`. What is **not** recoverable is the bytes, and that is governed
+by Meta's 7-day clock regardless of what we hold.
+
+**Revised decision: write off the bytes, but run the count.** A one-off query over
+`messages` establishes how much inbound media has ever been received and how much of it
+falls inside the 7-day window on the day ingestion ships. Anything inside that window is
+recoverable by feeding those ids through the same ingest path — which is worth doing
+precisely because the machinery already exists at that point. Anything outside it is
+gone and should be recorded as a known loss rather than discovered later.
+
+Current expectation is that this is small (findings §3: six hours of production logs
+across eight pods contained exactly one media event), but that is an observation from one
+window, not a count.
 
 ---
 
@@ -399,10 +437,14 @@ materially worse if copied.
    `exports/{survey}.csv` (`exporter.py:226`), `exports/{survey}_chat_log.csv` (:459),
    `exports/{survey}_full_messages{suffix}.csv` (:351). `survey` is `survey_name`,
    which is **not globally unique** — it is unique per user. Two researchers with a
-   survey named `default` overwrite each other's export objects. Today that is a
-   collision bug with a short window. For a ZIP of respondent photographs it would be a
-   cross-tenant disclosure, because the second researcher's presigned link would resolve
-   to bytes assembled from the first researcher's survey.
+   survey named `default` overwrite each other's export objects.
+
+   The disclosure direction is worth stating precisely, because it is the opposite of
+   the intuitive one: the **first** researcher's presigned URL stays valid for 7 hours
+   and, after the second export overwrites the key, **serves the second researcher's
+   bytes**. The victim does nothing wrong and receives someone else's data by following
+   their own link. Today that is a CSV of responses. For a ZIP of respondent
+   photographs it is a cross-tenant disclosure of personal data.
 
    **The media export must key by `export_id`:** `exports/media/{export_id}.zip`. The
    export id is already a `crypto.randomUUID()` generated per request in
@@ -446,8 +488,11 @@ Specifics that need deciding rather than discovering in production:
   the job cleanly rather than evicting the pod.
 - **Don't recompress.** JPEG and MP4 do not compress. Use `ZIP_STORED`, which turns the
   job into IO plus a small constant of CPU.
-- **MinIO PVC.** 25 Gi sized for a 3-day export window (`devops/minio/minio.yaml`).
-  Permanent respondent media plus large transient ZIPs breaks that sizing assumption.
+- **MinIO capacity.** MinIO is now a **4-replica StatefulSet, 50 Gi PVC each, erasure
+  EC:2 → ~100 Gi usable** (`devops/minio/minio.yaml:104-117,236`). That is the real
+  number; `documentation/exports-storage.md` still describes the superseded single-node
+  25 Gi deployment and is **stale** (see §11.5). ~100 Gi is a real constraint once
+  permanent respondent media and multi-gigabyte transient ZIPs share it.
   **Capacity alerting is a prerequisite, not a follow-up** — the same argument
   `media-abstraction.md` §4.5 makes for not deferring it.
 - **A cap.** A maximum asset count or byte budget per job, exceeded → `Failed` with a
@@ -632,7 +677,14 @@ conflict, and it should be resolved deliberately rather than inherited.** Three 
    re-run the §5.2 ownership check, stream from MinIO. No URL ever leaves the auth
    boundary. This is genuinely the "proxy-with-auth" that §4.6 anticipated, but placed on
    the *export* rather than on individual assets — one endpoint, one check, coarse
-   granularity. Costs a long-lived streaming connection on dashboard-server.
+   granularity. Costs a long-lived streaming connection on dashboard-server, and note it
+   is **not free today**: dashboard-server's `dashboard-media` credential is scoped to
+   `media/*` and deliberately cannot reach the exports bucket
+   (`devops/values/production.yaml:495-533`), so this option requires granting it a new
+   read credential — which is exactly the sort of scope creep §4.1 is trying to prevent.
+   The precedent exists (`GET /api/v1/responses/csv` already streams a CSV with
+   `Content-Disposition: attachment`, `response.controller.js:34-49`), so the pattern is
+   established even though the credential is not.
 3. **Both** — proxy by default, presign as fallback.
 
 **Recommendation: (1) now, (2) if the posture is challenged.** (1) is a one-line change
@@ -741,11 +793,23 @@ are. It costs nothing and it is the only point in the flow where a human reliabl
 3. **Whether Messenger inbound carries a hash.** WhatsApp's free `sha256` is what makes
    §3.2 step 5 free. If Messenger has none, integrity verification is one-sided.
 4. **Volume.** Nobody has measured how much media a real survey collects. Every capacity
-   decision in §5.5 — the cap, the PVC, the ephemeral disk — is currently a guess.
-   One production survey's `upload` response count would replace all of them.
-5. **MinIO topology.** `media-abstraction.md` §4.2 plans distributed mode with 4
-   replicas; `documentation/exports-storage.md` documents single-node with a 25 Gi PVC.
-   Which is true when this ships changes the capacity and durability story materially.
+   decision in §5.5 — the cap, the disk, the ~100 Gi budget — is currently a guess.
+   **This one is cheaply answerable and should be answered before stage B**: the raw
+   webhook items are all in `chatroach.messages` (§3.4), so a single query counts every
+   inbound media event ever received, by type and by survey. It replaces four guesses at
+   once and it is the same query the backfill count needs.
+5. ~~**MinIO topology.**~~ **Resolved while writing this.** MinIO is already the
+   distributed 4-replica StatefulSet with 50 Gi per PVC and EC:2
+   (`devops/minio/minio.yaml:104-117,236`), and `media` / `media-staging` buckets already
+   exist with scoped writer, reader and backup service accounts
+   (`devops/minio/media-svcacct.sh`). So §4.1's third bucket follows an established
+   provisioning pattern rather than inventing one — `media-svcacct.sh` is the script to
+   copy.
+
+   **The remaining item is a documentation bug, not a design question:**
+   `documentation/exports-storage.md` still describes the superseded single-node, 25 Gi
+   Deployment. It is the file this design would otherwise have been read against.
+   Correcting it belongs in stage G, and arguably sooner.
 6. **Whether `STUCK_TIMEOUT_MINUTES` becomes per-source** (§5.5). Needs deciding before
    the first large export, not after.
 
