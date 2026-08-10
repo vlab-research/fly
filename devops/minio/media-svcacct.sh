@@ -76,15 +76,26 @@ PROXY_ENV="$DIR/../../media-proxy/.env-media-$SUFFIX"
 MIRROR_ENV="$DIR/../backup/.env-media-mirror"
 
 ENV_FILES=("$DASHBOARD_ENV" "$PROXY_ENV")
+# Each env file is paired with its own template. Do NOT derive the template as
+# "$(dirname)/.env-example" -- the mirror's template is named differently, and
+# the guessed path sent operators looking for a file that does not exist.
+ENV_TEMPLATES=(
+    "$DIR/../../dashboard-server/.env-example"
+    "$DIR/../../media-proxy/.env-example"
+)
 # The mc mirror CronJob is production-only: it exists to protect the one copy of
 # researchers' uploads, and staging's uploads are disposable by definition.
-[[ "$ENV_NAME" == "production" ]] && ENV_FILES+=("$MIRROR_ENV")
+if [[ "$ENV_NAME" == "production" ]]; then
+    ENV_FILES+=("$MIRROR_ENV")
+    ENV_TEMPLATES+=("$DIR/../backup/.env-media-mirror-example")
+fi
 
-for f in "${ENV_FILES[@]}"; do
+for i in "${!ENV_FILES[@]}"; do
+    f="${ENV_FILES[$i]}"
     if [[ ! -e "$f" ]]; then
         echo "ERROR: $f does not exist." >&2
-        echo "       Copy the committed template first, e.g.:" >&2
-        echo "         cp ${f%/*}/.env-example $f" >&2
+        echo "       Copy the committed template first:" >&2
+        echo "         cp ${ENV_TEMPLATES[$i]} $f" >&2
         exit 1
     fi
     [[ -w "$f" ]] || { echo "ERROR: cannot write $f" >&2; exit 1; }

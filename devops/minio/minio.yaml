@@ -55,11 +55,19 @@
 # Once the `media` bucket holds real assets this is NO LONGER TRUE — from then
 # on, a change here requires a restore from the mirror target.
 #
-# Sequence (see planning/media-abstraction.md §9.2 step 1):
+# Sequence (full procedure: planning/minio-distributed-redeploy.md):
 #   kubectl delete deployment minio -n minio        # the old single-node pod
 #   kubectl delete pvc minio -n minio               # the old single-node volume
 #   kubectl apply -f devops/minio/
-#   bash devops/minio/media-svcacct.sh              # media bucket + scoped accounts
+#   bash devops/minio/media-svcacct.sh production   # media bucket + scoped accounts
+#   bash devops/minio/media-svcacct.sh staging      # ...and again for media-staging
+# The env argument is REQUIRED -- the script serves both environments from this
+# one MinIO (bucket `media` vs `media-staging`) and exits with usage if omitted.
+# Both runs mint NEW keys, so devops/secrets.sh must be re-run for each env and
+# the consuming pods restarted, or they hold credentials that no longer exist.
+#
+# svc/minio needs no delete: it stays a normal ClusterIP and is updated in place.
+# Only minio-headless is headless.
 # Gate: the exporter still writes exports, and anonymous access to the media
 # bucket is denied — including through storage-api.vlab.digital.
 ---

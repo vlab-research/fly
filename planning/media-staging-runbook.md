@@ -27,6 +27,13 @@ single-node MinIO.
 > **Do the distributed rewrite as its own maintenance window before production, not before
 > staging.** It is safe only while the `media` bucket is empty — see `planning/media-backup.md`.
 
+**Ordering caveat, if that window is imminent.** "Not before staging" means staging does not
+*depend* on the rewrite — not that step 2 below should run first. The rewrite destroys MinIO's
+service accounts, and `media-svcacct.sh` mints fresh keys on every run, so provisioning
+staging credentials first and rewriting afterwards **silently invalidates them**: you would
+have to redo step 2 and the step 6 restart. If the window is imminent, do the rewrite first,
+then run step 2 once. See `planning/minio-distributed-redeploy.md` §3b.
+
 ## Known staging limitations, before you start
 
 Measured 2026-08-10 against the staging database:

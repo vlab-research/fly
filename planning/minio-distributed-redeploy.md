@@ -6,6 +6,19 @@ build — and there are two reasons it is *better* done now than later (§3).
 **Related:** `planning/media-abstraction.md` §4.2, `planning/media-staging-runbook.md`,
 `planning/media-backup.md` (VIR-24), `documentation/exports-storage.md`.
 
+**Live state verified 2026-08-10** (`kubectl -n minio get deploy,sts,svc,pvc,pdb`, plus
+`ls /data` inside the pod):
+
+| Checked | Found |
+|---|---|
+| Workload | `deployment/minio`, 1/1, image `RELEASE.2025-09-07T16-13-09Z` — matches the manifest's pin |
+| Volume | `pvc/minio`, 25Gi, Bound, `standard-rwo`, **272M used of 25G** |
+| Buckets on disk | `fly` (271M) and `staging` (empty) only |
+| `media` / `media-staging` | **Do not exist yet** — §3a's window is fully open |
+| `svc/minio` | ClusterIP `10.91.9.78`, port 9000 only |
+| Nodes | 4 × `gke-toixo-bigpool-*`, all `Ready` |
+| PDB / ServiceMonitor / headless Service | None — all new |
+
 ---
 
 ## 1. What changes
@@ -39,10 +52,12 @@ Two independent reasons, both structural:
 **Applying `devops/minio/minio.yaml` destroys every object currently in MinIO.** That is not
 a side effect to mitigate — it is what the operation is.
 
-There is also a third, smaller blocker: **`spec.clusterIP` is immutable.** The client-facing
-`minio` Service currently has a real ClusterIP and the new manifest declares it headless
-(`clusterIP: None`), so `kubectl apply` will reject it with a field-immutable error. The
-Service must be deleted before applying. See §8 — this is worth a decision, not just a step.
+**The Services, by contrast, apply cleanly in place.** An earlier draft of this plan claimed
+the client-facing `minio` Service had to be deleted first because `spec.clusterIP` is
+immutable and the new manifest made it headless. That is not what the manifest says — only
+`minio-headless` carries `clusterIP: None`; the client `minio` Service is a normal ClusterIP
+(§8). Applying it adds the named `metrics` port (9002) to the existing Service, which is an
+ordinary mutable update. No Service delete step is needed.
 
 ## 3. Why now, and why "later" is worse
 
@@ -62,15 +77,20 @@ Destroying MinIO is cheap **only because nothing durable is in it.** Verified:
 **None of that is true of media.** Media is unrecoverable by construction — we hold the only
 copy, and Meta offers no download for a handle. The moment researchers upload a file, this
 operation stops being "recreate an empty bucket" and becomes "restore from backup" — and
-backup is deferred (VIR-24, not yet built).
+there is nothing to restore from. `devops/backup/minio-media-mirror.yaml` is *written* but
+**not deployed**, and is blocked on an unmade decision (`BACKUP_S3_ENDPOINT` and its
+provider — `planning/media-backup.md` §3).
 
-> **So the window is: while the `media` bucket is empty.** Doing this now costs a maintenance
-> window. Doing it after adoption costs a backup that does not exist yet.
+> **So the window is: while the `media` bucket is empty.** As of 2026-08-10 it does not exist
+> at all, so the window is not merely open — nothing has been staked on it yet. Doing this now
+> costs a maintenance window. Doing it after adoption costs a restore from a mirror that is
+> not running.
 
 ### 3b. It destroys the media service accounts, so ordering matters
 
 MinIO service accounts live **inside MinIO**. Destroying it destroys
-`media-writer` / `media-reader` (and their staging equivalents) along with everything else.
+`media-writer` / `media-reader` — and, in production, the mirror's read-only backup account —
+along with everything else.
 
 `devops/minio/media-svcacct.sh` is idempotent, but re-running it **mints fresh key pairs**
 (`openssl rand -hex 20` per account). So the secrets must be re-applied and the consuming
@@ -84,24 +104,39 @@ pods restarted, or dashboard-server and media-proxy hold credentials that no lon
 
 | Lost | Impact |
 |---|---|
-| All export objects in `fly` and `staging` | Researchers re-run any export they still want. Nothing is unrecoverable. |
+| All export objects in `fly` (271M) and `staging` (empty) | Researchers re-run any export they still want. Nothing is unrecoverable. |
 | In-flight presigned download links (≤7h old) | They 404. The export can be re-run. |
-| The `media` / `media-staging` buckets | Empty at time of writing — confirm before proceeding. |
+| The `media` / `media-staging` buckets | **They do not exist yet** (verified 2026-08-10) — nothing to lose. Re-confirm before proceeding. |
 | MinIO service accounts and their policies | Recreated by `media-svcacct.sh`; **new keys**, so secrets must be re-applied. |
 | An export running at the moment of the cutover | Fails. Re-runnable. |
 
-**Choose a low-traffic window** and tell researchers exports will be briefly unavailable and
+**Decided 2026-08-10: losing the exports is accepted.** They are regenerable from CockroachDB
+and this is not a reason to delay. What remains is operational courtesy, not a blocker:
+**choose a low-traffic window** and tell researchers exports will be briefly unavailable and
 that existing download links will stop working.
 
 ## 5. Prerequisites
 
-- [ ] Confirm the `media` bucket is **empty** (if it exists at all). If it has objects, STOP —
+- [x] **`media` bucket empty** — verified 2026-08-10: it does not exist. `ls /data` in the
+      pod shows only `fly`, `staging`, `lost+found`. If it ever *does* hold objects, STOP —
       this becomes a restore operation and VIR-24 must land first.
-- [ ] Confirm no export is running: check `export_status` for in-progress rows.
-- [ ] Confirm the node pool can schedule 4 pods with anti-affinity and provision 4× 50Gi.
-      With `podAntiAffinity`, fewer than 4 schedulable nodes leaves pods `Pending` and the
-      erasure set never forms.
-- [ ] Decide the headless-Service question (§8).
+- [ ] Confirm no export is running: check `export_status` for in-progress rows. (Point-in-time
+      — re-check immediately before step 2.)
+- [x] **Node pool** — 4 `Ready` nodes as of 2026-08-10, and 4× 50Gi is dynamically
+      provisioned from `standard-rwo`. Note the anti-affinity in the manifest is
+      `preferredDuringSchedulingIgnoredDuringExecution`, **not** `required`: with fewer than
+      4 nodes the pods still schedule and the erasure set still forms — two shards just share
+      a node, which is a redundancy loss, not an outage. Deliberate; see the manifest comment.
+- [x] **Headless-Service question** — already settled in the manifest (§8). No decision left.
+- [x] **The five gitignored `.env` files exist** — created from their templates 2026-08-10.
+      `media-svcacct.sh` refuses to create them and exits before doing any work, so a missing
+      file means a destroyed MinIO with no way to mint the media accounts until you notice:
+
+          dashboard-server/.env-media-production   .env-media-staging
+          media-proxy/.env-media-production        .env-media-staging
+          devops/backup/.env-media-mirror          (production run only)
+
+      They are empty templates; the script writes the keys into them.
 
 ## 6. Procedure
 
@@ -119,16 +154,15 @@ kubectl -n minio scale deployment/minio --replicas=0
 kubectl -n minio delete deployment/minio
 kubectl -n minio delete pvc/minio
 
-# 4. Delete the client-facing Service — clusterIP is immutable and the new one
-#    is headless, so apply alone will be rejected (§8)
-kubectl -n minio delete svc/minio
-
-# 5. Apply the new manifests from the repo
+# 4. Apply the new manifests from the repo. svc/minio is updated in place —
+#    it stays a normal ClusterIP and just gains the `metrics` port (§8).
 kubectl apply -f devops/minio/
 
-# 6. Wait for the erasure set to form
+# 5. Wait for the erasure set to form
 kubectl -n minio rollout status statefulset/minio --timeout=5m
-kubectl -n minio get pods -o wide      # expect 4, on distinct nodes
+# Expect 4 Running. With 4 Ready nodes they should land on distinct ones, but
+# the affinity is only `preferred` — check placement, do not assume it (§10).
+kubectl -n minio get pods -o wide
 ```
 
 Then re-provision buckets and credentials — **for both environments**:
@@ -147,6 +181,11 @@ kubectl rollout restart deployment/gbv-dashboard   -n vstag
 # media-proxy too, once it is deployed
 ```
 
+`media-svcacct.sh production` also mints the mirror's read-only backup account and rewrites
+`devops/backup/.env-media-mirror`. Nothing consumes it yet — the CronJob is not deployed
+(`media-backup.md`) — but if it ever *is* running when this redeploy happens, that secret
+must be re-applied and the CronJob's next run will otherwise fail on stale credentials.
+
 The exports buckets (`fly`, `staging`) need no manual step — the exporter recreates them.
 
 ## 7. Verification
@@ -155,6 +194,9 @@ The exports buckets (`fly`, `staging`) need no manual step — the exporter recr
 2. **Exports still work end to end** — trigger one from the dashboard, confirm the object
    lands and the presigned link downloads. This also re-creates the bucket and lifecycle rule.
 3. **Lifecycle rule re-applied:** `mc ilm ls` on the exports bucket shows `expire-exports-3d`.
+   (On Arch the client is `pacman -S minio-client` and the binary is **`mcli`** — Midnight
+   Commander already owns the name `mc`. The provisioning script is unaffected: it runs `mc`
+   in an ephemeral in-cluster pod, not on your machine.)
    (`_ensure_lifecycle` is best-effort and logs rather than failing, so a missing rule is
    silent — check it explicitly, or exports accumulate forever.)
 4. **Anonymous access denied** on the media bucket — both `GetObject` *and* `ListBucket`,
@@ -163,24 +205,27 @@ The exports buckets (`fly`, `staging`) need no manual step — the exporter recr
 6. **Kill a pod** and confirm reads and writes continue. This is the entire point of the
    change; verify it rather than assume it.
 
-## 8. Open question: should the client Service be headless?
+## 8. Settled: only the peer Service is headless
 
-The new manifest makes **both** Services headless. `minio-headless` for peer discovery is
-standard and correct. Making the **client-facing** `minio` Service headless is a real change:
-consumers resolving `http://minio.minio.svc.cluster.local:9000` would get DNS round-robin
-across pod IPs instead of a kube-proxy virtual IP.
+Recorded because an earlier draft of this plan raised it as an open question and got the
+premise wrong. The manifest was checked: **only `minio-headless` sets `clusterIP: None`.**
+The client-facing `minio` Service is a normal ClusterIP, which is what we want, for the
+reasons that made it a question at all —
 
-For MinIO that mostly works — any node serves any request — but it has consequences:
+- headless would mean DNS round-robin across pod IPs instead of a kube-proxy virtual IP;
+- clients with connection keep-alive would pin to whichever pod they first resolved;
+- a client caching DNS could keep hitting a pod that has gone away.
 
-- Clients with connection keep-alive pin to whichever pod they first resolved, so load is
-  unevenly distributed.
-- A client that caches DNS may keep hitting a pod that has gone away.
-- It is also why `svc/minio` must be deleted rather than applied.
+Two details of the manifest are worth knowing rather than rediscovering:
 
-**Recommendation: keep the client Service as a normal ClusterIP** and let only the peer
-Service be headless. That preserves current client behaviour, avoids the delete-recreate step
-entirely, and is the more common MinIO deployment shape. **Decide before executing** — this
-is a one-line change to `devops/minio/minio.yaml`.
+- `minio-headless` sets `publishNotReadyAddresses: true`. It must — a distributed MinIO is
+  only Ready once it has quorum, and quorum requires peers to resolve each other first.
+  Without it, startup deadlocks.
+- The client Service's readiness selection is load-bearing in the other direction: it serves
+  only Ready pods, so a node that has lost quorum is taken out of rotation automatically.
+
+**No action, and no Service delete step.** The plan previously carried one; it has been
+removed from §6.
 
 ## 9. Rollback
 
@@ -189,21 +234,37 @@ restored is the *shape*:
 
 ```bash
 kubectl -n minio delete statefulset/minio
-kubectl -n minio delete pvc -l app=minio
-git checkout HEAD~1 -- devops/minio/minio.yaml   # or the pre-change revision
-kubectl apply -f devops/minio/
+kubectl -n minio delete pdb/minio
+# NOTE the label. The volumeClaimTemplate labels PVCs with
+# app.kubernetes.io/instance=minio — there is no `app=minio` label anywhere in
+# the manifest, so `-l app=minio` matches nothing and silently deletes no PVCs.
+kubectl -n minio delete pvc -l app.kubernetes.io/instance=minio
+
+# 95e74fdf is the last single-node revision (Deployment + one 25Gi PVC).
+# HEAD~1 is NOT it — the StatefulSet rewrite landed in 6c91adbb, one commit
+# before the plan commit.
+git show 95e74fdf:devops/minio/minio.yaml > devops/minio/minio.yaml
+kubectl apply -f devops/minio/minio.yaml
 ```
+
+`devops/minio/servicemonitor.yaml` has no single-node counterpart; leave it applied or delete
+it, either is harmless.
 
 This returns a working single-node MinIO with an empty volume. Exports regenerate; media
 would not, which is the whole reason for §3a's window.
 
 ## 10. Residual risks
 
-- **Node capacity.** `podAntiAffinity` plus 4 replicas needs 4 schedulable nodes. Fewer means
-  `Pending` pods and no erasure set. Check before, not during.
+- **Node capacity — a redundancy risk, not a scheduling one.** The anti-affinity is
+  `preferred`, so fewer than 4 schedulable nodes does *not* leave pods `Pending`; it silently
+  co-locates shards, so one node loss can take two of four drives. That is still within EC:2
+  tolerance, but it eliminates the margin. 4 nodes are `Ready` today; verify placement after
+  the rollout (`get pods -o wide`) rather than trusting the node count at apply time.
 - **PVC sizing is a guess.** 50Gi × 4 was chosen without measured media volume — media has no
-  lifecycle rule and only grows. Capacity alerting (shipped) is what makes this recoverable
-  rather than a cliff.
+  lifecycle rule and only grows. Today's whole dataset is 272M, so the guess is generous for
+  exports; it is media that is unmodelled. `standard-rwo` expands online, so growing is safe;
+  shrinking and changing the replica count are not. Capacity alerting (shipped) is what makes
+  this recoverable rather than a cliff.
 - **The lifecycle rule is best-effort.** If `_ensure_lifecycle` fails after the redeploy it
   logs a warning and the export still succeeds — so exports would silently accumulate with no
   expiry. Verification step 3 exists specifically for this.
