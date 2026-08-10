@@ -1,0 +1,167 @@
+{{- if .Values.mediaHandles.enabled }}
+{{- $mh := .Values.mediaHandles }}
+{{- $runbook := .Values.runbookUrl }}
+# Media HANDLE health — is the handle layer's cache being maintained?
+# (planning/media-abstraction.md §2, §8.5, §13.)
+#
+# NOT THE SAME THING AS media-storage-capacity.yaml NEXT DOOR. That file watches
+# the BYTES (MinIO volumes, bucket growth) and its failures are permanent — a full
+# disk loses uploads, a dead erasure set loses files we hold the only copy of.
+# This file watches the CACHE of platform media ids, whose total failure costs
+# exactly nothing: every send degrades to a URL send and the reconciler refills on
+# the next tick (§5, "you can DELETE FROM media_handle at any moment and nothing
+# breaks"). Two adjacent concerns with opposite blast radii; keep them apart.
+#
+# THAT ASYMMETRY IS WHY NOTHING HERE PAGES. Every alert below is a warning, by
+# explicit decision and not by timidity: at the moment they fire, zero respondents
+# have been affected and zero messages have failed. What has failed is an
+# optimisation, silently — and "silently" is the whole reason the rules exist.
+# Escalate one of these to critical only if you can name the respondent-visible
+# consequence, and §13 says there isn't one.
+#
+# Metrics come from the `media_health` collector in devops/sql-exporter, which
+# reads migration 24's media_asset / media_handle tables directly. Read the long
+# comment above that collector before touching a threshold here — in particular
+# the ZERO BEHAVIOUR section, which is what makes it safe to write `> 0` rules
+# against tables that are empty in production today and will stay empty until a
+# researcher uses the media tab.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: media-handle-health
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: vlab-alerts
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: media-handle-health-recordings
+      interval: 1m
+      rules:
+        # Rates, not raw counts. 50 stale handles means something entirely
+        # different at 60 assets than at 60,000, and the alerts below are
+        # deliberately absolute — these recordings are what a human reads next to
+        # them to size the problem.
+        #
+        # clamp_min on every denominator, exactly as survey:error_ratio:1h does.
+        # media_handles_desired and media_handles are 0 on an untouched system,
+        # and 0/0 is NaN — which renders as a gap in Grafana and, worse, silently
+        # drops out of any comparison it feeds. The clamp makes the honest answer
+        # (0) come out instead.
+        #
+        # No alert reads these. They exist to be looked at.
+        - record: media:handles_missing:ratio
+          expr: |
+            media_handles_missing / clamp_min(media_handles_desired, 1)
+
+        - record: media:handles_expired:ratio
+          expr: |
+            media_handles_expired / clamp_min(media_handles, 1)
+
+        # Handles that exist for an account the researcher has since
+        # disconnected. §5 declines to put an FK on account_id (credentials
+        # rotate, and a partial unique index cannot back one) and leaves pruning
+        # to the reconciler — so this is the only place the prune half of the
+        # reconciler is observable at all. Refreshing without pruning looks
+        # perfectly healthy on every other metric here.
+        #
+        # Cannot go negative in a consistent read: every (desired - missing) pair
+        # is by construction a row in media_handle. It CAN read negative for one
+        # scrape if the two queries land either side of a write, since they are
+        # separate statements at separate timestamps. Read it over a window, not
+        # off one sample — which is another reason nothing alerts on it.
+        - record: media:handles_orphaned
+          expr: |
+            media_handles - (media_handles_desired - media_handles_missing)
+
+    - name: media-handle-health-alerts
+      interval: 1m
+      rules:
+        # ---- The reconciler has stopped: confirmed ------------------------
+        #
+        # A handle cannot reach `expired` without first sitting inside the refresh
+        # margin, unrefreshed, for the whole margin (72h — sql-exporter's
+        # media.refreshMarginHours, mirroring mediaReconciler.refreshMargin). The
+        # reconciler ticks HOURLY, so by the time this fires it has missed ~72
+        # consecutive chances to refresh that handle. The alert is not early and is
+        # not meant to be; it is the unambiguous confirmation.
+        #
+        # THRESHOLD IS 0 BECAUSE THIS IS AN INVARIANT, NOT A RATE. There is no
+        # healthy background of expired handles to calibrate against: a working
+        # reconciler produces exactly zero. That makes it one of the few thresholds
+        # in this chart that is not a v1 guess.
+        #
+        # THE `for:` IS DOING THE NOISE CONTROL INSTEAD, and it is deliberately
+        # longer than a reconciler tick: a single failed or slow tick leaves a
+        # handle expired until the next one, and that is normal operation, not an
+        # incident. 6h is six missed hourly ticks on top of the 72h of margin the
+        # handle already burned through to get here — ~78h of silent lead time.
+        # Keyed to the tick interval: if mediaReconciler.schedule slows, raise it.
+        - alert: MediaHandlesExpired
+          expr: |
+            media_handles_expired > {{ $mh.expiredThreshold }}
+          for: {{ $mh.expiredFor }}
+          labels:
+            severity: warning
+            component: media-handles
+          annotations:
+            summary: "{{`{{ $value }}`}} media handles are past their expiry"
+            description: >-
+              Platform media ids that should have been refreshed have expired
+              instead, which means the media reconciler has not run (or has not
+              kept up) for at least the refresh margin plus
+              {{ $mh.expiredFor }} — three days and counting. NO RESPONDENT IS
+              AFFECTED: expired handles resolve to a by-URL send
+              (planning/media-abstraction.md §13), so this is a maintenance
+              failure, not an outage. Fix the reconciler; the handles refill on
+              the next successful tick.
+            runbook_url: "{{ $runbook }}#mediahandlesexpired"
+
+        # ---- Fan-out gap the reconciler is not closing -------------------
+        #
+        # The desired state (§2) is one handle per (asset x each of the owner's
+        # messaging accounts). A gap is EXPECTED and HARMLESS on its own: upload
+        # fan-out is best-effort, never blocks the upload response, and is allowed
+        # to fail precisely because the reconciler backfills it. A gap that is
+        # still there a full reconciler cycle later is the conjunction of both
+        # halves failing, which is the thing worth knowing.
+        #
+        # Same 6h `for:`, same reasoning as above — and here it is load-bearing
+        # rather than defensive: without it, every upload would fire this alert in
+        # the window between the response and the next tick. It must also outlast a
+        # DEFERRED pass: the reconciler bounds each run at maxActions/maxBytes and
+        # pushes the remainder to the next tick, so a large library legitimately
+        # drains over several ticks.
+        #
+        # ⚠️ ONE WAY THIS CAN STICK ON FOREVER, and the fix is not the threshold.
+        # §11.5's eligibility invariant holds for size and MIME (enforced at
+        # upload) but NOT for codecs — an H.265 MP4 passes validation and is then
+        # refused by WhatsApp. The design's answer is that the reconciler records
+        # the refusal as platform_media_id = NULL, migration 24's "known-dead"
+        # marker, which moves the row out of `missing` and into
+        # media_handles_dead (exported, deliberately not alerted). If refused
+        # assets instead show up here as permanently missing, THE RECONCILER IS
+        # NOT WRITING THE DEAD MARKER — fix that, do not raise this threshold to
+        # paper over it. The knob exists for a floor you have deliberately decided
+        # to live with, not as the first response.
+        - alert: MediaHandleFanoutGap
+          expr: |
+            media_handles_missing > {{ $mh.missingThreshold }}
+          for: {{ $mh.missingFor }}
+          labels:
+            severity: warning
+            component: media-handles
+          annotations:
+            summary: "{{`{{ $value }}`}} (asset x account) pairs have had no media handle for {{ $mh.missingFor }}"
+            description: >-
+              Uploaded media assets are missing platform handles for one or more
+              of their owner's connected messaging accounts, and have been for
+              longer than a reconciler cycle — so upload fan-out failed AND the
+              reconciler has not backfilled. Those sends fall back to URL
+              (planning/media-abstraction.md §13), so nothing is failing for
+              respondents; the handle layer is simply not doing its job. Compare
+              media:handles_missing:ratio to size it, and check
+              media_handles_dead first — a platform that REFUSED the asset should
+              appear there, not here.
+            runbook_url: "{{ $runbook }}#mediahandlefanoutgap"
+{{- end }}

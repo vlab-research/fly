@@ -228,3 +228,73 @@ mediaStorage:
   # Raise it once real growth is visible; do not lower it to make the alert
   # "sensitive". The failure this guards against arrives over months.
   bucketWarnBytes: 21474836480
+
+# ---- Media handle health ----------------------------------------------------
+# planning/media-abstraction.md §2, §8.5, §13. Metrics come from the
+# `media_health` collector in devops/sql-exporter (CockroachDB media_asset /
+# media_handle, migration 24) — NOT from MinIO, and nothing to do with the
+# capacity block above. That one watches bytes we hold the only copy of; this one
+# watches a cache whose total loss costs nothing.
+#
+# WHY THIS IS MEASURED IN SQL AT ALL. §8.5 designed a by-URL send counter in
+# message-worker as the health signal, on the correct observation that in this
+# design a by-URL send for dashboard-uploaded media is an anomaly. But that
+# counter measures the SYMPTOM and only moves after a respondent has already been
+# served the degraded path — and no application service in this repo exposes
+# /metrics, so it does not exist yet. The CAUSE (a fan-out that never happened, a
+# handle that will be dead tomorrow) is a query, and it leads the symptom by days.
+#
+# NOTHING HERE PAGES, deliberately: at the moment these fire, no message has
+# failed. See the header of templates/media-handle-health.yaml.
+mediaHandles:
+  enabled: true
+
+  # MediaHandlesExpired — handles past expires_at.
+  #
+  # 0 is not a tuned threshold, it is the invariant: a working reconciler
+  # produces exactly zero expired handles, because a handle spends the whole
+  # 72h refresh margin (devops/sql-exporter values.yaml, media.refreshMarginHours)
+  # visible in media_handles_expiring before it can get here. There is no healthy
+  # background to calibrate against, which makes this one of the few thresholds
+  # in this file that is NOT a v1 guess.
+  #
+  # The `for:` carries all the noise control instead, and must stay LONGER THAN
+  # ONE RECONCILER TICK — a single failed or slow tick leaves handles expired
+  # until the next one, which is normal operation, not an incident.
+  #
+  # 6h is SIX missed hourly ticks (mediaReconciler.schedule is "17 * * * *"), on
+  # top of the 72h of margin a handle must already have burned through to get
+  # here at all. Total silent lead time before this fires: ~78h. There is no
+  # urgency to trade against — nothing respondent-facing is happening — so the
+  # bias is entirely toward never firing on a transient.
+  #
+  # !! IF THE RECONCILER'S SCHEDULE SLOWS, RAISE THIS TO MATCH. It is keyed to
+  # !! the tick interval, not to a wall-clock intuition: on a daily schedule 6h
+  # !! is less than one cycle and this alert would report the schedule rather
+  # !! than a fault.
+  expiredThreshold: 0
+  expiredFor: "6h"
+
+  # MediaHandleFanoutGap — desired (asset x account) pairs with no handle row.
+  #
+  # Also 0-as-invariant, and here the long `for:` is load-bearing rather than
+  # defensive: upload fan-out is best-effort and never blocks the upload response
+  # (§2), so EVERY upload creates a gap that exists until the next reconciler
+  # tick. Without a `for:` longer than a tick this alert fires on normal use.
+  #
+  # 6h is six hourly ticks. Note it must also outlast a DEFERRED pass: the
+  # reconciler bounds each run at maxActions/maxBytes and pushes the remainder to
+  # the next tick (devops/vlab/values.yaml), so a researcher who uploads a large
+  # library legitimately shows a gap for several ticks while it drains. Six is
+  # comfortably more than the two or three that takes at the configured bounds,
+  # and the same "raise it if the schedule slows" rule applies.
+  #
+  # ⚠️ RAISING THIS IS ALMOST ALWAYS THE WRONG FIX. The one legitimate reason the
+  # count can sit at a permanent non-zero floor is a codec-ineligible asset
+  # (§11.5 — the invariant holds for size and MIME, not codecs), and the design's
+  # answer to that is for the reconciler to write platform_media_id = NULL, which
+  # moves the row into media_handles_dead. A stuck floor here means the reconciler
+  # is not writing that marker. Fix the reconciler. This knob is for a floor you
+  # have consciously decided to live with, not a first response.
+  missingThreshold: 0
+  missingFor: "6h"

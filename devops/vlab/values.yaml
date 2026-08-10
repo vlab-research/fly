@@ -28,3 +28,52 @@ kakfka:
 exodus:
   api:
     enabled: true
+
+# The media handle reconciler CronJob (templates/media-reconciler-cronjob.yaml,
+# planning/media-abstraction.md §2/§11.3).
+#
+# OFF BY DEFAULT, and for the same reason media-proxy is: it needs the scoped
+# MinIO service account provisioned by devops/minio/media-svcacct.sh. Rendering
+# it into an unprovisioned environment gives an hourly job that fails to read
+# any bytes — which is a noisy nothing, since every send still works by URL.
+#
+# The values below are the DEFAULTS. devops/values/{production,staging}.yaml
+# override the schedule and enable it. TTLs are deliberately not here: Meta's
+# 90 days (Messenger) and 30 days (WhatsApp) are facts, not preferences, and
+# they live in DEFAULT_RECONCILE_POLICY next to the code that writes expires_at.
+mediaReconciler:
+  enabled: false
+  schedule: "17 * * * *"
+  # Refresh a handle once it is within this margin of expiry, so a handle the
+  # reconciler has not reached yet degrades to a URL send rather than failing
+  # (§6, mediaresolve.Resolve). MUST be comfortably larger than the schedule
+  # interval, or a handle can expire between ticks. The unit is required —
+  # a bare "72" is refused at startup rather than read as 72 milliseconds.
+  refreshMargin: "72h"
+  # ---- The per-run bound (§10) ------------------------------------------
+  # Desired state is assets x accounts, which grows multiplicatively, and one
+  # production user has 29 messaging accounts (§11.1b). Every action is a file
+  # upload to Meta of up to 100 MB, so an unbounded pass is not a run, it is an
+  # incident: connecting one account for that user turns their whole library
+  # into uploads in a single tick.
+  #
+  # TWO bounds, because count is the wrong unit on its own — 200 actions is a
+  # few seconds of thumbnails or 20 GB of documents. Whatever does not fit is
+  # DEFERRED TO THE NEXT TICK AND NAMED IN THE LOG; a silent cap reads as
+  # "covered everything" when it did not.
+  maxActions: 200
+  maxBytes: 536870912 # 512 MiB
+  # "off" keeps handles for accounts the owner no longer has. They are never
+  # looked up, so this is a debugging affordance, not a correctness knob.
+  prune: "on"
+  # Hard stop well inside the schedule interval, so a wedged pass cannot still
+  # be holding `concurrencyPolicy: Forbid` when the next one is due.
+  activeDeadlineSeconds: 2400
+  resources:
+    requests:
+      cpu: 50m
+      # Holds one asset's bytes in memory at a time (up to the 100 MB document
+      # cap) while fanning them out to that asset's accounts.
+      memory: 256Mi
+    limits:
+      memory: 512Mi

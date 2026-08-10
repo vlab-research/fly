@@ -81,8 +81,10 @@ asset/handle model (`planning/media-abstraction.md`; migration
 |---|---|
 | `api/media/media.core.js` | Pure decision layer — validation, hashing, keys, URLs, reconcile planning. No IO |
 | `api/media/media.controller.js` | The imperative shell: sequences IO, maps outcomes onto HTTP |
-| `api/media/storage/index.js` | S3 client (`minio`), `{put, delete, publicUrl}` |
+| `api/media/storage/index.js` | S3 client (`minio`), `{put, get, delete, publicUrl}` |
 | `api/media/media.platform-upload.js` | Pre-upload of bytes to Messenger / WhatsApp, producing a handle |
+| `api/media/media.reconcile.js` | The reconciler shell around `planReconcile` — reads state, bounds the work, executes, reports |
+| `scripts/media-reconcile.js` | CronJob entry point (`node scripts/media-reconcile.js`) |
 | `api/media/media.routes.js` | Multer wiring and the three endpoints |
 | `queries/media/media.queries.js` | `media_asset` reads/writes and the `media_handle` upsert |
 | `queries/credentials` → `getMessagingAccounts` | The fan-out target set |
@@ -93,7 +95,6 @@ asset/handle model (`planning/media-abstraction.md`; migration
 |---|---|
 | `POST /media/upload` | multipart `file`. `201` with the new asset, or **`200` with the existing one** on a dedupe hit |
 | `GET /media` | The caller's assets, newest first |
-| `DELETE /media/:id` | `204`. Removes the row and the object; handles cascade. `404` if it is not the caller's |
 
 The response shape is `{id, filename, mediaType, mimeType, byteSize, created, url}`.
 **`url` is the whole product** — it is what a researcher pastes into a survey.
@@ -101,6 +102,15 @@ It is derived from the asset id and `MEDIA_PUBLIC_BASE` rather than stored (§5)
 so moving the media domain is a helm edit and not a data migration. No platform
 identifier and no handle state is ever returned: handle freshness is our problem,
 not the author's.
+
+**`DELETE /media/:id` is not offered in v1.** We hold the only copy of every
+researcher's file, distributed MinIO does not cover cluster-level disk loss, and
+nothing checks whether a live survey references an asset before deletion — so
+a delete click is permanent, unrecoverable data loss that silently breaks
+respondent flows with zero signal to anyone. See `planning/media-abstraction.md`
+§11.6 for the full reasoning. Deletion can be revisited once backup (VIR-24)
+exists and reference counting against surveys is implemented. In the interim,
+the accidental-confidential-upload case is handled out-of-band.
 
 **`GET /media/pages` was deleted.** Asset creation is platform-independent, so
 there is no page for the author to select. An account picker at upload was
@@ -181,8 +191,17 @@ they stop being written, the proxy serves media with no content type, browsers
 sniff, and an uploaded payload becomes active content on our own domain. Pinned
 by an integration test that `statObject`s a real MinIO.
 
+**`get` exists for exactly one caller: the reconciler.** The upload path already
+holds the buffer, `message-worker` never touches storage, and the public read
+path is media-proxy — but a refresh re-uploads the *same* bytes to Meta, and we
+hold the only copy of them. It is the one reader of object storage inside the
+application.
+
 `STORAGE_BACKEND=none` is a dev no-op that discards bytes (matching the
-exporter's convention) and warns on every write.
+exporter's convention) and warns on every write. Its `get` **throws** rather
+than returning an empty buffer: handing the reconciler zero bytes would write a
+handle pointing at nothing, which is worse than no handle at all. The reconciler
+script refuses to start under `none` for the same reason.
 
 #### Upload size cap
 
@@ -209,7 +228,9 @@ more permissive than production is how a bad assumption ships.
 cd dashboard-server
 cp .env-dev-example .env      # gitignored; local throwaway credentials
 docker compose up -d
-npm run test:media            # unit + integration for api/media
+npm run test:media            # unit + integration for api/media (both processes)
+npm run test:media:upload     # core, controller, reconciler unit, upload integration
+npm run test:media:reconcile  # the reconciler shell, in its OWN mocha process
 npm test                      # unit only; *.integration.test.js excluded
 npm run test:integration      # every integration suite
 ```
@@ -223,6 +244,18 @@ See `documentation/secrets.md`.
 `*.integration.test.js` is excluded from `npm test` because it needs the stack
 up, and failing loudly beats a suite that silently skips the only tests that
 touch bytes.
+
+**`test:media` is two mocha processes on purpose, not a glob.** The query layer
+is a singleton over one `pg` Pool and `media.integration.test.js` closes that
+pool in its `after` hook, so a single process would hand the reconciler suite a
+dead connection — which surfaces as a confusing connection error rather than a
+test failure. Splitting the run is the cheapest honest fix.
+
+Note that re-running `docker compose up` against an existing volume replays the
+migrations, and `04-pointers.sql` is not written idempotently (`ADD COLUMN`
+without `IF NOT EXISTS`), so the `migrate` container logs an error and exits
+non-zero on a second boot. The schema is already applied at that point, so the
+suites run fine; `docker compose down -v` gives a clean apply.
 
 #### Media functional core (`api/media/media.core.js`)
 
@@ -346,6 +379,120 @@ because a handle is only ever an optimisation, nothing errors when it dies — e
 just falls back to URL, forever, on the platform carrying ~100% of live media traffic
 (§11.1). The reconcile tests run against the shipped constants precisely so this cannot
 regress unnoticed.
+
+#### The reconciler shell (`media.reconcile.js`, `scripts/media-reconcile.js`)
+
+**Deployment shape (§11.3, decided at stage F): a standalone script sharing
+dashboard-server's modules, run as a Kubernetes CronJob out of the dashboard
+image** — `devops/vlab/templates/media-reconciler-cronjob.yaml`, hourly, enabled
+per environment in `devops/values/{production,staging}.yaml`.
+
+The alternative §11.3 left open was an internal HTTP endpoint that cron would
+call. Rejected: it would need its own authentication — one more secret to issue,
+rotate and get wrong — for exactly one caller, and it would put a job that
+re-uploads hundreds of megabytes on the process serving the researcher UI. The
+script gets process isolation, its own resource limits and its own failure
+surface, and still reuses the same S3 client, the same `getMessagingAccounts`
+lookup and the same `planReconcile`, because it is the same codebase.
+
+```
+listAssetOwners -> per owner: accounts + assets + handles
+                -> planReconcile (pure)
+                -> prioritiseActions (pure)   <- the bound lives here
+                -> prune, then upload grouped by asset
+                -> summary
+```
+
+The CronJob template lives in the **umbrella** chart rather than the `dashboard`
+subchart (a versioned OCI artifact) so it can reuse `.Values.dashboard.env` and
+`.Values.dashboard.envFrom` verbatim. A second copy of the database host, the S3
+endpoint and the bucket is a copy that can silently disagree — and a reconciler
+pointed at the wrong bucket does not error, it finds no bytes and every send
+quietly falls back to URL.
+
+**The per-run bound, and why there are two of them.** Desired state is
+assets × accounts, which grows multiplicatively, and one production user has 29
+messaging accounts (§11.1b). Every action is a file upload to Meta of up to
+100 MB, so an unbounded pass is not a run, it is an incident: connecting one
+account for that user turns their whole library into uploads in a single tick.
+Count alone is the wrong unit — 200 actions is a few seconds of thumbnails or
+20 GB of documents — so the run is bounded by **`maxActions` (200) and
+`maxBytes` (512 MiB)**, whichever binds first. Steady state is far below both.
+
+Ordering is by urgency, and the ordering *is* the anti-starvation design:
+
+| Class | Meaning | Why it sits where it does |
+|---|---|---|
+| `expiring` | works today, dies soon | the only class where deferring makes something **worse** |
+| `dead` | `platform_media_id IS NULL` | already sending by URL |
+| `missing` | no handle at all | already sending by URL, and has been since upload |
+
+Within `expiring`, soonest `expires_at` first — **not** oldest `uploaded_at`, or
+a WhatsApp handle (30-day TTL) uploaded 28 days ago would sort behind a
+Messenger one (90-day TTL) uploaded 60 days ago. Within `missing`, oldest asset
+first, so an asset that has never had a handle does not sit behind newer uploads
+on every tick. Refreshes cannot starve creates over time because a refreshed
+handle is not due again for a full TTL.
+
+**Prunes are never deferred** (one `DELETE`, no bytes, no Meta round trip), and
+the byte budget **stops at the first action that does not fit** rather than
+skipping it for smaller ones — skipping would reorder by size and starve large
+assets permanently. The very first action is always admitted, so one oversized
+asset cannot deadlock the queue.
+
+**Whatever is deferred is named in the log, not just counted.** A silent cap
+reads as "covered everything" when it did not (§10), so the summary carries the
+count, the deferred bytes and up to 20 identified actions.
+
+**Concurrency and races.** `concurrencyPolicy: Forbid` stops overlapping runs,
+but the pass is safe without it: every write is
+`INSERT … ON CONFLICT (asset_id, account_id) DO UPDATE`, so racing a concurrent
+upload-time fan-out costs a wasted upload and nothing else. The one genuine
+read-then-write window is the **prune** — it decides an account is disconnected
+from a snapshot — so `deleteHandleIfUnchanged` matches on the `uploaded_at` the
+snapshot read. If the credential came back and fan-out wrote a fresh handle
+underneath, the `DELETE` is a no-op instead of discarding a good handle. Pinned
+by test.
+
+**Bytes are fetched once per asset** and reused across that asset's accounts —
+one storage read instead of 29 for the widest fan-out. The byte budget is
+charged per *upload* (the cost to Meta), not per fetch.
+
+**Failure is never fatal to the run** (§13). A broken owner, an unreadable
+object, a dead page token: each is logged, counted in `failed`, and the pass
+continues. There is **no error-driven invalidation** (§8.4, settled by §11.2) —
+Meta documents no error code for an expired or nonexistent media id, and the
+nearest one is an explicit catch-all, so classifying against a guessed taxonomy
+would bulk-invalidate good handles and trigger a re-upload storm. Age is the
+mechanism; the next tick retries.
+
+**Exit codes are a design decision.** `0` whenever the pass ran, whatever it
+found — individual upload failures are expected and every one of those messages
+still sends by URL, so exiting non-zero would fire `CronJobRepeatedlyFailing`
+for a condition nobody needs to be woken for, and an alert that cries wolf gets
+muted. `1` only when the pass could not run at all (no database, malformed
+config). The health signal for the handle layer is the by-URL counter (§8.5),
+not this exit code.
+
+**Settings** (all optional; defaults in `DEFAULT_RECONCILE_POLICY` and
+`DEFAULT_LIMITS`):
+
+| Env var | Default | Notes |
+|---|---|---|
+| `MEDIA_RECONCILE_REFRESH_MARGIN` | `72h` | **The unit is required.** A bare `72` is refused at startup rather than read as 72 ms, which would silently disable refresh-ahead |
+| `MEDIA_RECONCILE_MAX_ACTIONS` | `200` | staging runs `20` — a tighter blast radius where a reconciler bug shows up first |
+| `MEDIA_RECONCILE_MAX_BYTES` | `536870912` | staging runs 128 MiB |
+| `MEDIA_RECONCILE_PRUNE` | `on` | `off` keeps handles for disconnected accounts; they are never looked up, so this is a debugging affordance |
+
+TTLs are deliberately **not** configurable: 90 days and 30 days are facts about
+Meta, not preferences, and a second copy of them in a values file is a copy that
+can disagree with the `expires_at` the writer stamped.
+
+**Manual run** (needs the same env as the dashboard):
+
+```bash
+cd dashboard-server && node scripts/media-reconcile.js
+```
 
 ### Database and Query Pattern
 

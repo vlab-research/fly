@@ -1,0 +1,99 @@
+{{- if .Values.mediaReconciler.enabled }}
+# The media handle reconciler (planning/media-abstraction.md §2, §7, §11.3).
+#
+# Desired state: one fresh handle per (asset x each of its owner's messaging
+# accounts). Actual state: the rows in media_handle. This closes the gap, and
+# one mechanism covers three cases -- expiry, an account connected after the
+# asset was uploaded, and the partial fan-out failures that upload time is
+# allowed to leave behind precisely because this exists.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS LIVES IN THE UMBRELLA CHART AND NOT IN THE DASHBOARD SUBCHART
+# ---------------------------------------------------------------------------
+# The dashboard subchart is a versioned OCI artifact (dashboard-0.0.2.tgz), so
+# adding a template to it means cutting and publishing a chart release for a
+# job whose configuration lives in this repo's values files anyway. Here it is a
+# file in the same tree as the values that drive it, and -- the part that
+# matters -- it REUSES `.Values.dashboard.env` and `.Values.dashboard.envFrom`
+# rather than restating them. A second copy of the database host, the S3
+# endpoint and the media bucket is a second copy that can silently disagree with
+# the first, and a reconciler pointed at the wrong bucket does not error: it
+# finds no bytes, logs failures, and every send quietly falls back to URL.
+#
+# WHY A CRONJOB RUNNING A SCRIPT AND NOT AN ENDPOINT ON THE DASHBOARD (§11.3).
+# An internal HTTP endpoint would need its own authentication -- one more secret
+# to issue, rotate and get wrong -- and would exist for exactly one caller,
+# cron. It would also put a job that re-uploads hundreds of megabytes on the
+# process serving the researcher UI. The script shares the dashboard's IMAGE and
+# therefore its modules, its S3 client, its credentials lookup and
+# `planReconcile`, while getting process isolation and its own resource limits
+# for free.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-media-reconciler
+  labels:
+    app.kubernetes.io/name: media-reconciler
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  schedule: {{ .Values.mediaReconciler.schedule | quote }}
+  # A second pass starting while the first is still uploading would do the same
+  # work twice. It would be SAFE -- every write is an upsert on
+  # (asset_id, account_id) and the prune is conditional on the uploaded_at the
+  # pass read -- but safe is not free when each duplicated action is a file
+  # upload to Meta.
+  concurrencyPolicy: Forbid
+  # A missed tick is not worth catching up on: the next pass recomputes desired
+  # state from scratch, so it inherently covers whatever the missed one would
+  # have done.
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # No retries. A failed pass is not a lost pass -- the next tick recomputes
+      # everything -- and retrying immediately would re-attempt the same dead
+      # page token against Meta three times for nothing.
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ .Values.mediaReconciler.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: media-reconciler
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: media-reconciler
+              # The dashboard image, deliberately: same modules, same S3 client,
+              # same credentials lookup, same planReconcile. Pinned to the same
+              # tag by the same anchor, so the reconciler can never be running a
+              # different notion of "when a handle dies" than the code that
+              # wrote the handle.
+              image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
+              imagePullPolicy: {{ .Values.dashboard.image.pullPolicy }}
+              command: ["node", "scripts/media-reconcile.js"]
+              envFrom:
+                - secretRef:
+                    name: "{{ .Values.dashboard.envFrom }}"
+              env:
+                # Everything the dashboard has: the database, the S3 endpoint,
+                # the bucket, the two scoped MinIO keys. Reused, never restated.
+                {{- toYaml .Values.dashboard.env | nindent 16 }}
+                # ...plus the settings only the reconciler reads.
+                - name: MEDIA_RECONCILE_REFRESH_MARGIN
+                  value: {{ .Values.mediaReconciler.refreshMargin | quote }}
+                - name: MEDIA_RECONCILE_MAX_ACTIONS
+                  value: {{ .Values.mediaReconciler.maxActions | int64 | quote }}
+                # `int64` is not decoration: Helm reads 536870912 from YAML as a
+                # float and renders it as "5.36870912e+08", which is a value an
+                # operator cannot read and a parser might not.
+                - name: MEDIA_RECONCILE_MAX_BYTES
+                  value: {{ .Values.mediaReconciler.maxBytes | int64 | quote }}
+                - name: MEDIA_RECONCILE_PRUNE
+                  value: {{ .Values.mediaReconciler.prune | quote }}
+              resources:
+                {{- toYaml .Values.mediaReconciler.resources | nindent 16 }}
+{{- end }}

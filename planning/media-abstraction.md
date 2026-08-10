@@ -71,11 +71,21 @@ SELECT key FROM chatroach.credentials
 WHERE userid = $1 AND entity IN ('facebook_page','whatsapp_business')
 ```
 
-served as an index-only scan by migration 20's `unique_messaging_account`. You do not
-predict the account — you upload to all of them.
+You do not predict the account — you upload to all of them.
 
-(This section originally claimed "3–5 accounts at most". **That is false** — production has
-a user with 29. See §11.1b for the real distribution and what it means for fan-out cost.)
+Two corrections to what this section originally said, both found by verifying against the
+real schema and real production data:
+
+- It claimed the query above is **"served as an index-only scan by migration 20's
+  `unique_messaging_account`"**. It is not. That index is `ON credentials (key)` — it *leads
+  with `key`*, so it cannot serve a `userid`-scoped lookup at all. What actually serves it is
+  `01-init.sql`'s `INDEX (userid, entity, key, created DESC) STORING (details)`. Harmless in
+  practice, but anyone reasoning about fan-out cost from the wrong index reasons wrongly.
+  (`unique_messaging_account` is still load-bearing — for a different thing: it makes account
+  ids globally unique across platforms, which is what lets `media_handle` key on `account_id`
+  alone. See §5.)
+- It claimed **"3–5 accounts at most"**. Also false — production has a user with 29. See
+  §11.1b for the real distribution and what it costs fan-out.
 
 So handle creation moves to **upload time**, where the user is known and therefore their
 accounts are. No publish hook is needed anywhere.
@@ -654,6 +664,37 @@ dashboard-uploaded media is an anomaly — it should be near zero, and if it is 
 fan-out or the reconciler is broken. In a lazy design a by-URL send is expected on first
 send, so a completely broken handle pipeline looks healthy. This is the one metric that
 makes the difference observable.
+
+> **Shipped instead, 2026-08-10: a `media_health` collector in
+> `devops/sql-exporter`, plus two alerts in `devops/alerts/`.** Runbooks:
+> `documentation/alerting.md` §11.
+>
+> The reasoning above is right and the counter is still wanted. But it measures the
+> **symptom** — it only moves after a respondent has already been served the degraded
+> path — and it has nowhere to live: **no application service in this repo exposes
+> `/metrics` at all**, so building it means first standing up a metrics endpoint, a
+> Service and a ServiceMonitor for message-worker.
+>
+> The **cause** is a query. §2's desired state is "one handle per (asset × each of the
+> owner's messaging accounts)", so a fan-out that never happened is measurable the moment
+> the upload returns, and a handle that will be dead in three days is measurable today.
+> Seven gauges (`media_handles_desired` / `_missing` / `_expired` / `_expiring` / `_dead`,
+> `media_handles`, `media_assets`) lead the by-URL counter by days, cost one bounded index
+> span and one small join per minute, and are zero-safe against the empty tables production
+> has today.
+>
+> **Three things the SQL cannot see, which is why §8.5 is not closed:**
+>
+> - **The read path.** §13's "CRDB slow or down" row — the worker logging a lookup error
+>   and treating it as a miss — leaves the rows perfect while every send degrades. Same for
+>   `MEDIA_HANDLE_USE` simply being off. Only a worker-side counter sees this.
+> - **Third-party URLs** (§2). No asset row, so invisible here, and a by-URL send forever
+>   by design. This is why the counter's floor is not zero.
+> - **Codec-level refusals** (§11.5). Visible here, but as a missing or dead handle
+>   indistinguishable from a reconciler fault without reading the rows.
+>
+> Build the counter when message-worker gets a metrics endpoint. Until then the collector
+> is the signal, and it is the earlier of the two.
 
 ---
 

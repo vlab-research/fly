@@ -37,7 +37,7 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 #
 # The remaining services below still carry -wa and were out of scope for both
 # changes; swap each to a clean tag as it next changes.
-versionDashboard: &vdashboard v0.0.71
+versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
 versionReplybot: &vreplybot v0.0.218
@@ -946,34 +946,82 @@ media-proxy:
 
 # ---- Media handle reconciler (§7, §11.3) ------------------------------------
 #
-# NOT YET DEPLOYABLE — DELIBERATELY. §11.3 leaves the reconciler's deployment
-# shape open ("CronJob calling an internal dashboard-server endpoint, or a
-# standalone job sharing its modules — decide at stage F"), and the `dashboard`
-# chart (OCI 0.0.2) has no CronJob template to render either into. Publishing a
-# new chart version to pick a shape this file has no authority to pick would be
-# the wrong order.
+# DEPLOYMENT SHAPE DECIDED AT STAGE F: a standalone script sharing
+# dashboard-server's modules, run as a CronJob —
+# devops/vlab/templates/media-reconciler-cronjob.yaml, running
+# dashboard-server/scripts/media-reconcile.js out of the dashboard image.
 #
-# The schedule is settled and recorded here so it is one value to wire up rather
-# than one to re-derive:
+# The alternative §11.3 left open was an internal HTTP endpoint on
+# dashboard-server that cron would call. Rejected: it would need its own
+# authentication — one more secret to issue, rotate and get wrong — for exactly
+# one caller, and it would put a job that re-uploads hundreds of megabytes on
+# the process serving the researcher UI. The script shares the dashboard IMAGE,
+# so it still gets the same S3 client, the same credentials lookup and the same
+# planReconcile, while getting process isolation and its own limits for free.
 #
-#   Hourly. The reconciler's job is desired-state convergence, not freshness
-#   racing an expiry — handles last 30 days (WhatsApp) and 90 days (Messenger),
-#   refreshed off `uploaded_at` (§11.2), so the expiry clock does not want a
-#   fast tick. What does is the OTHER two cases it covers: a researcher who
-#   connects a new page, and a partial upload-time fan-out failure. Both are
-#   "how long until this heals", and an hour is short enough that neither is
-#   ever noticed while being 24x cheaper than the fan-out width would make a
-#   per-minute tick (§11.1b: one production user has 29 accounts).
+# The CronJob template lives in the UMBRELLA chart rather than the `dashboard`
+# subchart (which is a versioned OCI artifact), so that it can reuse
+# `.Values.dashboard.env` and `.Values.dashboard.envFrom` verbatim instead of
+# restating the database host, the S3 endpoint, the bucket and the two scoped
+# MinIO keys. A second copy of those is a copy that can silently disagree, and a
+# reconciler pointed at the wrong bucket does not error — it finds no bytes,
+# logs failures, and every send quietly falls back to URL.
 #
-# Left disabled so this block is inert until stage F wires a template to it.
+# SCHEDULE — hourly. The reconciler's job is desired-state convergence, not
+# freshness racing an expiry: handles last 30 days (WhatsApp) and 90 days
+# (Messenger), refreshed off `uploaded_at` (§11.2), so the expiry clock does not
+# want a fast tick. What does is the OTHER two cases it covers — a researcher
+# who connects a new page, and a partial upload-time fan-out failure. Both are
+# "how long until this heals", and an hour is short enough that neither is ever
+# noticed, while being 24x cheaper than the fan-out width would make a
+# per-minute tick (§11.1b: one production user has 29 accounts).
+#
+# REQUIRED BEFORE APPLYING: the CronJob runs `node scripts/media-reconcile.js`
+# out of the DASHBOARD image, and that script does not exist in versionDashboard
+# above until a release is cut from this branch. Enabling it against an older
+# tag gives an hourly job that exits immediately with "Cannot find module" —
+# noisy, and (because a handle is only ever an optimisation) completely
+# invisible in message delivery. Bump versionDashboard first.
+#
+# It also depends on migration 24 and on the `dashboard-media` secret already
+# being applied — both are earlier steps in the §9.2 deploy sequence.
 mediaReconciler:
-  enabled: false
+  enabled: true
   schedule: "17 * * * *"
   # Refresh a handle once it is within this margin of expiry, so a handle the
   # reconciler has not reached yet degrades to a URL send rather than failing
   # (§6, mediaresolve.Resolve). Must be comfortably larger than the schedule
-  # interval, or a handle can expire between ticks.
+  # interval, or a handle can expire between ticks. 72h against an hourly tick
+  # is 72 chances to refresh before anything degrades.
+  #
+  # THE UNIT IS REQUIRED. A bare "72" is refused at startup rather than read as
+  # 72 milliseconds — which would silently disable refresh-ahead and leave every
+  # handle to die between ticks with nothing erroring.
   refreshMargin: "72h"
+  # ---- The per-run bound (§10) ------------------------------------------
+  # Desired state is assets x accounts, and one production user has 29 messaging
+  # accounts (§11.1b). Every action is a file upload to Meta of up to 100 MB, so
+  # connecting one account for that user would otherwise turn their whole
+  # library into uploads inside a single tick.
+  #
+  # Two bounds, because count is the wrong unit alone: 200 actions is a few
+  # seconds of thumbnails or 20 GB of documents. Whatever does not fit is
+  # deferred to the next tick AND NAMED IN THE LOG — a silent cap reads as
+  # "covered everything" when it did not.
+  #
+  # Steady state is far below both: with 90/30-day TTLs and an hourly tick,
+  # refreshes arrive a handful at a time. The cap only bites on a backfill
+  # burst, which is exactly what should be spread over ticks.
+  maxActions: 200
+  maxBytes: 536870912 # 512 MiB
+  prune: "on"
+  activeDeadlineSeconds: 2400
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
 
 cockroachdb:
   image:

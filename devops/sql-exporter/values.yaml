@@ -23,6 +23,43 @@ database:
   # Protect the DB: run collectors at most every 60s (even if Prometheus scrapes faster).
   minInterval: 60
 
+# ---- Media handle health (planning/media-abstraction.md §2, §8.5, §11.2) -----
+# Feeds the `media_health` collector. See the long comment above it in
+# templates/configmap.yaml for what each metric measures and why this lives in
+# SQL rather than as a counter in message-worker.
+media:
+  # How far ahead of expires_at a handle counts as "expiring", in hours.
+  #
+  # !! THIS MIRRORS `mediaReconciler.refreshMargin` IN devops/vlab/values.yaml
+  # !! (and its production/staging overrides), WHICH IS "72h". IT IS A
+  # !! HAND-MAINTAINED COUPLING — nothing enforces it, the two charts are
+  # !! installed separately, and a drift produces no error anywhere. Change one,
+  # !! change the other.
+  #
+  # SET EQUAL, NOT MERELY COMPATIBLE, AND THAT IS THE POINT: the reconciler
+  # refreshes exactly the handles inside its margin, so with the two numbers
+  # equal, `media_handles_expiring` IS THE RECONCILER'S WORK QUEUE — the same set
+  # of rows, counted from the outside. That is what makes it readable as a
+  # backlog: healthy means it churns, stalled means it grows.
+  #
+  # The reconciler's margin doubles as mediaresolve's degrade-to-URL threshold
+  # (§6), so this window is also exactly the set of handles the send path has
+  # already stopped trusting. Making it SMALLER than the reconciler's margin
+  # would mean respondents get the by-URL path before this metric says anything,
+  # which inverts the whole point of a leading indicator. Larger is merely
+  # noisier — it counts handles nobody is worried about yet.
+  #
+  # Why 72h in the first place is the reconciler's decision, not this chart's:
+  # the tick is hourly (`schedule: "17 * * * *"`), so 72h is 72 chances to
+  # refresh before anything degrades, against verified 30-day WhatsApp and
+  # 90-day Messenger clocks (§11.2). At 10% of the WhatsApp clock, steady state
+  # keeps roughly 10% of WhatsApp handles inside the window at any moment — a
+  # churning value, not a wall.
+  #
+  # Cost is unaffected either way: the query is a bounded index span on
+  # (expires_at) and a wider margin just reads a slightly wider span.
+  refreshMarginHours: 72
+
 exporter:
   port: 9399
 

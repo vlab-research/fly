@@ -59,6 +59,14 @@ function makeNoopStorage(config) {
       console.warn(`[media/storage] STORAGE_BACKEND=none: discarding bytes for asset ${assetId}`);
       return { key: storageKeyFor(assetId), stored: false };
     },
+    // Throws rather than returning empty bytes. The reconciler re-uploads real
+    // bytes to Meta; handing it a zero-length buffer would write a handle
+    // pointing at nothing, which is worse than no handle at all.
+    async get({ assetId }) {
+      throw new Error(
+        `STORAGE_BACKEND=none has no bytes for asset ${assetId} (they were discarded at upload)`,
+      );
+    },
     async delete({ assetId }) {
       return { key: storageKeyFor(assetId), deleted: false };
     },
@@ -102,6 +110,28 @@ function makeS3Storage(config) {
         'Content-Disposition': contentDisposition(filename),
       });
       return { key, stored: true };
+    },
+
+    /**
+     * Reads an asset's bytes back.
+     *
+     * ONLY THE RECONCILER NEEDS THIS. The upload path already holds the buffer,
+     * message-worker never touches storage (§4.3), and the public read path is
+     * media-proxy. Refresh re-uploads the same bytes to Meta, and we are the
+     * only place they exist — so this is the one reader inside the application.
+     *
+     * @returns {Promise<{key: string, buffer: Buffer}>}
+     */
+    async get({ assetId }) {
+      const key = storageKeyFor(assetId);
+      const stream = await client.getObject(config.bucket, key);
+      const buffer = await new Promise((resolve, reject) => {
+        const chunks = [];
+        stream.on('data', chunk => chunks.push(chunk));
+        stream.on('error', reject);
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
+      });
+      return { key, buffer };
     },
 
     async delete({ assetId }) {

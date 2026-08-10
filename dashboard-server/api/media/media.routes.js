@@ -64,11 +64,18 @@ function handleMulterError(err, req, res, next) {
  * scope for the author to choose. Fan-out goes to all of the owner's accounts
  * and is best-effort, so a researcher with no accounts connected yet uploads
  * fine and handles appear when they connect one.
+ *
+ * DELETE /:id is deliberately NOT offered in v1 (planning/media-abstraction.md §11.6).
+ * The reasons are stated in the plan: no backup (VIR-24) and no reference counting
+ * against surveys, so deletion is a click that irrevocably breaks any live survey
+ * that references the asset with zero signal to anyone. The accidental-confidential-
+ * upload case is handled out-of-band — the researcher tells us and we delete it
+ * after a human considers whether the URL escaped. Once backup exists and reference
+ * counting against surveys is implemented, deletion can be revisited.
  */
 router
   .post('/upload', upload, handleMulterError, handlers.uploadMedia)
-  .get('/', handlers.listMedia)
-  .delete('/:id', handlers.deleteMedia);
+  .get('/', handlers.listMedia);
 
 module.exports = router;
 module.exports.MAX_UPLOAD_BYTES = MAX_UPLOAD_BYTES;

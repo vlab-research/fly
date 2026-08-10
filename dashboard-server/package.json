@@ -11,7 +11,10 @@
     "start": "node index.js",
     "test": "NODE_ENV=test mocha --colors --timeout 5000 --exclude './**/*.integration.test.js' './{,!(node_modules)/**}/*.test.js'",
     "test:integration": "NODE_ENV=test mocha --colors --timeout 30000 './{,!(node_modules)/**}/*.integration.test.js'",
-    "test:media": "NODE_ENV=test mocha --colors --timeout 30000 './api/media/*.test.js'"
+    "test:media": "npm run test:media:upload && npm run test:media:reconcile",
+    "test:media:upload": "NODE_ENV=test mocha --colors --timeout 30000 './api/media/media.core.test.js' './api/media/media.controller.test.js' './api/media/media.reconcile.test.js' './api/media/media.integration.test.js'",
+    "test:media:reconcile": "NODE_ENV=test mocha --colors --timeout 60000 './api/media/media.reconcile.integration.test.js'",
+    "reconcile:media": "node scripts/media-reconcile.js"
   },
   "repository": {
     "type": "git",

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Table, Upload, Tag, message, Card, Spin, Typography, Alert,
-  Button, Popconfirm,
 } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import PropTypes from 'prop-types';
@@ -149,17 +148,6 @@ const Media = () => {
     return false;
   };
 
-  const handleDelete = async (asset) => {
-    try {
-      await api.fetcher({ path: `/media/${asset.id}`, method: 'DELETE' });
-      setAssets(prev => prev.filter(a => a.id !== asset.id));
-      message.success(`${asset.filename} deleted`);
-    } catch (err) {
-      message.error(`Delete failed: ${parseApiError(err, 'unknown error')}`);
-      console.error(err);
-    }
-  };
-
   const renderPreview = (_, asset) => {
     if (!isPreviewable(asset)) return <Text type="secondary">—</Text>;
     return (
@@ -184,35 +172,6 @@ const Media = () => {
     >
       <Text code style={{ fontSize: 12 }}>{url}</Text>
     </Text>
-  );
-
-  // §11.6: there is NO reference counting against surveys. A running survey
-  // that references this asset will silently show a broken file, so the
-  // confirmation says so plainly instead of asking "are you sure?".
-  const renderActions = (_, asset) => (
-    <Popconfirm
-      title={(
-        <div style={{ maxWidth: 320 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            Delete
-            {' '}
-            {asset.filename}
-            ?
-          </div>
-          <div>
-            If any survey still uses this link, the file will stop loading for
-            respondents straight away. We can&apos;t check that for you, and this
-            can&apos;t be undone — the file is deleted for good.
-          </div>
-        </div>
-      )}
-      okText="Delete"
-      okButtonProps={{ danger: true }}
-      cancelText="Keep"
-      onConfirm={() => handleDelete(asset)}
-    >
-      <Button danger size="small" type="link">Delete</Button>
-    </Popconfirm>
   );
 
   const columns = [
@@ -250,9 +209,6 @@ const Media = () => {
       width: 120,
       render: d => new Date(d).toLocaleDateString(),
       sorter: (a, b) => new Date(a.created) - new Date(b.created),
-    },
-    {
-      title: '', key: 'actions', width: 90, render: renderActions,
     },
   ];
 

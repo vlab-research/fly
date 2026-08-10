@@ -13,6 +13,7 @@ data:
       collectors:
         - study_health
         - study_traffic
+        - media_health
 
     # ---------------------------------------------------------------------------
     # INDEX DISCIPLINE — read before adding or editing any query here.
@@ -515,3 +516,320 @@ data:
                 ORDER BY s.created DESC
                 LIMIT 1
               ) sv ON true;
+
+      # -------------------------------------------------------------------------
+      # MEDIA HANDLE HEALTH — planning/media-abstraction.md §2, §8.5, §13.
+      #
+      # WHY THIS IS A SQL COLLECTOR AND NOT A COUNTER IN message-worker.
+      #
+      # §8.5 designed a "by-URL counter": in this architecture a by-URL send for
+      # dashboard-uploaded media is an anomaly, so a counter that sits near zero is
+      # a clean health signal. That reasoning is right and this collector does not
+      # replace it — but the counter measures the SYMPTOM, and it only moves AFTER a
+      # respondent has already been served the degraded path. It also has nowhere to
+      # live today: no application service in this repo exposes /metrics at all, so
+      # shipping it means standing up a metrics endpoint, a Service and a
+      # ServiceMonitor for message-worker first.
+      #
+      # The CAUSE is visible in SQL, before any send degrades. The handle layer's
+      # desired state (§2) is "one fresh handle per (asset x each of the owner's
+      # messaging accounts)", and that is a query. A handle that will be expired
+      # tomorrow is measurable today; a fan-out that never happened is measurable
+      # the moment the upload returns. Every metric below leads the by-URL counter.
+      #
+      # WHAT THIS CANNOT SEE, and what still wants the §8.5 counter eventually:
+      #  - Third-party URLs (§2 "out of scope"). An imgur link in a survey has no
+      #    asset row, so it is invisible here and is a by-URL send forever, by
+      #    design. Not a fault, but it is why the counter's floor is not zero.
+      #  - Codec-level ineligibility (§11.5's weakened invariant). A file that
+      #    passes upload validation and is then refused by WhatsApp gets no handle.
+      #    That DOES show up here — as a permanently missing handle — but it is
+      #    indistinguishable from a broken reconciler without looking at the rows.
+      #  - The read path. If message-worker's lookup errors and it treats the miss
+      #    as by-URL (§13's "CRDB slow or down" row), the handle rows are perfect
+      #    and this collector reports perfect health while every send degrades.
+      #    Nothing in SQL can see that. It is the one failure mode that genuinely
+      #    requires the worker-side counter.
+      #  - MEDIA_HANDLE_USE being off. Same blind spot: healthy rows, no use made
+      #    of them.
+      #
+      # ---------------------------------------------------------------------------
+      # ZERO BEHAVIOUR — read before editing any query here.
+      #
+      # media_asset and media_handle are EMPTY in production and stay empty until a
+      # researcher uploads through the media tab (§11.1 measured zero adoption).
+      # Every query below is therefore an UNGROUPED aggregate, which returns exactly
+      # one row against an empty table. That is deliberate and load-bearing:
+      #
+      #   - the series always exist, so no alert expression silently evaluates
+      #     against an absent vector, and no Grafana panel reads "No data";
+      #   - the values are 0, so no alert fires merely because nobody has uploaded
+      #     anything. An alert that fires on an empty table is worse than no alert;
+      #   - there is no division anywhere in SQL. Ratios are built in PromQL with
+      #     clamp_min() on the denominator, the same way survey:error_ratio:1h does.
+      #
+      # !! DO NOT ADD A GROUP BY OR A key_label HERE without re-checking that. The
+      # !! obvious candidate is a `platform` label off media_handle.platform, and it
+      # !! is a trap twice over: a grouped query emits ZERO series on an empty table,
+      # !! and `platform` is a DESCRIPTIVE column (migration 24) whose value
+      # !! vocabulary is pinned by nothing — the codebase spells platforms two ways
+      # !! ('messenger'/'whatsapp' vs 'facebook_page'/'whatsapp_business') and a
+      # !! label matcher written against the wrong spelling reads as a clean zero.
+      # !! Per-platform triage belongs in the runbook's SQL, not in a label.
+      # ---------------------------------------------------------------------------
+      - collector_name: media_health
+        min_interval: {{ .Values.database.minInterval }}s
+        metrics:
+          # media_handles_desired / media_handles_missing
+          #
+          # THE DESIRED STATE, AND THE GAP. §2: one handle per (asset x each of the
+          # owner's messaging accounts), where the account set is
+          #   SELECT key FROM credentials
+          #   WHERE userid = $1 AND entity IN ('facebook_page','whatsapp_business')
+          #
+          # `missing` is the primary health signal of the whole handle layer. A
+          # non-zero AND NON-DECREASING value means two things have failed together:
+          # upload-time fan-out did not create the handle, and the reconciler is not
+          # backfilling it. Either alone is harmless by design (§2 — fan-out is
+          # explicitly allowed to be unreliable BECAUSE the reconciler backfills), so
+          # only the conjunction is worth alerting on. Hence the alert's long `for:`.
+          #
+          # Expect it to be briefly non-zero after every upload: fan-out is
+          # best-effort and never blocks the upload response, and the reconciler
+          # tick is what closes the gap. Transient, not a fault.
+          #
+          # JOIN KEY IS account_id ALONE. h.account_id = c.key, with no platform
+          # predicate. Read migration 24's comment before changing this: a
+          # (platform, account_id) key is a silent-failure trap because the writer
+          # holds credentials.entity and the reader holds SendMessageCommand's
+          # platform spelling, and a lookup miss is not an error — it is the
+          # designed URL fallback. A platform predicate added here would make this
+          # metric report a fan-out gap that does not exist.
+          #
+          # ACCESS PATH (verified with EXPLAIN against migration 24's schema):
+          #   merge join media_asset@(userid, content_hash) x
+          #              credentials@(userid, entity, key)   -- both ordered by userid
+          #   -> lookup join media_handle@media_handle_pkey  -- (asset_id, account_id)
+          #                                                     equality, "equality
+          #                                                     cols are key"
+          # No cross product is ever materialised: the merge emits exactly `desired`
+          # rows and each one costs a single primary-key seek.
+          #
+          # COST GROWS WITH THE DESIRED-STATE CARDINALITY, and that is irreducible
+          # for an exact answer — one seek per (asset, account) pair. At today's
+          # scale (zero) and the realistic near-term scale (3 media-authoring
+          # researchers x 3-4 accounts x tens of assets = hundreds of seeks) it is
+          # far cheaper than the study_traffic query already running beside it.
+          # The number to watch is assets x accounts, NOT assets: §11.1b measured one
+          # production user with 29 messaging accounts, so a single researcher can
+          # multiply the row count by 29.
+          #
+          # !! IF media_handles_desired PASSES ~100,000, MOVE THIS METRIC TO ITS OWN
+          # !! COLLECTOR with a longer min_interval (5-15m). Fan-out gaps are
+          # !! reconciler-scale events measured in hours; nothing here needs 60s
+          # !! resolution. That is the lever — do not "optimise" the query, there is
+          # !! nothing cheaper that is still exact.
+          - metric_name: media_handles_desired
+            type: gauge
+            help: "Desired (asset x owner's messaging account) pairs — the handle layer's target state (planning/media-abstraction.md §2)"
+            values:
+              - desired
+            query_ref: media_fanout
+
+          - metric_name: media_handles_missing
+            type: gauge
+            help: "Desired (asset x account) pairs with NO handle row — fan-out failed AND the reconciler has not backfilled"
+            values:
+              - missing
+            query_ref: media_fanout
+
+          # media_handles_expired
+          #
+          # Handles past expires_at. SHOULD BE ~0 AT ALL TIMES. A handle only gets
+          # here if the reconciler has not run, or is running but not keeping up —
+          # by the time expires_at has passed, the refresh margin has already been
+          # open for days (see media_handles_expiring below).
+          #
+          # Not a respondent-facing fault on its own: §13's "handle expired,
+          # reconciler hasn't run" row degrades to a by-URL send, and mediaresolve's
+          # own margin (§6) catches it before the id is actually used. This is a
+          # "the reconciler is dead" signal, not an outage.
+          #
+          # BOTH PLATFORMS EXPIRE — verified against Meta's docs 2026-08-10 (§11.2):
+          # WhatsApp media ids 30 days, Messenger attachment ids 90 days. An earlier
+          # draft of the design recorded Messenger as "no known expiry", under which
+          # every Messenger handle would have died silently at 90 days with nothing
+          # erroring and nothing alerting — and Messenger carries ~100% of live media
+          # traffic (§11.1). This metric is the thing that would have caught it.
+          #
+          # `expires_at IS NULL` is EXCLUDED, not counted as expired. NULL now means
+          # only "expiry genuinely unknown", which no current platform produces; a
+          # NULL is a reconciler/writer bug, and it surfaces as a stuck
+          # media_handles_missing rather than being miscounted here.
+          - metric_name: media_handles_expired
+            type: gauge
+            help: "Handles already past expires_at — the reconciler is not running or not keeping up"
+            values:
+              - expired
+            query_ref: media_handle_expiry
+
+          # media_handles_expiring
+          #
+          # THE LEADING INDICATOR. Handles not yet expired but inside the refresh
+          # margin — the set the reconciler is supposed to be working on right now.
+          # It rises BEFORE media_handles_expired does, by exactly the margin, which
+          # is the window in which a stalled reconciler can be fixed with no
+          # degradation at all.
+          #
+          # A healthy system has a small, CHURNING value here: handles enter the
+          # margin, the reconciler refreshes them, they leave. A value that rises
+          # and then stops falling is the same fault media_handles_expired reports,
+          # caught {{ .Values.media.refreshMarginHours }}h earlier.
+          #
+          # The margin must be >= mediaresolve's own margin (§6), or the send path
+          # starts degrading to by-URL before this metric has said anything.
+          - metric_name: media_handles_expiring
+            type: gauge
+            help: "Handles inside the refresh margin but not yet expired — leading indicator of a stalled reconciler"
+            values:
+              - expiring
+            query_ref: media_handle_expiry
+
+          # media_handles_dead
+          #
+          # platform_media_id IS NULL — migration 24's "known-dead, send by URL"
+          # marker. These are handles the fan-out or reconciler tried to create and
+          # the platform refused. They ALWAYS send by URL, so they are the standing
+          # floor under the §8.5 by-URL counter.
+          #
+          # Expected to be small but NOT provably zero: §11.5's eligibility
+          # invariant holds for size and MIME (enforced at upload) and NOT for
+          # codecs — an H.265 MP4 or a stereo Ogg passes upload validation and is
+          # then refused by WhatsApp. Such an asset is permanently dead on that
+          # account. That is a KNOWN, ACCEPTED class, which is exactly why this is a
+          # separate metric from media_handles_missing rather than folded into it:
+          # dead means "we tried and were told no", missing means "nobody tried".
+          # Conflating them would make an accepted condition look like a fault.
+          #
+          # NOT ALERTED ON. A rise here is a researcher-visible upload problem, not
+          # a platform outage, and the actionable version of it belongs at the
+          # upload validator. Exported so a by-URL reading can be explained.
+          - metric_name: media_handles_dead
+            type: gauge
+            help: "Handles with platform_media_id IS NULL (known-dead) — these always send by URL"
+            values:
+              - dead
+            query_ref: media_handle_inventory
+
+          # media_handles / media_assets
+          #
+          # CHEAP DENOMINATORS, so everything above can be read as a rate. 50 stale
+          # handles means something very different at 60 assets than at 60,000.
+          # Bare gauges, no _total suffix: that suffix means "counter" in Prometheus
+          # convention and these are point-in-time counts.
+          #
+          # media_handles is the row count of media_handle, which is NOT
+          # (desired - missing). The difference is ORPHANED handles — rows for an
+          # account that has since been disconnected. §5 says explicitly that no FK
+          # constrains account_id (credentials rotate) and that the reconciler
+          # prunes them. So:
+          #
+          #   media_handles - (media_handles_desired - media_handles_missing)
+          #
+          # is the orphan count, and a growing orphan count means the reconciler's
+          # PRUNE half is not running even if its refresh half is. Verified against
+          # a seeded local stack: a handle for a disconnected account contributes to
+          # media_handles and to neither desired nor missing.
+          - metric_name: media_handles
+            type: gauge
+            help: "Total media_handle rows (includes orphans for disconnected accounts) — denominator"
+            values:
+              - handles
+            query_ref: media_handle_inventory
+
+          - metric_name: media_assets
+            type: gauge
+            help: "Total media_asset rows — denominator, and the adoption signal for the media tab"
+            values:
+              - assets
+            query_ref: media_assets
+
+        # ---------------------------------------------------------------------------
+        # Shared queries for the media_health collector.
+        #
+        # WHY `queries:` + `query_ref` HERE, when every collector above inlines its SQL:
+        # seven metrics come from four executions instead of seven. media_handle is
+        # scanned ONCE per interval for both media_handles and media_handles_dead, and
+        # the fan-out join — the expensive one — runs once for both of its metrics.
+        # Inlining would double its cost for no benefit.
+        #
+        # !! `queries:` IS A COLLECTOR-LEVEL KEY, a sibling of `metrics:` — NOT a
+        # !! top-level one. Placed at the top level it parses as valid YAML and then
+        # !! fails at startup with `unresolved query_ref "media_fanout" in metric
+        # !! "media_handles_desired"`, so the pod CrashLoops instead of serving a
+        # !! partial /metrics. Verified against burningalchemist/sql_exporter 0.24.3
+        # !! by making exactly that mistake.
+        # ---------------------------------------------------------------------------
+        queries:
+          - query_name: media_fanout
+            query: |
+              SELECT
+                COUNT(*)::INT                                        AS desired,
+                COUNT(*) FILTER (WHERE h.asset_id IS NULL)::INT      AS missing
+              FROM media_asset a
+              JOIN credentials c
+                ON c.userid = a.userid
+               AND c.entity IN ('facebook_page', 'whatsapp_business')
+              LEFT JOIN media_handle h
+                ON h.asset_id = a.id
+               AND h.account_id = c.key;
+
+          # ACCESS PATH: a bounded span on media_handle@media_handle_expires_at_idx —
+          # `(/NULL - /<now + margin>]`. Verified with EXPLAIN. Note the OPEN lower
+          # bound: `expires_at IS NOT NULL` is what makes CockroachDB exclude the NULL
+          # prefix from the span, so rows with no recorded expiry are not even read.
+          # Drop that predicate and the scan starts reading them.
+          #
+          # THIS IS THE ONLY QUERY HERE WHOSE COST DOES NOT GROW WITH THE TABLE. It
+          # reads only the handles at or near expiry, which in a healthy system is a
+          # near-empty span regardless of how many handles exist. Both alerting metrics
+          # are deliberately served from it, so the alerting path never degrades as the
+          # media library grows. Keep it that way — do not add a column to this query
+          # that is not in the (expires_at) index, because that turns the span into an
+          # index join and then a full scan.
+          - query_name: media_handle_expiry
+            query: |
+              SELECT
+                COUNT(*) FILTER (WHERE expires_at <  now())::INT AS expired,
+                COUNT(*) FILTER (WHERE expires_at >= now())::INT AS expiring
+              FROM media_handle
+              WHERE expires_at IS NOT NULL
+                AND expires_at < now() + INTERVAL '{{ .Values.media.refreshMarginHours }} hours';
+
+          # ACCESS PATH: FULL SCAN of media_handle@media_handle_pkey, and it cannot be
+          # made cheaper — platform_media_id is in no secondary index, so counting NULLs
+          # means reading every row. Stated rather than hidden.
+          #
+          # Both metrics from this query are DENOMINATORS AND EXPLANATIONS, never alert
+          # inputs, which is what makes the scan acceptable: if it ever becomes too
+          # expensive the honest fix is to drop the interval on this one query, and no
+          # alert loses resolution. For scale: the study_traffic collector beside this
+          # one scans a 1,000,000-row table every 60s in 420-500ms. media_handle is
+          # assets x accounts; it would have to become genuinely large to compete.
+          #
+          # If it does, the remedy is a partial index — `INDEX (asset_id) WHERE
+          # platform_media_id IS NULL` in a new migration — NOT a rewrite here. Not
+          # shipped in migration 24 on purpose: an index sized for a table with zero
+          # rows is a guess.
+          - query_name: media_handle_inventory
+            query: |
+              SELECT
+                COUNT(*)::INT                                             AS handles,
+                COUNT(*) FILTER (WHERE platform_media_id IS NULL)::INT    AS dead
+              FROM media_handle;
+
+          # ACCESS PATH: scan of media_asset@(userid, content_hash) — CockroachDB picks
+          # the narrowest covering index for a bare COUNT(*), not the primary index.
+          - query_name: media_assets
+            query: |
+              SELECT COUNT(*)::INT AS assets FROM media_asset;

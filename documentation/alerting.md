@@ -18,10 +18,10 @@ namespace and are versioned as Helm charts.
 
 | Source (repo path) | Release / how applied | Alerts |
 |---|---|---|
-| **`devops/alerts/`** | Helm `vlab-alerts` (monitoring) | Kafka **broker health** + **app health** + **study health** + **media storage capacity** (this doc) |
+| **`devops/alerts/`** | Helm `vlab-alerts` (monitoring) | Kafka **broker health** + **app health** + **study health** + **media storage capacity** + **media handle health** (this doc) |
 | **`devops/kafka-consumer-health/`** | Helm `kafka-consumer-health` (monitoring) | Kafka **consumer-lag** — see the dedicated doc |
 | `devops/kminion/` | Helm `kminion` (default) | *(metrics source for consumer-lag; no alerts)* |
-| `devops/sql-exporter/` | Helm `sql-exporter` (monitoring) | *(metrics source for study health; no alerts)* |
+| `devops/sql-exporter/` | Helm `sql-exporter` (monitoring) | *(metrics source for study health **and media handle health**; no alerts)* |
 | `devops/minio/servicemonitor.yaml` | `kubectl apply -f devops/minio/` | *(metrics source for media storage capacity; no alerts)* |
 | `devops/vlab/charts/redis/templates/prometheusrule.yaml` | vlab umbrella (`gbv`) | Redis health (subchart) |
 | `devops/prometheus/values.yaml` → `defaultRules` | kube-prometheus-stack | Kubernetes/node/Prometheus infra alerts (`Kube*`, `Node*`, `Watchdog`, …) |
@@ -587,3 +587,187 @@ outage.
    not override it.
 5. Verify the `mc mirror` CronJob (`devops/backup/minio-media-mirror.yaml`) ran
    recently. A degraded cluster is the moment the off-cluster copy matters.
+
+---
+
+## 11. Media handle health — runbooks
+
+Defined in `devops/alerts/templates/media-handle-health.yaml`. Thresholds in
+`devops/alerts/values.yaml` (`mediaHandles:`). Metrics come from the
+**`media_health` collector** in `devops/sql-exporter`, which reads
+`chatroach.media_asset` and `chatroach.media_handle` (migration
+`24-media-assets.sql`) directly. Design: `planning/media-abstraction.md` §2,
+§8.5, §13.
+
+**This is not §10.** §10 watches the *bytes* — MinIO volumes and bucket growth —
+and its failures are permanent, because we hold the only copy of an uploaded
+file. This section watches the *cache of platform media ids*, whose total loss
+costs nothing: you can `DELETE FROM media_handle` at any moment, every send
+degrades to a URL send, and the reconciler refills on the next tick (§5). Two
+adjacent concerns with opposite blast radii.
+
+### Why these alerts exist, and why none of them page
+
+§8.5 designed a **by-URL send counter** in message-worker as the handle layer's
+health signal, on a correct observation: in this design a by-URL send for
+dashboard-uploaded media is an *anomaly* and should sit near zero, whereas in a
+lazy design it is expected on first send — so a completely broken handle pipeline
+would look healthy. That counter is still the right idea and these metrics do not
+replace it. But it measures the **symptom**, moving only after a respondent has
+already been served the degraded path, and it has nowhere to live yet: **no
+application service in this repo exposes `/metrics` at all**, so shipping it means
+first standing up a metrics endpoint, Service and ServiceMonitor for
+message-worker.
+
+The **cause** is a SQL query. The desired state (§2) is "one fresh handle per
+(asset × each of the owner's messaging accounts)", so a fan-out that never
+happened is visible the moment the upload returns, and a handle that will be dead
+in three days is visible today. These metrics lead the by-URL counter by days.
+
+**Nothing here is `critical`, by explicit decision.** At the moment these fire,
+zero respondents are affected and zero messages have failed — what has failed is
+an optimisation, silently, and "silently" is the entire reason the rules exist.
+§13's table is the argument: every handle-layer failure mode degrades to a URL
+send. Escalate one of these only if you can name the respondent-visible
+consequence.
+
+### What these metrics cannot see
+
+Worth knowing before reading a clean board as proof that media is healthy:
+
+- **Third-party URLs.** An imgur link in a survey has no asset row (§2 — not
+  mirrored, deliberately), so it is invisible here and is a by-URL send forever.
+  Not a fault, but it is why the by-URL counter's floor is not zero.
+- **Codec-level ineligibility.** §11.5's eligibility invariant holds for size and
+  MIME (enforced at upload) and **not** for codecs — an H.265 MP4 passes
+  validation and is then refused by WhatsApp. That shows up here, but as a
+  missing or dead handle indistinguishable from a reconciler fault without
+  looking at the rows.
+- **The read path.** If message-worker's handle lookup errors and it treats the
+  miss as by-URL (§13's "CRDB slow or down" row), or if `MEDIA_HANDLE_USE` is
+  simply off, the rows are perfect and this collector reports perfect health
+  while every send degrades. **This is the one failure mode that genuinely
+  requires the worker-side counter**, and it is the reason §8.5 should still be
+  built eventually.
+
+### Reading the numbers
+
+Seven gauges, all safe at zero — `media_asset` and `media_handle` are empty in
+production and stay empty until a researcher uses the media tab (§11.1 measured
+zero adoption), so every query is an ungrouped aggregate that returns one row of
+zeros rather than no rows at all. Nothing here fires on an empty table.
+
+| Metric | Meaning |
+|---|---|
+| `media_handles_desired` | (asset × owner's messaging account) pairs — the target state |
+| `media_handles_missing` | …of those, the ones with no handle row at all |
+| `media_handles_expired` | handles past `expires_at` — should be 0 |
+| `media_handles_expiring` | handles inside the 72h refresh margin — the leading indicator |
+| `media_handles_dead` | `platform_media_id IS NULL`, migration 24's "known-dead" marker |
+| `media_handles` | total rows, **including orphans** for disconnected accounts |
+| `media_assets` | total assets — also the media tab's adoption signal |
+
+Three recording rules, read by no alert, exist to size a problem:
+`media:handles_missing:ratio`, `media:handles_expired:ratio`, and
+`media:handles_orphaned` (= `media_handles - (desired - missing)`). The last is
+the only place the reconciler's **prune** half is observable — a reconciler that
+refreshes but never prunes looks perfect on every other metric here.
+
+**`media_handles_expiring` is deliberately not alerted on.** The exporter's
+margin is set equal to `mediaReconciler.refreshMargin`, so this metric *is the
+reconciler's work queue*, counted from the outside — and its healthy steady state
+is therefore *non-zero and churning*: with a 72h margin against a 30-day WhatsApp
+clock, roughly 10% of handles sit inside the window at any moment — so any
+threshold on it would be a guess with no measured background to calibrate
+against. The better version of that alert is a *minimum time to expiry* gauge
+(`min(expires_at) - now()`, an O(1) seek on the `(expires_at)` index), which
+turns "is the set churning?" into a continuous quantity that marches downward
+when the reconciler stalls. Add it when there is real data to calibrate it, not
+before.
+
+### MediaHandlesExpired
+`media_handles_expired > 0` for **6h** — **warning**.
+
+The confirmation, not the early warning. A handle cannot reach `expired` without
+first sitting in the 72h refresh margin unrefreshed for the whole margin, and the
+reconciler ticks **hourly** (`mediaReconciler.schedule: "17 * * * *"`) — so by
+the time this fires it has missed roughly 72 consecutive chances to refresh that
+handle, and then another 6.
+
+The threshold is `0` because this is an **invariant, not a rate**: a working
+reconciler produces exactly zero expired handles, so unlike almost every other
+threshold in this document it is not a v1 guess. The **`for:` carries all the
+noise control instead** and is keyed to the tick interval, not to a wall-clock
+intuition — 6h is six missed hourly ticks on top of the margin, ~78h of silent
+lead time in total. A single failed tick must never alert.
+
+> **If `mediaReconciler.schedule` slows, raise `expiredFor` to match.** On a
+> daily schedule 6h is less than one cycle and this alert would report the
+> schedule rather than a fault.
+
+1. Is the reconciler running at all? It is the component §11.3 left undecided —
+   check the CronJob (`kubectl -n vprod get cronjob`) and its last successful
+   run. `CronJobNotSucceeding` (§6) may already be firing for the same cause; if
+   so, triage there, this is downstream.
+2. Size it: `media:handles_expired:ratio`. A handful out of thousands is a
+   partial failure (one account's credentials rotated, one platform refusing);
+   everything at once is the job not running.
+3. Which handles: connect to CockroachDB read-only and look, rather than guessing
+   from the label-free gauge —
+   ```sql
+   SELECT platform, count(*), min(expires_at), max(expires_at)
+   FROM chatroach.media_handle
+   WHERE expires_at < now()
+   GROUP BY platform;
+   ```
+   All one `platform` means a platform-side or token problem; both means the job.
+4. **No emergency action is required on the messages themselves.** Expired
+   handles resolve to a by-URL send. Fix the reconciler and the handles refill on
+   the next successful tick — there is nothing to repair by hand, and nothing to
+   `kubectl` into the cluster.
+
+### MediaHandleFanoutGap
+`media_handles_missing > 0` for **6h** — **warning**.
+
+Assets with no handle for one or more of their owner's connected messaging
+accounts, for longer than several reconciler cycles. A gap on its own is
+**expected and harmless**: upload fan-out is best-effort and never blocks the
+upload response, precisely because the reconciler backfills it (§2). What this
+alert detects is the *conjunction* — fan-out failed **and** the reconciler is not
+backfilling.
+
+The `for:` is load-bearing rather than defensive here: without it, every single
+upload would fire this alert in the window between the response and the next
+tick. It also has to outlast a **deferred pass** — the reconciler bounds each run
+at `maxActions` / `maxBytes` and pushes the remainder to the next tick, so a
+researcher uploading a large library legitimately shows a gap that drains over
+several ticks.
+
+1. **Check `media_handles_dead` first.** An asset the platform *refused* should
+   appear there (migration 24's `platform_media_id IS NULL` marker), not here.
+   `dead` means "we tried and were told no"; `missing` means "nobody tried".
+2. Is this a new researcher or a newly connected account? A researcher who
+   connects a fourth page after uploading legitimately shows a gap until the next
+   tick — §2's "new account" reconciler case. That is the system working.
+3. Which pairs are missing:
+   ```sql
+   SELECT u.email, c.entity, count(*)
+   FROM chatroach.media_asset a
+   JOIN chatroach.users u ON u.id = a.userid
+   JOIN chatroach.credentials c
+     ON c.userid = a.userid
+    AND c.entity IN ('facebook_page','whatsapp_business')
+   LEFT JOIN chatroach.media_handle h
+     ON h.asset_id = a.id AND h.account_id = c.key
+   WHERE h.asset_id IS NULL
+   GROUP BY 1, 2 ORDER BY 3 DESC;
+   ```
+   One researcher and one entity is a credentials/token problem for that account.
+   Spread across everyone is the reconciler.
+4. ⚠️ **Do not raise `missingThreshold` as a first response.** The one legitimate
+   cause of a permanent non-zero floor is a codec-ineligible asset (§11.5), and
+   the design's answer to that is for the reconciler to record the refusal as
+   `platform_media_id = NULL`, moving the row into `media_handles_dead`. **A
+   stuck floor here means the reconciler is not writing the dead marker** — fix
+   the reconciler. The knob is for a floor you have consciously decided to live
+   with.

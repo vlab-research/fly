@@ -95,25 +95,6 @@ async function list({ email }) {
 }
 
 /**
- * Deletes an asset owned by this user. Handles cascade (FK ON DELETE CASCADE),
- * which is why deletion is safe under UUID identity: the URL identifies exactly
- * one row, so there is no refcount to get wrong.
- *
- * Returns the deleted row, or undefined when it was not theirs / not there —
- * the email predicate is the authorisation check, so a miss must be a 404.
- */
-async function remove({ email, id }) {
-  const q = `
-    DELETE FROM media_asset
-    WHERE id = $1
-      AND userid = (SELECT id FROM users WHERE email = $2)
-    RETURNING id, content_hash, media_type, mime_type, byte_size, filename, created
-  `;
-  const { rows } = await this.query(q, [id, email]);
-  return rows[0];
-}
-
-/**
  * Writes one handle. INSERT ... ON CONFLICT (asset_id, account_id) DO UPDATE.
  *
  * The primary key enforces "exactly one handle per (asset, account)" in the
@@ -159,6 +140,89 @@ async function listHandles({ assetId }) {
   return rows;
 }
 
+// --------------------------------------------------------------------------
+// Reconciler reads (api/media/media.reconcile.js)
+// --------------------------------------------------------------------------
+//
+// Scoped BY OWNER, not globally, because the desired state is
+// `asset × its OWNER's messaging accounts` and the account set comes from
+// getMessagingAccounts({email}). Reconciling one owner at a time keeps each
+// query on an index and keeps a single broken owner from taking the run down.
+
+/**
+ * Every user who owns at least one asset — the reconciler's outer loop.
+ *
+ * `email` is returned because credentials are looked up by email
+ * (getMessagingAccounts), and `userid` because planReconcile matches assets to
+ * accounts on it.
+ */
+async function listAssetOwners() {
+  const q = `
+    SELECT u.id AS userid, u.email
+    FROM users u
+    WHERE EXISTS (SELECT 1 FROM media_asset m WHERE m.userid = u.id)
+    ORDER BY u.email ASC
+  `;
+  const { rows } = await this.query(q);
+  return rows;
+}
+
+/**
+ * One owner's assets, oldest first.
+ *
+ * `byte_size` is here because it is the reconciler's cost model: every action
+ * re-uploads the bytes to Meta, so the per-run budget is spent in bytes as well
+ * as in count. `created` is the tie-break that stops a never-handled asset from
+ * being starved behind newer ones forever.
+ */
+async function listAssetsForOwner({ userid }) {
+  const q = `
+    SELECT id, userid, media_type, mime_type, byte_size, filename, created
+    FROM media_asset
+    WHERE userid = $1
+    ORDER BY created ASC
+  `;
+  const { rows } = await this.query(q, [userid]);
+  return rows;
+}
+
+/** Every handle belonging to one owner's assets. */
+async function listHandlesForOwner({ userid }) {
+  const q = `
+    SELECT h.asset_id, h.account_id, h.platform, h.platform_media_id, h.uploaded_at, h.expires_at
+    FROM media_handle h
+    JOIN media_asset m ON m.id = h.asset_id
+    WHERE m.userid = $1
+    ORDER BY h.asset_id ASC, h.account_id ASC
+  `;
+  const { rows } = await this.query(q, [userid]);
+  return rows;
+}
+
+/**
+ * Prunes one handle, but ONLY if it is still the row the reconciler read.
+ *
+ * The `uploaded_at` predicate closes the reconciler's one genuine read-then-
+ * write race. Everything else the reconciler does is an upsert on the primary
+ * key, so a concurrent upload-time fan-out just overwrites and both writers end
+ * up with a valid handle. A prune is the exception: it decided this account was
+ * disconnected from a snapshot, and if the credential came back and fan-out
+ * wrote a FRESH handle in the meantime, an unconditional DELETE would throw
+ * away a good handle. Matching on the timestamp we read makes the delete a
+ * no-op in exactly that case.
+ *
+ * Returns the deleted row, or undefined when the row had already changed.
+ */
+async function deleteHandleIfUnchanged({ assetId, accountId, uploadedAt }) {
+  const q = `
+    DELETE FROM media_handle
+    WHERE asset_id = $1 AND account_id = $2 AND uploaded_at = $3
+    RETURNING asset_id, account_id
+  `;
+  const { rows } = await this.query(q, [assetId, accountId, uploadedAt]);
+  return rows[0];
+}
+
 module.exports = {
   name: 'Media',
   queries: pool => ({
@@ -166,8 +230,11 @@ module.exports = {
     findByHash: findByHash.bind(pool),
     get: get.bind(pool),
     list: list.bind(pool),
-    remove: remove.bind(pool),
     upsertHandle: upsertHandle.bind(pool),
     listHandles: listHandles.bind(pool),
+    listAssetOwners: listAssetOwners.bind(pool),
+    listAssetsForOwner: listAssetsForOwner.bind(pool),
+    listHandlesForOwner: listHandlesForOwner.bind(pool),
+    deleteHandleIfUnchanged: deleteHandleIfUnchanged.bind(pool),
   }),
 };

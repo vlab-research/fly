@@ -201,35 +201,7 @@ function makeHandlers({ credentialQuery, mediaQuery, storage, platformUpload, ne
     }
   }
 
-  /**
-   * Deletes an asset: the row, then the object. Handles cascade (§11.6).
-   *
-   * The row goes first because it is the authorisation boundary and the thing
-   * the list view reads. A failed object delete after a successful row delete
-   * leaves an unreachable orphan — logged, and cheap — whereas the reverse
-   * would leave a listed asset whose URL 404s.
-   */
-  async function deleteMedia(req, res) {
-    const { email } = req.user;
-    const { id } = req.params;
-    try {
-      const deleted = await mediaQuery.remove({ email, id });
-      if (!deleted) return res.status(404).json({ error: 'Media not found' });
-
-      try {
-        await storage.delete({ assetId: deleted.id });
-      } catch (e) {
-        console.error(`[media] deleted row ${deleted.id} but object remains: ${e.message}`);
-      }
-
-      return res.status(204).send();
-    } catch (e) {
-      console.error(e);
-      return res.status(500).json({ error: e.message || 'Internal server error' });
-    }
-  }
-
-  return { uploadMedia, listMedia, deleteMedia, fanOutHandles, formatAsset };
+  return { uploadMedia, listMedia, fanOutHandles, formatAsset };
 }
 
 module.exports = { makeHandlers, formatAsset };

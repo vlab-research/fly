@@ -406,41 +406,4 @@ describe('media.controller (makeHandlers)', () => {
     });
   });
 
-  // -------------------------------------------------------
-  // deleteMedia
-  // -------------------------------------------------------
-  describe('deleteMedia', () => {
-    const deletedRow = { id: ASSET_ID, filename: 'welcome.png' };
-
-    it('deletes the row and the object', async () => {
-      const res = mockRes();
-      await build({ mediaQuery: fakeMediaQuery({ remove: async () => deletedRow }) })
-        .deleteMedia({ user: { email: 'test@vlab.com' }, params: { id: ASSET_ID } }, res);
-
-      res.statusCode.should.equal(204);
-      deletes.should.deep.equal([{ assetId: ASSET_ID }]);
-    });
-
-    it('404s when the asset is not the caller\'s', async () => {
-      // The email predicate in the DELETE is the authorisation check, so a miss
-      // and a not-mine are indistinguishable on purpose.
-      const res = mockRes();
-      await build().deleteMedia({ user: { email: 'other@vlab.com' }, params: { id: ASSET_ID } }, res);
-
-      res.statusCode.should.equal(404);
-      deletes.should.have.length(0);
-    });
-
-    it('still reports success when the object delete fails, leaving a logged orphan', async () => {
-      const storage = fakeStorage();
-      storage.delete = async () => { throw new Error('MinIO unreachable'); };
-      const res = mockRes();
-      await build({ storage, mediaQuery: fakeMediaQuery({ remove: async () => deletedRow }) })
-        .deleteMedia({ user: { email: 'test@vlab.com' }, params: { id: ASSET_ID } }, res);
-
-      // The row is gone and cannot come back; failing the request would tell
-      // the researcher their delete did not happen, which would be false.
-      res.statusCode.should.equal(204);
-    });
-  });
 });

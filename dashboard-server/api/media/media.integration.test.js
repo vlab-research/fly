@@ -342,35 +342,6 @@ describe('media upload (real MinIO + CockroachDB)', function () {
     (await countAssets(OWNER)).should.equal(before);
   });
 
-  // -----------------------------------------------------------------
-  // Delete
-  // -----------------------------------------------------------------
-  it('deletes the row, the object, and cascades the handles', async () => {
-    const res = mockRes();
-    await build().uploadMedia(req(OWNER, pdf('doomed'), 'doomed.pdf', 'application/pdf'), res);
-    const id = res.body.id;
-    (await Media.listHandles({ assetId: id })).should.have.length(3);
-
-    const del = mockRes();
-    await build().deleteMedia({ user: { email: OWNER }, params: { id } }, del);
-
-    del.statusCode.should.equal(204);
-    (await objectExists(id)).should.equal(false);
-    expect(await Media.get({ email: OWNER, id })).to.equal(undefined);
-    (await Media.listHandles({ assetId: id })).should.have.length(0);
-  });
-
-  it('refuses to delete another user\'s asset', async () => {
-    const res = mockRes();
-    await build().uploadMedia(req(OWNER, pdf('mine'), 'mine.pdf', 'application/pdf'), res);
-    track(res);
-
-    const del = mockRes();
-    await build().deleteMedia({ user: { email: OTHER }, params: { id: res.body.id } }, del);
-
-    del.statusCode.should.equal(404);
-    (await objectExists(res.body.id)).should.equal(true);
-  });
 
   async function countAssets(email) {
     const { rows } = await pool.query(

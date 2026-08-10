@@ -20,7 +20,7 @@ exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
-versionDashboard: &vdashboard v0.0.68-wa
+versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
 # replybot leaves the -wa line here (was v0.0.211-wa, which trailed prod's
@@ -814,16 +814,43 @@ media-proxy:
     port: 80
 
 # ---- Media handle reconciler (§7, §11.3) ------------------------------------
-# Shape undecided (§11.3, decide at stage F) and the dashboard chart has no
-# CronJob template to render into — see the fuller note in production.yaml.
-# Inert until then; the schedule is recorded so it is one value to wire up.
+# Shape decided at stage F: a standalone script (dashboard-server/scripts/
+# media-reconcile.js) run as a CronJob from the dashboard image — see the fuller
+# reasoning in production.yaml.
 #
 # Staging runs the same hourly schedule, offset by half an hour from production
 # so the two never contend on the same MinIO at the same minute.
+#
+# THE BOUND IS DELIBERATELY TIGHTER HERE. Staging is where a reconciler bug
+# shows up first, and a bug in a job whose unit of work is "upload a file to
+# Meta" is much cheaper to discover against a 20-action cap than a 200-action
+# one. It is not a capacity judgement — staging's library is tiny — it is a
+# blast-radius one. Anything over the cap is deferred to the next tick and named
+# in the log, so a tighter bound costs latency, never coverage.
+#
+# REQUIRED BEFORE APPLYING: the CronJob runs `node scripts/media-reconcile.js`
+# out of the DASHBOARD image, and that script does not exist in versionDashboard
+# above until a release is cut from this branch. Enabling it against an older
+# tag gives an hourly job that exits immediately with "Cannot find module" —
+# noisy, and (because a handle is only ever an optimisation) completely
+# invisible in message delivery. Bump versionDashboard first.
+#
+# It also depends on migration 24 and on the `dashboard-media` secret already
+# being applied — both are earlier steps in the §9.2 deploy sequence.
 mediaReconciler:
-  enabled: false
+  enabled: true
   schedule: "47 * * * *"
   refreshMargin: "72h"
+  maxActions: 20
+  maxBytes: 134217728 # 128 MiB
+  prune: "on"
+  activeDeadlineSeconds: 900
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
 
 cockroachdb:
   image:

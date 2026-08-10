@@ -40,6 +40,12 @@ const envVarsSchema = joi
     S3_REGION: joi.string().optional().empty(''),
     S3_ACCESS_KEY_ID: joi.string().optional().empty(''),
     S3_SECRET_ACCESS_KEY: joi.string().optional().empty(''),
+    // Media handle reconciler (scripts/media-reconcile.js). Read only by that
+    // script — the server process never reconciles.
+    MEDIA_RECONCILE_REFRESH_MARGIN: joi.string().optional().empty(''),
+    MEDIA_RECONCILE_MAX_ACTIONS: joi.number().optional().empty(''),
+    MEDIA_RECONCILE_MAX_BYTES: joi.number().optional().empty(''),
+    MEDIA_RECONCILE_PRUNE: joi.string().allow(['on', 'off']).optional().empty(''),
   })
   .unknown()
   .required();
@@ -127,6 +133,25 @@ const config = {
     region: envVars.S3_REGION || 'us-east-1',
     accessKeyId: envVars.S3_ACCESS_KEY_ID || 'minioadmin',
     secretAccessKey: envVars.S3_SECRET_ACCESS_KEY || 'minioadmin',
+  },
+  // Media handle reconciler (§2, §11.3), run as a CronJob by
+  // devops/vlab/templates/media-reconciler-cronjob.yaml. Values are kept RAW
+  // here and parsed by the script, so the operator-facing spelling in
+  // devops/values/<env>.yaml ("72h") is the same string that lands in the env.
+  //
+  // Every one of these is optional: unset means the defaults in media.core.js
+  // (DEFAULT_RECONCILE_POLICY) and media.reconcile.js (DEFAULT_LIMITS). THE
+  // TTLs ARE DELIBERATELY NOT CONFIGURABLE — Messenger's 90 days and WhatsApp's
+  // 30 are facts about Meta, not preferences, and a second copy of them in a
+  // values file is a copy that can silently disagree with the writer's
+  // expires_at.
+  MEDIA_RECONCILE: {
+    refreshMargin: envVars.MEDIA_RECONCILE_REFRESH_MARGIN || '',
+    maxActions: envVars.MEDIA_RECONCILE_MAX_ACTIONS,
+    maxBytes: envVars.MEDIA_RECONCILE_MAX_BYTES,
+    // 'off' keeps handles for accounts the owner no longer has. They are never
+    // looked up, so this is a debugging affordance, not a correctness knob.
+    prune: (envVars.MEDIA_RECONCILE_PRUNE || 'on') !== 'off',
   },
   ALERTMANAGER: {
     // Unset -> /platform/notices returns { notices: [] } (feature cleanly

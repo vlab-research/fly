@@ -138,7 +138,6 @@ API consumed (`dashboard-server/api/media`):
 |---|---|
 | `POST /media/upload` (multipart, field `file`) | `201` with the new asset; **`200` with the existing asset** on a dedupe hit (`UNIQUE (userid, content_hash)`) |
 | `GET /media` | the caller's assets, newest first |
-| `DELETE /media/:id` | `204`; `404` if not the caller's |
 
 Asset shape: `{id, filename, mediaType, mimeType, byteSize, created, url}`. The
 field is **`url`** — §3's prose says `public_url`, but the implementation emits
@@ -180,10 +179,11 @@ unguessable but permanently readable by anyone who obtains one, in researcher
 terms: *"anyone with the link can view the file, forever; don't upload anything
 confidential."* Not a footnote and not dismissible.
 
-**Delete warns about the missing reference count** (§11.6). Nothing checks
-whether a live survey references an asset, so deletion silently breaks that
-survey's media. The confirmation says so in plain language rather than asking
-"are you sure?".
+**Deletion is not offered in v1** (§11.6). We hold the only copy of every file,
+distributed MinIO doesn't cover cluster-level disk loss, and deletion silently
+breaks any live survey that references the asset. See `planning/media-abstraction.md`
+§11.6 for the full reasoning. Deletion can be revisited once backup exists and
+reference counting against surveys is implemented.
 
 `Media/format.js` holds the pure logic — `formatBytes` (base 1024, one decimal
 at MB, matching dashboard-server's error strings so a "6.2 MB" refusal and the
