@@ -330,3 +330,57 @@ Consequences, in order of importance:
 
 Not fixed, deliberately: deleting live state that no repo file governs, and changing an
 alert's aggregation, are both decisions rather than cleanup.
+
+## 12. Monitoring, 2026-08-10 — and a third "written but not deployed"
+
+Checked after the cutover, because §7 step 5 only proves *scraping* works, not that anything
+would ever tell a human.
+
+**Prometheus and Alertmanager were fine.** All 4 pods `up=1`; `minio_bucket_usage_total_bytes`
+present for `media` and `media-staging`. (`fly` lags — those series come from MinIO's
+background scanner, not per scrape.) Alertmanager healthy, `Watchdog` firing as designed,
+routing to `#vlab-alerts` / `#vlab-alerts-critical` + ntfy per `documentation/alerting.md`.
+
+**But none of the media alerting was deployed.** Zero PrometheusRules in the cluster contained
+`MinioPVCSpaceCritical`, `MediaBucketSizeHigh`, `MinioDrivesOffline`, or any media-handle
+alert. Cause: the `vlab-alerts` release was at revision 9 from **2026-08-04**, and both media
+templates landed after it (`6c91adbb`, `a2c661fe`). Written, committed, `enabled: true`, never
+applied.
+
+That mattered here specifically. The 50Gi × 4 sizing in §10 is justified by "capacity alerting
+is what makes this recoverable rather than a cliff" — and it was not running, over volumes
+holding a bucket with no lifecycle rule.
+
+> Three times in one day the repo described something as in place when only the file existed:
+> the mirror CronJob, MinIO's ServiceMonitor history, and this. **"Committed" and "running"
+> are different claims.** Prefer checking the cluster over reading the doc that asserts it.
+
+### Fixed before deploying, not after
+
+`MinioDrivesOffline` used `sum(minio_cluster_drive_offline_total)`. That metric is
+**cluster-wide but reported by every node**, so `sum()` over-counted 4× before today and 12×
+after the triple-scrape. `> 0` still fired correctly, but the page would have claimed *12
+drives offline when one was* — a critical alert misstating its own severity. Changed to
+`max()`, which is correct under any number of duplicate series, then deployed.
+
+`helm upgrade --install vlab-alerts devops/alerts -n monitoring` → **revision 10**. Verified
+first that `kafka-consumer-health`, which exists in the cluster but not in this chart, belongs
+to a *different* release and so would not be swept: the upgrade added 2 rules and deleted none.
+
+(`--install` is an upsert and a no-op against an existing release; it is in `alerting.md` so
+the command also works on a fresh cluster. Its one cost is that a mistyped release name
+silently creates a new release instead of erroring.)
+
+### Still outstanding
+
+**The orphaned Bitnami ServiceMonitor is still in `monitoring`.** Confirmed a true tombstone —
+no helm release named `minio` exists, not even a failed one, and there are no release secrets
+for it. Deleting it needs a permission this session does not have:
+
+```bash
+kubectl -n monitoring delete servicemonitor minio
+```
+
+Until then cluster metrics stay triple-scraped. Nothing is *wrong* — the deployed alerts use
+`max()` and are immune — but any future `sum()` over MinIO cluster metrics will be silently
+3× off. A copy of the manifest was taken before attempting the delete.

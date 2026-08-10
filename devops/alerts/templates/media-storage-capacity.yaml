@@ -15,8 +15,11 @@
 # a human sees it (§13), but so does `mc mirror`'s target-side work and every
 # export write sharing the same disks.
 #
-# Metrics come from devops/minio/servicemonitor.yaml, which is also new — MinIO
-# was not a Prometheus target at all before this. The bucket-usage series are
+# Metrics come from devops/minio/servicemonitor.yaml, which is also new. (It is
+# not, however, MinIO's first ServiceMonitor — an orphaned Bitnami one has been
+# scraping cluster metrics from the `monitoring` namespace for three years; see
+# that file's header. Bucket metrics are new; cluster metrics are not.) The
+# bucket-usage series are
 # produced by MinIO's background SCANNER, not per scrape, so they step on the
 # order of minutes to hours. Every rule here therefore uses a long `for:` and a
 # threshold with real headroom; none of this is a real-time gauge and none of it
@@ -110,9 +113,17 @@ spec:
         # tolerating anything. The gap between "degraded" and "unavailable" is
         # one more failure, so a degraded set is worth waking someone for even
         # though nothing is failing yet.
+        # `max()`, NOT `sum()`. minio_cluster_drive_offline_total is a
+        # CLUSTER-WIDE count that every node reports independently, so summing
+        # multiplies it by the number of scraped series: 4x for the four pods,
+        # and 12x today because an orphaned Bitnami ServiceMonitor in the
+        # `monitoring` namespace scrapes cluster metrics twice more (see
+        # devops/minio/servicemonitor.yaml). The `> 0` test survived that bug,
+        # but $value did not -- this alert would have paged claiming 12 drives
+        # offline when one was. max() is correct under any number of duplicates.
         - alert: MinioDrivesOffline
           expr: |
-            sum(minio_cluster_drive_offline_total) > 0
+            max(minio_cluster_drive_offline_total) > 0
           for: 10m
           labels:
             severity: critical
