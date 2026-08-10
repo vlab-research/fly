@@ -1,0 +1,89 @@
+{
+  "id": "mediaHandleReuse",
+  "title": "Same asset sent twice in one flow",
+  "theme": {
+    "href": "https://api.typeform.com/themes/6lPNE6"
+  },
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/WA44hg"
+  },
+  "settings": {
+    "is_public": true,
+    "is_trial": false,
+    "language": "en",
+    "progress_bar": "percentage",
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "meta": {
+      "allow_indexing": false
+    }
+  },
+  "thankyou_screens": [
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "reuseFirstRef",
+      "title": "Here it is the first time",
+      "ref": "reuseFirstRef",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/11111111-1111-4111-8111-111111111111/messenger-handled.png\"},\"keepMoving\":true}"
+      },
+      "type": "statement"
+    },
+    {
+      "id": "reuseSecondRef",
+      "title": "Here it is the second time",
+      "ref": "reuseSecondRef",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/11111111-1111-4111-8111-111111111111/messenger-handled.png\"},\"keepMoving\":true}"
+      },
+      "type": "statement"
+    },
+    {
+      "id": "sawItField",
+      "title": "Did you see the image?",
+      "ref": "sawItRef",
+      "properties": {
+        "choices": [
+          {
+            "ref": "choice_yes",
+            "label": "Yes"
+          },
+          {
+            "ref": "choice_no",
+            "label": "No"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      },
+      "type": "thankyou_screen"
+    }
+  ],
+  "_links": {
+    "display": "https://nandanrao.typeform.com/to/mediaHandleReuse"
+  },
+  "custom_messages": {}
+}

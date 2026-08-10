@@ -1,0 +1,78 @@
+{
+  "id": "mediaLegacyId",
+  "title": "Legacy Messenger attachment_id passthrough",
+  "theme": {
+    "href": "https://api.typeform.com/themes/6lPNE6"
+  },
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/WA44hg"
+  },
+  "settings": {
+    "is_public": true,
+    "is_trial": false,
+    "language": "en",
+    "progress_bar": "percentage",
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "meta": {
+      "allow_indexing": false
+    }
+  },
+  "thankyou_screens": [
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "legacyIdRef",
+      "title": "Here is a legacy image",
+      "ref": "legacyIdRef",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1434849748462496\"},\"keepMoving\":true}"
+      },
+      "type": "statement"
+    },
+    {
+      "id": "sawItField",
+      "title": "Did you see the image?",
+      "ref": "sawItRef",
+      "properties": {
+        "choices": [
+          {
+            "ref": "choice_yes",
+            "label": "Yes"
+          },
+          {
+            "ref": "choice_no",
+            "label": "No"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      },
+      "type": "thankyou_screen"
+    }
+  ],
+  "_links": {
+    "display": "https://nandanrao.typeform.com/to/mediaLegacyId"
+  },
+  "custom_messages": {}
+}
