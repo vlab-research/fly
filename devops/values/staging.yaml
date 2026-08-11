@@ -522,18 +522,9 @@ dashboard:
     - name: MEDIA_PREFIX
       value: 'a/'
     - name: MEDIA_PUBLIC_BASE
-      # The origin a researcher pastes into a survey, and the origin Meta
-      # fetches from when a send has no cached handle.
-      #
-      # MUST MATCH media-proxy.ingress.host below, exactly. The dashboard mints
-      # asset URLs from this value and that Ingress is what answers them. A
-      # mismatch does not error anywhere — it produces URLs that resolve to
-      # nothing, and the first symptom is a broken image in a respondent's chat.
-      #
-      # This previously pointed at the in-cluster Service (http://gbv-media-proxy)
-      # because no staging hostname had been chosen. That was fetchable from
-      # inside the cluster but NOT by Meta, so every staging media send without a
-      # handle would have failed — and looked like a code bug.
+      # Must match media-proxy.ingress.host below. The dashboard mints asset
+      # URLs from this and that Ingress answers them; a mismatch does not error,
+      # it produces URLs that resolve to nothing.
       value: 'https://staging.media.vlab.digital'
     - name: S3_ENDPOINT
       value: 'http://minio.minio.svc.cluster.local:9000'
@@ -747,21 +738,10 @@ message-worker:
     value: "1000"
 
   # ---- Media handle layer (planning/media-abstraction.md §8.5, §9.2) --------
-  #
-  # ON, as of 2026-08-10. Staging is step 5 of the staged rollout
-  # (staging -> one production account -> all). PRODUCTION REMAINS OFF.
-  #
-  # The step-4 checkpoint this was held for has passed: with the flag off, an
-  # upload through the staging dashboard produced asset
-  # 4122f8d3-51e9-4c6c-9746-f27747333a74 and exactly one media_handle row —
-  # account_id 935593143497601 (the owner's page, correctly scoped: the other
-  # facebook_page credential in this namespace belongs to a different user and
-  # was untouched), platform_media_id 829681623472316, expires_at = uploaded_at
-  # + 90 days. Fan-out demonstrably worked while nothing read it.
-  #
-  # ROLLBACK IS THIS LINE BACK TO "false" plus a helm upgrade. There is no state
-  # to unwind: every message under this flag has a URL fallback beneath it
-  # (§13), so turning it off returns to by-URL sends immediately.
+  # When off, the worker never queries media_handle: legacy attachment_id
+  # passthrough, everything else by URL. Every message under this flag has a URL
+  # fallback beneath it (§13), so rollback is this line back to "false" plus a
+  # helm upgrade, with no state to unwind.
   - name: MEDIA_HANDLE_USE
     value: "true"
 
@@ -823,29 +803,17 @@ media-proxy:
     port: 80
 
 # ---- Media handle reconciler (§7, §11.3) ------------------------------------
-# Shape decided at stage F: a standalone script (dashboard-server/scripts/
-# media-reconcile.js) run as a CronJob from the dashboard image — see the fuller
-# reasoning in production.yaml.
+# A standalone script (dashboard-server/scripts/media-reconcile.js) run as a
+# CronJob from the dashboard image — see production.yaml for the fuller notes.
 #
-# Staging runs the same hourly schedule, offset by half an hour from production
-# so the two never contend on the same MinIO at the same minute.
+# Offset half an hour from production so the two never contend on the same MinIO
+# at the same minute.
 #
-# THE BOUND IS DELIBERATELY TIGHTER HERE. Staging is where a reconciler bug
-# shows up first, and a bug in a job whose unit of work is "upload a file to
-# Meta" is much cheaper to discover against a 20-action cap than a 200-action
-# one. It is not a capacity judgement — staging's library is tiny — it is a
-# blast-radius one. Anything over the cap is deferred to the next tick and named
-# in the log, so a tighter bound costs latency, never coverage.
-#
-# REQUIRED BEFORE APPLYING: the CronJob runs `node scripts/media-reconcile.js`
-# out of the DASHBOARD image, and that script does not exist in versionDashboard
-# above until a release is cut from this branch. Enabling it against an older
-# tag gives an hourly job that exits immediately with "Cannot find module" —
-# noisy, and (because a handle is only ever an optimisation) completely
-# invisible in message delivery. Bump versionDashboard first.
-#
-# It also depends on migration 24 and on the `dashboard-media` secret already
-# being applied — both are earlier steps in the §9.2 deploy sequence.
+# The per-run bound is deliberately tighter here: a bug in a job whose unit of
+# work is "upload a file to Meta" is cheaper to find against a 20-action cap
+# than a 200-action one. Blast radius, not capacity — anything over the cap is
+# deferred to the next tick and named in the log, so it costs latency, never
+# coverage.
 mediaReconciler:
   enabled: true
   schedule: "47 * * * *"

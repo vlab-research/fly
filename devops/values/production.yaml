@@ -49,12 +49,6 @@ versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
 versionMessageWorker: &vmessageworker v0.1.18
-# REQUIRED BEFORE APPLYING: media-proxy has never been released, so this tag
-# does not exist in ghcr.io yet. It is created by pushing the git tag
-# `media-proxy-v0.0.1` (.github/workflows/release.yml resolves the build context
-# and image name from the tag). Applying with a tag that does not exist gives an
-# ImagePullBackOff, and because media-proxy is on the media send path (§13) that
-# is a real outage for media sends with no handle, not a cosmetic failure.
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
@@ -485,16 +479,12 @@ dashboard:
     - name: ALERTMANAGER_URL
       value: 'http://alertmanager-operated.monitoring:9093'
 
-    # ---- Media object storage (planning/media-abstraction.md §4.7) ----------
-    # The dashboard is the only WRITER of media objects. It uploads bytes, then
-    # hands the researcher a public URL that media-proxy answers.
-    #
-    # THE TWO CREDENTIALS ARE NOT HERE AND MUST NEVER BE. They live in the
-    # `dashboard-media` secret, applied from the gitignored
-    # dashboard-server/.env-media-production by devops/secrets.sh (see
-    # dashboard-server/.env-example). They are a MinIO service account scoped to
-    # Get/Put/Delete on media/* — not the root credential, and unable to reach
-    # the exports bucket that holds respondent data.
+    # ---- Media object storage (planning/media-abstraction.md §4.7) -----------
+  # The two S3 credentials are NOT here and must never be: they live in the
+  # `dashboard-media` secret, applied by devops/secrets.sh from the gitignored
+  # dashboard-server/.env-media-production. Scoped to media/* — not the root
+  # credential, and unable to reach the exports bucket, which holds respondent
+  # data.
     - name: STORAGE_BACKEND
       value: 's3'
     - name: MEDIA_BUCKET
@@ -505,12 +495,10 @@ dashboard:
       # the proxy can never serve.
       value: 'a/'
     - name: MEDIA_PUBLIC_BASE
-      # The origin the researcher pastes into a survey. Deliberately a SEPARATE
-      # ORIGIN from fly.vlab.digital (§4.6): an uploaded HTML/SVG has no
-      # dashboard session to reach. Served by devops/media-ingress.yaml.
-      #
-      # Not stored on the asset row — the URL derives from this plus the uuid
-      # (§5), so moving the domain is this line, not a data migration.
+      # The origin a researcher pastes into a survey. A SEPARATE ORIGIN from
+      # fly.vlab.digital by design (§4.6), so an uploaded HTML/SVG has no
+      # dashboard session to reach. Must match media-proxy.ingress.host below —
+      # a mismatch does not error, it mints URLs that resolve to nothing.
       value: 'https://media.vlab.digital'
     - name: S3_ENDPOINT
       # In-cluster and plaintext, on purpose: the write path has no reason to
@@ -862,32 +850,15 @@ message-worker:
     value: "1000"
 
   # ---- Media handle layer (planning/media-abstraction.md §8.5, §9.2) --------
+  # When off, the worker never queries media_handle: legacy attachment_id
+  # passthrough, everything else by URL. Every message under this flag has a URL
+  # fallback beneath it (§13), so rollback is this line back to "false" plus a
+  # rollout restart, with no state to unwind.
   #
-  # OFF. THIS SHIPS DARK, AND FLIPPING IT IS THE ONLY STEP IN THIS FEATURE THAT
-  # A RESPONDENT CAN OBSERVE.
-  #
-  # With this off, the worker never queries media_handle and the send path is
-  # byte-for-byte what it is today: legacy `attachment_id` passthrough (rule 1),
-  # everything else by URL. §11.1 measured that 27 live shortcodes across 3
-  # owners carry attachment_id and account for essentially all live media
-  # traffic — including surveys taking 29k responses/90d — so "we did not
-  # disturb the existing path" is the single most important property of this
-  # build, and this flag is what preserves it.
-  #
-  # ENABLEMENT IS STAGED AND ORDERED (§9.2 step 5), never a single edit here:
-  #   1. off everywhere; confirm media_handle rows appear from upload fan-out
-  #   2. staging on
-  #   3. ONE production account on
-  #   4. all of production
-  # Gate at each step: send-failure rate flat, logs show id sends, and the
-  # by-URL counter (§8.5) near zero for dashboard-uploaded media. That counter
-  # is the health signal — in this design a by-URL send for dashboard-uploaded
-  # media is an anomaly, not an expected first-send.
-  #
-  # Every message under this flag has a URL fallback beneath it, so the rollback
-  # is this line back to "false" plus a rollout restart.
+  # Note there is no per-account gate — this is a single boolean read at worker
+  # startup, so enablement is all-or-nothing for the namespace.
   - name: MEDIA_HANDLE_USE
-    value: "false"
+    value: "true"
 
 # media-proxy — the sole public read path for media assets (§4.4).
 #
@@ -958,73 +929,31 @@ media-proxy:
     port: 80
 
 # ---- Media handle reconciler (§7, §11.3) ------------------------------------
+# A standalone script (dashboard-server/scripts/media-reconcile.js) run as a
+# CronJob from the DASHBOARD image — devops/vlab/templates/media-reconciler-cronjob.yaml.
 #
-# DEPLOYMENT SHAPE DECIDED AT STAGE F: a standalone script sharing
-# dashboard-server's modules, run as a CronJob —
-# devops/vlab/templates/media-reconciler-cronjob.yaml, running
-# dashboard-server/scripts/media-reconcile.js out of the dashboard image.
+# The template lives in the umbrella chart, not the `dashboard` subchart, so it
+# reuses .Values.dashboard.env / .envFrom verbatim. Restating the database host,
+# S3 endpoint, bucket and keys would be a second copy that can silently
+# disagree, and a reconciler pointed at the wrong bucket does not error — it
+# finds no bytes and every send quietly falls back to URL.
 #
-# The alternative §11.3 left open was an internal HTTP endpoint on
-# dashboard-server that cron would call. Rejected: it would need its own
-# authentication — one more secret to issue, rotate and get wrong — for exactly
-# one caller, and it would put a job that re-uploads hundreds of megabytes on
-# the process serving the researcher UI. The script shares the dashboard IMAGE,
-# so it still gets the same S3 client, the same credentials lookup and the same
-# planReconcile, while getting process isolation and its own limits for free.
-#
-# The CronJob template lives in the UMBRELLA chart rather than the `dashboard`
-# subchart (which is a versioned OCI artifact), so that it can reuse
-# `.Values.dashboard.env` and `.Values.dashboard.envFrom` verbatim instead of
-# restating the database host, the S3 endpoint, the bucket and the two scoped
-# MinIO keys. A second copy of those is a copy that can silently disagree, and a
-# reconciler pointed at the wrong bucket does not error — it finds no bytes,
-# logs failures, and every send quietly falls back to URL.
-#
-# SCHEDULE — hourly. The reconciler's job is desired-state convergence, not
-# freshness racing an expiry: handles last 30 days (WhatsApp) and 90 days
-# (Messenger), refreshed off `uploaded_at` (§11.2), so the expiry clock does not
-# want a fast tick. What does is the OTHER two cases it covers — a researcher
-# who connects a new page, and a partial upload-time fan-out failure. Both are
-# "how long until this heals", and an hour is short enough that neither is ever
-# noticed, while being 24x cheaper than the fan-out width would make a
-# per-minute tick (§11.1b: one production user has 29 accounts).
-#
-# REQUIRED BEFORE APPLYING: the CronJob runs `node scripts/media-reconcile.js`
-# out of the DASHBOARD image, and that script does not exist in versionDashboard
-# above until a release is cut from this branch. Enabling it against an older
-# tag gives an hourly job that exits immediately with "Cannot find module" —
-# noisy, and (because a handle is only ever an optimisation) completely
-# invisible in message delivery. Bump versionDashboard first.
-#
-# It also depends on migration 24 and on the `dashboard-media` secret already
-# being applied — both are earlier steps in the §9.2 deploy sequence.
+# Requires migration 24, the `dashboard-media` secret, and a versionDashboard
+# containing the script. Against an older tag the job exits with "Cannot find
+# module" every hour.
 mediaReconciler:
   enabled: true
   schedule: "17 * * * *"
-  # Refresh a handle once it is within this margin of expiry, so a handle the
-  # reconciler has not reached yet degrades to a URL send rather than failing
-  # (§6, mediaresolve.Resolve). Must be comfortably larger than the schedule
-  # interval, or a handle can expire between ticks. 72h against an hourly tick
-  # is 72 chances to refresh before anything degrades.
-  #
-  # THE UNIT IS REQUIRED. A bare "72" is refused at startup rather than read as
-  # 72 milliseconds — which would silently disable refresh-ahead and leave every
-  # handle to die between ticks with nothing erroring.
+  # Refresh once a handle is within this margin of expiry, so one the reconciler
+  # has not reached yet degrades to a URL send rather than failing (§6). Must be
+  # comfortably larger than the schedule interval. THE UNIT IS REQUIRED — a bare
+  # "72" is refused at startup rather than read as 72 milliseconds.
   refreshMargin: "72h"
-  # ---- The per-run bound (§10) ------------------------------------------
-  # Desired state is assets x accounts, and one production user has 29 messaging
-  # accounts (§11.1b). Every action is a file upload to Meta of up to 100 MB, so
-  # connecting one account for that user would otherwise turn their whole
-  # library into uploads inside a single tick.
-  #
-  # Two bounds, because count is the wrong unit alone: 200 actions is a few
-  # seconds of thumbnails or 20 GB of documents. Whatever does not fit is
-  # deferred to the next tick AND NAMED IN THE LOG — a silent cap reads as
-  # "covered everything" when it did not.
-  #
-  # Steady state is far below both: with 90/30-day TTLs and an hourly tick,
-  # refreshes arrive a handful at a time. The cap only bites on a backfill
-  # burst, which is exactly what should be spread over ticks.
+  # Per-run bound (§10). Desired state is assets x accounts and one production
+  # user has 29 accounts, so a backfill burst is bounded two ways — count alone
+  # is the wrong unit, since 200 actions is a few seconds of thumbnails or 20 GB
+  # of documents. Whatever does not fit is deferred to the next tick and named
+  # in the log.
   maxActions: 200
   maxBytes: 536870912 # 512 MiB
   prune: "on"
