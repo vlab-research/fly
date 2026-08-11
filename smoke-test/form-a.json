@@ -222,18 +222,8 @@
     },
     {
       "type": "statement",
-      "ref": "media_legacy_attachment_id",
-      "title": "🖼️ And here's an IMAGE sent by a legacy attachment_id — the old pre-upload method, kept permanently for backwards compatibility since Meta offers no way to migrate an existing attachment_id into an asset. Should work on Messenger; on WhatsApp it is expected to fail cleanly, since attachment ids were never supported there.",
-      "properties": {
-        "hide_marks": false,
-        "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1658615935222752\"}}"
-      }
-    },
-    {
-      "type": "statement",
       "ref": "media_third_party_url",
-      "title": "🖼️ And here's an ordinary third-party image URL — not a dashboard asset, proving that plain third-party URLs still work unaccelerated (no handle, no mirroring). This is the only field in the survey testing a not-uploaded URL besides the welcome screen:",
+      "title": "🖼️ First, an ordinary third-party image URL — not a dashboard asset, proving that plain third-party URLs still work unaccelerated (no handle, no mirroring). This is the only not-uploaded URL test in the survey besides the welcome screen, and the only media field SHARED by both environments: a third-party URL belongs to no environment. Everything after this is environment-specific.",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
@@ -242,8 +232,68 @@
     },
     {
       "type": "statement",
-      "ref": "media_asset_image",
-      "title": "🖼️ Now an IMAGE sent by a dashboard asset URL — the modern upload path. ⚠️ PLACEHOLDER: the UUID below is not a real uploaded asset (the dashboard upload path doesn't exist yet); this field will fail to send until it is swapped for a real https://media.vlab.digital/a/<uuid>/<filename> URL.",
+      "ref": "media_legacy_attachment_id_prod",
+      "title": "🖼️ [PRODUCTION] An IMAGE sent by a legacy attachment_id minted on the PRODUCTION page — the old pre-upload method, kept permanently for backwards compatibility since Meta offers no way to migrate an existing attachment_id into an asset. Attachment ids are page-scoped, so this id only works in production. Should work on Messenger; on WhatsApp it is expected to fail cleanly, since attachment ids were never supported there.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1434849748462496\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_image_prod",
+      "title": "🖼️ [PRODUCTION] An IMAGE sent by a dashboard asset URL on PRODUCTION media storage (media.vlab.digital) — the modern upload path. Asset rows live in one environment's database and bucket, so production sends production URLs.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/5e8aa701-8c63-450e-af6f-bdbea6d7321f/IMG_1239.jpeg\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_repeat_prod",
+      "title": "🖼️ [PRODUCTION] The SAME production image asset again — identical UUID to the field above, on purpose. This second send is the only proof that the handle is being reused rather than silently falling back to a fresh by-URL send every time.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://media.vlab.digital/a/5e8aa701-8c63-450e-af6f-bdbea6d7321f/IMG_1239.jpeg\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_video_prod",
+      "title": "🎥 [PRODUCTION] A VIDEO sent by a dashboard asset URL on PRODUCTION media storage — the modern upload path, non-image branch (≤16MB MP4/3GPP per §11.5).",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"video\",\"url\":\"https://media.vlab.digital/a/93b7bfab-8fdb-472b-864e-a3bc7a59a3b6/2025-02-13%2000-13-42.mp4\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_file_prod",
+      "title": "📄 [PRODUCTION] A FILE (PDF) sent by a dashboard asset URL on PRODUCTION media storage — the modern upload path, document branch (≤100MB per §11.5).",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"file\",\"url\":\"https://media.vlab.digital/a/d61acaf1-354c-43fa-88a6-20e1b428ece3/3.%20Rao%20Facebook%20Ads%20vs.%20Malaria%20(1).pdf\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_legacy_attachment_id_staging",
+      "title": "🖼️ [STAGING] An IMAGE sent by a legacy attachment_id minted on the STAGING page — the old pre-upload method, kept permanently for backwards compatibility since Meta offers no way to migrate an existing attachment_id into an asset. Attachment ids are page-scoped, so this id only works in staging. Should work on Messenger; on WhatsApp it is expected to fail cleanly, since attachment ids were never supported there.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1658615935222752\"}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "media_asset_image_staging",
+      "title": "🖼️ [STAGING] An IMAGE sent by a dashboard asset URL on STAGING media storage (staging.media.vlab.digital) — the modern upload path. Asset rows live in one environment's database and bucket, so staging sends staging URLs.",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
@@ -252,8 +302,8 @@
     },
     {
       "type": "statement",
-      "ref": "media_asset_repeat",
-      "title": "🖼️ And the SAME dashboard image asset again — this second send is the only proof that the handle is being reused rather than silently falling back to a fresh by-URL send every time. ⚠️ PLACEHOLDER — same UUID as the field above, on purpose:",
+      "ref": "media_asset_repeat_staging",
+      "title": "🖼️ [STAGING] The SAME staging image asset again — identical UUID to the field above, on purpose. This second send is the only proof that the handle is being reused rather than silently falling back to a fresh by-URL send every time.",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
@@ -262,8 +312,8 @@
     },
     {
       "type": "statement",
-      "ref": "media_asset_video",
-      "title": "🎥 Now a VIDEO sent by a dashboard asset URL — the modern upload path (replaces the old direct-URL video test). ⚠️ PLACEHOLDER: swap for a real uploaded video URL once one exists; the real asset must be ≤16MB MP4/3GPP per §11.5.",
+      "ref": "media_asset_video_staging",
+      "title": "🎥 [STAGING] A VIDEO sent by a dashboard asset URL on STAGING media storage — the modern upload path, non-image branch (≤16MB MP4/3GPP per §11.5).",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
@@ -272,8 +322,8 @@
     },
     {
       "type": "statement",
-      "ref": "media_asset_file",
-      "title": "📄 And a FILE (PDF) sent by a dashboard asset URL — the modern upload path (replaces the old direct-URL PDF test). ⚠️ PLACEHOLDER: swap for a real uploaded PDF URL once one exists; the real asset must be ≤100MB per §11.5.",
+      "ref": "media_asset_file_staging",
+      "title": "📄 [STAGING] A FILE (PDF) sent by a dashboard asset URL on STAGING media storage — the modern upload path, document branch (≤100MB per §11.5).",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
@@ -283,7 +333,7 @@
     {
       "type": "multiple_choice",
       "ref": "confirm_attachment",
-      "title": "Did those six attachments actually arrive — legacy attachment_id image, third-party image URL, uploaded image asset, the repeated image asset, uploaded video asset, and uploaded PDF asset? A failed send is reported and committed rather than retried, so answer honestly. On WhatsApp the legacy attachment_id one is EXPECTED to fail (WhatsApp never supported attachment ids) — the other five should still arrive there.",
+      "title": "Did those six attachments actually arrive — the shared third-party image URL, then the five for the environment you picked: legacy attachment_id image, uploaded image asset, the repeated image asset, uploaded video asset, and uploaded PDF asset? A failed send is reported and committed rather than retried, so answer honestly. On WhatsApp the legacy attachment_id one is EXPECTED to fail (WhatsApp never supported attachment ids) — the other five should still arrive there.",
       "properties": {
         "choices": [
           { "label": "Yes", "ref": "choice_confirm_attachment_yes" },
@@ -613,7 +663,7 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "media_legacy_attachment_id" }
+            "to": { "type": "field", "value": "media_third_party_url" }
           },
           "condition": {
             "op": "is",
@@ -627,6 +677,67 @@
           "action": "jump",
           "details": {
             "to": { "type": "field", "value": "send_picture" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "media_third_party_url",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "media_legacy_attachment_id_staging" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_environment" },
+              { "type": "choice", "value": "choice_env_staging" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "media_legacy_attachment_id_prod" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "media_asset_file_prod",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "confirm_attachment" }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "media_asset_file_staging",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "confirm_attachment" }
           },
           "condition": {
             "op": "always",
