@@ -11,7 +11,7 @@
       "properties": {
         "hide_marks": false,
         "button_text": "Start",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"url\":\"https://i.imgur.com/ZSHauqq.png\"}}"
+        "description": "{\"type\":\"statement\",\"keepMoving\":true}"
       }
     },
     {
@@ -227,7 +227,7 @@
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1434849748462496\"}}"
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"image\",\"attachment_id\":\"1658615935222752\"}}"
       }
     },
     {
