@@ -421,12 +421,23 @@ Google login) — same data as a live state view; resolved alerts disappear.
 
 ---
 
-## 8. Alert overview + phone push (Karma + ntfy)
+## 8. Alert overview, phone push, dashboards (Karma + ntfy + Grafana)
 
 Slack `#vlab-alerts` is a firehose — poor for *overview* when several alerts fire
 chronically, and it can't push to a phone selectively. Two OSS, self-hosted pieces
 fill the gap (both in the `monitoring` namespace). Full build/rollout plan:
 `planning/karma-ntfy-alerting-plan.md`.
+
+**Grafana** joins them as the third browser-facing surface — where you go *after*
+an alert, to see magnitude and history. All three now have public hostnames with
+Google login; the two auth patterns in use are compared below and in
+`devops/grafana/README.md`.
+
+| Host | What | Auth |
+|---|---|---|
+| `alerts.vlab.digital` | Karma — live alert board | oauth2-proxy (nginx `auth_request`) → Auth0 → Google |
+| `grafana.vlab.digital` | Grafana — dashboards | Grafana's own `auth.google` → Google (no broker) |
+| `ntfy.vlab.digital` | ntfy — phone push | ntfy's own users/tokens (clients can't do browser OIDC) |
 
 ### Karma — the overview board (`devops/karma/`)
 [Karma](https://github.com/prymitive/karma) at **`https://alerts.vlab.digital`**
@@ -457,6 +468,37 @@ pattern as the Slack webhooks — never committed.
   browser OIDC flow, so ntfy uses its **own** auth (users + tokens + per-topic ACLs,
   `auth-default-access: deny-all`), **not** oauth2-proxy. See `devops/ntfy/README.md`
   for the user/token/access setup.
+
+### Grafana — the dashboards board (`devops/grafana/`)
+Grafana at **`https://grafana.vlab.digital`** is the third browser-facing piece on
+the cluster, and the one you reach for when an alert tells you *that* something
+is wrong and you need to see *how much* and *since when*. It reads Prometheus,
+Loki, and prod CockroachDB (via a `PostgreSQL` datasource). Previously
+port-forward-only.
+
+- **Auth: deliberately unlike Karma.** Karma has no login of its own, hence
+  oauth2-proxy in front reaching Google *through* Auth0 as an OIDC broker.
+  Grafana has a first-class OAuth client, so it goes **straight to Google**
+  (`auth.google`) — **one** ingress, no `auth_request` annotations, no
+  oauth2-proxy, no broker, and real per-user identity instead of one shared
+  anonymous session.
+- **Who may log in** is enforced in Grafana: a `role_attribute_path` JMESPath
+  allowlist plus `role_attribute_strict = true`, which denies any email that
+  doesn't map to a role. Adding a teammate means editing that line in
+  `devops/prometheus/values.yaml` and running `helm upgrade` — the counterpart to
+  Karma's `oauth2-proxy-emails` ConfigMap. Not `allowed_domains`: the team is not
+  on one Workspace domain.
+- **The OAuth client is created by hand in the Google Cloud Console**, once, and
+  that is on purpose. Google has no live API for creating "Sign in with Google"
+  web clients (the IAP OAuth Admin API that Terraform used was shut down
+  2026-03-19, and needed an org this project doesn't have). Brokering through
+  Auth0 *would* make it Terraformable — that design was rejected, because it adds
+  a vendor to the critical login path and a standing tenant-admin credential to
+  avoid one console form. See `devops/grafana/README.md`.
+- **Config lives in `devops/prometheus/values.yaml`**, not in a `grafana` Helm
+  release — Grafana is a subchart of `kube-prometheus-stack`. Client id/secret
+  arrive as `GF_*` env vars from the `grafana-oauth` secret so they never land in
+  the ConfigMap that `grafana.ini` renders into.
 
 ### Why not Grafana OnCall
 OnCall **OSS is archived** (2026-03-24) and its mobile push/SMS/phone features (which

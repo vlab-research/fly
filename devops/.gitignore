@@ -1,8 +1,24 @@
 .env*
-# ...but `.env-*-example` files are COMMITTED TEMPLATES, not secrets: every key
-# present with a __FILL_...__ placeholder value, per documentation/secrets.md.
-# devops/secrets.sh refuses to apply a file that still contains a placeholder,
-# which is what makes an unsupplied value a loud failure instead of a silent one.
+# ...but the committed TEMPLATES are not secrets. Two patterns are needed and
+# neither covers the other: `.env-*-example` does not match `.env-example`,
+# because it requires a middle segment.
+#
+#   .env-example               devops/grafana/
+#   .env-<name>-example        devops/backup/.env-media-mirror-example
+#
+# Each carries every key with a __FILL_...__ placeholder, per
+# documentation/secrets.md. devops/secrets.sh refuses to apply a file that still
+# contains a placeholder, which makes an unsupplied value a loud failure rather
+# than a silent one.
+!.env-example
 !.env-*-example
+
+# Credential files downloaded from a cloud console. These carry a live client
+# secret and are NOT matched by the .env* rule above, so they must be named
+# explicitly. Extract the values into the neighbouring .env and delete the
+# download -- the .env file is the source of truth (documentation/secrets.md).
+client_secret_*.json
+credentials.json
+token.json
 # alertmanager directory is now version-controlled
 # Only ignore the secret.yaml file (tracked in root .gitignore)
