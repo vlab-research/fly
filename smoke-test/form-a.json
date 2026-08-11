@@ -267,7 +267,7 @@
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"video\",\"url\":\"https://media.vlab.digital/a/22222222-2222-2222-2222-222222222222/PLACEHOLDER-video.mp4\"}}"
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"video\",\"url\":\"https://staging.media.vlab.digital/a/c8154af4-4554-4f48-bdb2-a8f0c8ecdd6b/2026-06-09%2018-06-31.mp4\"}}"
       }
     },
     {
@@ -277,7 +277,7 @@
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"file\",\"url\":\"https://media.vlab.digital/a/33333333-3333-3333-3333-333333333333/PLACEHOLDER-document.pdf\"}}"
+        "description": "{\"type\":\"attachment\",\"keepMoving\":true,\"attachment\":{\"type\":\"file\",\"url\":\"https://staging.media.vlab.digital/a/079422ed-d32e-458f-8daa-61ff45c56004/0.Amdt%231-PO-43354893%20(Virtual%20Lab).pdf\"}}"
       }
     },
     {
