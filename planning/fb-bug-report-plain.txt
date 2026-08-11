@@ -1,0 +1,93 @@
+Hi Alex, 
+
+No, it is ONLY message_echoes for messages where message.quick_replies contains an entry with content_type "user_phone_number". 
+
+
+
+Title: message_echoes webhook stopped firing for outbound messages with user_phone_number quick replies (regression on 2026-05-21)
+
+Summary
+-------
+Starting at approximately 2026-05-21 12:00 UTC, message_echoes webhook events stopped being delivered for outbound messages where message.quick_replies contains an entry with content_type "user_phone_number". The Send API returns 200 OK, recipients receive the message and reply to it, but no echo webhook fires. Echoes for all other outbound message types (plain text, multiple_choice quick replies, button templates, etc.) from the same pages continue to be delivered normally.
+
+App ID: 699455733740842 (Virtual Lab)
+Graph API version used for sending: v22.0
+Affected pages (sample): 101435865704727, 758018254333043 — and others using the same outbound shape.
+
+Steps to reproduce
+------------------
+1. Subscribe an app to message_echoes on a Facebook Page (confirmed via GET /{page-id}/subscribed_apps: subscribed_fields includes message_echoes).
+2. Send the following payload via the Send API:
+
+POST https://graph.facebook.com/v22.0/me/messages
+{
+  "recipient": {"id": "1989430067808669"},
+  "message": {
+    "text": "What phone number should we send the mobile credit to?",
+    "quick_replies": [{"content_type": "user_phone_number"}],
+    "metadata": "{\"ref\":\"phone_number\",\"type\":\"phone_number\"}"
+  }
+}
+
+3. Send API returns 200 with a message_id. Recipient receives the message and can tap to share their phone number.
+
+Expected
+--------
+A message_echoes webhook fires within seconds with sender.id = <page>, recipient.id = <PSID>, message.is_echo = true, message.text = "What phone number...", and message.quick_replies mirroring the outbound payload.
+
+Actual
+------
+No echo webhook is delivered. Outbound messages from the same page sent in the same minute without user_phone_number quick replies do produce echoes normally.
+
+When it started — sharp cutover
+-------------------------------
+Successful flows (echo received → user reply processed) on page 101435865704727:
+- 2026-05-20: 424 successful, 0 stuck users
+- 2026-05-21 00:00–11:00 UTC: ~45 successful, 0 stuck
+- 2026-05-21 12:00 UTC: first stuck users appear
+- 2026-05-21 12:00–23:59 UTC: 7 successful, 14 stuck
+- 2026-05-22: 9 successful, 30 stuck
+- 2026-05-23: 4 successful, 10 stuck
+- 2026-05-24: 2 successful, 6 stuck
+- 2026-05-25: 2 successful, 22 stuck
+
+No deploys or code changes on our side around the cutover. Webhook subscription state has not changed. App permissions and Graph API version unchanged. The change is on the Facebook side, between 11:00 and 12:00 UTC on 2026-05-21.
+
+Evidence from our webhook receiver (last 2 hours)
+-------------------------------------------------
+- 32 is_echo:true events received, all for non-user_phone_number messages.
+- Echo text distribution: "Thank you!", "Sorry, we can't accept any responses now.", "Please wait!", multiple-choice questions in English and Hausa, button templates. All echo normally.
+- Hundreds of outbound user_phone_number sends in the same window produced zero echoes.
+
+Sample echo we DO receive (works correctly):
+
+sender: { id: 758018254333043 }
+recipient: { id: 27697504466519327 }
+message: {
+  mid: "m_NGfc22fo_HBmmWN81NwZsJwiiSyOXbJeqJDpuQvcgIepAk8nVR-6aH0PGnrWSR-K4oQtYgpCjNcDAszN65aibw",
+  is_echo: true,
+  text: "Shekarunka nawa?\n\n1) Ƙasa da shekaru 18\n...",
+  metadata: "{\"ref\":\"q2_age\",\"type\":\"multiple_choice\"}",
+  app_id: 699455733740842
+}
+
+Sample echo we DO NOT receive: outbound message "What phone number should we send the mobile credit to?" with quick_replies [{content_type: "user_phone_number"}] — no matching is_echo ever arrives, even though the recipient's reply with their phone number does arrive on the messages webhook.
+
+Things we have ruled out
+------------------------
+- Subscription: GET /{page-id}/subscribed_apps confirms message_echoes is subscribed on every affected page. No change in subscription history.
+- App permissions: unchanged. No app review event around 2026-05-21.
+- API version: on v22.0 since 2026-02-22; no version change near the cutover.
+- Our own code: last bot deploy on 2026-05-15; no changes to webhook-handling, message-sending, or quick-reply code between then and the cutover.
+- User-side / network: recipients still receive the message and can reply.
+
+Impact
+------
+~860 users currently stuck mid-survey because our state machine relies on echoes to transition past a "responding" state. Affects every survey that issues a mobile-credit / payment reward (girleffectincentive, dreampay3, bauchipilot1, bauchipilot1hausa, incentiveswahili, ecdenglishincentive). Confirmed on at least two pages, presumably system-wide for any page sending user_phone_number quick replies.
+
+Questions
+---------
+1. Is this an intentional change? If yes, please document it.
+2. Is the data being delivered via a different webhook field now — possibly messaging_customer_information or similar — that we need to subscribe to instead? If so, please confirm the field name and payload shape.
+3. Is user_email (the sibling sensitive-input quick reply) similarly affected?
+4. If unintentional, please restore echo delivery for these messages.

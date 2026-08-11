@@ -1,0 +1,327 @@
+# Grafana Loki Helm Chart Values
+# Chart Version: 6.52.0
+# Loki App Version: 3.6.4
+#
+# Configuration: Single-binary deployment with filesystem storage and 30-day retention
+# Generated: 2026-04-18
+
+# Deployment mode: SingleBinary for small installations (up to 10s of GB/day)
+deploymentMode: SingleBinary
+
+# Global Kubernetes configuration
+global:
+  clusterDomain: "cluster.local"
+  dnsService: "kube-dns"
+  dnsNamespace: "kube-system"
+
+# ============================================================================
+# Loki Core Configuration
+# ============================================================================
+loki:
+  # Security: disable authentication (no tenant isolation)
+  auth_enabled: false
+
+  # Server: HTTP port 3100, gRPC port 9095
+  server:
+    http_listen_port: 3100
+    grpc_listen_port: 9095
+    http_server_read_timeout: 600s
+    http_server_write_timeout: 600s
+
+  # Sample limits and retention
+  limits_config:
+    # Reject samples older than 30 days (720 hours)
+    reject_old_samples: true
+    reject_old_samples_max_age: 720h
+    max_cache_freshness_per_query: 10m
+    split_queries_by_interval: 15m
+    query_timeout: 300s
+    volume_enabled: true
+
+  # Image configuration
+  image:
+    registry: docker.io
+    repository: grafana/loki
+    tag: "3.6.4"
+    pullPolicy: IfNotPresent
+
+  # Pod security context
+  podSecurityContext:
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+    runAsGroup: 10001
+    runAsNonRoot: true
+    runAsUser: 10001
+
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+    allowPrivilegeEscalation: false
+
+  # Readiness probe
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: http-metrics
+    periodSeconds: 10
+    initialDelaySeconds: 15
+    successThreshold: 1
+    failureThreshold: 3
+    timeoutSeconds: 1
+
+  # ============================================================================
+  # Storage Configuration: Filesystem Backend
+  # ============================================================================
+  storage_config:
+    # Filesystem storage for chunks and rules
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
+
+    # Bloom shipper working directory
+    bloom_shipper:
+      working_directory: /var/loki/data/bloomshipper
+
+    # Index gateway client for boltdb/tsdb shipper
+    boltdb_shipper:
+      index_gateway_client:
+        server_address: 'loki-index-gateway'
+
+    tsdb_shipper:
+      index_gateway_client:
+        server_address: 'loki-index-gateway'
+
+    # Request hedging for resilience
+    hedging:
+      at: "250ms"
+      max_per_second: 20
+      up_to: 3
+
+  # ============================================================================
+  # Schema Configuration: Required for Compaction & Retention
+  # ============================================================================
+  # Using test schema for filesystem-based deployments
+  useTestSchema: true
+  testSchemaConfig:
+    configs:
+      # Single schema entry from deployment date onwards
+      - from: 2026-04-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          # Daily index period for easy lifecycle management
+          period: 24h
+
+  # ============================================================================
+  # Compactor Configuration: Deletes Old Data
+  # ============================================================================
+  compactor:
+    working_directory: /var/loki/compactor
+    compaction_interval: 10m
+    retention_enabled: true
+    retention_grace_period: 0h
+    shared_store: filesystem
+
+  # ============================================================================
+  # Component Defaults
+  # ============================================================================
+  # Index gateway (required for boltdb/tsdb shippers)
+  index_gateway:
+    mode: simple
+
+  # Frontend and frontend-worker scheduler address
+  frontend:
+    scheduler_address: 'loki-query-scheduler'
+    tail_proxy_url: 'loki-querier'
+
+  frontend_worker:
+    scheduler_address: 'loki-query-scheduler'
+
+  # Disable bloom filters (not needed for single-binary small deployments)
+  bloom_build:
+    enabled: false
+
+  bloom_gateway:
+    enabled: false
+
+  # Pattern ingester disabled
+  pattern_ingester:
+    enabled: false
+
+  # UI disabled by default (enable to use the Loki UI at /ui/)
+  ui:
+    enabled: false
+
+  # Tracing disabled
+  tracing:
+    enabled: false
+
+  # Common config for replication and compaction
+  commonConfig:
+    path_prefix: /var/loki
+    # For single-binary, replication doesn't apply
+    replication_factor: 1
+    # Point to the compactor
+    compactor_grpc_address: 'loki-compactor'
+
+  # ============================================================================
+  # Default Object Storage (unused for filesystem, but required by template)
+  # ============================================================================
+  storage:
+    type: s3
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+
+# ============================================================================
+# SingleBinary: Main Loki Instance
+# ============================================================================
+singleBinary:
+  # Deploy 1 replica (0 = disabled)
+  replicas: 1
+
+  # All modules in single binary
+  targetModule: "all"
+
+  # Image overrides (inherit from loki.image by default)
+  image:
+    registry: null
+    repository: null
+    tag: null
+
+  # Service configuration
+  service:
+    type: "ClusterIP"
+    # Service DNS: loki.default.svc.cluster.local (in-cluster access)
+    # Service port: 3100
+
+  # Persistence: Required for filesystem storage
+  persistence:
+    enabled: true
+    accessModes:
+      - ReadWriteOnce
+    # Adjust size based on:
+    # - Log volume (GB/day)
+    # - 30-day retention
+    # - Compression (~3-5:1 typical)
+    # Example: 50GB/day * 30 days / 4 = ~375GB
+    size: 100Gi
+    # Use default storage class
+    storageClass: null
+    # Auto-delete PVC when StatefulSet is deleted
+    enableStatefulSetAutoDeletePVC: true
+    enableStatefulSetRecreationForSizeChange: false
+
+  # Pod annotations (for monitoring, logging, etc.)
+  podAnnotations: {}
+
+  # Pod labels
+  podLabels: {}
+
+  # Autoscaling disabled (single binary is stateful)
+  autoscaling:
+    enabled: false
+
+# ============================================================================
+# Retention Management via Table Manager
+# ============================================================================
+tableManager:
+  # Enable table manager for retention
+  enabled: true
+
+  # Enable deletion of old data by retention period
+  retention_deletes_enabled: true
+
+  # Retention period: 30 days
+  retention_period: 720h
+
+# ============================================================================
+# Compactor: Handles Data Compaction & Deletion
+# ============================================================================
+compactor:
+  # Deploy 1 compactor for retention operations
+  replicas: 1
+
+  # Persistence for compactor working directory
+  persistence:
+    enabled: true
+    claims:
+      - name: data
+        accessModes:
+          - ReadWriteOnce
+        size: 10Gi
+        storageClass: null
+
+# ============================================================================
+# Gateway: DISABLED
+# ============================================================================
+# Direct access to Loki on port 3100 (no reverse proxy)
+gateway:
+  enabled: false
+
+# ============================================================================
+# Disabled Components (not needed for SingleBinary)
+# ============================================================================
+# These components are automatically disabled for SingleBinary,
+# but explicitly set to 0 to be clear.
+
+read:
+  replicas: 0
+
+write:
+  replicas: 0
+
+backend:
+  replicas: 0
+
+distributor:
+  replicas: 0
+
+ingester:
+  replicas: 0
+
+querier:
+  replicas: 0
+
+query_frontend:
+  replicas: 0
+
+query_scheduler:
+  replicas: 0
+
+index_gateway:
+  replicas: 0
+
+ruler:
+  replicas: 0
+
+# ============================================================================
+# Optional: Monitoring and Self-Monitoring
+# ============================================================================
+monitoring:
+  dashboards:
+    enabled: false
+  rules:
+    enabled: false
+  alerts:
+    enabled: false
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+
+# ============================================================================
+# Optional: Canary for Smoke Testing (Disabled)
+# ============================================================================
+canary:
+  enabled: false
+
+# ============================================================================
+# Optional: Minio (for local S3-compatible storage, not used with filesystem)
+# ============================================================================
+minio:
+  enabled: false
