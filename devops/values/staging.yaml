@@ -748,17 +748,22 @@ message-worker:
 
   # ---- Media handle layer (planning/media-abstraction.md §8.5, §9.2) --------
   #
-  # OFF HERE TOO, INCLUDING ON STAGING. The staged rollout in §9.2 step 5 is
-  # staging -> one production account -> all, and step 4 is "merge and deploy
-  # the branch with MEDIA_HANDLE_USE=off" everywhere. Staging is the FIRST step
-  # of the rollout, not exempt from it: turning it on here at merge time would
-  # collapse steps 4 and 5 and remove the checkpoint that proves media_handle
-  # rows appear from upload fan-out while nothing reads them.
+  # ON, as of 2026-08-10. Staging is step 5 of the staged rollout
+  # (staging -> one production account -> all). PRODUCTION REMAINS OFF.
   #
-  # Flip this to "true" first, on its own, once those rows are confirmed — then
-  # a production account, then production.
+  # The step-4 checkpoint this was held for has passed: with the flag off, an
+  # upload through the staging dashboard produced asset
+  # 4122f8d3-51e9-4c6c-9746-f27747333a74 and exactly one media_handle row —
+  # account_id 935593143497601 (the owner's page, correctly scoped: the other
+  # facebook_page credential in this namespace belongs to a different user and
+  # was untouched), platform_media_id 829681623472316, expires_at = uploaded_at
+  # + 90 days. Fan-out demonstrably worked while nothing read it.
+  #
+  # ROLLBACK IS THIS LINE BACK TO "false" plus a helm upgrade. There is no state
+  # to unwind: every message under this flag has a URL fallback beneath it
+  # (§13), so turning it off returns to by-URL sends immediately.
   - name: MEDIA_HANDLE_USE
-    value: "false"
+    value: "true"
 
 # media-proxy — the sole public read path for media assets (§4.4). See the
 # production block for why >=2 replicas and a PDB are requirements (§13).
