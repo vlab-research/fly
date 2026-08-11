@@ -22,6 +22,7 @@ Env files sit next to the app they configure, suffixed by environment:
 |---|---|---|
 | `replybot/.env` | `gbv-bot-envs` | local / dev |
 | `replybot/.env-staging` | `gbv-bot-envs` | `vstag` |
+| `replybot/.env-production` | `gbv-bot-envs` | `vprod` |
 | `exporter/.env` | — (local dev only) | local |
 | `exporter/.env-staging` | `exporter` | `vstag` |
 
@@ -75,6 +76,20 @@ kubectl get secret <name> -n <namespace> -o json \
 
 Review the output before saving — hand-created secrets are exactly the ones
 likely to contain a stale or malformed value.
+
+**`gbv-bot-envs` in `vprod` is exactly this case.** It was created by hand years
+before the convention and had no repo-side source until `replybot/.env-production`
+was introduced. Seed that file from the cluster once, before adding any key:
+
+```bash
+kubectl get secret gbv-bot-envs -n vprod -o json \
+  | jq -r '.data | to_entries[] | "\(.key)=\(.value|@base64d)"' | sort \
+  > replybot/.env-production
+```
+
+This matters because `accounts.sh` **replaces the whole secret** — applying a
+hand-written file that is missing a key deletes that key from the cluster. Diff
+the file's key list against the live secret before every apply.
 
 ## Gotcha: database URL schemes
 

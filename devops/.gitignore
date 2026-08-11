@@ -1,3 +1,14 @@
 .env*
+# ...but .env-example is the committed template for each secret (see
+# documentation/secrets.md) -- it carries every key with placeholder values.
+!.env-example
+
+# Credential files downloaded from a cloud console. These carry a live client
+# secret and are NOT matched by the .env* rule above, so they must be named
+# explicitly. Extract the values into the neighbouring .env and delete the
+# download -- the .env file is the source of truth (documentation/secrets.md).
+client_secret_*.json
+credentials.json
+token.json
 # alertmanager directory is now version-controlled
 # Only ignore the secret.yaml file (tracked in root .gitignore)
