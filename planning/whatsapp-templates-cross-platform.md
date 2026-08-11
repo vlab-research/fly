@@ -178,7 +178,7 @@ explicit testing before anything is fielded:
 
 - `documentation/whatsapp-templates.md` — the existing implementation reference.
 - `planning/whatsapp-media-send-path-findings.md`,
-  `planning/whatsapp-inbound-media-findings.md` — the two defects found in the
+  `planning/inbound-media.md Appendix A` — the two defects found in the
   first production run, both at API divergence points.
 - `documentation/utility-messages.md` — the Messenger utility-message system
   this mirrors.

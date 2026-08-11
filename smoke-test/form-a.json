@@ -345,24 +345,6 @@
       "validations": { "required": false }
     },
     {
-      "type": "short_text",
-      "ref": "send_picture",
-      "title": "📸 Now testing INBOUND media. Please send me a picture — tap the attachment/camera button in Messenger and choose any photo.",
-      "properties": {
-        "description": "{\"type\":\"upload\",\"upload\":{\"type\":\"image\"}}"
-      },
-      "validations": { "required": false }
-    },
-    {
-      "type": "statement",
-      "ref": "picture_received",
-      "title": "📸 Got your picture! The bot received it and stored the image URL: {{field:send_picture}}",
-      "properties": {
-        "hide_marks": false,
-        "button_text": "Continue"
-      }
-    },
-    {
       "type": "statement",
       "ref": "movie_webview_prod",
       "title": "🎬 Testing in PRODUCTION. Now testing the video webview + moviehouse events — tap the button to open the production video player, then press ▶️ play. I'll react as soon as you start it.",
@@ -676,7 +658,20 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "send_picture" }
+            "to": { "type": "field", "value": "movie_webview_staging" }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              { "type": "field", "value": "test_environment" },
+              { "type": "choice", "value": "choice_env_staging" }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": { "type": "field", "value": "movie_webview_prod" }
           },
           "condition": {
             "op": "always",
@@ -748,7 +743,7 @@
     },
     {
       "type": "field",
-      "ref": "picture_received",
+      "ref": "confirm_attachment",
       "actions": [
         {
           "action": "jump",

@@ -173,11 +173,10 @@ accepted).
 | `payment_wait` → `payment_success`/`payment_failure` | **Payment** (Reloadly) via `wait: external` + **hidden-field logic** | `wait` / `payment:reloadly`; branch on `e_payment_reloadly_success` |
 | `handoff_statement` → `handoff_result` | **Thread-control handoff** round trip + metadata flattening | `handoff`; interpolates `e_handover_metadata_*` (needs `smoke-echo`) |
 | `test_utility` → `utility_message` | Facebook **UTILITY template** message, gated behind a yes/no like `test_payment`/`test_handoff` — answering No skips straight to `test_environment` (choices must match the page's approved button labels — [see below](#the-utility_message-field-page-specific-not-env-specific)) | `multiple_choice` → `utility_message` |
-| `test_environment` | **Env pick, asked once up front.** Drives *two* branches: the five environment-scoped media fields (`media_third_party_url` logic) and the moviehouse webview host (`picture_received` logic). Both exist because the same Typeform form is deployed to prod and staging, while asset rows, attachment ids and the moviehouse player host are all per-environment | quick-reply; read by `media_third_party_url` and `picture_received` logic |
-| `test_attachments` → `media_third_party_url` → `media_legacy_attachment_id_<env>` → `media_asset_image_<env>` → `media_asset_repeat_<env>` → `media_asset_video_<env>` → `media_asset_file_<env>` → `confirm_attachment` | Six media-abstraction paths back to back, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole block straight to `send_picture`. One shared third-party field, then a five-field prod or staging chain — see [Media fields](#media-fields-what-each-one-proves) below | `multiple_choice` → `attachment` (`keepMoving`), one legacy `attachment_id`, one not-uploaded `url`, four uploaded-asset `url`s |
-| `confirm_attachment` | **Did they actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — this is the only signal that a media send silently failed | `multiple_choice` (answers recorded, no branching) |
-| `send_picture` → `picture_received` | **Inbound user media** (user sends a photo); stored URL interpolated back | `upload` (`{type:image}`) → `user_media`/MEDIA event |
-| `movie_webview_prod`/`movie_webview_staging` → `movie_watched`/`movie_timeout` | **Webview button → moviehouse external events → logic reacting to them** (works in prod & staging); branched from `test_environment` by `picture_received` | `webview` + `wait{op:or,[external moviehouse:play, timeout]}`; branch on `e_moviehouse_play_id` |
+| `test_environment` | **Env pick, asked once up front.** Drives *two* branches: the five environment-scoped media fields (`media_third_party_url` logic) and the moviehouse webview host (`confirm_attachment` logic). Both exist because the same Typeform form is deployed to prod and staging, while asset rows, attachment ids and the moviehouse player host are all per-environment | quick-reply; read by `media_third_party_url` and `confirm_attachment` logic |
+| `test_attachments` → `media_third_party_url` → `media_legacy_attachment_id_<env>` → `media_asset_image_<env>` → `media_asset_repeat_<env>` → `media_asset_video_<env>` → `media_asset_file_<env>` → `confirm_attachment` | Six media-abstraction paths back to back, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole block straight to the moviehouse webview. One shared third-party field, then a five-field prod or staging chain — see [Media fields](#media-fields-what-each-one-proves) below | `multiple_choice` → `attachment` (`keepMoving`), one legacy `attachment_id`, one not-uploaded `url`, four uploaded-asset `url`s |
+| `confirm_attachment` | **Did they actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — this is the only signal that a media send silently failed. Also carries the env branch into the moviehouse webview | `multiple_choice` |
+| `movie_webview_prod`/`movie_webview_staging` → `movie_watched`/`movie_timeout` | **Webview button → moviehouse external events → logic reacting to them** (works in prod & staging); branched from `test_environment` by `confirm_attachment` | `webview` + `wait{op:or,[external moviehouse:play, timeout]}`; branch on `e_moviehouse_play_id` |
 | `stitch_statement` | **Form stitch** A → B | `stitch` |
 | `test_timeout` → `timeout_wait` → `welcome_back` (B) | **Timeout / dean followup** | `wait: timeout` |
 
@@ -340,7 +339,7 @@ branch.
 #### Branch shape
 
 ```
-test_attachments ──No──────────────────────────────────► send_picture
+test_attachments ──No──────────────────────────────────► movie_webview_<env>
         │
         └─Yes─► media_third_party_url   (shared, env-neutral)
                         │
@@ -356,7 +355,7 @@ test_attachments ──No──────────────────�
 
 Three logic rules carry it: `media_third_party_url` branches on
 `test_environment` (staging first, prod as the `always` default — the same
-shape as `picture_received`), and each chain's last field
+shape as `confirm_attachment`), and each chain's last field
 (`media_asset_file_<env>`) jumps unconditionally to `confirm_attachment`. The
 prod chain's jump is load-bearing (without it, it would fall through into the
 staging chain); the staging chain's is the natural next field but is written
@@ -439,11 +438,16 @@ survey is what moves.
 
 ## Notes / gotchas
 
-- **The `upload` field forces a real photo.** `validateUpload` requires
-  `answer.type === 'image'` with a `payload.url`; typing text is rejected and
-  the prompt repeats. That is intentional — the point is to prove the
-  `user_media` → MEDIA path. (Proven in `replybot/.../machine.test.js`, the
-  "Adds the URL given an attachment as responseValue" test.)
+- **There is no inbound-media (`upload`) field, deliberately.** The smoke test
+  used to end the media block with a `send_picture` → `picture_received` pair
+  proving the `user_media` → MEDIA path. It was removed 2026-08-11: replybot
+  validates and stores an inbound media answer, but **nothing downloads the
+  bytes**, so the stored value is a handle that expires at Meta (7 days on
+  WhatsApp, ~30 on Messenger) and resolves to nothing afterwards. Smoke-testing
+  it asserted a capability the platform does not have. Re-add it in the same
+  change that builds the downloader — see
+  `planning/inbound-media.md`, which keeps the field definition and the
+  wiring needed to restore it.
 - **`media_third_party_url`** (and `welcome`) point at an imgur URL, which must
   stay reachable by Facebook's fetchers; swap it if the host goes away. There
   is no longer a public-sample-host dependency for video/PDF — those moved to

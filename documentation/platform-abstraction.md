@@ -360,7 +360,7 @@ WhatsApp event parsing implemented alongside Messenger:
 | `messages[].text.body` | `user_text` | `{ type: "user_text", text }` |
 | `messages[].interactive.button_reply` | `user_interaction` | `{ type: "user_interaction", value, label, interaction_type: "button_reply" }` |
 | `messages[].interactive.list_reply` | `user_interaction` | `{ type: "user_interaction", value, label, interaction_type: "list_reply" }` |
-| `messages[].image/video/document/audio/voice` | `user_media` | `{ type: "user_media", attachments: [{ type, url }] }` |
+| `messages[].image/video/document/audio/voice` | `user_media` | `{ type: "user_media", attachments: [{ type, payload: { id, url } }] }` — see the inbound-media note below |
 | `messages[].location` | (currently ignored) | N/A |
 | `messages[].contacts` | (currently ignored) | N/A |
 | `messages[].referral` | `conversation_started` | `{ type: "conversation_started", trigger: "referral", referral: { ref: "form.<SHORTCODE>" } }` |
@@ -375,6 +375,30 @@ WhatsApp event parsing implemented alongside Messenger:
 - `user_id` is the sender's WhatsApp phone number (from `messages[].from`)
 - `account_id` is the WhatsApp Business phone number ID (from metadata)
 - No `optin` / `one_time_notif_token` — WhatsApp has no OTN equivalent
+
+### Inbound media is NOT a supported feature
+
+`user_media` events parse, and an `upload` question validates and stores an
+answer. **Nothing downloads the bytes.** What lands in `responses.response` is
+a handle owned by Meta, not a retrievable asset:
+
+| Platform | Stored value | Dies after |
+|---|---|---|
+| WhatsApp | the media **id** (`"1338855734902082"`) | **7 days** (inbound ids; the 30-day clock is for *uploaded* media) |
+| Messenger | the signed CDN **url** | **~30 days** (`oe=` parameter) |
+
+Both also need a Bearer token on WhatsApp, so neither is fetchable by a
+researcher even while alive. The value is therefore a dead reference by the
+time anyone exports it.
+
+**Do not offer `upload` questions to researchers**, and do not treat
+`responses.response` for one as a URL — since commit `471475a2` it is
+platform-dependent (id on WhatsApp, url on Messenger). As of 2026-08-11 no
+researcher survey has ever used one; the only `upload` fields in production
+belong to test surveys.
+
+Making this real means downloading and storing the bytes on receipt. That work
+is designed but unbuilt — see `planning/inbound-media.md`.
 
 **Dispatcher in parseEvent():**
 ```javascript

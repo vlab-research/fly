@@ -1,7 +1,36 @@
-# Inbound Media Storage — Design
+# Inbound Media — Design (deferred)
 
-**Status:** Design. Nothing built. Written 2026-08-10 in the
-`fly-media-abstraction` worktree.
+**Status:** Designed, **not built, deliberately deferred 2026-08-11.** Written
+2026-08-10 in the `fly-media-abstraction` worktree; deferred after the
+production numbers in §0.1 came in.
+
+**This is the single document for inbound media.** It absorbs the former
+`planning/whatsapp-inbound-media-findings.md` (deleted; its probe evidence is
+Appendix A, with its original section numbers preserved, so every
+"findings §X" citation in this document resolves to **Appendix A §X**).
+Appendix B holds everything removed from the codebase, verbatim, so the feature
+can be restored in one change.
+
+**Why it is deferred:** no researcher has ever used an upload question (§0.1).
+Building it now would create a permanent store of respondent photographs — with
+a backup obligation, a retention policy question and an erasure gap (§9) — for
+zero users. Nothing is being lost in the meantime, because nothing is being
+collected.
+
+**What was removed on deferral**, so the platform stops claiming a capability
+it does not have:
+
+| Where | Change |
+|---|---|
+| `smoke-test/form-a.json` | `send_picture` + `picture_received` fields and their wiring (Appendix B) |
+| `smoke-test/README.md` | flow table, branch diagram, `upload` gotcha |
+| `documentation/platform-abstraction.md` | corrected the `user_media` payload shape; added "Inbound media is NOT a supported feature" |
+
+**What was deliberately left in place:** `validateUpload`
+(`replybot/lib/generic-validator.js`), the normalizer media branch
+(`event-normalizer.js:371-384`), and the media-id persistence from `471475a2`.
+They are small, correct, and are what makes re-adding this cheap. Do not remove
+them.
 
 **What this covers:** media that **respondents send us** — photographs, documents,
 audio, video arriving on the inbound webhook — which we must download from Meta with
@@ -20,12 +49,123 @@ proxy-with-auth.
 
 ---
 
-## 0. Relationship to the existing document
+## 0. Production findings, 2026-08-11
 
-**There is a prior document, and it is good.**
-`planning/whatsapp-inbound-media-findings.md` (untracked, present in the main worktree
-at `/home/nandan/Documents/vlab-research/fly/planning/`, referenced by commit
-`471475a2`). It is a findings document backed by two live probes against Meta.
+Read-only queries against vprod (CockroachDB, follower reads). **These were run
+after the design below was written and they correct it in four places.** Where
+this section and a later section disagree, this section is right.
+
+### 0.1 Nobody uses this. That is why it is deferred.
+
+Across **5,125 surveys and 187,148 fields**, exactly **18 fields** declare
+`type: upload`. All 18 belong to four surveys owned by `nandanmarkrao@gmail.com`
+(`flysmoke`, `smllinktest`, `smlbaseline`, `testuploadtype`). **Zero belong to a
+researcher.**
+
+The full production history of inbound media answers is **five rows**:
+
+| when | platform | stored `responses.response` |
+|---|---|---|
+| 2026-07-27 ×2, 2026-08-11 | messenger | `https://scontent.xx.fbcdn.net/...` |
+| 2026-08-09 ×2 | whatsapp | `1338855734902082`, `1046120588390346` |
+
+This confirms §7.2's join contract exactly as designed — and it closes §3.4:
+**there is no backfill problem**, and the deadline pressure driving §13's build
+order is imaginary. Nothing is bleeding because nothing is being collected.
+
+Detector note for anyone re-running this: the effective field type comes from
+`md`, not Typeform's `type`. `form.js:addCustomType` parses
+`properties.description` as YAML and `params.type` **overrides** `field.type`.
+An upload question is a `short_text` whose description is
+`{"type":"upload","upload":{"type":"image"}}`. Match on the description with
+`~ 'type"?\s*[:=]\s*"?upload'` — a plain `LIKE '%"type":"upload"%'` misses the
+half that use a space after the colon.
+
+### 0.2 Messenger inbound URLs live ~30 days, not minutes
+
+**This inverts §2's central claim.** The `oe=` parameter on the signed CDN URL
+is a hard expiry:
+
+| sample sent | `oe=` | expires | TTL |
+|---|---|---|---|
+| 2026-07-27 | `6A8E299E` | 2026-08-25 | **29.84 days** |
+| 2026-08-11 | `6AA208FD` | 2026-09-10 | **29.93 days** |
+
+WhatsApp's `ext=` (~302 s) and Messenger's `oe=` are different mechanisms on
+different clocks. So §2's "for Messenger there is no budget at all", "the first
+fetch is the only fetch", "Messenger is the strict one", and §3.3's "the sweeper
+cannot help Messenger" are all **wrong**. On these numbers WhatsApp (7 days) is
+the strict platform and Messenger the forgiving one — the conventional reading
+after all. It also means Messenger media *is* backfillable for ~30 days.
+
+**Not fully verified:** the signature was decoded, the URL was not fetched.
+`oe` is the documented expiry but Meta may enforce other limits. **Fetching an
+aged URL unauthenticated is the one probe still owed** — it is Stage A, it is
+one `curl`, and it decides whether "download on receipt" is a hard requirement
+or a preference.
+
+### 0.3 Messenger carries no hash, no mime type, no size
+
+The raw inbound payload is exactly `{"type":"image","payload":{"url":"..."}}`.
+So §11.3 is answered **no**: §3.2 step 5's free integrity check is
+**WhatsApp-only**. On Messenger you must trust `Content-Type` and have no
+defence against storing a truncated object.
+
+### 0.4 The real inbound media volume is unsolicited — and the design would store it
+
+Sampling 400 recently-active respondents: on one World Bank page
+(`111108121363615`), **92 distinct respondents sent 160 images in four weeks**,
+to surveys with **no upload question at all**. Respondents just send photos.
+
+§3.2 step 1's filter is *"is this an inbound message event carrying media?"*,
+which would permanently store every one of them: no join key to any response, no
+researcher who asked for it, no export path, and maximal PII exposure for zero
+research value.
+
+**The filter must be scoped to media answering an upload question.** That
+requires survey context the consumer explicitly does not have (§7.1), so either
+ingest gates on a response row appearing, or §7's join-at-read-time premise
+needs revisiting. **This is an unresolved hole in the design, not a tuning
+note.**
+
+### 0.5 The `messages` scan is no longer cheap
+
+§11.4 calls the volume query "cheaply answerable". It is not. Migration 18
+(applied 2026-07-22) dropped both global timestamp indexes on
+`chatroach.messages`; only `primary` and `messages_userid_timestamp_idx` remain,
+and there is no index on `timestamp` or `content`. That query is now a **full
+scan of ~101M rows / ~400 GiB**. Sample by `userid` (which *is* indexed)
+instead — that is how §0.1 and §0.4 were measured.
+
+(§3.4's other claim holds: the raw webhook item is in `messages.content`
+verbatim, id, `sha256`, `mime_type` and all.)
+
+### 0.6 Two defects in the schema and the join, both with the same root cause
+
+**The design keys on Meta's media id, and Messenger does not have one.**
+
+1. **`UNIQUE (platform, account_id, platform_media_id)` does nothing for
+   Messenger.** `platform_media_id` is NULL there, and NULLs are distinct in a
+   unique index — so §3.2 step 2's `ON CONFLICT DO NOTHING` **never fires**, and
+   Kafka's at-least-once delivery duplicates downloads and stored objects on the
+   platform carrying ~100% of traffic.
+2. **The §7.2 join is not 1:1.** Two response rows in production hold a
+   **byte-identical** Messenger URL (verified by `md5(response)`), so the join
+   fans out: duplicate manifest entries, ZIP filename collisions, and a wrong
+   `missing` counter.
+
+**Both close with the same fix: key on the message `mid`**
+(`m_1X_qEefFwSPdn1wVGkpY1pJaDwO6MfM6T1OEQCh-Kvt…`), which is present on both
+platforms and unique per message. Use `(platform, account_id, message_id)` as
+the natural key in §6.1 instead.
+
+---
+
+## 0bis. Relationship to the absorbed findings
+
+The probe evidence in **Appendix A** is backed by two live runs against Meta and
+remains the authoritative record of *what Meta actually does*. This design
+adopts it wholesale except where §0 above corrects it.
 
 **What it got right, and this design adopts wholesale:**
 
@@ -68,11 +208,11 @@ at `/home/nandan/Documents/vlab-research/fly/planning/`, referenced by commit
 4. **It did not consider the exporter.** It proposed storage and a retrieval record but
    no delivery mechanism to researchers. The delivery mechanism already exists (§5).
 
-**Verdict: extend, do not supersede.** That document remains the authoritative record
-of *what Meta actually does*, established by probe rather than by documentation, and
-this design does not restate its evidence. This document supersedes only its **§6.2
-storage/retrieval design** and its **§7 open items**, both of which it flagged as
-unsettled. Its §1–§5 stand.
+**Verdict: extend, do not supersede.** Appendix A §1–§5 stand as the record of
+what Meta actually does, established by probe rather than by documentation. This
+document supersedes only its **§6.2 storage/retrieval design** and its **§7 open
+items**, both of which it flagged as unsettled — and §0.2/§0.3 above correct its
+Messenger claims.
 
 ---
 
@@ -782,22 +922,23 @@ are. It costs nothing and it is the only point in the flow where a human reliabl
 
 ## 11. Open questions
 
-1. **Messenger's inbound attachment URL TTL is unknown.** Meta's `oh=`/`oe=` signed CDN
-   URLs have never been probed the way WhatsApp's were. Since Messenger carries ~100% of
-   live media traffic and has **no durable id**, this is the highest-value unknown in the
-   document. `planning/whatsapp-media-watch.sh` is the template for probing it, and it
-   should be probed before building, not after.
+1. ~~**Messenger's inbound attachment URL TTL is unknown.**~~ **Mostly answered
+   by §0.2** — the `oe=` signature decodes to ~30 days on both samples, which
+   inverts §2. **Still owed: one unauthenticated `curl` of an aged URL** to
+   confirm Meta honours it. `planning/whatsapp-media-watch.sh` is the template.
+   This remains the single highest-value probe and it is Stage A.
 2. **Is `id` present for all six WhatsApp media types?** Findings §7.4, still open. Both
    probed samples were images. The design depends on `id` for everything except
    Messenger.
-3. **Whether Messenger inbound carries a hash.** WhatsApp's free `sha256` is what makes
-   §3.2 step 5 free. If Messenger has none, integrity verification is one-sided.
-4. **Volume.** Nobody has measured how much media a real survey collects. Every capacity
-   decision in §5.5 — the cap, the disk, the ~100 Gi budget — is currently a guess.
-   **This one is cheaply answerable and should be answered before stage B**: the raw
-   webhook items are all in `chatroach.messages` (§3.4), so a single query counts every
-   inbound media event ever received, by type and by survey. It replaces four guesses at
-   once and it is the same query the backfill count needs.
+3. ~~**Whether Messenger inbound carries a hash.**~~ **Answered: no** (§0.3).
+   Integrity verification is WhatsApp-only.
+4. ~~**Volume.**~~ **Answered: effectively zero** (§0.1) — five media responses
+   in all of production, none from a researcher. Every capacity decision in
+   §5.5 is therefore untested rather than merely unmeasured, and must be
+   revisited against real numbers if this is ever built. Note §0.5: the
+   `messages` query this item proposed is now a ~400 GiB full scan; sample by
+   `userid` instead. **§0.4 is the volume question that actually matters now** —
+   unsolicited media, which the design would store and should not.
 5. ~~**MinIO topology.**~~ **Resolved while writing this.** MinIO is already the
    distributed 4-replica StatefulSet with 50 Gi per PVC and EC:2
    (`devops/minio/minio.yaml:104-117,236`), and `media` / `media-staging` buckets already
@@ -830,18 +971,371 @@ are. It costs nothing and it is the only point in the flow where a human reliabl
 
 ## 13. Build order
 
-Ingestion first, because it is the only part with a deadline. Every day without it is a
-day of permanently lost respondent media; delivery can be built against data already
-accumulating.
+**The trigger to start is a researcher actually needing an upload question.**
+Until then this stays deferred (§0.1). When that day comes, the first move is
+not Stage A — it is **§0.6 and §0.4**: re-key the schema on the message `mid`,
+and decide how ingest is scoped so it does not hoover up unsolicited media.
+Neither is a coding task; both are design corrections this document has not yet
+absorbed into §3–§7.
+
+The original ordering below assumed ingestion carried a deadline. It does not
+while nothing is collected — but it *will* from the moment the first upload
+question goes live, so Stages A–D still have to land before that question is
+published, not after.
 
 | Stage | What |
 |---|---|
-| A | Probe the Messenger CDN URL TTL (§11.1). It can invalidate §3.3's Messenger handling. |
+| 0 | Re-open §3.2's filter (§0.4) and §6.1's natural key (§0.6). **Do this first.** |
+| A | Probe the Messenger CDN URL TTL — one unauthenticated `curl` of an aged URL (§0.2, §11.1). It can invalidate §3.3's Messenger handling. |
 | B | Migration `25-inbound-media.sql`; bucket + two scoped service accounts (§4.1). |
 | C | `media-ingest`: consumer, tokenstore reuse, resolve→download→verify→store, sweeper. Pure core (filter, key derivation, hash verification) table-tested with no Kafka, no Meta, no MinIO — per §10 of the media plan. |
 | D | Backup mirror covering `respondent-media` **before** the first asset is stored (§4.3). Capacity alerting alongside. |
 | E | Exporter `response_media` source: the §7.2 join, ZIP assembly, manifest, the shortfall counter (§7.3). Test that a second user's identical `survey_name` yields zero rows (§5.2). |
 | F | `SOURCE_MAP` entry, dashboard UI, presign expiry decision (§8.1). |
-| G | Documentation: `documentation/inbound-media.md`, and updates to `exports-storage.md` (third bucket, no lifecycle) and `platform-abstraction.md` (which findings §8 already notes is stale on the media payload shape). |
+| G | Documentation: `documentation/inbound-media.md`; updates to `exports-storage.md` (third bucket, no lifecycle) and `platform-abstraction.md` (replace the "Inbound media is NOT a supported feature" section). |
+| H | Restore the smoke-test coverage from Appendix B — **in the same change**, so the media path is never unwatched again. |
 
-Stages A–D are the deadline-bearing half. E–G can lag without losing data.
+Stages 0–D are the deadline-bearing half. E–H can lag without losing data.
+
+---
+
+# Appendix A — Probe evidence (absorbed from `whatsapp-inbound-media-findings.md`)
+
+*Original section numbers are preserved: every "findings §X" citation in this
+document resolves here. Its §6 (design) and §7 (open items) are superseded by
+the body above and are not reproduced; §0.2 and §0.3 correct its Messenger
+claims.*
+
+**Provenance:** Root cause identified and verified. Design settled — see §6.
+Observed in production 2026-08-05 during the first end-to-end WhatsApp test
+(Track A, number `1203867182815254`, survey `flysmoke`). Probed 2026-08-05
+after the fact, and again 2026-08-06 against a live event 14 seconds old —
+two independent media samples, agreeing on every point except one, where the
+live run corrected an over-strong claim (see §4.2b).
+
+## 1. The observed issue
+
+Answering an upload question by sending a photo over WhatsApp returns
+"sorry, that answer is not valid". This reproduces for every WhatsApp media
+answer; it is not intermittent and not asset-specific.
+
+Messenger is unaffected — but see §5.3, it is broken in a different way.
+
+---
+
+## 2. Root cause — verified
+
+A field-name mismatch in the inbound normalizer.
+
+**The actual webhook payload** (captured verbatim from replybot logs in
+production):
+
+```json
+{
+  "from": "15419799714",
+  "id": "wamid.HBgLMTU0MTk3OTk3MTQVAgASGCBBQzZFQzMyQ0ZCQ0VFOTAxMTEyNTdBQ0Y1NDhCRUMwMwA=",
+  "timestamp": 1785972838000,
+  "type": "image",
+  "image": {
+    "mime_type": "image/jpeg",
+    "sha256": "IykpcWWXi/vfsIJ1QUUouc+HEoWd5W/ypMuc/6L7/es=",
+    "id": "2563305464111161",
+    "url": "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=2563305464111161&source=webhook&ext=1785973140&hash=..."
+  },
+  "source": "whatsapp",
+  "phone_number_id": "1203867182815254"
+}
+```
+
+**What the normalizer reads** — `replybot/lib/event-normalizer.js:379`:
+
+```js
+payload: { id: media.id || null, url: media.link || null }
+```
+
+It reads `media.link`. The inbound field is `media.url`. `link` is the field
+name WhatsApp uses for **outbound** sends (`{"image":{"link":"..."}}`), and it
+appears to have been carried over to the inbound parser by analogy.
+
+**Where it fails** — `replybot/lib/generic-validator.js:209-211`:
+
+```js
+const url = r && r.payload && r.payload.url
+const validType = (r && r.type) === uploadType
+const valid = validType && !!url
+```
+
+`url` is always `null`, so `valid` is always `false`, so every media answer is
+rejected regardless of type or content.
+
+**Messenger is unaffected by this particular defect** because
+`event-normalizer.js:96-101` passes `data.message.attachments` through
+unchanged, preserving Facebook's native `payload.url`.
+
+---
+
+## 3. Scope — what is *not* broken
+
+From the same production run, confirming the bug is narrow:
+
+- Interactive **button replies** (≤3 options) parse correctly.
+- Interactive **list replies** (4–10 options) parse correctly.
+- Text validation works — `siblings` correctly rejected "Goo" and accepted "5".
+- Numeric, phone-number and multiple-choice field types all validated correctly.
+- The flow reached `WAIT_EXTERNAL_EVENT` on a real Reloadly payment.
+
+So this is specifically the media ingestion path, not WhatsApp inbound
+generally.
+
+Blast radius is currently small: across eight replybot pods in `vprod`, six
+hours of logs contained exactly **one** media event — the test image. Nothing
+is silently accumulating broken media answers in production.
+
+---
+
+## 4. What the live probe established
+
+Two independent runs against the production credential for phone number
+`1203867182815254`.
+
+- **Run A** (2026-08-05), media `2563305464111161`, probed ~25 min after the
+  event — every URL already expired.
+- **Run B** (2026-08-06), media `1981434135889496`, probed **14 seconds** after
+  the event, inside the URL's lifetime. This is the run that settles the
+  auth-vs-expiry question Run A could not.
+
+Reproducible via `planning/whatsapp-media-probe.sh <media_id>` for the
+after-the-fact case, or `planning/whatsapp-media-watch.sh` to catch a live
+event and probe inside the window. Both are read-only and never print the
+token.
+
+| # | Request | Run A (aged ~25 min) | Run B (aged 14 s) |
+|---|---|---|---|
+| 1 | Webhook `url`, **no auth** | `401` | **`401`** |
+| 2 | Webhook `url`, **with** Bearer | `401` (expired) | **`200`, `image/jpeg`, 155,656 B** |
+| 3 | `GET /v18.0/{media_id}`, with Bearer | `200` | `200` |
+| 4 | Resolved URL, **no auth** | `401` | `401` |
+| 5 | Resolved URL, with Bearer | `200`, 152,619 B | `200`, 155,656 B |
+| 6 | Resolved URL, +6 min, with Bearer | `401` — expired | not re-run |
+
+### 4.1 — Media URLs require a Bearer token. Always.
+
+Run B test 1 is decisive: a webhook lookaside URL **14 seconds old**, well
+inside its lifetime, still refuses an unauthenticated GET with `401
+Authentication Error`. The `hash=` parameter is **not** a self-contained
+pre-signature. Confirmed independently by test 4 on both runs against
+freshly-resolved URLs.
+
+No unauthenticated consumer can fetch WhatsApp media, ever, from either URL
+source.
+
+### 4.2 — The URL expiry is hard, and applies to both URL sources.
+
+Run A: `ext=1785973140` against event timestamp `1785972838` — **302 s**.
+Run B: **303 s**. So ~5 minutes, marginally variable rather than a fixed
+constant; do not hard-code 300.
+
+Run A test 2 shows a valid token does not rescue an expired URL, and test 6
+shows URLs from `GET /{media_id}` expire on the same clock.
+
+### 4.2b — The webhook `url` *is* usable — with a token, inside the window
+
+Run B test 2 returned `200` and the full 155,656-byte JPEG from the
+webhook-embedded URL directly. Run A's `401` on the same request was **purely
+expiry**, not a property of the URL.
+
+This corrects an over-strong claim in the previous revision of this document,
+which held that the webhook URL was unusable in principle. It is not. It is
+merely useless *to this architecture* — see 4.5.
+
+### 4.3 — The media ID is the durable handle.
+
+Run A test 3 resolved cleanly 25 minutes after the event, long after every URL
+associated with it had died. Meta documents a 30-day media retention window;
+only the 25-minute figure is verified here, but the ID is unambiguously the
+reference that survives.
+
+### 4.4 — `sha256` is a usable content identity.
+
+The webhook's `sha256` is base64; the resolve endpoint returns hex. They decode
+to the same digest — verified on **both** samples, independently. Usable for
+content-addressed dedup and integrity checking without any extra call.
+
+Run B also confirms the response bytes agree across sources: the webhook URL
+and the resolved URL both returned exactly 155,656 bytes, matching `file_size`.
+
+### 4.5 — Consequence: the `url` field is useless *to us*.
+
+Not inert in principle (4.2b) — useless in this architecture, for two reasons
+that both hold:
+
+- It needs credentials, and replybot does not have any (5.2). The only
+  component positioned to read it cannot use it.
+- It is dead within ~5 minutes, so nothing asynchronous or downstream can use
+  it either, and anything persisting it stores a value that is unresolvable
+  seconds later.
+
+The one-line field fix (`media.link` → `media.url`) therefore unblocks the
+conversational flow but writes a value into `responses` that is worthless by
+the time anyone reads it.
+
+---
+
+## 5. Structural facts about the current pipeline
+
+### 5.1 — The media ID is discarded before storage
+
+`machine.js:582-583` builds the attachment object carrying both `id` and `url`,
+but that object is consumed **only** by the validator (`machine.js:934-936`).
+What propagates is `responseValue`, which is the bare URL string
+(`machine.js:853-856` → `responses/responser.js:8`).
+
+So the ID never reaches the `responses` table. Any fix that stores only the URL
+discards the sole recoverable reference to the asset.
+
+### 5.2 — replybot holds no credentials
+
+`replybot/lib/typewheels/tokenstore.js` was deleted during the
+platform-abstraction work; there is no tokenstore anywhere under `replybot/lib`
+today. replybot cannot call `GET /{media_id}` or attach a Bearer header. Any
+resolution or download step is therefore architecturally excluded from replybot
+as currently structured.
+
+Per-account tokens live in the `credentials` table, keyed
+`(entity, key)` = (`whatsapp_business` | `facebook_page`, account id).
+`message-worker/tokenstore.go:84` is the working reference implementation.
+
+### 5.3 — Messenger has the same disease
+
+Nothing anywhere in the repo re-hosts, refreshes or re-fetches media — verified
+by grep across replybot, hermes, message-worker and event-exporter. Messenger
+stores its own expiring CDN URL (`oe=`/`oh=` signed) exactly the same way.
+**Messenger upload answers have been storing dead links all along.** This is
+not a WhatsApp regression; WhatsApp is currently below an already-broken
+baseline.
+
+Any durable-media design must cover both platforms or it will be built twice.
+
+### 5.4 — Media IDs are already on the Kafka topic
+
+`hermes/src/handlers.rs:177` stamps each raw WhatsApp message with its
+`phone_number_id` and produces the **whole item** to `event_topic`. replybot
+consumes from that topic and normalizes afterwards. In production both are
+bound to the same anchor in `devops/values/production.yaml` —
+`vlab-prod-chat-events`.
+
+The full `image` object, ID included, is therefore already flowing through
+Kafka today. A downloader needs **no new topic and no producer changes** — only
+a new consumer group.
+
+---
+
+## 8. Related
+
+- `planning/whatsapp-media-send-path-findings.md` — the **outbound** media
+  counterpart found in the same session (out-of-order delivery). Same root
+  shape: the platform abstraction generalised routing and naming but not the
+  points where Meta's two APIs genuinely diverge. The underlying divergence
+  this document establishes — Messenger is URL-first, WhatsApp is ID-first —
+  is likely the same fault line.
+- `documentation/platform-abstraction.md` — §"Replybot Event Normalizer" lists
+  the WhatsApp inbound event mapping. Line 363 documents the media payload as
+  `{ type, url }`, which is both the defective shape and out of step with the
+  code's actual `{ type, payload: { id, url } }`. Needs updating once 6.1
+  lands.
+- `replybot/lib/event-normalizer.js:371-384` — the WhatsApp media branch.
+- `replybot/lib/generic-validator.js:203-214` — `validateUpload`.
+- `message-worker/tokenstore.go:84` — reference token lookup.
+- `exporter/exporter/storage.py` — reference S3/MinIO backend.
+
+
+---
+
+# Appendix B — Restoring the smoke-test coverage
+
+Everything removed from `smoke-test/` on 2026-08-11, verbatim. Restore it in
+**Stage H**, in the same change that builds the downloader — the `media.link` /
+`media.url` bug (Appendix A §2) was silently broken from the platform
+abstraction until this coverage caught it, and it is the only end-to-end guard
+on the inbound path.
+
+### B.1 The two fields (`form-a.json`, inserted after `confirm_attachment`)
+
+```json
+{
+  "type": "short_text",
+  "ref": "send_picture",
+  "title": "📸 Now testing INBOUND media. Please send me a picture — tap the attachment/camera button in Messenger and choose any photo.",
+  "properties": {
+    "description": "{\"type\":\"upload\",\"upload\":{\"type\":\"image\"}}"
+  },
+  "validations": { "required": false }
+},
+{
+  "type": "statement",
+  "ref": "picture_received",
+  "title": "📸 Got your picture! The bot received it and stored the image URL: {{field:send_picture}}",
+  "properties": {
+    "hide_marks": false,
+    "button_text": "Continue"
+  }
+}
+```
+
+**Fix the `picture_received` wording on restore.** Since `471475a2` the stored
+value is a media **id** on WhatsApp, not a URL, so "stored the image URL"
+interpolates a bare number into a sentence calling it a URL. It was already
+wrong when removed. Say *handle*, or branch on platform.
+
+### B.2 The logic wiring
+
+Removing the fields required rerouting two jumps; restoring them reverses that:
+
+| Logic block | Deferred state (now) | Restored state |
+|---|---|---|
+| `test_attachments` | `Yes → media_third_party_url`, then the `test_environment` branch to `movie_webview_<env>` | `Yes → media_third_party_url`, then `always → send_picture` |
+| `confirm_attachment` | carries the `test_environment` branch to `movie_webview_<env>` | **delete this block** — it falls through to `send_picture` |
+| `picture_received` | *(deleted)* | recreate it carrying the `test_environment` branch: `staging → movie_webview_staging`, `always → movie_webview_prod` |
+
+The env branch is the load-bearing part: it must sit on whichever field
+immediately precedes the moviehouse webview, because the same form is deployed
+to prod and staging and the player host differs. Restoring `send_picture` moves
+that branch from `confirm_attachment` back to `picture_received`.
+
+Validate after editing — this catches every mistake the rerouting can make:
+
+```bash
+python3 - <<'EOF'
+import json
+d=json.load(open('smoke-test/form-a.json'))
+refs={f['ref'] for f in d['fields']}
+print("logic blocks with no field:", {l['ref'] for l in d['logic']} - refs)
+print("dangling jump targets:", [(l['ref'], a['details']['to']['value'])
+      for l in d['logic'] for a in l['actions']
+      if a['details']['to']['type']=='field' and a['details']['to']['value'] not in refs])
+EOF
+```
+
+### B.3 `README.md` restorations
+
+- Flow table row:
+  `| `send_picture` → `picture_received` | **Inbound user media** (user sends a photo); stored URL interpolated back | `upload` (`{type:image}`) → `user_media`/MEDIA event |`
+- Branch diagram: `test_attachments ──No───► send_picture` (currently
+  `movie_webview_<env>`).
+- The `test_environment` and `movie_webview_*` rows and the "Three logic rules"
+  paragraph name `confirm_attachment` as the env-branch carrier; change back to
+  `picture_received`.
+- Replace the "There is no inbound-media (`upload`) field, deliberately" gotcha
+  with the original:
+
+  > **The `upload` field forces a real photo.** `validateUpload` requires
+  > `answer.type === 'image'` with a `payload.url`; typing text is rejected and
+  > the prompt repeats. That is intentional — the point is to prove the
+  > `user_media` → MEDIA path. (Proven in `replybot/.../machine.test.js`, the
+  > "Adds the URL given an attachment as responseValue" test.)
+
+### B.4 Documentation
+
+Replace the "Inbound media is NOT a supported feature" section in
+`documentation/platform-abstraction.md` with a real `documentation/inbound-media.md`
+(Stage G).

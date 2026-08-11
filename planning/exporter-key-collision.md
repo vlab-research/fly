@@ -4,7 +4,7 @@
 abstraction work that surfaced it.
 
 **Found:** 2026-08-10, while designing inbound respondent-media storage
-(`planning/inbound-media-storage.md`), which planned to reuse the exporter's delivery path.
+(`planning/inbound-media.md`), which planned to reuse the exporter's delivery path.
 
 ---
 
@@ -111,7 +111,7 @@ export success — an export that overwrites another's object succeeds perfectly
 
 ## 7. Do not inherit this
 
-`planning/inbound-media-storage.md` proposes extending the exporter to deliver respondent
+`planning/inbound-media.md` proposes extending the exporter to deliver respondent
 media. **That work must not adopt the current key scheme.** The same collision there would
 disclose a ZIP of respondent photographs rather than a CSV — same mechanism, materially
 worse payload. Either fix this first, or key the new source correctly from the start and

@@ -12,7 +12,7 @@ const uploadField = (mediaType, key = 'validate') => ({
 })
 
 // The verbatim production webhook payload from the 2026-08-05 Track A test.
-// See planning/whatsapp-inbound-media-findings.md §2. Note `url`, not `link` —
+// See planning/inbound-media.md Appendix A §2. Note `url`, not `link` —
 // reading `link` here is what rejected every WhatsApp media answer.
 const REAL_WHATSAPP_IMAGE_WEBHOOK = {
   from: '15419799714',
