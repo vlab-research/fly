@@ -856,14 +856,19 @@ message-worker:
     # means every WhatsApp send fails while Messenger keeps working.
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
-    # MUST stay 1. This is the burrow pool's goroutine count (the code default
-    # is 100). Burrow dispatches jobs to a shared channel with no key affinity,
-    # so N>1 lets two commands for the SAME user send concurrently and arrive
-    # out of order — a survey question before its own preamble.
+    # The burrow pool's goroutine count (code default 100).
     #
-    # To add outbound throughput, raise replicaCount above instead: partitions
-    # are keyed by user_id, so more pods parallelise across users while keeping
-    # each user serial.
+    # Raising this was UNSAFE before burrow v0.1.5: dispatch went through one
+    # shared channel with no key affinity, so N>1 let two commands for the SAME
+    # user send concurrently and arrive out of order — a survey question before
+    # its own preamble. v0.1.5 routes by hash(user_id) to a fixed worker, so
+    # same-user commands stay FIFO while different users run in parallel, and
+    # message-worker sets KeyAffinity unconditionally.
+    #
+    # Still 1 here pending UAT smoke testing of the concurrent path. The
+    # integration suite runs at 8. Raise deliberately, and read the poll-loop
+    # backpressure note in burrow's KEY_AFFINITY.md before going large — a
+    # single backed-up worker stalls the whole pod's polling.
     value: "1"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"

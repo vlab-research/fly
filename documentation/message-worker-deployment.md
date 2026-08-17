@@ -117,7 +117,7 @@ kubectl exec kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 | `DATABASE_URL` | `postgresql://chatroach@gbv-cockroachdb-public:26257/chatroach?sslmode=disable` | For token lookup |
 | `BOTSERVER_URL` | `http://gbv-botserver` | For error reporting (synthetic events) |
 | `FACEBOOK_GRAPH_URL` | `https://graph.facebook.com/v25.0` | Must match replybot's version |
-| `NUM_WORKERS` | `1` | **Must stay 1** — in-process goroutines have no key affinity and would reorder a user's messages. Scale `replicaCount` instead. See [Scaling](#scaling) below. |
+| `NUM_WORKERS` | `1` | In-process goroutine count. Safe to raise as of burrow v0.1.5 (key-affinity dispatch); held at 1 pending UAT. See [Scaling](#scaling) below. |
 | `MAX_RETRY_ATTEMPTS` | `3` | Exponential backoff: 100ms → 200ms → 400ms |
 | `HEALTH_PORT` | `8081` | Health endpoint (/healthz) |
 
@@ -141,20 +141,32 @@ resources:
 
 ## Scaling
 
-Outbound throughput scales with **replicas**, never with `NUM_WORKERS`.
+Outbound throughput scales two ways, and since burrow v0.1.5 both preserve
+ordering.
 
 Replybot keys every command by `user_id` (`replybot/lib/index.js`), so all of one
 user's commands land on a single partition of `vlab-prod-commands` and are
-delivered in order. Two ways to add parallelism, only one of which preserves
-that:
+delivered in order. Anything that adds parallelism has to keep that true:
 
 | Lever | Effect | Ordering |
 |---|---|---|
-| `replicaCount` | Partitions spread across pods | **Safe** — a partition still has exactly one consumer, running one worker |
-| `NUM_WORKERS` | Goroutines inside one pod | **Breaks it** — burrow dispatches to a shared job channel with no key affinity, so two commands for the same user run concurrently |
+| `replicaCount` | Partitions spread across pods | **Safe** — a partition has exactly one consumer |
+| `NUM_WORKERS` | Goroutines inside one pod | **Safe as of burrow v0.1.5** — dispatch routes by `hash(key)` to a fixed worker, so one user's commands always share a worker and stay FIFO |
 
 A reordered send is not a cosmetic bug: it can put a survey question ahead of the
-preamble that explains it, which corrupts the response.
+preamble that explains it, which corrupts the response. Before v0.1.5 burrow
+dispatched through one shared channel with no key affinity, so `NUM_WORKERS > 1`
+did exactly that; `message-worker` now sets `KeyAffinity` unconditionally, so the
+guarantee does not depend on remembering to enable it alongside a worker bump.
+
+The two levers compose: replicas parallelise across partitions, workers
+parallelise across users within a partition. Prefer replicas up to the partition
+count first, since they also isolate failures.
+
+Note the one cost of key affinity: per-worker queues are `JobQueueSize /
+NumWorkers`, and burrow's poll loop is single-threaded, so a worker that backs
+up stalls polling for the whole pod — including workers sitting idle. See
+`KEY_AFFINITY.md` in the burrow repo.
 
 **The ceiling is the partition count.** `vlab-prod-commands` has 6 partitions, so
 6 replicas is maximum useful parallelism — a 7th pod idles. Going beyond that
@@ -279,9 +291,9 @@ Graceful shutdown: preStop hook sleeps 15s to allow Kafka offset commits before 
 
 3. **NUM_WORKERS was 100:** Configured for 100 goroutines but the initial deployment uses 1 worker thread. Fixed to `1` for safety.
 
-   Superseded 2026-08-17: `1` is now permanent, not provisional. "Can scale up
-   later" was wrong — raising it breaks per-user ordering. Scale replicas
-   instead; see [Scaling](#scaling).
+   Superseded twice. "Can scale up later" was wrong at the time — raising it
+   reordered a user's messages. Burrow v0.1.5 added key-affinity dispatch,
+   which makes it safe again. See [Scaling](#scaling).
 
 4. **go.work did not include message-worker:** The Go workspace file didn't list `./message-worker`, causing `go test ./...` to fail. Added to go.work.
 

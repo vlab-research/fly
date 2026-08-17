@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/vlab-research/burrow"
 	messageworker "github.com/vlab-research/fly/message-worker"
 	"github.com/vlab-research/fly/message-worker/types"
-	"github.com/vlab-research/burrow"
 	"go.uber.org/zap"
 )
 
@@ -141,11 +141,22 @@ func main() {
 		zap.Bool("media_handle_use", config.MediaHandleUse),
 		zap.Duration("media_handle_margin", config.MediaHandleMargin))
 
-	// Create Burrow pool for concurrent processing
+	// Create Burrow pool for concurrent processing.
 	burrowConfig := burrow.DefaultConfig(logger)
 	burrowConfig.NumWorkers = config.NumWorkers
 	burrowConfig.CommitInterval = 5 * time.Second
 	burrowConfig.CommitBatchSize = 1000
+
+	// REQUIRED whenever NumWorkers > 1. Commands are keyed by user_id
+	// (replybot/lib/index.js), and a user's messages must reach the platform in
+	// the order the state machine produced them — a question must not overtake
+	// the statement that sets it up. Without this, burrow hands consecutive
+	// messages to whichever worker is free and the pair can invert.
+	//
+	// Enabled unconditionally rather than only for NumWorkers > 1: it is a
+	// no-op at 1 worker, and making it conditional would mean a later bump of
+	// NUM_WORKERS silently reintroduces the reordering bug.
+	burrowConfig.KeyAffinity = true
 
 	pool, err := burrow.NewPool(consumer, burrowConfig)
 	if err != nil {
