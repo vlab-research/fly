@@ -1,3 +1,5 @@
+const chai = require('chai')
+const should = chai.should()
 const u = require('./utils')
 
 const { getStarted, echo, statementEcho, delivery, read, qr, text, multipleChoice, referral, whatsappReferral, WA_PHONE_NUMBER_ID } = require('./events.test')
@@ -114,6 +116,77 @@ describe('eventPlatform', () => {
     u.eventPlatform({ source: { type: 'synthetic', platform: 'synthetic' } }).should.equal('messenger')
     u.eventPlatform({ source: {} }).should.equal('messenger')
     u.eventPlatform({}).should.equal('messenger')
+  })
+})
+
+// md.ad_id — see the "Ad identity" block comment in utils.js for the full
+// rationale. adIdFromReferral is pure, so this is the cheap exhaustive layer;
+// machine.test.js separately proves the same rules survive a real raw webhook
+// through parseEvent -> getMetadata.
+describe('adIdFromReferral', () => {
+  it('messenger: reads referral.ad_id directly, no gate', () => {
+    u.adIdFromReferral({ ad_id: '123' }, 'messenger').should.equal('123')
+  })
+
+  it('messenger: no ad_id on the referral -> undefined', () => {
+    should.equal(u.adIdFromReferral({}, 'messenger'), undefined)
+  })
+
+  it('messenger: null/undefined referral -> undefined, does not throw', () => {
+    should.equal(u.adIdFromReferral(null, 'messenger'), undefined)
+    should.equal(u.adIdFromReferral(undefined, 'messenger'), undefined)
+  })
+
+  it('whatsapp: source_type "ad" gates source_id through', () => {
+    u.adIdFromReferral({ source_type: 'ad', source_id: '120254866237980150' }, 'whatsapp')
+      .should.equal('120254866237980150')
+  })
+
+  // The regression that matters most: source_id is not ad-specific. An
+  // organic reshare of a page post also carries a source_id, but it is a
+  // POST id, and source_type says so. Capturing it unconditionally would
+  // write post ids into ad_id, where they can never match vlab's
+  // (network, ad_id) mapping and would pile up forever in the "unmapped"
+  // bucket that exists to catch real bugs.
+  it('whatsapp: source_type "post" must NOT resolve an ad_id', () => {
+    should.equal(u.adIdFromReferral({ source_type: 'post', source_id: '999' }, 'whatsapp'), undefined)
+  })
+
+  it('whatsapp: source_id with no source_type at all -> undefined', () => {
+    should.equal(u.adIdFromReferral({ source_id: '999' }, 'whatsapp'), undefined)
+  })
+
+  it('whatsapp: source_type "ad" but no source_id -> undefined', () => {
+    should.equal(u.adIdFromReferral({ source_type: 'ad' }, 'whatsapp'), undefined)
+  })
+
+  it('whatsapp: legacy spelling source: "ads" also gates through', () => {
+    u.adIdFromReferral({ source: 'ads', source_id: '5' }, 'whatsapp').should.equal('5')
+  })
+
+  it('whatsapp: source_type/id are trimmed and case-insensitive', () => {
+    u.adIdFromReferral({ source_type: ' AD ', source_id: ' 7 ' }, 'whatsapp').should.equal('7')
+  })
+
+  it('whatsapp: whitespace-only source_id is the same as absent -> undefined', () => {
+    should.equal(u.adIdFromReferral({ source_type: 'ad', source_id: '   ' }, 'whatsapp'), undefined)
+  })
+
+  it('normalizes a numeric id to its string form', () => {
+    // A literal that large (Meta's real ad ids run 15-18 digits) exceeds
+    // Number.MAX_SAFE_INTEGER and would round on its way into this test file,
+    // which would test JS float precision rather than _id()'s String(v).trim()
+    // behavior. Use a value safely inside the exact-integer range instead.
+    u.adIdFromReferral({ source_type: 'ad', source_id: 120254866 }, 'whatsapp')
+      .should.equal('120254866')
+  })
+
+  // Cross-platform guard: a whatsapp referral shaped like a Messenger one
+  // (carrying `ad_id` instead of `source_id`/`source_type`) must not resolve
+  // anything -- the whatsapp branch only ever reads source_id, gated by
+  // source_type/source.
+  it('whatsapp: messenger-shaped referral (ad_id field) resolves nothing', () => {
+    should.equal(u.adIdFromReferral({ ad_id: '123' }, 'whatsapp'), undefined)
   })
 })
 

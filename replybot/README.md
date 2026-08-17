@@ -231,23 +231,49 @@ Production path for ad-driven conversions. User clicks a Click-to-WhatsApp ad or
 3. Hermes stamps with `source: "whatsapp"` and `phone_number_id` (event.rs:73-97), publishes raw event to Kafka unchanged
 4. Replybot's event-normalizer (`categorizeWhatsAppEvent`, line 257-265) recognizes `data.referral`
 5. Returns `event_type: 'conversation_started'`, `payload.referral: data.referral` (preserves entire referral object)
-6. `getMetadata(event)` (utils.js:75-105) extracts form shortcode from `payload.referral.ref`
+6. `getMetadata(event)` (utils.js) extracts form shortcode from `payload.referral.ref`
 7. Machine's REFERRAL case resolves survey by shortcode via formcentral
 8. Survey starts with no-retake enforcement
 
-**Referral object structure (from Meta webhook):**
+**Referral object structure (from a real production webhook, 2026-08-16):**
 ```javascript
 {
-  "ref": "form.ABC123",                 // Required: form shortcode
-  "source": "ads",                      // "ads", "message", "id_matching", etc.
-  "source_id": "ad_campaign_123",       // Campaign or source identifier
-  "ctwa_clid": "click_to_whatsapp_id",  // Click tracking ID
-  "headline": "ad headline text",       // Ad creative headline
-  "body": "ad body text"                // Ad creative body
+  // NOTE: no `ref`. Every field here is Meta-assigned; the form shortcode
+  // arrives separately, on the autofill message's text.body.
+  "source_url": "https://fb.me/9nJxtZGUu",
+  "source_id": "120254866237980150",    // ad id when source_type is "ad";
+                                        // a POST id when it is not
+  "source_type": "ad",                  // "ad" | "post" | ...
+  "headline": "Virtual Lab survey",
+  "body": "ad body text",
+  "media_type": "image",
+  "image_url": "https://scontent-....fbcdn.net/...",
+  "ctwa_clid": "AfiIcrJAS9Ee...",       // click tracking ID (Conversions API)
+  "welcome_message": { "text": "..." }
 }
 ```
 
-**Important limitation:** Only the `ref` field is used for form resolution. The extra fields (`source`, `source_id`, `ctwa_clid`, `headline`, `body`) are **preserved in the raw event but not extracted or mapped to state metadata**. Unlike Messenger's `m.me?ref=form.ABC.key.value` links, WhatsApp CTWA ads provide no mechanism to pass targeted metadata (cohort, segment, variant) into the survey state. This is a platform API limitation, not a code gap.
+Earlier revisions of this README showed `"source": "ads"` here. That spelling
+appears in no production payload, hermes type, or test fixture in this repo — it
+looks like a transcription of *Messenger's* referral `source` field (`"ADS"`,
+`"SHORTLINK"`). The real WhatsApp key is `source_type`, value `"ad"`.
+
+**What is and is not mapped into `state.md`:**
+
+- **Form + targeting metadata**: `form`, plus arbitrary `key.value` pairs. Since
+  `v0.0.217` these ride in on the ad's **autofill message** (`text.body`), not on
+  the referral, giving CTWA the same targeting transport as
+  `m.me?ref=form.ABC.key.value`. The older claim that WhatsApp had "no mechanism
+  to pass targeted metadata" is retired — the real constraint is that the token
+  is authored per ad *creative* rather than per click.
+- **`ad_id`**: from `source_id`, but **only when `source_type` says the arrival
+  came from an ad**. On an organic reshare of a page post, `source_id` is a post
+  id; capturing it would write post ids into the ad_id field, where they can
+  never match vlab's `(network, ad_id)` mapping. See
+  `documentation/referral-form-resolution.md` § "Ad identity (`md.ad_id`)".
+- **Not mapped**: `ctwa_clid`, `headline`, `body`, `media_type`, `source_url`,
+  `image_url`, `welcome_message` are preserved on the raw event but do not reach
+  state metadata. (`ctwa_clid` in particular is deliberately deferred.)
 
 **Key:** The referral object is a Meta-level webhook field; it comes ONLY from CTWA ads or explicit Meta referral links, not from plain wa.me links or manual user typing.
 
@@ -336,7 +362,7 @@ A WhatsApp user sending plain text that does NOT match the form ref pattern (e.g
 
 This is intentional: WhatsApp is a customer-service platform, not a broadcast tool. Users must explicitly request a survey via an entry point (CTWA ad, form-ref link, or /synthetic), not stumble into one via casual text. Unlike Messenger (which has a "Get Started" button offering opt-in), WhatsApp conversations are always user-initiated and require explicit entry.
 
-### Metadata Extraction (getMetadata in utils.js:75-105)
+### Metadata Extraction (`getMetadata` in utils.js)
 
 All three entry paths converge on the same `getMetadata(event)` function:
 - Only `event_type: 'conversation_started'` events extract metadata (line 80-87)

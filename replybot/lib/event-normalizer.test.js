@@ -435,6 +435,23 @@ describe('parseMessengerEvent', () => {
     // the JSON-string payload is parsed so the notify validator can match ref
     result.payload.payload.ref.should.equal('notify_ref')
   })
+
+  // md.ad_id (see utils.js "Ad identity" block) reads referral.ad_id directly
+  // for Messenger. That only works if parseMessengerEvent/categorizeMessengerEvent
+  // pass the referral through unmodified -- pin that here, once, at the
+  // normalizer boundary. adIdFromReferral itself is covered exhaustively in
+  // utils.test.js; this is not a re-test of that logic.
+  it('preserves referral.ad_id through to payload.referral untouched', () => {
+    const event = {
+      sender: { id: 'user_123' },
+      recipient: { id: 'page_456' },
+      timestamp: 1234567890,
+      referral: { ref: 'form.ABC', source: 'ADS', type: 'OPEN_THREAD', ad_id: '6041234567890' }
+    }
+    const result = parseMessengerEvent(event, 1234567890)
+    result.event_type.should.equal('conversation_started')
+    result.payload.referral.ad_id.should.equal('6041234567890')
+  })
 })
 
 describe('parseEvent', () => {
@@ -746,6 +763,21 @@ describe('categorizeWhatsAppEvent', () => {
       payload.referral.ctwa_clid.should.equal('AAbbCCddEE')
       payload.referral.source_id.should.equal('120226305854810726')
       payload.referral.headline.should.equal('Take our survey')
+    })
+
+    // md.ad_id's whatsapp gate (see utils.js "Ad identity" block) reads
+    // source_type off the referral to decide whether source_id is trustworthy
+    // as an ad id. That gate is only meaningful if source_type survives
+    // normalization unmodified -- pin that here, once, at the normalizer
+    // boundary. The gate logic itself (post vs ad) is covered exhaustively in
+    // utils.test.js; this is not a re-test of that logic.
+    it('preserves source_type, the field the ad-sourcing gate reads', () => {
+      const { payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'form.ABC' },
+        referral: ctwaReferral
+      })
+      payload.referral.source_type.should.equal('ad')
     })
 
     it('does NOT mutate the inbound referral object', () => {
