@@ -41,6 +41,36 @@ function _group(pairs) {
   return d
 }
 
+// decodeURIComponent, but a token it cannot decode is kept verbatim instead of
+// throwing.
+//
+// This is a containment rule, not a convenience. getMetadata's whole ref parse
+// sits inside one try/catch, so a SINGLE undecodable token used to discard the
+// entire md — including `form` — and the conversation fell through to
+// FALLBACK_FORM, a real survey whose misrouted users look like completions
+// (the VIR-19 shape). One malformed targeting value must not cost a user their
+// survey.
+//
+// The WhatsApp entry gate (event-normalizer.js WHATSAPP_ENTRY_REF) already
+// rejects syntactically malformed escapes (`%zz`, a trailing `%`, a truncated
+// `%2`). It cannot reject the rest: `%FF`, `%C3`, `%80` and `%E2%82` are all
+// well-formed `%XX` octets that decodeURIComponent still throws on, because
+// they are not valid UTF-8 — and UTF-8 well-formedness is not practically
+// expressible as a regex. This is where that residual is absorbed.
+//
+// It also covers the Messenger path, which has the identical exposure today: a
+// single bad escape in an `m.me?ref=` link currently discards the whole md.
+//
+// Failure stays visible rather than silent — the raw `%FF` survives into
+// state.md, so the value is debuggable instead of vanishing.
+function _decodeToken(s) {
+  try {
+    return decodeURIComponent(s)
+  } catch (e) {
+    return s
+  }
+}
+
 function hash(s) {
   return farmhash.fingerprint32(s + '')
 }
@@ -156,7 +186,7 @@ function getMetadata(event) {
 
     if (referral && referral.ref) {
       const pairs = referral.ref.split('.')
-      md = _group(pairs.map(decodeURIComponent))
+      md = _group(pairs.map(_decodeToken))
     }
   } catch (e) {
     md = {}

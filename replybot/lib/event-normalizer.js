@@ -253,8 +253,40 @@ function parseSyntheticEvent(data, timestamp) {
 // vocabulary the machine already understands (see categorizeMessengerEvent).
 // Anchored, full-match pattern for a WhatsApp entry token. STRICT by design: a
 // mid-survey free-text answer that merely contains a ref token must not
-// re-trigger entry, so partial matches are rejected outright.
-const WHATSAPP_ENTRY_REF = /^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i
+// re-trigger entry, so partial matches are rejected outright. Widening the
+// alphabet below does NOT relax that: the pattern stays `^...$` anchored and
+// full-match, which is the property the whole no-accidental-re-entry rule
+// rests on.
+//
+// Each `.`-separated token accepts unreserved characters OR a percent escape.
+// The escape branch exists because WhatsApp has no advertiser-settable `ref`:
+// on CTWA the shortcode and its targeting metadata reach us through the ad's
+// autofill message text, and vlab's ad metadata values contain spaces
+// ("Static English - Girls", "Bauchi State"). vlab percent-encodes them, so
+// without `%` in the alphabet the text failed this gate, no
+// conversation_started was derived, and the arrival silently landed on
+// FALLBACK_FORM — a real survey whose misrouted users look like completions
+// (the VIR-19 shape). Note the decoding half already worked: getMetadata does
+// `_group(pairs.map(decodeURIComponent))`.
+//
+// The escape branch is `%[0-9A-Fa-f]{2}` and NOT a bare `%` on purpose. A bare
+// `%` would admit `form.abc.k.%zz`, a trailing `%`, or a truncated `%2` — all
+// of which make decodeURIComponent THROW. getMetadata swallows that throw
+// (`catch (e) { md = {} }`), so md comes back empty and md.form falls to
+// FALLBACK_FORM: the exact failure this widening exists to remove, in a
+// harder-to-spot form.
+//
+// Caveat, deliberately not solved here: well-formed hex is necessary but NOT
+// sufficient for decodeURIComponent. `%FF`, `%C3`, `%80` and `%E2%82` are all
+// valid `%XX` octets that still throw, because they are not valid UTF-8. A
+// regex cannot practically encode UTF-8 well-formedness, so the residual is
+// handled where it belongs — see the safe per-token decode in
+// typewheels/utils.js, which keeps one bad token from discarding the whole md.
+//
+// Both alternation branches are disjoint (`%` is not in the character class)
+// and tokens are split by a literal `.` that neither branch can produce, so
+// the pattern is unambiguous and backtracks linearly — no ReDoS exposure.
+const WHATSAPP_ENTRY_REF = /^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i
 
 // Returns the `form.<shortcode>[.key.value...]` ref carried by a text message,
 // or null. Shared by both WhatsApp entry paths — the wa.me prefilled-text link

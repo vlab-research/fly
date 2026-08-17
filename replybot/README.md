@@ -282,7 +282,7 @@ looks like a transcription of *Messenger's* referral `source` field (`"ADS"`,
 Fallback path for testing and direct wa.me links. Any plain text message matching a specific pattern triggers survey entry.
 
 **Pattern:** Message body (trimmed) must exactly match
-`/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` (case-insensitive).
+`/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i` (case-insensitive).
 - Valid: `form.flysmoke`, `FORM.FLYSMOKE`, `start form.myform`, ` form.flysmoke ` (surrounding whitespace is trimmed before matching)
 - Valid with metadata (since v0.0.217): `form.flysmoke.creative.3b.gender.men` → `md` gets `creative`/`gender`, matching `m.me?ref=` on Messenger
 - Invalid: `tell me form.flysmoke` (extra text—no match), `form.` (no shortcode)
@@ -292,9 +292,28 @@ tokens keep the case as typed. An odd token count (`form.ABC.creative`) matches
 deliberately — `_group` leaves the dangling key `undefined` rather than throwing,
 so the survey still starts.
 
-**Encoding caveat for link authors:** raw `&` and `#` inside a `wa.me?text=`
-value silently truncate the prefilled message. Percent-encode them (`%26`, `%23`)
-if a targeting value could ever contain one.
+**Percent-encoded values are supported.** Targeting values with spaces travel
+encoded — `form.ABC.creative.Static%20English%20-%20Girls` →
+`creative: 'Static English - Girls'`. This matters most on CTWA, where there is
+no advertiser-settable `ref` and the autofill text is the only carrier.
+
+The gate accepts only well-formed escapes (`%[0-9A-Fa-f]{2}`), never a bare `%`:
+`%zz`, a trailing `%`, or a truncated `%2` would make `decodeURIComponent`
+throw, `getMetadata` would swallow it (`catch (e) { md = {} }`), and the user
+would silently land on `FALLBACK_FORM`.
+
+Well-formed hex is necessary but not sufficient — `%FF`, `%C3`, `%80` are valid
+octets that still throw, because they are not valid UTF-8. `getMetadata` decodes
+**per token** (`_decodeToken`) and keeps an undecodable token raw, so one bad
+value can no longer discard the whole `md` (including `form`) and cost the user
+their survey.
+
+**Encoding caveats for link and ad authors:**
+- Raw `&` and `#` inside a `wa.me?text=` value silently truncate the prefilled
+  message. Percent-encode them (`%26`, `%23`).
+- Python's `quote()` never encodes `.`, `-`, `_` or `~`. A `.` in a value
+  **corrupts the pair structure** (it reads as a separator), and `~` is not in
+  the gate's alphabet so the match fails outright. Encode or strip both.
 
 **Flow:**
 1. User sends plain text via wa.me link (e.g., `https://wa.me/1023456789?text=form.flysmoke`), manual SMS-like typing, or smoke testing

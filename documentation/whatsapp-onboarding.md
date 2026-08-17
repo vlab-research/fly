@@ -120,7 +120,7 @@ Three ways to start a survey, cheapest-to-set-up first. See
 **1. Bare-text form ref — no ad, no Meta setup beyond the webhook.** Text
 `form.<shortcode>` to the number from any phone (or open
 `wa.me/<number>?text=form.<shortcode>`). The normalizer full-matches
-`/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` and synthesizes
+`/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i` and synthesizes
 the same `conversation_started` event a real referral produces; trailing
 `.key.value` pairs ride along into `state.md`. This is the practical end-to-end
 test: it exercises Meta → hermes → Kafka → replybot → message-worker → Cloud
@@ -208,7 +208,7 @@ once a CTWA ad exists, and worth doing before building around per-creative refs.
 bare-text pattern in `replybot/lib/event-normalizer.js` is:
 
 ```js
-/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i
+/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i
 ```
 
 The **whole** matched ref body is forwarded as `payload.referral.ref`; parsing

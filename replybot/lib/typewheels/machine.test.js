@@ -3533,6 +3533,92 @@ describe('WhatsApp CTWA ad entry resolves the form from the autofill message', (
   })
 })
 
+// WHATSAPP_ENTRY_REF percent-escape widening, end-to-end: raw webhook ->
+// parseEvent (event-normalizer) -> getState (machine), not just the pattern
+// or getMetadata in isolation. vlab's targeting metadata contains spaces and
+// punctuation ("Static English - Girls", "Bauchi State"); on WhatsApp CTWA
+// there is no advertiser-settable `ref`, so vlab percent-encodes those values
+// into the ad's autofill message text. See event-normalizer.js
+// (WHATSAPP_ENTRY_REF) and typewheels/utils.js (_decodeToken) for the two
+// halves of this fix.
+describe('WhatsApp percent-encoded metadata resolves end-to-end through getState', () => {
+  const ctwaAdReferral = {
+    source_url: 'https://fb.me/3cr4Wqqkv',
+    source_id: '120226305854810726',
+    source_type: 'ad',
+    headline: 'Take our survey',
+    body: 'Tap to start',
+    media_type: 'image',
+    ctwa_clid: 'AAbbCCddEE'
+  }
+
+  const rawWa = body => ({
+    source: 'whatsapp',
+    from: WA_USER_ID,
+    phone_number_id: WA_PHONE_NUMBER_ID,
+    timestamp: 1542123799219,
+    type: 'text',
+    text: { body }
+  })
+
+  it('round-trips a percent-encoded value with spaces and a literal hyphen', () => {
+    const state = getState([rawWa('form.hpvintrotriple.creative.Static%20English%20-%20Girls')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.creative.should.equal('Static English - Girls')
+  })
+
+  it('decodes multiple percent-encoded key.value pairs', () => {
+    const state = getState([rawWa('form.hpvintrotriple.state.Bauchi%20State.region.South%20East')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.state.should.equal('Bauchi State')
+    state.md.region.should.equal('South East')
+  })
+
+  it('decodes the same percent-encoded ref arriving as a CTWA referral (the ad path, not wa.me)', () => {
+    const rawCtwa = {
+      ...rawWa('form.hpvintrotriple.creative.Static%20English%20-%20Girls'),
+      referral: ctwaAdReferral
+    }
+    const state = getState([rawCtwa].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.creative.should.equal('Static English - Girls')
+  })
+
+  // A syntactically malformed escape is rejected by WHATSAPP_ENTRY_REF itself,
+  // before decodeURIComponent is ever reached. The text then falls through
+  // exactly like any other non-matching bare text: no referred-form entry, so
+  // the conversation lands on FALLBACK_FORM instead of the advertised form.
+  it('does not start the referred form when the ref contains a malformed escape (%zz)', () => {
+    const state = getState([rawWa('form.hpvintrotriple.k.%zz')].map(parseEvent))
+
+    state.md.form.should.equal('fallback')
+    state.md.form.should.not.equal('hpvintrotriple')
+  })
+
+  // The containment case: %FF is a well-formed %XX escape (passes the
+  // pattern) but is not valid UTF-8, so decodeURIComponent throws on it.
+  // Before _decodeToken, that throw was uncaught within getMetadata's
+  // try/catch around the WHOLE ref parse, so one bad token discarded the
+  // entire md -- including `form` -- and the user lost their survey to
+  // FALLBACK_FORM. Now the bad token survives raw and the rest of the ref,
+  // `form` especially, still resolves normally.
+  it('keeps a malformed-UTF-8-but-well-formed escape raw without losing the form', () => {
+    const state = getState([rawWa('form.hpvintrotriple.k.%FF')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.k.should.equal('%FF')
+  })
+
+  it('leaves plain unencoded wa.me entry unaffected', () => {
+    const state = getState([rawWa('form.hpvintrotriple')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+  })
+})
+
 // md.ad_id — see the "Ad identity" block comment in lib/typewheels/utils.js.
 // vlab keys ad attribution on this opaque id and owns the (network, ad_id)
 // mapping itself; fly's only job is to capture it off the referral and carry

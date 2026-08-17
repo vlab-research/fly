@@ -547,7 +547,7 @@ User clicks a CTWA ad. The inbound webhook carries `messages[].referral`, which 
 
 **Entry Path 2: Bare-Text Reference Token (wa.me links, manual typing, smoke tests)**
 
-Message body matches the strict pattern `/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` (case-insensitive, full-match after trim). Event-normalizer's `categorizeWhatsAppEvent` tests the text when there is no referral object — and, since `v0.0.218`, also when a referral is present but carries no usable `ref`; both share one matcher. On match, synthesizes `event_type: 'conversation_started'` with the whole matched ref, so trailing `.key.value` pairs reach `state.md` exactly as on Messenger. Survey starts with no-retake enforcement.
+Message body matches the strict pattern `/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i` (case-insensitive, full-match after trim). Event-normalizer's `categorizeWhatsAppEvent` tests the text when there is no referral object — and, since `v0.0.218`, also when a referral is present but carries no usable `ref`; both share one matcher. On match, synthesizes `event_type: 'conversation_started'` with the whole matched ref, so trailing `.key.value` pairs reach `state.md` exactly as on Messenger. Survey starts with no-retake enforcement.
 
 Valid patterns: `form.flysmoke`, `FORM.FLYSMOKE`, `start form.myform`, `START FORM.MYFORM`
 

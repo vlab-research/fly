@@ -98,6 +98,22 @@ describe('getMetadata', () => {
     const md = u.getMetadata(syntheticReferral)
     md.platform.should.equal('messenger')
   })
+
+  // _decodeToken containment: %FF is a well-formed %XX escape but not valid
+  // UTF-8, so decodeURIComponent throws on it. Without _decodeToken, that
+  // throw propagated out of the pairs.map(...) inside getMetadata's
+  // try/catch around the WHOLE ref parse, discarding md entirely -- including
+  // `form` -- and falling to FALLBACK_FORM. Now only the bad token is kept
+  // raw; the rest of the ref, `form` especially, still resolves.
+  it('keeps a malformed-UTF-8-but-well-formed escape raw without losing the form', () => {
+    const badEscapeReferral = {
+      ...referral,
+      payload: { ...referral.payload, referral: { ref: 'form.FOO.k.%FF' } }
+    }
+    const md = u.getMetadata(badEscapeReferral)
+    md.form.should.equal('FOO')
+    md.k.should.equal('%FF')
+  })
 })
 
 describe('eventPlatform', () => {

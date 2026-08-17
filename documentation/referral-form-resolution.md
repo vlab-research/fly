@@ -570,7 +570,7 @@ where one ad backs unlimited `m.me?ref=` variants.
 ### 2. Bare-Text Entry Fallback (wa.me links, manual typing)
 
 WhatsApp users can start a survey by typing plain text matching
-`/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i`
+`/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i`
 (case-insensitive, full-match):
 
 ```
@@ -586,6 +586,47 @@ capability as `m.me?ref=`. The pattern stays anchored/full-match, so a mid-surve
 free-text answer still cannot re-trigger entry. An odd token count
 (`form.ABC.creative`) matches deliberately and leaves the dangling key
 `undefined` rather than throwing.
+
+#### Percent-encoded metadata values
+
+Real targeting values contain spaces — `Static English - Girls`, `Bauchi State`,
+`South East`. They travel **percent-encoded**:
+
+```
+form.ABC123.creative.Static%20English%20-%20Girls.state.Bauchi%20State
+  → { form: 'ABC123', creative: 'Static English - Girls', state: 'Bauchi State' }
+```
+
+`getMetadata` has always decoded (`_group(pairs.map(...))` over
+`decodeURIComponent`); what was missing was the **entry gate** — `%` was not in
+the character class, so an encoded autofill message failed to match, no
+`conversation_started` was derived, and the arrival landed on `FALLBACK_FORM`.
+This matters most on CTWA, where there is no advertiser-settable `ref` and the
+autofill text is the only carrier.
+
+The gate accepts only **well-formed** escapes (`%[0-9A-Fa-f]{2}`), never a bare
+`%`. A bare `%` would admit `%zz`, a trailing `%`, or a truncated `%2` — each of
+which makes `decodeURIComponent` throw. `getMetadata` swallows that throw
+(`catch (e) { md = {} }`), so the whole `md` would come back empty and the user
+would land on `FALLBACK_FORM` anyway: the same silent misroute, in a
+harder-to-spot form. Malformed escapes are therefore rejected at the gate and
+simply never start a conversation.
+
+**Well-formed hex is necessary but not sufficient.** `%FF`, `%C3`, `%80` and
+`%E2%82` are all valid `%XX` octets that `decodeURIComponent` still throws on,
+because they are not valid UTF-8 — and UTF-8 well-formedness is not practically
+expressible as a regex. That residual is absorbed in `getMetadata` instead: it
+decodes **per token** via `_decodeToken`, which returns the raw token when
+decoding fails. So one malformed value can no longer discard the entire `md`
+(including `form`) and cost the user their survey — the form still resolves and
+the bad value survives verbatim (`k: '%FF'`), visible and debuggable rather than
+vanished. This also covers the Messenger path, which had the identical exposure.
+
+**For link and ad authors:** Python's `quote()` never encodes `.`, `-`, `_` or
+`~`. A `.` in a value will **corrupt the pair structure** (it reads as a
+separator), and `~` is not in the gate's alphabet and will fail the match
+outright. Encode or strip both before building the ref. The older caveat about
+raw `&` and `#` truncating a `wa.me?text=` link still applies.
 
 **Flow:**
 1. Hermes receives webhook, stamps and publishes to Kafka
@@ -755,7 +796,7 @@ proves less than it appears to.
 - **Hermes webhook handler**: `hermes/src/handlers.rs:handle_whatsapp()` (line 124)
 - **Hermes event stamping**: `hermes/src/event.rs:stamp_whatsapp_event()` (line 73-97)
 - **Event normalization**: `replybot/lib/event-normalizer.js:categorizeWhatsAppEvent()` (line 254-395)
-- **Bare-text pattern**: `/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` (event-normalizer.js)
+- **Bare-text pattern**: `/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i` (event-normalizer.js)
 - **Pattern tests**: `replybot/lib/event-normalizer.test.js:567-651`
 
 **Ad identity:**

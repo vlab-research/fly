@@ -826,6 +826,116 @@ describe('categorizeWhatsAppEvent', () => {
       should.not.exist(payload.referral.ref)
     })
   })
+
+  // WHATSAPP_ENTRY_REF widening: percent-encoded octets in the alphabet.
+  //
+  // WhatsApp CTWA has no advertiser-settable `ref`, so vlab's targeting
+  // metadata (which contains spaces and punctuation, e.g. "Static English -
+  // Girls", "Bauchi State") arrives percent-encoded in the ad's autofill
+  // message text. Before this widening, `%` was not in the token character
+  // class, so any such text failed the gate entirely and the arrival
+  // silently fell to FALLBACK_FORM.
+  describe('percent-encoded metadata values', () => {
+    it('accepts a percent-encoded value with spaces and a literal hyphen', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.creative.Static%20English%20-%20Girls' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.abc.creative.Static%20English%20-%20Girls')
+    })
+
+    it('accepts multiple percent-encoded key.value pairs', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.state.Bauchi%20State.region.South%20East' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.abc.state.Bauchi%20State.region.South%20East')
+    })
+
+    it('accepts a multi-byte percent-encoded escape sequence', () => {
+      // %C3%A9 is the UTF-8 encoding of 'é' — two escapes back to back within
+      // a single token. The pattern only checks well-formed %XX shape; actual
+      // decoding (and UTF-8 validity) happens downstream in getMetadata.
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.k.%C3%A9' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.abc.k.%C3%A9')
+    })
+
+    it('still matches plain unencoded refs exactly as before', () => {
+      const cases = ['form.abc', 'FORM.ABC', 'start form.abc', 'form.abc.creative.3b.gender.men']
+      cases.forEach(body => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body } })
+        event_type.should.equal('conversation_started')
+      })
+    })
+
+    it('preserves shortcode case exactly as typed, unaffected by the widened alphabet', () => {
+      const { payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.AbCdEf.creative.Static%20English' } })
+      payload.referral.ref.should.equal('form.AbCdEf.creative.Static%20English')
+    })
+
+    // These cases matter most: they prove the pattern rejects malformed
+    // escapes BEFORE decodeURIComponent is ever reached. A bare `%` in the
+    // alphabet (instead of the strict `%[0-9A-Fa-f]{2}`) would let `%zz`, a
+    // bare trailing `%`, or a truncated `%2` through the gate; each of those
+    // makes decodeURIComponent throw inside getMetadata's try/catch, which
+    // swallows the error and returns an EMPTY md — so md.form falls to
+    // FALLBACK_FORM. That is the exact silent misroute this widening exists
+    // to remove; admitting these strings back in would just move the failure
+    // one layer deeper and make it harder to spot.
+    describe('malformed escapes are rejected by the pattern itself', () => {
+      it('rejects a non-hex escape (%zz)', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.k.%zz' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects a bare trailing % with nothing after it', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.k.%' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects a truncated escape (%2)', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.k.%2' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects a trailing % on the shortcode itself', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc%' } })
+        event_type.should.equal('user_text')
+      })
+    })
+
+    // Anchoring is unweakened by the widened alphabet: full-match/anchored
+    // strictness still rejects any text that merely contains a ref token,
+    // including one with a percent-encoded value inside it.
+    describe('anchoring is still strict with the widened alphabet', () => {
+      it('rejects leading text before the ref', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'tell me form.abc' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects a mid-survey free-text answer that contains an encoded ref', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'I think the answer is form.abc.creative.Static%20English' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects form. with no shortcode', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects an invalid character in the shortcode (@)', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc@def' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects a double dot (empty token)', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC..creative' } })
+        event_type.should.equal('user_text')
+      })
+
+      it('rejects an unencoded literal space inside a token', () => {
+        const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.k.a b' } })
+        event_type.should.equal('user_text')
+      })
+    })
+  })
 })
 
 describe('parseWhatsAppEvent', () => {

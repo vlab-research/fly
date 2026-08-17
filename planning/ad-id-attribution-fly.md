@@ -116,6 +116,50 @@ fix exists on the unmerged `feature/exporter-integration-tests` branch (commit
 `07ff6c4e`). Captured as a `strict=True` xfail in `test_exporter.py` so the gap
 stays visible and flips to XPASS the moment that fix lands.
 
+## Follow-up: percent-encoded metadata in the WhatsApp entry gate
+
+vlab's ad metadata values contain spaces (`Static English - Girls`,
+`Bauchi State`). On CTWA there is no advertiser-settable `ref`, so those values
+reach fly through the ad's autofill message text — which `WHATSAPP_ENTRY_REF`
+rejected, because `%` was not in its character class. The arrival fell through
+to `FALLBACK_FORM`: the VIR-19 shape again. Decoding already worked
+(`_group(pairs.map(...))`); only the gate was wrong.
+
+Final pattern (`replybot/lib/event-normalizer.js`):
+
+```
+/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i
+```
+
+Still anchored and full-match — widening the alphabet must not weaken the
+property that stops a mid-survey free-text answer from re-triggering entry.
+Both alternation branches are disjoint (`%` is not in the class) and tokens are
+split by a literal `.` neither branch can produce, so matching is unambiguous
+and linear: no ReDoS exposure.
+
+**Why well-formed escapes only, never a bare `%`:** `%zz`, a trailing `%`, and a
+truncated `%2` all make `decodeURIComponent` throw; `getMetadata` swallows the
+throw and falls to `FALLBACK_FORM`, reintroducing the bug in a subtler form.
+
+**Why that alone was not enough.** Syntactic well-formedness is *necessary but
+not sufficient*: `%FF`, `%C3`, `%80` and `%E2%82` are all valid `%XX` octets
+that still throw, because they are not valid UTF-8. UTF-8 well-formedness is not
+practically expressible as a regex, so the residual is absorbed in
+`getMetadata`, which now decodes **per token** through `_decodeToken` and keeps
+an undecodable token verbatim. One malformed targeting value can no longer
+discard the entire `md` — `form` included — and cost a user their survey; the
+bad value lands as raw `%FF`, visible and debuggable. This also closes the
+identical, pre-existing exposure on the Messenger `m.me?ref=` path, where a
+single bad escape currently nukes the whole conversation into `FALLBACK_FORM`.
+
+**Interop gap for the vlab side:** Python's `quote()` never encodes `.`, `-`,
+`_` or `~`. A `.` inside a value corrupts the pair structure (it reads as a
+separator), and `~` is outside the gate's alphabet so the match fails outright.
+vlab must encode or strip both when building refs.
+
+**The mirrored copy of this pattern in vlab's tests is now stale** and must be
+re-synced to the pattern above.
+
 ## Note for whoever picks this up
 
 `replybot/lib/typewheels/events.test.js` is a **fixtures module**, not a test
