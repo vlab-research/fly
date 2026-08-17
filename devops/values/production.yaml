@@ -795,10 +795,25 @@ exodus:
         memory: 64Mi
 
 message-worker:
-  # Scaled up for the first time in this release. replybot v0.0.210-wa has NO
-  # send path of its own — it publishes commands here — so a worker at 0
-  # replicas means production sends nothing at all, silently.
-  replicaCount: 1
+  # replybot v0.0.210-wa has NO send path of its own — it publishes commands
+  # here — so a worker at 0 replicas means production sends nothing at all,
+  # silently.
+  #
+  # 6 replicas == the partition count of vlab-prod-commands. One pod per
+  # partition is the maximum useful parallelism; going higher just leaves pods
+  # idle, and going higher usefully requires adding partitions first.
+  #
+  # Scale HERE, not via NUM_WORKERS (which stays 1 — see the note on that env
+  # var below). Commands are keyed by user_id (replybot/lib/index.js), so a
+  # user's messages sit on one partition, owned by one pod, processed by one
+  # worker: order is preserved end to end. Replicas keep that property;
+  # in-process workers do not.
+  #
+  # Background: planning/message-worker-command-lag.md (2026-08-17) — a bulk
+  # utility-message campaign drove ~520 commands of lag and multi-minute
+  # delivery delays for live surveys in other studies, because one serial
+  # consumer drained a six-partition topic.
+  replicaCount: 6
   image:
     repository: ghcr.io/vlab-research/message-worker
     tag: *vmessageworker
@@ -841,6 +856,14 @@ message-worker:
     # means every WhatsApp send fails while Messenger keeps working.
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
+    # MUST stay 1. This is the burrow pool's goroutine count (the code default
+    # is 100). Burrow dispatches jobs to a shared channel with no key affinity,
+    # so N>1 lets two commands for the SAME user send concurrently and arrive
+    # out of order — a survey question before its own preamble.
+    #
+    # To add outbound throughput, raise replicaCount above instead: partitions
+    # are keyed by user_id, so more pods parallelise across users while keeping
+    # each user serial.
     value: "1"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"

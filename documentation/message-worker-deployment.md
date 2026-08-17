@@ -116,8 +116,8 @@ kubectl exec kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 | `KAFKA_AUTO_OFFSET_RESET` | `latest` | Only process new commands |
 | `DATABASE_URL` | `postgresql://chatroach@gbv-cockroachdb-public:26257/chatroach?sslmode=disable` | For token lookup |
 | `BOTSERVER_URL` | `http://gbv-botserver` | For error reporting (synthetic events) |
-| `FACEBOOK_GRAPH_URL` | `https://graph.facebook.com/v22.0` | Must match replybot's version |
-| `NUM_WORKERS` | `1` | Single worker thread for initial deployment |
+| `FACEBOOK_GRAPH_URL` | `https://graph.facebook.com/v25.0` | Must match replybot's version |
+| `NUM_WORKERS` | `1` | **Must stay 1** — in-process goroutines have no key affinity and would reorder a user's messages. Scale `replicaCount` instead. See [Scaling](#scaling) below. |
 | `MAX_RETRY_ATTEMPTS` | `3` | Exponential backoff: 100ms → 200ms → 400ms |
 | `HEALTH_PORT` | `8081` | Health endpoint (/healthz) |
 
@@ -138,6 +138,45 @@ resources:
     cpu: 500m
     memory: 512Mi
 ```
+
+## Scaling
+
+Outbound throughput scales with **replicas**, never with `NUM_WORKERS`.
+
+Replybot keys every command by `user_id` (`replybot/lib/index.js`), so all of one
+user's commands land on a single partition of `vlab-prod-commands` and are
+delivered in order. Two ways to add parallelism, only one of which preserves
+that:
+
+| Lever | Effect | Ordering |
+|---|---|---|
+| `replicaCount` | Partitions spread across pods | **Safe** — a partition still has exactly one consumer, running one worker |
+| `NUM_WORKERS` | Goroutines inside one pod | **Breaks it** — burrow dispatches to a shared job channel with no key affinity, so two commands for the same user run concurrently |
+
+A reordered send is not a cosmetic bug: it can put a survey question ahead of the
+preamble that explains it, which corrupts the response.
+
+**The ceiling is the partition count.** `vlab-prod-commands` has 6 partitions, so
+6 replicas is maximum useful parallelism — a 7th pod idles. Going beyond that
+means adding partitions first.
+
+Production runs 6 replicas as of 2026-08-17.
+
+### Rebalance replays duplicate sends
+
+Burrow builds a rebalance callback that drains in-flight work and commits before
+surrendering partitions (`pool.go:300-347`), but `cmd/message-worker/main.go`
+subscribes with `SubscribeTopics(topics, nil)` — the callback is never wired up,
+and its `partitions assigned` / `partitions revoked` log lines never appear.
+
+Consequence: on **any** rebalance — scaling, a rolling deploy, a pod restart —
+offsets processed since the last commit are replayed by the partition's new
+owner, and those commands send twice. With `CommitInterval: 5s` that is up to
+~5 seconds of duplicate outbound messages.
+
+This predates multi-replica operation (a single pod already replayed on every
+deploy), but rebalances are more frequent now. The fix belongs in the `burrow`
+repo: expose the callback so `SubscribeTopics` can pass it instead of `nil`.
 
 ## Token Store Compatibility
 
@@ -238,7 +277,11 @@ Graceful shutdown: preStop hook sleeps 15s to allow Kafka offset commits before 
 
 2. **FACEBOOK_GRAPH_URL was v18.0:** The message-worker config had `v18.0` while replybot uses `v22.0`. Fixed to `v22.0`. Using different API versions can cause subtle behavior differences.
 
-3. **NUM_WORKERS was 100:** Configured for 100 goroutines but the initial deployment uses 1 worker thread. Fixed to `1` for safety — can scale up later.
+3. **NUM_WORKERS was 100:** Configured for 100 goroutines but the initial deployment uses 1 worker thread. Fixed to `1` for safety.
+
+   Superseded 2026-08-17: `1` is now permanent, not provisional. "Can scale up
+   later" was wrong — raising it breaks per-user ordering. Scale replicas
+   instead; see [Scaling](#scaling).
 
 4. **go.work did not include message-worker:** The Go workspace file didn't list `./message-worker`, causing `go test ./...` to fail. Added to go.work.
 
