@@ -140,10 +140,32 @@ dinersclub:
       value: "dinersclub"
     - name: DINERSCLUB_BATCH_SIZE
       value: "2"
+    # THESE THREE ARE A BUDGET, NOT INDEPENDENT KNOBS. spine hardcodes
+    # max.poll.interval.ms=300s; if one batch outruns that, Kafka evicts the
+    # group, the uncommitted batch is redelivered, and dinersclub crash-loops
+    # on it forever making zero progress. That happened on 2026-08-17 with the
+    # old 2m/2m values and no provider timeout at all.
+    #
+    # Worst case for a batch (POOL_SIZE == BATCH_SIZE, so messages run
+    # concurrently and the batch costs about what one message costs):
+    #   auth on cache miss     <=  30s  (1 provider call)
+    #   Payout backoff         <=  45s elapsed + 60s last attempt (Reloadly
+    #                                   DoJob = FindOperator + Topup = 2 calls)
+    #   sendResult backoff     <=  45s elapsed + one in-cluster hermes call
+    #   -------------------------------------------------------------
+    #   ~180s, leaving headroom under the 300s eviction deadline.
+    #
+    # Raising any of these, or BATCH_SIZE above POOL_SIZE, must be re-checked
+    # against that 300s ceiling.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "2m"
+      value: "45s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "2m"
+      value: "45s"
+    # Hard ceiling on ONE outbound provider HTTP call. RETRY_PROVIDER cannot do
+    # this job: backoff only checks elapsed time between attempts, so a single
+    # hung call is unbounded without this.
+    - name: DINERSCLUB_PROVIDER_TIMEOUT
+      value: "30s"
     - name: DINERSCLUB_POOL_SIZE
       value: "2"
     - name: DINERSCLUB_PROVIDERS

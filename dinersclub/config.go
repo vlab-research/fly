@@ -28,6 +28,14 @@ type Config struct {
 	PoolSize            int           `env:"DINERSCLUB_POOL_SIZE,required"`
 	Providers           []string      `env:"DINERSCLUB_PROVIDERS" envSeparator:","`
 	BackOffRandomFactor float64       `env:"BACK_OFF_RANDOM_FACTOR" envDefault:"0.5"`
+
+	// Hard timeout on a single outbound provider HTTP call. NOT the same as
+	// RetryProvider, which bounds elapsed time *across* backoff attempts and
+	// therefore cannot bound an attempt that never returns. Defaulted rather
+	// than required so an unset environment still gets a bound -- an unbounded
+	// provider call wedges the whole consumer (see README, "Why provider calls
+	// have a hard timeout").
+	ProviderTimeout time.Duration `env:"DINERSCLUB_PROVIDER_TIMEOUT" envDefault:"30s"`
 }
 
 func getConfig() *Config {

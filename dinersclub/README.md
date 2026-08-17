@@ -406,9 +406,34 @@ DINERSCLUB_PROVIDERS=fake,reloadly,giftcard,http,dingconnect
 |----------|---------|----------|-------------|
 | DINERSCLUB_PROVIDERS | - | Yes | Comma-separated list of enabled providers (e.g., `fake,reloadly,http`) |
 | DINERSCLUB_POOL_SIZE | - | Yes | Maximum concurrent payment jobs |
-| DINERSCLUB_RETRY_PROVIDER | - | Yes | Max duration to retry provider calls with exponential backoff |
-| DINERSCLUB_RETRY_BOTSERVER | - | Yes | Max duration to retry botserver calls with exponential backoff |
+| DINERSCLUB_RETRY_PROVIDER | - | Yes | Max **elapsed** duration to retry provider calls with exponential backoff |
+| DINERSCLUB_RETRY_BOTSERVER | - | Yes | Max **elapsed** duration to retry botserver calls with exponential backoff |
+| DINERSCLUB_PROVIDER_TIMEOUT | 30s | No | Hard timeout on a **single** outbound provider HTTP call. Not the same thing as the retry budgets — see below |
 | BACK_OFF_RANDOM_FACTOR | 0.5 | No | Randomization factor for backoff (0.0 to 1.0) |
+
+### These are a budget, not independent knobs
+
+`spine` hardcodes `max.poll.interval.ms = 300000` (5 min) in `kafka.go`, and runs
+with `enable.auto.commit = false`. If processing one batch outruns 300s, Kafka
+evicts the consumer from the group, the in-flight batch is **never committed**,
+and on restart the service reads the *same* messages and hangs again — a crash
+loop that makes zero progress while lag climbs. See "Provider call hangs / crash
+loop" under Common Issues.
+
+Worst case for a batch, when `POOL_SIZE == BATCH_SIZE` (messages run
+concurrently, so a batch costs roughly what one message costs):
+
+```
+auth on cache miss    <= PROVIDER_TIMEOUT                (1 call)
+Payout backoff        <= RETRY_PROVIDER  + 2x PROVIDER_TIMEOUT
+                                  (Reloadly DoJob = FindOperator + Topup)
+sendResult backoff    <= RETRY_BOTSERVER + one in-cluster hermes call
+```
+
+At the current production values (45s / 45s / 30s) that is ~180s, leaving
+headroom under the 300s ceiling. **Raising any of these — or setting
+`BATCH_SIZE` above `POOL_SIZE`, which makes the batch serial — must be
+re-checked against that ceiling.**
 
 ### Cache Configuration
 
@@ -711,6 +736,50 @@ The HTTP provider couldn't connect to the API. Check:
 3. API server is running
 4. Consider increasing `DINERSCLUB_RETRY_PROVIDER` if flaky
 
+### Provider call hangs / crash loop ("Group partition assignment lost")
+
+Signature — the pod restarts on a near-exact 5-minute cycle, and the consumer
+group's committed offset never moves while lag climbs:
+
+```
+Consumed 2 messages as batch from Kafka
+%4|...|MAXPOLL|rdkafka#consumer-1| Application maximum poll interval (300000ms)
+      exceeded by 228ms (adjust max.poll.interval.ms ...): leaving group
+DinersClub failed from Kafka error: Local: Group partition assignment lost
+```
+
+This is **not** a Kafka fault. A provider call is hanging long enough that the
+batch outruns spine's 300s poll interval; Kafka evicts the group, the batch is
+never committed, `monitor()` calls `log.Fatalf`, and the restarted pod re-reads
+the identical messages and hangs again. It cannot self-heal — the alert
+`KafkaConsumerStuck` fires for it.
+
+Confirm and diagnose:
+
+```bash
+# Is the offset actually frozen? (LAG grows, CURRENT-OFFSET does not move)
+kubectl exec -n default <kafka-pod> -c kafka -- env KAFKA_OPTS="" JMX_PORT="" \
+  /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:29092 \
+  --group dinersclub --describe
+
+# Which messages are wedging it? Read at the frozen CURRENT-OFFSET.
+kubectl exec -n default <kafka-pod> -c kafka -- env KAFKA_OPTS="" JMX_PORT="" \
+  /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:29092 \
+  --topic vlab-prod-payment --partition 0 --offset <CURRENT-OFFSET> --max-messages 3
+```
+
+> `KAFKA_OPTS=""  JMX_PORT=""` is required — without it the bundled JMX
+> Prometheus agent tries to re-bind the exporter port and the CLI dies with
+> `java.net.BindException: Address already in use` before it does anything.
+
+The `--describe` output also tells you whether it's one poison message or a
+whole provider: a single frozen partition points at one message, both partitions
+frozen points at the upstream provider being down.
+
+Fix the timeout budget (above) rather than deleting the messages — the payments
+are real, and the topic retains 31 days, so they can be replayed once the
+provider recovers.
+
 ### "Botserver failed from Kafka error"
 
 Kafka consumer encountered an error. Check:
@@ -720,6 +789,34 @@ Kafka consumer encountered an error. Check:
 4. Network/firewall allows Kafka connections
 
 ## Architecture Notes
+
+### Why provider calls have a hard timeout
+
+`reloadly.NewTopups()` and `reloadly.NewGiftCards()` both return a `Service`
+carrying `http.DefaultClient`, which has **no timeout** — a call that never
+answers blocks forever. `NewReloadlyProvider` / `NewGiftCardsProvider` therefore
+overwrite `svc.Client` with one bounded by `DINERSCLUB_PROVIDER_TIMEOUT`.
+
+The retry budget cannot do this job. `backoff.Retry` consults `MaxElapsedTime`
+only *between* attempts, so a single attempt that never returns is unbounded no
+matter how small `DINERSCLUB_RETRY_PROVIDER` is. `checkCache`'s `provider.Auth()`
+call isn't inside a backoff at all, so before this change it was unbounded too.
+
+On 2026-08-17 that combination took production down: Reloadly stopped answering
+during a ~230-payout burst to Nigeria, batches outran the 300s poll interval,
+and dinersclub crash-looped on the same two uncommitted messages for ~50 minutes.
+
+**Do not remove these client overrides**, and prefer a bounded client (or a
+`context.WithTimeout`, as `http_provider.go` and `dingconnect.go` do) for any new
+provider. A provider that can hang does not just fail its own payment — it wedges
+the entire consumer.
+
+> **Payment-safety caveat:** a timeout fires without telling you whether the
+> topup was actually executed, and the backoff will then retry it. Reloadly
+> dedupes on `customIdentifier`, but the topups provider only forwards one when
+> the event supplies `custom_identifier` — most events don't — and the giftcards
+> provider generates a *fresh* UUID per call, which does not dedupe either.
+> Sending a stable, event-derived identifier is open work.
 
 ### Why providers are recreated each request
 

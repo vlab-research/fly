@@ -136,10 +136,14 @@ dinersclub:
       value: "dinersclub"
     - name: DINERSCLUB_BATCH_SIZE
       value: "1"
+    # Keep in step with production -- see the budget comment there. spine's
+    # 300s max.poll.interval.ms is the same in both environments.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "2m"
+      value: "45s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "2m"
+      value: "45s"
+    - name: DINERSCLUB_PROVIDER_TIMEOUT
+      value: "30s"
     - name: DINERSCLUB_POOL_SIZE
       value: "1"
     - name: DINERSCLUB_PROVIDERS
