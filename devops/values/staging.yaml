@@ -332,8 +332,6 @@ replybot:
   env:
   - name: FAKE
     value: "NOTHING"
-  - name: CHATBASE_BACKEND
-    value: "@vlab-research/chatbase-postgres"
   - name: CHATBASE_DATABASE
     value: "chatroach"
   - name: CHATBASE_USER
@@ -370,6 +368,18 @@ replybot:
     value: "https://graph.facebook.com/v25.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
+  # The `link_tracking` and `moviehouse` field types — see the matching block in
+  # production.yaml for why these are public hostnames rather than cluster-internal
+  # service names. Staging MUST carry its own values: the whole point of replybot
+  # owning the URL is that the environment decides where it points, so a staging
+  # survey that reached production's linksniffer would report clicks into the wrong
+  # environment's event stream.
+  - name: LINKSNIFFER_URL
+    value: "https://staging.links.vlab.digital"
+  # Netlify serves the `staging` branch of site `virtuallab-videos` at this
+  # branch-deploy hostname.
+  - name: MOVIEHOUSE_URL
+    value: "https://staging--virtuallab-videos.netlify.app"
   - name: STATE_STORE_LIMIT
     value: "30000"
   - name: NUM_SPINES
@@ -613,6 +623,29 @@ hermes:
     # WHATSAPP_VERIFY_TOKEN comes from the gbv-bot-envs secret via envFrom
     # (same pattern as VERIFY_TOKEN). Until the key is added to the secret,
     # GET /whatsapp verification returns 401.
+    #
+    # THE 400 GATE for the /synthetic conversation triple (user, account_id,
+    # platform) — see documentation/event-envelope.md and
+    # planning/conversation-identity.md §7.3.1.
+    #
+    # "false": hermes accepts a synthetic POST that is missing account_id or
+    # platform, stamps whatever it can derive, and logs the gap. "true": it
+    # returns 400 and produces nothing.
+    #
+    # Staging is where this gets flipped to "true" FIRST, once every poster is
+    # deployed here — that is the rehearsal for the production flip, and the
+    # place a missed poster should be discovered. Declared explicitly rather
+    # than left to hermes' default so the flip is an edit to this file plus a
+    # rollout restart, never a `kubectl set env` against live state.
+    #
+    # There are SIX posters, not the four named in the plan. Grep the
+    # BOTSERVER_URL values in this file to enumerate them:
+    #   dean, dinersclub, message-worker, replybot  — shipped with the triple
+    #   linksniffer, exodus                         — NOT YET COMPLIANT
+    # See the production.yaml comment on this same variable for why linksniffer
+    # cannot comply without a change to how replybot builds webview URLs.
+    - name: SYNTHETIC_REQUIRE_CONVERSATION
+      value: "false"
 
   resources:
     requests:
@@ -715,7 +748,33 @@ message-worker:
   - name: KAFKA_COMMAND_TOPIC
     value: *commandstopic
   - name: KAFKA_EVENT_TOPIC
+    # NOT merely an output topic. message-worker PRODUCES DIRECTLY to the chat
+    # topic, bypassing hermes: its WhatsApp send echo — the event that advances
+    # RESPONDING -> QOUT on a platform with no native echo webhook — is written
+    # here by message-worker/kafka.go. So `chat-events` has more than one
+    # producer, and message-worker stamps the account_id/platform envelope
+    # itself. See message-worker/README.md and documentation/event-envelope.md.
     value: *topic
+  - name: STRICT_EVENT_ENVELOPE
+    # The producer-side envelope gate, and the counterpart to
+    # SYNTHETIC_REQUIRE_CONVERSATION above: that one guards events entering the
+    # topic through hermes, this one guards events message-worker writes to it
+    # directly.
+    #
+    #   "false" (here) -> log CHAT_EVENTS_ENVELOPE_MISSING at Error, publish anyway
+    #   "true"         -> refuse to publish an event lacking account_id/platform
+    #
+    # STAGING IS WHERE THIS GETS TURNED ON FIRST, and it is the right place for
+    # it: refusing drops the WhatsApp send echo, and on WhatsApp that echo is
+    # the only thing that advances the conversation — so a stall here is a test
+    # failure, while the same stall in production is a participant left hanging
+    # mid-survey. Flip to "true" here, confirm CHAT_EVENTS_ENVELOPE_MISSING
+    # reads zero for 24h, then flip production.yaml.
+    #
+    # Declared explicitly rather than left to config.go's default so turning it
+    # on is a reviewable committed diff plus a rollout restart — never a
+    # `kubectl set env` against live state.
+    value: "false"
   - name: KAFKA_GROUP_ID
     # Env-scoped: the Kafka cluster is shared with production. Mirrors the
     # vlab-<env>-* topic convention. See documentation/kafka-consumer-lag-alerting.md

@@ -14,7 +14,9 @@
     "gulp-mustache": "^5.0.0"
   },
   "scripts": {
-    "start": "gulp replace"
+    "start": "gulp replace",
+    "test": "node --test src/",
+    "lint": "eslint src gulpfile.js"
   },
   "repository": {
     "type": "git",

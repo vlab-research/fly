@@ -86,28 +86,34 @@ describe('Response queries', () => {
     surveyName = survey.survey_name
     afterParam = null
 
-    const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
+    // `pageid` is the messaging account, and it became part of the responses primary
+    // key in devops/migrations/28-responses-account-scoped-key.sql -- a conversation
+    // is (platform, account_id, user_id), not a user id on its own. The column is
+    // NOT NULL with no default, so a fixture has to name the account explicitly;
+    // omitting it raises 23502 rather than quietly recording an unattributed
+    // response. These rows previously omitted it and asserted `pageid: null`.
+    const MOCK_QUERY = `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, pageid, question_ref, question_idx, question_text, response, seed, timestamp)
       VALUES
         ('${survey.id}', '231', '${survey.id
-      }', '231', 100001, '127', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
+      }', '231', 100001, '127', 'page1', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
       }')
        ,('${survey2.id}', '123', '${survey2.id
-      }', '123', 100003, '126', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
+      }', '123', 100003, '126', 'page1', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
       }')
        ,('${survey.id}', '231', '${survey.id
-      }', '231', 100004, '127', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
+      }', '231', 100004, '127', 'page1', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
       }')
        ,('${survey.id}', '231', '${survey.id
-      }', '231', 100005, '126', 'ref', 10, 'text', 'first', '6789', '${timestamps[3]
+      }', '231', 100005, '126', 'page1', 'ref', 10, 'text', 'first', '6789', '${timestamps[3]
       }')
        ,('${survey2.id}', '123', '${survey2.id
-      }', '123', 100003, '128', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
+      }', '123', 100003, '128', 'page1', 'ref', 10, 'text', 'last', '6789', '${timestamps[1]
       }')
        ,('${survey.id}', '231', '${survey.id
-      }', '231', 100004, '128', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
+      }', '231', 100004, '128', 'page1', 'ref', 10, 'text', 'first', '6789', '${timestamps[2]
       }')
        ,('${survey2.id}', '123', '${survey2.id
-      }', '123', 100005, '128', 'ref', 10, 'text', 'do not return me', '6789', '${timestamps[3]
+      }', '123', 100005, '128', 'page1', 'ref', 10, 'text', 'do not return me', '6789', '${timestamps[3]
       }')`;
 
 
@@ -144,7 +150,7 @@ describe('Response queries', () => {
           response: 'last',
           timestamp: iso(timestamps[1]),
           metadata: null,
-          pageid: null,
+          pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[1]), '127', 'ref']),
         },
@@ -161,7 +167,7 @@ describe('Response queries', () => {
           response: 'first',
           timestamp: iso(timestamps[2]),
           metadata: null,
-          pageid: null,
+          pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[2]), '127', 'ref']),
         },
@@ -178,7 +184,7 @@ describe('Response queries', () => {
           response: 'first',
           timestamp: iso(timestamps[2]),
           metadata: null,
-          pageid: null,
+          pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[2]), '128', 'ref']),
         },
@@ -195,7 +201,7 @@ describe('Response queries', () => {
           response: 'first',
           timestamp: iso(timestamps[3]),
           metadata: null,
-          pageid: null,
+          pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[3]), '126', 'ref']),
         },

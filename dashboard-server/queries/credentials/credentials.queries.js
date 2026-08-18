@@ -97,11 +97,73 @@ async function create ({entity, key, details, email}) {
   return rows[0]
 }
 
+/**
+ * Creates a credential and a corresponding messaging_accounts registry row
+ * in a single transaction.
+ *
+ * On success, returns the credential row. On failure (either insert), rolls back
+ * both and throws the database error.
+ *
+ * @param {Object} params
+ * @param {string} params.entity - Credential entity ('facebook_page', 'whatsapp_business', etc.)
+ * @param {string} params.key - Credential key (account id for messaging)
+ * @param {Object} params.details - Credential details JSON
+ * @param {string} params.email - User's email (resolved to userid)
+ * @param {string} params.platform - Platform for registry row ('messenger', 'whatsapp', etc.)
+ * @returns {Promise<Object>} - The created credential row
+ * @throws {Error} - Database error (which will roll back the transaction)
+ */
+async function createWithMessagingRegistry ({entity, key, details, email, platform}) {
+  const client = await this.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Insert credential
+    const credQ = `
+      INSERT INTO chatroach.credentials (entity, key, details, userid)
+      VALUES ($1, $2, $3, (SELECT id FROM chatroach.users WHERE email = $4))
+      RETURNING entity, key, details, userid, created
+    `;
+    const credValues = [entity, key, details, email];
+    const credResult = await client.query(credQ, credValues);
+    const credential = credResult.rows[0];
+
+    if (!credential) {
+      await client.query('ROLLBACK');
+      throw new Error('Failed to insert credential');
+    }
+
+    // Insert registry row
+    const regQ = `
+      INSERT INTO chatroach.messaging_accounts
+        (platform, account_id, userid, credentials_entity, credentials_key, created)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+    `;
+    const regValues = [platform, key, credential.userid, entity, key];
+    await client.query(regQ, regValues);
+
+    await client.query('COMMIT');
+    return credential;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {
+      // Rollback failed, but we're already erroring, so log and continue
+      console.error('Rollback failed:', rollbackErr);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 
 module.exports = {
   name: 'Credential',
   queries: pool => ({
     create: create.bind(pool),
+    createWithMessagingRegistry: createWithMessagingRegistry.bind(pool),
     update: update.bind(pool),
     get: get.bind(pool),
     getOne: getOne.bind(pool),
