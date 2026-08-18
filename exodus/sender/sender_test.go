@@ -48,7 +48,13 @@ func TestSendBailout_Success(t *testing.T) {
 		"count":  5,
 	}
 
-	err := sender.SendBailout(ctx, "user123", "page456", "exit-form", metadata)
+	target := UserTarget{
+		UserID:   "user123",
+		PageID:   "page456",
+		Platform: "whatsapp",
+	}
+
+	err := sender.SendBailout(ctx, target, "exit-form", metadata)
 	if err != nil {
 		t.Fatalf("SendBailout failed: %v", err)
 	}
@@ -57,8 +63,14 @@ func TestSendBailout_Success(t *testing.T) {
 	if receivedEvent.User != "user123" {
 		t.Errorf("Expected user=user123, got %s", receivedEvent.User)
 	}
+	if receivedEvent.AccountID != "page456" {
+		t.Errorf("Expected account_id=page456, got %s", receivedEvent.AccountID)
+	}
 	if receivedEvent.Page != "page456" {
-		t.Errorf("Expected page=page456, got %s", receivedEvent.Page)
+		t.Errorf("Expected page=page456 (deprecated alias), got %s", receivedEvent.Page)
+	}
+	if receivedEvent.Platform != "whatsapp" {
+		t.Errorf("Expected platform=whatsapp, got %s", receivedEvent.Platform)
 	}
 	if receivedEvent.Event == nil {
 		t.Fatal("Event detail is nil")
@@ -90,7 +102,13 @@ func TestSendBailout_ServerError(t *testing.T) {
 	sender := New(server.URL, 0, false)
 	ctx := context.Background()
 
-	err := sender.SendBailout(ctx, "user123", "page456", "exit-form", nil)
+	target := UserTarget{
+		UserID:   "user123",
+		PageID:   "page456",
+		Platform: "messenger",
+	}
+
+	err := sender.SendBailout(ctx, target, "exit-form", nil)
 	if err == nil {
 		t.Fatal("Expected error for 500 response, got nil")
 	}
@@ -110,7 +128,13 @@ func TestSendBailout_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	err := sender.SendBailout(ctx, "user123", "page456", "exit-form", nil)
+	target := UserTarget{
+		UserID:   "user123",
+		PageID:   "page456",
+		Platform: "messenger",
+	}
+
+	err := sender.SendBailout(ctx, target, "exit-form", nil)
 	if err == nil {
 		t.Fatal("Expected error for cancelled context, got nil")
 	}
@@ -133,9 +157,9 @@ func TestSendBailouts_RateLimiting(t *testing.T) {
 	ctx := context.Background()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
-		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
-		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
+		{UserID: "user1", PageID: "page1", Platform: "whatsapp", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", Platform: "whatsapp", DestinationForm: "exit-form"},
+		{UserID: "user3", PageID: "page3", Platform: "whatsapp", DestinationForm: "exit-form"},
 	}
 
 	startTime := time.Now()
@@ -225,9 +249,9 @@ func TestSendBailouts_PartialFailure(t *testing.T) {
 	ctx := context.Background()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
-		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
-		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
+		{UserID: "user1", PageID: "page1", Platform: "whatsapp", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", Platform: "whatsapp", DestinationForm: "exit-form"},
+		{UserID: "user3", PageID: "page3", Platform: "whatsapp", DestinationForm: "exit-form"},
 	}
 
 	ids, err := sender.SendBailouts(ctx, users, nil)
@@ -277,9 +301,9 @@ func TestSendBailouts_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
-		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
-		{UserID: "user3", PageID: "page3", DestinationForm: "exit-form"},
+		{UserID: "user1", PageID: "page1", Platform: "whatsapp", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", Platform: "whatsapp", DestinationForm: "exit-form"},
+		{UserID: "user3", PageID: "page3", Platform: "whatsapp", DestinationForm: "exit-form"},
 	}
 
 	ids, err := sender.SendBailouts(ctx, users, nil)
@@ -307,8 +331,14 @@ func TestSendBailout_NilMetadata(t *testing.T) {
 	sender := New(server.URL, 0, false)
 	ctx := context.Background()
 
+	target := UserTarget{
+		UserID:   "user123",
+		PageID:   "page456",
+		Platform: "messenger",
+	}
+
 	// Send with nil metadata
-	err := sender.SendBailout(ctx, "user123", "page456", "exit-form", nil)
+	err := sender.SendBailout(ctx, target, "exit-form", nil)
 	if err != nil {
 		t.Fatalf("SendBailout failed: %v", err)
 	}
@@ -316,5 +346,81 @@ func TestSendBailout_NilMetadata(t *testing.T) {
 	// Verify metadata field is omitted or empty in JSON
 	if receivedEvent.Event.Value.Metadata != nil && len(receivedEvent.Event.Value.Metadata) > 0 {
 		t.Errorf("Expected nil or empty metadata, got %v", receivedEvent.Event.Value.Metadata)
+	}
+}
+
+// TestBuildBailoutEvent_SyntheticEventContract verifies the pure function builds the correct event shape
+// with user, account_id, page (deprecated alias), platform, and event fields as required by the contract
+func TestBuildBailoutEvent_SyntheticEventContract(t *testing.T) {
+	target := UserTarget{
+		UserID:   "user123",
+		PageID:   "page456",
+		Platform: "whatsapp",
+	}
+
+	metadata := map[string]interface{}{
+		"reason": "timeout",
+	}
+
+	event := buildBailoutEvent(target, "exit-form", metadata)
+
+	// Marshal to JSON to verify all fields are present
+	body, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event: %v", err)
+	}
+
+	var jsonObj map[string]interface{}
+	err = json.Unmarshal(body, &jsonObj)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal event JSON: %v", err)
+	}
+
+	// Verify the three required conversation-identity fields
+	if user, ok := jsonObj["user"]; !ok || user != "user123" {
+		t.Errorf("Missing or incorrect 'user' field, got: %v", user)
+	}
+
+	if accountID, ok := jsonObj["account_id"]; !ok || accountID != "page456" {
+		t.Errorf("Missing or incorrect 'account_id' field, got: %v", accountID)
+	}
+
+	if platform, ok := jsonObj["platform"]; !ok || platform != "whatsapp" {
+		t.Errorf("Missing or incorrect 'platform' field, got: %v", platform)
+	}
+
+	// Verify page field is also present for backward compatibility
+	if page, ok := jsonObj["page"]; !ok || page != "page456" {
+		t.Errorf("Missing or incorrect 'page' field (deprecated alias), got: %v", page)
+	}
+
+	// Verify event structure
+	if _, ok := jsonObj["event"]; !ok {
+		t.Errorf("Missing 'event' field")
+	}
+}
+
+// TestBuildBailoutEvent_UserListBail tests the pure function with a user_list bail where platform comes from the entry
+func TestBuildBailoutEvent_UserListBail(t *testing.T) {
+	target := UserTarget{
+		UserID:   "user_a",
+		PageID:   "page_a",
+		Platform: "messenger",
+	}
+
+	event := buildBailoutEvent(target, "survey_b", map[string]interface{}{})
+
+	// Verify all fields
+	if event.User != "user_a" {
+		t.Errorf("Expected user=user_a, got %s", event.User)
+	}
+	if event.AccountID != "page_a" {
+		t.Errorf("Expected account_id=page_a, got %s", event.AccountID)
+	}
+	if event.Page != "page_a" {
+		t.Errorf("Expected page=page_a, got %s", event.Page)
+	}
+	if event.Platform != "messenger" {
+		t.Errorf("Expected platform=messenger, got %s", event.Platform)
 	}
 }

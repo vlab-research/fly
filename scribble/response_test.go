@@ -110,7 +110,111 @@ func TestResponseWriterWritesGoodData(t *testing.T) {
 
 }
 
-func TestResponseWriterWritesNullPageIdIfNone(t *testing.T) {
+// A conversation is (platform, account_id, user_id). responses' conflict target
+// omitted the account, so a participant answering the same question_ref at the
+// same instant on two of our messaging accounts had one of the two answers
+// silently discarded -- ON CONFLICT DO NOTHING makes a collision invisible
+// rather than loud. Fails against the old target.
+func TestResponseWriterKeepsBothAccountsForOneParticipant(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, insertSurveySql, "d6c21c81-fcd0-4aa4-8975-8584d8bdb820", formA, `{}`)
+
+	msgs := makeMessages([]string{
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "parent_shortcode":"baz",
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "accountA",
+          "question_ref":"bar",
+          "question_idx":1,
+          "question_text":"foobar",
+          "response":"answer on A",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "parent_shortcode":"baz",
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "accountB",
+          "question_ref":"bar",
+          "question_idx":1,
+          "question_text":"foobar",
+          "response":"answer on B",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+	})
+
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	assert.Equal(t, []string{"accountA", "accountB"}, colValues(getCol(pool, "responses", "pageid")))
+	assert.Equal(t, []string{"answer on A", "answer on B"}, colValues(getCol(pool, "responses", "response")))
+}
+
+// The account joins the key; it does not replace it. A genuine repeat within one
+// conversation must still collapse.
+func TestResponseWriterStillIgnoresDuplicatesWithinOneAccount(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, insertSurveySql, "d6c21c81-fcd0-4aa4-8975-8584d8bdb820", formA, `{}`)
+
+	msgs := makeMessages([]string{
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "parent_shortcode":"baz",
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "accountA",
+          "question_ref":"bar",
+          "question_idx":1,
+          "question_text":"foobar",
+          "response":"first",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "parent_shortcode":"baz",
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "accountA",
+          "question_ref":"bar",
+          "question_idx":1,
+          "question_text":"foobar",
+          "response":"duplicate, must be dropped",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+	})
+
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	assert.Equal(t, []string{"first"}, colValues(getCol(pool, "responses", "response")))
+}
+
+// pageid is NOT NULL now that it is part of the primary key (migration 28), so an
+// absent account is written as the empty-string "account unknown" sentinel -- the
+// same value the migration backfilled production's 1.82M historical NULLs to.
+// Replaces TestResponseWriterWritesNullPageIdIfNone.
+func TestResponseWriterWritesUnknownAccountSentinelIfNone(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()
 
@@ -139,11 +243,11 @@ func TestResponseWriterWritesNullPageIdIfNone(t *testing.T) {
 	err := writer.Write(msgs)
 	assert.Nil(t, err)
 
-	rows, err := pool.Query(context.Background(), "select pageid from responses where pageid is null")
+	rows, err := pool.Query(context.Background(), "select pageid from responses where pageid = ''")
+	assert.Nil(t, err)
 
 	res := rowStrings(rows)
 	assert.Equal(t, 1, len(res))
-
 }
 
 func TestResponseWriterWritesPageIdIfExists(t *testing.T) {

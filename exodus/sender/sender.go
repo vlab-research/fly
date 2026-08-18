@@ -12,9 +12,11 @@ import (
 
 // BailoutEvent is sent to botserver to trigger a form bailout
 type BailoutEvent struct {
-	User  string       `json:"user"`
-	Page  string       `json:"page"`
-	Event *EventDetail `json:"event"`
+	User      string       `json:"user"`
+	AccountID string       `json:"account_id"`
+	Page      string       `json:"page"`      // Deprecated alias for account_id, kept for backward compatibility
+	Platform  string       `json:"platform"`
+	Event     *EventDetail `json:"event"`
 }
 
 // EventDetail contains the event type and value
@@ -41,6 +43,7 @@ type Sender struct {
 type UserTarget struct {
 	UserID          string
 	PageID          string
+	Platform        string // messaging platform ('messenger' | 'whatsapp'), from states.platform
 	DestinationForm string // always set by caller; resolved before passing to sender
 }
 
@@ -54,11 +57,14 @@ func New(botserverURL string, rateLimit time.Duration, dryRun bool) *Sender {
 	}
 }
 
-// SendBailout sends a single bailout event
-func (s *Sender) SendBailout(ctx context.Context, userID, pageID, destinationForm string, metadata map[string]interface{}) error {
-	event := &BailoutEvent{
-		User: userID,
-		Page: pageID,
+// buildBailoutEvent builds a BailoutEvent from a UserTarget and metadata
+// This is a pure function for testability, with no side effects
+func buildBailoutEvent(target UserTarget, destinationForm string, metadata map[string]interface{}) *BailoutEvent {
+	return &BailoutEvent{
+		User:      target.UserID,
+		AccountID: target.PageID,
+		Page:      target.PageID, // Deprecated alias, kept for backward compatibility
+		Platform:  target.Platform,
 		Event: &EventDetail{
 			Type: "bailout",
 			Value: &BailValue{
@@ -67,10 +73,15 @@ func (s *Sender) SendBailout(ctx context.Context, userID, pageID, destinationFor
 			},
 		},
 	}
+}
+
+// SendBailout sends a single bailout event for the given UserTarget
+func (s *Sender) SendBailout(ctx context.Context, target UserTarget, destinationForm string, metadata map[string]interface{}) error {
+	event := buildBailoutEvent(target, destinationForm, metadata)
 
 	if s.dryRun {
-		log.Printf("[DRY RUN] Would bail user=%s page=%s to form=%s with metadata=%v",
-			userID, pageID, destinationForm, metadata)
+		log.Printf("[DRY RUN] Would bail user=%s account_id=%s platform=%s to form=%s with metadata=%v",
+			target.UserID, target.PageID, target.Platform, destinationForm, metadata)
 		return nil
 	}
 
@@ -99,7 +110,7 @@ func (s *Sender) SendBailout(ctx context.Context, userID, pageID, destinationFor
 		return fmt.Errorf("botserver returned non-200 status: %d", resp.StatusCode)
 	}
 
-	log.Printf("Successfully bailed user=%s page=%s to form=%s", userID, pageID, destinationForm)
+	log.Printf("Successfully bailed user=%s account_id=%s platform=%s to form=%s", target.UserID, target.PageID, target.Platform, destinationForm)
 	return nil
 }
 
@@ -118,9 +129,9 @@ func (s *Sender) SendBailouts(ctx context.Context, users []UserTarget, metadata 
 		}
 
 		// Send bailout for this user using their destination form
-		err := s.SendBailout(ctx, user.UserID, user.PageID, user.DestinationForm, metadata)
+		err := s.SendBailout(ctx, user, user.DestinationForm, metadata)
 		if err != nil {
-			log.Printf("Failed to bail user=%s page=%s: %v", user.UserID, user.PageID, err)
+			log.Printf("Failed to bail user=%s account_id=%s: %v", user.UserID, user.PageID, err)
 			lastError = err
 			// Continue with remaining users even if one fails
 		} else {
