@@ -1,8 +1,22 @@
-const { getField, FieldError } = require('../typewheels/form')
-const { StateStore } = require('../typewheels/statestore')
-const { Machine } = require('../typewheels/transition')
-const util = require('util')
+const { getField } = require('../typewheels/form')
 
+// This module used to also export a `Responser` class -- a Kafka consumer that
+// wrote the `responses` table -- and two entrypoints that ran it
+// (`scratchbot.js`, `batch.js`), alongside a sibling `Stateman` consumer
+// (`stateman.js`) that wrote `states`. All four are deleted as of §7.1.
+//
+// They could not have worked since Machine.transition's signature changed to
+// (state, parsedEvent): every one of them called
+// `machine.transition(state, userId, rawEventString)` with three arguments, so
+// `parsedEvent` was the user id string and `parsedEvent.source.account_id` threw
+// a TypeError on the first event. Nothing deployed ran them either -- production
+// replybot runs only `lib/index.js` (`package.json` `start`), scribble is the
+// real writer of both tables, and the `scratchbot` subchart is `false` in every
+// environment. They were live only as a source of confusion about who writes
+// `states`.
+//
+// `responseVals` stays: it is pure, it is the actual response-row builder, and
+// `typewheels/transition.js` imports it on the live path.
 function responseVals(newState, update, form, surveyid, pageid, user, timestamp) {
   if (update) {
     const [q, response] = update
@@ -32,62 +46,4 @@ function responseVals(newState, update, form, surveyid, pageid, user, timestamp)
   }
 }
 
-class Responser {
-  constructor(chatbase) {
-    this.chatbase = chatbase
-    this.stateStore = new StateStore(chatbase)
-    this.machine = new Machine('600s')
-  }
-
-  async updateStore(userId, e) {
-    const state = await this.stateStore.getState(userId, e)
-    const t = await this.machine.transition(state, userId, e)
-    const vals = responseVals(t, this.machine)
-    await this.stateStore.updateState(userId, t.newState)
-    return vals
-  }
-
-  async write({ key: userId, value }) {
-    try {
-      const vals = await this.updateStore(userId, value)
-      if (vals) await this.put(vals)
-      return null
-    }
-    catch (error) {
-      if (error instanceof FieldError) {
-        console.warn(error)
-        // Ignore FieldErrors
-      } else {
-        console.error(error)
-        console.log('ERROR OCCURRED DURING EVENT: ')
-        console.log(util.inspect(JSON.parse(value), null, 8))
-      }
-      return null
-    }
-  }
-
-
-
-  put(vals) {
-    const query = `INSERT INTO responses(parent_surveyid,
-                                         parent_shortcode,
-                                         surveyid,
-                                         shortcode,
-                                         flowid,
-                                         userid,
-                                         question_ref,
-                                         question_idx,
-                                         question_text,
-                                         response,
-                                         seed,
-                                         metadata,
-                                         timestamp)
-		   values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		   ON CONFLICT(userid, timestamp, question_ref) DO NOTHING`
-
-    return this.chatbase.pool.query(query, vals)
-  }
-
-}
-
-module.exports = { Responser, responseVals }
+module.exports = { responseVals }

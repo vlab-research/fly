@@ -3,7 +3,7 @@ const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
 const { _initialState } = require('./machine')
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 
 process.env.FALLBACK_FORM = 'fallback'
 process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
@@ -291,10 +291,18 @@ describe('Machine integrated', () => {
   })
 
   // Regression test for the wrong-platform bug: synthetic re-entry events
-  // (dean timeouts / follow-ups) carry source.type 'synthetic', so the
-  // outbound platform must come from the persisted md.platform — before that
-  // was persisted, WhatsApp conversations got 'messenger' send commands.
-  it('produces whatsapp commands for a synthetic timeout on a state with md.platform whatsapp', async () => {
+  // (dean timeouts / follow-ups) carry source.type 'synthetic', so the outbound
+  // platform has to come from somewhere else, or WhatsApp conversations get
+  // 'messenger' send commands and message-worker rejects them.
+  //
+  // UPDATED with §7.1: it comes from THE EVENT (source.platform, surfaced by the
+  // event-normalizer from the top-level `platform` field that hermes now stamps
+  // on every event — §7.3), not from the persisted state.md.platform. The state
+  // is the wrong place to read it: before §7.1 keyed the cache by conversation,
+  // a participant messaging two accounts shared one state blob, so md.platform
+  // could name the *other* conversation's platform. The md on the state below is
+  // deliberately left in place and is deliberately NOT what makes this pass.
+  it('produces whatsapp commands for a synthetic timeout on a whatsapp conversation', async () => {
     const m = new Machine()
 
     m.getForm = () => Promise.resolve([{
@@ -320,7 +328,7 @@ describe('Machine integrated', () => {
       event_id: 'evt_test_wa_timeout',
       user_id: WA_USER_ID,
       timestamp: now,
-      source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID },
+      source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID, platform: 'whatsapp' },
       event_type: 'synthetic_timeout',
       payload: now
     }
@@ -500,6 +508,163 @@ describe('Machine integrated', () => {
     report.publish.should.be.false
     report.newState.should.eql(state)
     should.not.exist(report.commands)
+  })
+
+
+  // A synthetic event on a conversation that replayed as START. The machine
+  // DEFERs (machine.js `_handleExternalEvent`) and the shell must publish and
+  // cache NOTHING -- lib/index.js gates both `publishState` and
+  // `stateStore.updateState` on `report.newState`, and `scribble/state.go`
+  // UPSERTs unconditionally, so any state published here would overwrite the
+  // conversation's real `states` row. That row is what dean's `Timeouts()` and
+  // `Payments()` sweeps select on, so leaving it alone is the retry path.
+  //
+  // These assert the ABSENCE of newState, not merely that no command was sent:
+  // asserting only on `commands` would pass against a build that happily
+  // clobbered `states` with a START row.
+  describe('DEFER (synthetic event, no conversation)', () => {
+    const timeout = synthetic({ type: 'timeout', value: 1000 })
+    const click = synthetic({
+      type: 'external',
+      value: { type: 'linksniffer:click', url: 'https://example.com' }
+    })
+
+    const deferred = async event => {
+      const m = new Machine()
+      // Would throw if it were ever reached; a DEFER must short-circuit before
+      // actionsResponses, which is where the 305 lookup and the send would happen.
+      m.getForm = () => Promise.reject(new Error('getForm must not be reached'))
+      return m.run(_initialState(), 'bar', event)
+    }
+
+    it('publishes no state, so `states` is not clobbered', async () => {
+      const report = await deferred(timeout)
+
+      should.not.exist(report.newState)
+    })
+
+    it('writes nothing to the state cache', async () => {
+      // Same property, stated as the cache contract: updateState is called only
+      // when newState exists, so no newState means no poisoned Redis key either.
+      const report = await deferred(click)
+
+      should.not.exist(report.newState)
+    })
+
+    it('publishes no machine_report and sends no message', async () => {
+      const report = await deferred(timeout)
+
+      report.publish.should.be.false
+      should.not.exist(report.commands)
+      should.not.exist(report.responses)
+      should.not.exist(report.error)
+    })
+
+    it('still reports the conversation it could not name', async () => {
+      const event = synthetic({ type: 'timeout', value: 1000 }, {
+        source: { type: 'synthetic', account_id: PAGE_ID, platform: 'whatsapp' }
+      })
+      const report = await deferred(event)
+
+      report.user.should.equal('bar')
+      report.timestamp.should.equal(event.timestamp)
+      report.page.should.equal(PAGE_ID)
+      report.platform.should.equal('whatsapp')
+    })
+
+    // The contrast case: a Messenger handover on the same empty state is NOT
+    // deferred, so the shell publishes normally. If this ever starts failing,
+    // the guard has been widened from "synthetic" to "external" and the
+    // documented handover race is broken.
+    it('does not defer a Messenger handover on the same empty state', async () => {
+      const m = new Machine()
+      m.getForm = () => Promise.resolve([{ logic: [], fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }] }, 'surveyid'])
+
+      const report = await m.run(_initialState(), 'bar', handover({ metadata: 'new message' }))
+
+      report.publish.should.be.true
+      should.exist(report.newState)
+      report.newState.forms.should.eql(['fallback'])
+    })
+  })
+
+
+  // The second DEFER reason: a form-less entry event (Messenger's bare
+  // `get_started`, or a referral whose ref names no form) arriving on a
+  // conversation that already has a form. The machine refuses it (machine.js's
+  // REFERRAL case) and the shell must write NOTHING.
+  //
+  // Withholding `newState` is the whole mechanism, and it is why this is a DEFER
+  // rather than the `_noop()` the other REFERRAL guards use. `_noop` returns
+  // `newState`, lib/index.js publishes it, and `scribble/state.go` UPSERTs it over
+  // the live conversation's real `states` row -- the row every recovery sweep
+  // selects on -- while bumping `updated`, by which dean and the dashboard age
+  // conversations. Nothing happened here, so nothing may be written.
+  describe('DEFER (form-less entry on a live conversation)', () => {
+    const rawGetStarted = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1755000001653,
+      postback: { title: 'Get Started', payload: 'get_started' }
+    }
+
+    // A live conversation on another researcher's form, awaiting an answer.
+    const live = { ..._initialState(), state: 'QOUT', forms: ['mnchweeklanguage'], question: 'foo' }
+
+    const deferred = async () => {
+      const m = new Machine()
+      // Would throw if reached: a DEFER must short-circuit before the
+      // FALLBACK_FORM lookup and the send.
+      m.getForm = () => Promise.reject(new Error('getForm must not be reached'))
+      return m.run(live, USER_ID, rawGetStarted)
+    }
+
+    it('publishes no state, so the live conversation is not clobbered', async () => {
+      const report = await deferred()
+
+      should.not.exist(report.newState)
+    })
+
+    it('writes nothing to the state cache', async () => {
+      // Same property as the cache contract: updateState is called only when
+      // newState exists, so no newState means no poisoned Redis key either.
+      const report = await deferred()
+
+      should.not.exist(report.newState)
+    })
+
+    it('publishes no machine_report, sends no message, records no response', async () => {
+      const report = await deferred()
+
+      report.publish.should.be.false
+      should.not.exist(report.commands)
+      should.not.exist(report.responses)
+      should.not.exist(report.error)
+    })
+
+    it('still reports the conversation the event was refused for', async () => {
+      const report = await deferred()
+
+      report.user.should.equal(USER_ID)
+      report.timestamp.should.equal(rawGetStarted.timestamp)
+      report.page.should.equal(PAGE_ID)
+      report.platform.should.equal('messenger')
+    })
+
+    // The contrast case, and the 162,148-row half of the behaviour: the same
+    // webhook on an empty conversation is an ENTRY and must still be served.
+    it('does not defer the same postback on an empty conversation', async () => {
+      const m = new Machine()
+      m.getForm = () => Promise.resolve([{ logic: [], fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }] }, 'surveyid'])
+
+      const report = await m.run(_initialState(), USER_ID, rawGetStarted)
+
+      report.publish.should.be.true
+      should.exist(report.newState)
+      report.newState.forms.should.eql(['fallback'])
+      report.commands.length.should.equal(1)
+    })
   })
 
 

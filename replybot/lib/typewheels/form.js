@@ -166,7 +166,7 @@ function interpolateField(ctx, qa, field) {
 }
 
 function translateField(ctx, qa, field) {
-  return translateTypeformField(addCustomType(interpolateField(ctx, qa, field)))
+  return translateTypeformField(addCustomType(interpolateField(ctx, qa, field)), ctx)
 }
 
 function getField({ form, user }, ref, index = false) {
@@ -324,7 +324,17 @@ function getVar(ctx, qa, ref, v, vars) {
 }
 
 
-const mdLinkPattern = /\[([^\]]*)\]\(([^)]+)\)/
+// GLOBAL on purpose. Typeform auto-linkifies every URL a researcher pastes into
+// a field description, so an edited field routinely carries several markdown
+// links in one scalar. Without /g, `String.replace` unwrapped only the FIRST and
+// left the rest as literal `[text](url)` -- whose `](...)` fragments then ran
+// into the following value. That is where production's 63 junk `pageId`s came
+// from (`105246245358509)`, `105246245358509)720722553`), and one of them
+// reached the `states` table. See planning/moviehouse-conversation-identity.md.
+//
+// The regex is a literal rather than a shared /g object used with .test(), so
+// there is no `lastIndex` state to leak between calls.
+const mdLinkPattern = /\[([^\]]*)\]\(([^)]+)\)/g
 
 function _removeMdLinks(s) {
   if (typeof s === 'string' || s instanceof String) {

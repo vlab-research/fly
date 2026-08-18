@@ -239,6 +239,64 @@ describe('addCustomType', () => {
     const out = f.addCustomType(field)
     out.type.should.equal('multiple_choice')
   })
+
+  // NOTE the quoting. `_cleanStrings` runs on the values yaml.safeLoad already
+  // parsed, so a markdown link only ever reaches it from inside a scalar --
+  // bare `url: [a](b)` is a YAML syntax error (flow sequence then garbage) and
+  // addCustomType swallows it and returns the field untouched. Real production
+  // fields carry them quoted, or inside a JSON blob.
+  it('unwraps a single markdown link Typeform autolinked', () => {
+    const field = {
+      type: 'statement', title: 'foo', ref: 'foo',
+      properties: { description: 'type: link_tracking\nurl: "[who.int/hpv](https://who.int/hpv)"' }
+    }
+    const out = f.addCustomType(field)
+    out.md.url.should.equal('https://who.int/hpv')
+  })
+
+  // Regression: `mdLinkPattern` was NOT global, so `String.replace` unwrapped
+  // only the FIRST markdown link in a description. Typeform auto-linkifies every
+  // pasted URL, so an edited field routinely carries several, and the leftover
+  // `](...)` fragments of the second onwards were concatenated into whatever
+  // value followed. That is the origin of the 63 junk `pageId` values observed
+  // in production -- `105246245358509)`, `720722553`, and the concatenated
+  // `105246245358509)720722553` -- and it reached the `states` table.
+  // See planning/moviehouse-conversation-identity.md.
+  it('unwraps EVERY markdown link, not just the first', () => {
+    const field = {
+      type: 'statement', title: 'foo', ref: 'foo',
+      properties: {
+        description: 'type: link_tracking\n'
+          + 'url: "[a.example](https://a.example) and [b.example](https://b.example)"'
+      }
+    }
+    const out = f.addCustomType(field)
+    out.md.url.should.equal('https://a.example and https://b.example')
+  })
+
+  // The exact production shape: a trailing markdown link runs into the value
+  // that follows it, which is how `pageId` ended up as `105246245358509)`.
+  it('does not leak a link fragment into the following value', () => {
+    const field = {
+      type: 'statement', title: 'foo', ref: 'foo',
+      properties: {
+        description: 'type: webview\n'
+          + 'url: "https://v.example/?id=[720722553](https://vimeo.com/720722553)&pageId=105246245358509"'
+      }
+    }
+    const out = f.addCustomType(field)
+    out.md.url.should.equal('https://v.example/?id=https://vimeo.com/720722553&pageId=105246245358509')
+    out.md.url.should.not.contain(')')
+  })
+
+  it('leaves a description with no markdown links untouched', () => {
+    const field = {
+      type: 'statement', title: 'foo', ref: 'foo',
+      properties: { description: 'type: link_tracking\nurl: https://who.int/hpv' }
+    }
+    const out = f.addCustomType(field)
+    out.md.url.should.equal('https://who.int/hpv')
+  })
 })
 
 

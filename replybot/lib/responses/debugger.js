@@ -1,7 +1,20 @@
+// Local CLI tool. Replays one participant's archived event log through the real
+// machine and prints the state transition for each event.
+//
+//   CHATBASE_HOST=... CHATBASE_PORT=... CHATBASE_DATABASE=... \
+//   CHATBASE_USER=... CHATBASE_PASSWORD=... node lib/responses/debugger.js <userid>
+//
+// KEPT DELIBERATELY (§7.1) while `stateman.js`, `scratchbot.js` and `batch.js`
+// were deleted: this is the tool for reproducing a cross-conversation state bug
+// off the durable log, which is the exact class of bug §7.1 fixes.
+//
+// It writes to the SAME Redis keys replybot uses, so point it at a scratch Redis
+// (or accept that you are refreshing the 24h TTL on real conversation state).
 const { StateStore } = require('../typewheels/statestore')
-const Chatbase = require(process.env.CHATBASE_BACKEND)
+const Chatbase = require('../chatbase/chatbase')
 const { PromiseStream } = require('@vlab-research/steez')
 const { parseEvent } = require('../event-normalizer')
+const { conversationFromRawEvent } = require('../typewheels/utils')
 const { DBStream } = require('./pgstream')
 const { Machine } = require('../typewheels/transition')
 
@@ -38,27 +51,32 @@ async function query(pool, userid, lim) {
 const userid = process.argv.slice(2)[0]
 if (!userid) throw new Error('GIVE ME USERID!')
 
-const fn = (lim) => query(chatbase.pool, userid, lim)
-const stream = new DBStream(fn, null)
-
 const chatbase = new Chatbase()
 const emptyBase = { get: () => [], pool: chatbase.pool }
 const stateStore = new StateStore(emptyBase)
 const machine = new Machine('600s')
 
+const fn = (lim) => query(chatbase.pool, userid, lim)
+const stream = new DBStream(fn, null)
+
 stream
   .pipe(new PromiseStream(async ({ userid: userId, content: event }) => {
 
-    const state = await stateStore.getState(userId, event)
-    const { newState, output } = await machine.transition(state, parseEvent(event))
+    // The conversation comes from the event envelope, never from the state --
+    // `messages` is not account-scoped yet (§7.4/§7.5), so replaying a user who
+    // talked to two accounts interleaves both conversations here. Printing the
+    // conversation per event is how you SEE that, which is the point of the tool.
+    const conv = conversationFromRawEvent(event)
 
-    // const {actions, pageToken, responses} = await machine.actionsResponses(state, userId, event, page, newState, output)
+    const state = await stateStore.getState(conv, userId, event)
+    const { newState, output, page, platform } = await machine.transition(state, parseEvent(event))
 
+    console.log('CONVERSATION:\n', { user: userId, ...(conv || { platform: null, account: null }) }, '-----------------------')
     console.log('STATE:\n', state, '-----------------------')
     console.log('EVENT:\n', JSON.parse(event, null, 4), '-----------------------')
     console.log('OUTPUT\n: ', output, '-----------------------')
-    // console.log('ACTIONS:\n', actions, '-----------------------')
+    console.log('ROUTING:\n', { page, platform }, '-----------------------')
     console.log('NEW STATE:\n', newState, '-----------------------')
 
-    await stateStore.updateState(userId, newState)
+    await stateStore.updateState(conv, userId, newState)
   }))

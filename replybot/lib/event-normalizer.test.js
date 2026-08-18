@@ -2,6 +2,7 @@ const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
 const { parseEvent, parsePayload, categorizeMessengerEvent, parseMessengerEvent, parseWhatsAppEvent, categorizeWhatsAppEvent, parseSyntheticEvent } = require('./event-normalizer')
+const { getMetadata } = require('./typewheels/utils')
 
 describe('parseSyntheticEvent - platform hint', () => {
   it('surfaces an optional top-level platform field as source.platform', () => {
@@ -255,6 +256,22 @@ describe('categorizeMessengerEvent - postback', () => {
     const result = categorizeMessengerEvent(event)
     result.event_type.should.equal('conversation_started')
     result.payload.type.should.equal('conversation_started')
+  })
+
+  // Pinned deliberately. The obvious-looking fix for the FALLBACK_FORM re-entry
+  // defect is to stop emitting a conversation entry here, and it would break
+  // organic Messenger entry -- roughly a third of production's 162,148 fallback
+  // conversations start on exactly this webhook, with no referral anywhere in
+  // their log. A bare Get Started IS an entry signal; whether it may ENTER is
+  // machine.js's decision (typewheels/machine.test.js, "a form-less entry event
+  // must not re-enter a live conversation").
+  it('keeps the bare get_started an entry signal, with no referral to resolve', () => {
+    const result = categorizeMessengerEvent({
+      postback: { payload: 'get_started', title: 'Get Started' }
+    })
+
+    result.event_type.should.equal('conversation_started')
+    should.not.exist(result.payload.referral)
   })
 })
 
@@ -707,6 +724,104 @@ describe('categorizeWhatsAppEvent', () => {
     })
   })
 
+  // The `form` pair does not have to come first. `_group` (typewheels/utils.js)
+  // pairs tokens two at a time and is order-independent, and real refs are
+  // routinely written form-last — Messenger's own production refs look like
+  // `creative.3b.gender.men.form.hpvintrotriple`. Anchoring the WhatsApp entry
+  // pattern on a leading `form.` rejected those and dropped the arrival to
+  // FALLBACK_FORM (a live survey belonging to another researcher, so the
+  // misroute looks like a completion — the VIR-19 failure shape).
+  describe('bare-text form ref entry — form pair in any position (order-independent)', () => {
+    it('resolves a form pair at the START of the token list (regression guard)', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('form.ABC')
+    })
+
+    it('resolves a form pair at the END of the token list', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'creative.x.form.ABC' } })
+      event_type.should.equal('conversation_started')
+      payload.trigger.should.equal('referral')
+      payload.referral.ref.should.equal('creative.x.form.ABC')
+    })
+
+    it('resolves a form pair in the MIDDLE of the token list', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'creative.x.form.ABC.gender.men' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('creative.x.form.ABC.gender.men')
+    })
+
+    it('resolves the exact live CTWA autofill text (2026-08-16)', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'ctwaprobe.alpha.creative.Ad1H.form.probetest' }
+      })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('ctwaprobe.alpha.creative.Ad1H.form.probetest')
+    })
+
+    it('supports the optional start prefix with a trailing form pair', () => {
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'start creative.x.form.ABC' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('creative.x.form.ABC')
+    })
+
+    it('lowercases the form token wherever it sits, preserving every other token', () => {
+      // Only the literal `form` key is normalized — getMetadata looks up
+      // `md.form` — while shortcode and metadata tokens keep the case typed.
+      const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'Creative.X.FORM.MyForm' } })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('Creative.X.form.MyForm')
+    })
+
+    it('does not double-prefix the ref with an extra form.', () => {
+      const { payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'creative.x.form.ABC' } })
+      payload.referral.ref.should.not.match(/^form\./)
+      payload.referral.ref.split('.').filter(t => t === 'form').length.should.equal(1)
+    })
+
+    it('rejects a form key landing on an odd token boundary (_group could not resolve it)', () => {
+      // `_group` pairs two at a time: `creative.form.ABC` groups to
+      // { creative: 'form', ABC: undefined } — no form at all. Synthesizing a
+      // referral from that would silently resolve to FALLBACK_FORM, so the
+      // message stays an ordinary user_text instead.
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'creative.form.ABC' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('rejects a token list with no form pair at all', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'creative.x.gender.men' } })
+      event_type.should.equal('user_text')
+    })
+
+    it('rejects a mid-sentence ref whose form pair is not first', () => {
+      const { event_type } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'tell me about creative.x.form.abc please' } })
+      event_type.should.equal('user_text')
+    })
+  })
+
+  // Explicit negative guard for the strictness the whole pattern exists to
+  // protect: a mid-survey free-text ANSWER that merely mentions a form token
+  // must never re-trigger conversation entry.
+  describe('bare-text form ref entry — mid-survey free text never re-triggers entry', () => {
+    const answers = [
+      'tell me about form.abc please',
+      'tell me about creative.x.form.abc please',
+      'form.abc is the one I did',
+      'I already finished form.abc',
+      'what is form.abc?',
+      'form.abc\nform.def'
+    ]
+
+    answers.forEach(body => {
+      it(`treats ${JSON.stringify(body)} as plain user_text`, () => {
+        const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body } })
+        event_type.should.equal('user_text')
+        payload.text.should.equal(body)
+      })
+    })
+  })
+
   // A real Click-to-WhatsApp referral object carries only Meta-assigned fields
   // (source_url / source_id / source_type / headline / body / media_type /
   // ctwa_clid) — none of which is a form ref. Without a `ref`, getMetadata's
@@ -733,6 +848,22 @@ describe('categorizeWhatsAppEvent', () => {
       })
       event_type.should.equal('conversation_started')
       payload.referral.ref.should.equal('form.hpvintrotriple.creative.3b.gender.men')
+    })
+
+    it('derives the ref when the autofill text puts the form pair LAST', () => {
+      // The exact shape that failed live on 2026-08-16: a real ad whose
+      // autofill_message is written form-last was rejected by the old
+      // leading-`form.` anchor, so the referral kept no ref and the arrival
+      // resolved to FALLBACK_FORM (305), a live survey owned by someone else.
+      const { event_type, payload } = categorizeWhatsAppEvent({
+        type: 'text',
+        text: { body: 'ctwaprobe.alpha.creative.Ad1H.form.probetest' },
+        referral: ctwaReferral
+      })
+      event_type.should.equal('conversation_started')
+      payload.referral.ref.should.equal('ctwaprobe.alpha.creative.Ad1H.form.probetest')
+      // and the rest of the CTWA object still rides along
+      payload.referral.ctwa_clid.should.equal('AAbbCCddEE')
     })
 
     it('preserves the rest of the CTWA referral, ctwa_clid especially', () => {
@@ -960,6 +1091,114 @@ describe('parseEvent - whatsapp source', () => {
         }
       })
       payload.attachments[0].payload.url.should.equal('https://api.example.com/fallback_link')
+    })
+  })
+})
+
+// End-to-end: a matching pattern proves nothing on its own — what matters is
+// the shortcode `getMetadata` finally hands the machine. These drive RAW
+// hermes-shaped webhooks through `parseEvent` (lib/typewheels/events.test.js is
+// a fixtures module of already-normalized events, so it cannot exercise
+// normalization) and assert on `md.form`.
+describe('WhatsApp entry text → md.form (end-to-end through parseEvent)', () => {
+  const FALLBACK = '305'
+  let previousFallback
+
+  beforeEach(() => {
+    previousFallback = process.env.FALLBACK_FORM
+    process.env.FALLBACK_FORM = FALLBACK
+  })
+
+  afterEach(() => {
+    if (previousFallback === undefined) delete process.env.FALLBACK_FORM
+    else process.env.FALLBACK_FORM = previousFallback
+  })
+
+  const rawWhatsAppText = (body, referral) => JSON.stringify({
+    source: 'whatsapp',
+    phone_number_id: 'PHONE_1',
+    from: '27123456789',
+    type: 'text',
+    text: { body },
+    timestamp: 1640995200000,
+    ...(referral ? { referral } : {})
+  })
+
+  const mdFor = (body, referral) => getMetadata(parseEvent(rawWhatsAppText(body, referral)))
+
+  it('resolves md.form from a leading form pair', () => {
+    mdFor('form.ABC').form.should.equal('ABC')
+  })
+
+  it('resolves md.form from a TRAILING form pair', () => {
+    const md = mdFor('creative.x.form.ABC')
+    md.form.should.equal('ABC')
+    md.creative.should.equal('x')
+  })
+
+  it('resolves md.form and all sibling pairs from the live CTWA autofill text', () => {
+    const md = mdFor('ctwaprobe.alpha.creative.Ad1H.form.probetest')
+    md.form.should.equal('probetest')
+    md.ctwaprobe.should.equal('alpha')
+    md.creative.should.equal('Ad1H')
+    md.platform.should.equal('whatsapp')
+    md.pageid.should.equal('PHONE_1')
+  })
+
+  it('resolves md.form from a CTWA referral that carries no ref of its own', () => {
+    const md = mdFor('ctwaprobe.alpha.creative.Ad1H.form.probetest', {
+      source_type: 'ad',
+      source_id: '120226305854810726',
+      ctwa_clid: 'AAbbCCddEE'
+    })
+    md.form.should.equal('probetest')
+    md.form.should.not.equal(FALLBACK)
+    md.creative.should.equal('Ad1H')
+  })
+
+  it('resolves md.form with the start prefix', () => {
+    mdFor('start form.ABC').form.should.equal('ABC')
+  })
+
+  it('resolves md.form when the typed form token is uppercase', () => {
+    mdFor('Creative.X.FORM.MyForm').form.should.equal('MyForm')
+  })
+
+  it('does NOT start a conversation for a mid-survey free-text answer', () => {
+    const event = parseEvent(rawWhatsAppText('tell me about form.abc please'))
+    event.event_type.should.equal('user_text')
+    // getMetadata only reads a referral off conversation_started, so such an
+    // event could only ever produce the fallback — it must not be an entry.
+    getMetadata(event).form.should.equal(FALLBACK)
+  })
+})
+
+describe('Shared fixture: Messenger account derivation (pinned to Rust rule in hermes)', () => {
+  const fixture = require('../../testdata/event-envelope/messenger-account-derivation.json')
+
+  it('loads the fixture with non-zero test vectors', () => {
+    fixture.vectors.should.be.an('array')
+    fixture.vectors.length.should.be.greaterThan(0)
+  })
+
+  fixture.vectors.forEach(vector => {
+    it(`derives account_id and user_id correctly for: ${vector.name}`, () => {
+      const result = parseMessengerEvent(vector.event, vector.event.timestamp)
+
+      // Normalize undefined → null on both sides for comparison
+      const resultAccountId = result.source.account_id || null
+      const resultUserId = result.user_id || null
+      const expectedAccountId = vector.expected.account_id || null
+      const expectedUserId = vector.expected.user_id || null
+
+      // Direct equality works with null values
+      if (resultUserId !== expectedUserId) {
+        throw new Error(`user_id mismatch for ${vector.name}: got ${resultUserId}, expected ${expectedUserId}`)
+      }
+      if (resultAccountId !== expectedAccountId) {
+        throw new Error(`account_id mismatch for ${vector.name}: got ${resultAccountId}, expected ${expectedAccountId}`)
+      }
+      result.source.type.should.equal('messenger')
     })
   })
 })

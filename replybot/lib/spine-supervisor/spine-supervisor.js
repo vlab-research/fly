@@ -1,6 +1,7 @@
 const { pipeline } = require('stream')
 const { Machine } = require('../typewheels/transition')
 const { StateStore } = require('../typewheels/statestore')
+const Chatbase = require('../chatbase/chatbase')
 
 class SpineSupervisor {
   constructor(numSpines, maxRestarts = 5, timeWindow = 5 * 60 * 1000, chatbase = null, BotSpineCtor = null) {
@@ -11,7 +12,12 @@ class SpineSupervisor {
     this.maxRestarts = maxRestarts
     this.timeWindow = timeWindow
     this.restarts = []
-    this.chatbase = chatbase || new (require(process.env.CHATBASE_BACKEND))()
+    // Required directly, not through the old `CHATBASE_BACKEND` env var. That
+    // indirection had exactly one implementation for its whole life, and once
+    // the client was absorbed into `lib/chatbase` it could only ever have named
+    // a package that is no longer installed. The `chatbase` argument is still
+    // the injection seam for tests.
+    this.chatbase = chatbase || new Chatbase()
     this.BotSpineCtor = BotSpineCtor || require('@vlab-research/botspine').BotSpine
     // Single shared StateStore instance for all spines
     this.stateStore = new StateStore(this.chatbase, process.env.REPLYBOT_STATESTORE_TTL || '24h')

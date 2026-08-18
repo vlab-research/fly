@@ -26,8 +26,6 @@ spec:
         - secretRef:
             name: bot-envs
         env:
-        - name: CHATBASE_BACKEND
-          value: "@vlab-research/chatbase-postgres"
         - name: CHATBASE_DATABASE
           value: "chatroach"
         - name: CHATBASE_USER

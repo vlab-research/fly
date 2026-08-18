@@ -34,6 +34,20 @@ function categorizeMessengerEvent(data) {
     (postbackPayload && postbackPayload.referral) ||
     (quickReplyPayload && quickReplyPayload.referral)
 
+  // A bare `get_started` postback is a conversation ENTRY carrying no referral,
+  // so it resolves to FALLBACK_FORM downstream. That is deliberate and
+  // load-bearing: it is how an organic (non-ad) Messenger user starts a survey,
+  // and it accounts for roughly a third of production's 162,148 fallback
+  // conversations -- 158 of 159 replayed `get_started` entries had no referral
+  // anywhere in their log. Do NOT demote it to `user_interaction` to stop it
+  // reaching the REFERRAL case; that breaks organic entry outright.
+  //
+  // What must not happen is a form-less entry RE-entering a conversation that
+  // already has a form. That is refused one layer down, in machine.js's REFERRAL
+  // case (`_refNamesForm`), because the same refusal has to cover a referral whose
+  // ref names no form -- `clickToMessengerAds`, a CTWA referral object with no
+  // `ref` -- which is indistinguishable from a real referral here. The normalizer
+  // reports what arrived; the machine decides what it may do.
   if (referral || postbackPayload === 'get_started') {
     return {
       event_type: 'conversation_started',
@@ -254,22 +268,45 @@ function parseSyntheticEvent(data, timestamp) {
 // Anchored, full-match pattern for a WhatsApp entry token. STRICT by design: a
 // mid-survey free-text answer that merely contains a ref token must not
 // re-trigger entry, so partial matches are rejected outright.
-const WHATSAPP_ENTRY_REF = /^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i
-
-// Returns the `form.<shortcode>[.key.value...]` ref carried by a text message,
-// or null. Shared by both WhatsApp entry paths — the wa.me prefilled-text link
-// and a CTWA ad's autofill message — so they cannot drift apart.
 //
-// Only the literal `form.` prefix is normalized to lowercase (the pattern is
+// The `form` pair may sit ANYWHERE in the dot-separated key.value list, not
+// only first. Messenger `m.me?ref=` links have always been written form-last
+// (`creative.3b.gender.men.form.hpvintrotriple`) and a real CTWA ad's
+// autofill_message reads the same way — `ctwaprobe.alpha.creative.Ad1H.form.
+// probetest`. Anchoring on a leading `form.` rejected those outright and
+// dropped the arrival to FALLBACK_FORM, which is a live survey belonging to
+// someone else: the VIR-19 failure shape, reproduced live on 2026-08-16.
+//
+// The pair must still begin on an EVEN token boundary, which is what the
+// leading `(?:key\.value\.)*` group enforces. getMetadata()/_group
+// (typewheels/utils.js) pairs tokens two at a time, so a `form` token landing
+// in a value slot resolves to no form at all (`creative.form.ABC` groups to
+// `{ creative: 'form', ABC: undefined }`). Refusing to match those leaves the
+// message an ordinary user_text rather than synthesizing a referral that
+// cannot resolve.
+//
+// Capture groups: 1 = leading key.value pairs, 2 = shortcode, 3 = trailing tokens.
+const WHATSAPP_ENTRY_REF = /^(?:start\s+)?((?:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.)*)form\.([A-Za-z0-9_-]+)((?:\.[A-Za-z0-9_-]+)*)$/i
+
+// Returns the `[key.value...]form.<shortcode>[.key.value...]` ref carried by a
+// text message, or null. Shared by both WhatsApp entry paths — the wa.me
+// prefilled-text link and a CTWA ad's autofill message — so they cannot drift
+// apart.
+//
+// Only the literal `form` token is normalized to lowercase (the pattern is
 // case-insensitive) so getMetadata's `md.form` lookup always finds the
 // shortcode; the shortcode and every metadata token keep the case as typed.
-// The whole ref body is returned as-is — key/value parsing belongs to
-// getMetadata()/_group (typewheels/utils.js) and is not duplicated here.
+// The ref is otherwise reassembled exactly as matched — key/value parsing
+// belongs to getMetadata()/_group (typewheels/utils.js) and is not duplicated
+// here.
 function _refFromText(data) {
   if (data.type !== 'text') return null
   const body = (data.text && data.text.body) || ''
   const match = body.trim().match(WHATSAPP_ENTRY_REF)
-  return match ? `form.${match[1]}` : null
+  if (!match) return null
+
+  const [, leading, shortcode, trailing] = match
+  return `${leading}form.${shortcode}${trailing}`
 }
 
 function categorizeWhatsAppEvent(data) {
@@ -319,12 +356,12 @@ function categorizeWhatsAppEvent(data) {
   // (no-retake, ignore rules) applies identically to both entry paths.
   //
   // Messenger parity: `wa.me/<number>?text=form.ABC.creative.x.gender.men`
-  // carries the same dot-separated key.value metadata as an `m.me?ref=`
-  // link. The character class after `form.` additionally accepts further
-  // `.`-separated tokens, still anchored/full-match so strictness against
-  // mid-survey free text is unchanged. We pass the WHOLE matched ref body
-  // through as-is and let getMetadata()/_group (utils.js) do the key/value
-  // parsing — this normalizer does not duplicate that logic.
+  // carries the same dot-separated key.value metadata as an `m.me?ref=` link,
+  // and — like `m.me?ref=` — the `form` pair may appear anywhere in that list
+  // rather than only first. The pattern stays anchored/full-match, so
+  // strictness against mid-survey free text is unchanged. We pass the WHOLE
+  // matched ref body through and let getMetadata()/_group (utils.js) do the
+  // key/value parsing — this normalizer does not duplicate that logic.
   //
   // An odd number of tokens (e.g. `form.ABC.creative`, a dangling key with
   // no value) is deliberately allowed to match: _group() pairs tokens two at

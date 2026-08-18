@@ -5,7 +5,7 @@ const fs = require('fs')
 const _ = require('lodash')
 const { parseLogJSON } = require('./utils')
 const { followUpMessage, offMessage } = require('../generic-validator')
-const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata } = require('./machine')
+const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata, categorizeEvent, DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 const { parseEvent } = require('../event-normalizer')
@@ -3245,14 +3245,368 @@ describe('md must always carry startTime', () => {
   })
 
   it('blank-starts a form when an external event arrives for a user with no conversation', () => {
-    // In prod the handover usually races the user's own first message by a
-    // second or two, so starting the form is the right outcome anyway.
+    // A Messenger thread-control handover is a REAL PLATFORM EVENT, not a
+    // synthetic one, and blank-starting on it is deliberate: in prod the
+    // handover races the user's own first message by a second or two, so
+    // starting the form is the right outcome and the referral that follows
+    // switches them onto the referred form (see the handover-race test below
+    // and documentation/referral-form-resolution.md §6b).
+    //
+    // This is the case that makes "an external event must never blank-start"
+    // wrong as a rule. The discriminator is `source.type === 'synthetic'`, not
+    // "arrived via _handleExternalEvent" -- see the DEFER describe below.
     const next = step(_initialState(), handover({ metadata: 'new message' }))
 
     next.forms.should.eql(['fallback'])
     should.exist(next.md)
     next.md.should.have.property('startTime', 3000)
     next.md.should.have.property('form', 'fallback')
+  })
+})
+
+// A SYNTHETIC event on a conversation that reconstructs as START is
+// self-contradictory, and blank-starting FALLBACK_FORM there is a silent
+// re-entry onto another researcher's live survey.
+//
+// Why it is self-contradictory: every synthetic external event exists only
+// BECAUSE a conversation already exists. A dean `timeout` is selected from a
+// `states` row sitting in WAIT_EXTERNAL_EVENT; a dinersclub payment result
+// requires the machine to have issued a payment; a linksniffer click and a
+// moviehouse video event require a field to have been rendered and sent. So
+// `state === 'START'` on one of these does not mean "new participant", it means
+// "the log we just replayed is not the conversation's log" -- either because the
+// scribble messages sink has not archived it yet, or because the account the
+// event named is not the account the conversation lives on.
+//
+// Neither of those is a reason to enter a survey. See planning/conversation-identity.md
+// §7.1 (CORRECTED) and documentation/states-debugging.md.
+describe('a synthetic event must not blank-start a conversation', () => {
+
+  const step = (state, event) => apply(state, exec(state, event))
+
+  const timeout = synthetic({ type: 'timeout', value: 1000 })
+  const click = synthetic({
+    type: 'external',
+    value: { type: 'linksniffer:click', url: 'https://example.com' }
+  })
+  const video = synthetic({
+    type: 'external',
+    value: { type: 'moviehouse:play', id: 'vid1' }
+  })
+
+  it('DEFERs a dean timeout that arrives on an empty conversation', () => {
+    exec(_initialState(), timeout).action.should.equal('DEFER')
+  })
+
+  it('DEFERs a linksniffer click that arrives on an empty conversation', () => {
+    exec(_initialState(), click).action.should.equal('DEFER')
+  })
+
+  it('DEFERs a moviehouse video event that arrives on an empty conversation', () => {
+    exec(_initialState(), video).action.should.equal('DEFER')
+  })
+
+  it('names the offending event on the output, for the log line', () => {
+    const output = exec(_initialState(), click)
+    output.event_type.should.equal('synthetic_external')
+  })
+
+  // The whole point: no FALLBACK_FORM, no md, no forms entry, no message.
+  it('leaves the state untouched rather than entering FALLBACK_FORM', () => {
+    const next = step(_initialState(), timeout)
+
+    next.should.eql(_initialState())
+    next.state.should.equal('START')
+    next.forms.should.eql([])
+    should.not.exist(next.md)
+  })
+
+  it('does not enter FALLBACK_FORM for any of the three producers', () => {
+    for (const e of [timeout, click, video]) {
+      const next = step(_initialState(), e)
+      next.forms.should.eql([])
+      should.not.exist(next.md)
+    }
+  })
+
+  // DEFER must be a pure no-op in the FOLD, not a throw. `exec` runs during
+  // replay as well as live (machine.getState folds the archived log with it), so
+  // a throw here would make any log whose first archived event is a synthetic
+  // one permanently unreplayable -- turning a transient archive lag into a
+  // permanently dead conversation. That is a worse failure than the one being
+  // fixed, so the fold must stay total.
+  it('replays a log that OPENS with a synthetic event without throwing', () => {
+    const state = getState([click, video, timeout])
+
+    state.state.should.equal('START')
+    state.forms.should.eql([])
+    should.not.exist(state.md)
+  })
+
+  it('still starts the referred form when the referral arrives after the deferred events', () => {
+    const state = getState([click, timeout, referral, echo])
+
+    state.forms.should.eql(['FOO'])
+    state.md.form.should.equal('FOO')
+    state.md.form.should.not.equal(process.env.FALLBACK_FORM)
+  })
+
+  // Once the conversation exists, synthetic external events behave exactly as
+  // before. The guard is scoped to START and nothing else.
+  it('does not change behaviour once the conversation is established', () => {
+    const established = getState([referral, echo])
+    established.state.should.not.equal('START')
+
+    const output = exec(established, click)
+    output.action.should.equal('UPDATE_STATE')
+    output.stateUpdate.externalEvents.length.should.equal(1)
+  })
+
+  it('leaves a blocked participant on the existing USER_BLOCKED no-op', () => {
+    const blocked = { ..._initialState(), state: 'USER_BLOCKED' }
+    exec(blocked, timeout).action.should.equal('NONE')
+  })
+
+  // DELIBERATELY NOT DEFERRED. An exodus bailout names the form it wants the
+  // participant switched onto, so it does not resolve through FALLBACK_FORM and
+  // honouring it on a short replay still does the thing it was asked to do --
+  // degraded (no seed, no md.pageid) but not wrong. Dropping it would silently
+  // un-bail a participant exodus decided to bail, and exodus has no re-sweep.
+  // Recorded here so the scope of the guard is a decision, not an oversight.
+  it('does not defer an exodus bailout, which names its own form', () => {
+    const output = exec(_initialState(), syntheticBail)
+
+    output.action.should.equal('SWITCH_FORM')
+    output.form.should.equal('BAR')
+  })
+})
+
+// FALLBACK_FORM MAY START A CONVERSATION; IT MAY NEVER RE-ENTER ONE.
+//
+// Messenger's bare "Get Started" postback normalizes to `conversation_started`
+// with NO referral (event-normalizer.js), so it routes to the REFERRAL case and
+// resolves FALLBACK_FORM -- and the REFERRAL case was the one entry path with no
+// START guard, because a referral naming a form is SUPPOSED to switch a live
+// participant onto it. So a bare Get Started pushed FALLBACK_FORM onto a live
+// conversation's stack at any state and replaced `md` wholesale.
+//
+// 3,732 production `states` rows, continuously 2020-06 to 2026-08 at 10-90/month.
+// Replaying 561 of their real logs puts them, at the moment of the append, in END
+// 50% / QOUT 22% / RESPONDING 14% / WAIT_EXTERNAL_EVENT 7% / BLOCKED 6% -- 44%
+// mid-survey. The sequence below is the traced production one, from
+// `chatroach.messages` on the Bauchi MNCH page:
+//
+//   13:16:00.474  referral  ref="creative.Static Hausa -parents. ... .form.mnchweeklanguage"
+//   13:16:01.653  {"postback":{"title":"Get Started","payload":"get_started"}}   <- 1.2s later
+//   13:16:03.524  forms:["mnchweeklanguage","305"]   md:{form:"305", ...}
+//   13:16:04.53   ERROR
+//
+// RAW webhook shapes driven through the real event-normalizer, because the
+// ambiguity is created in normalization (`referral: undefined`) and only resolved
+// in the machine; a pre-normalized fixture would not exercise the pair.
+describe('a form-less entry event must not re-enter a live conversation', () => {
+
+  const step = (state, event) => apply(state, exec(state, event))
+
+  const REAL_REF = 'creative.Static Hausa -parents.Age.Age.State.Bauchi State.form.mnchweeklanguage'
+  const T = 1755000000474
+
+  const raw = (extra, timestamp) => ({
+    source: 'messenger',
+    sender: { id: USER_ID },
+    recipient: { id: PAGE_ID },
+    timestamp,
+    ...extra
+  })
+
+  const adReferral = raw({ referral: { ref: REAL_REF, type: 'OPEN_THREAD' } }, T)
+  // The third webhook in the ad-click race, 1.2s after the referral.
+  const getStartedPostback = raw({ postback: { title: 'Get Started', payload: 'get_started' } }, T + 1179)
+  // A referral that DOES carry a ref, which names no form. Production values.
+  const refWithoutForm = raw({ referral: { ref: 'clickToMessengerAds', type: 'OPEN_THREAD' } }, T + 1179)
+
+  // A live conversation: entered by the ad, question sent, awaiting an answer.
+  const liveLog = [parseEvent(adReferral), echo]
+
+  it('routes the bare postback to REFERRAL carrying no referral at all', () => {
+    // Why it reaches this case rather than POSTBACK, which already guards START.
+    const event = parseEvent(getStartedPostback)
+
+    event.event_type.should.equal('conversation_started')
+    should.not.exist(event.payload.referral)
+    categorizeEvent(event).should.equal('REFERRAL')
+  })
+
+  it('leaves the live conversation byte-for-byte untouched', () => {
+    const before = getState(liveLog)
+    const after = getState([...liveLog, parseEvent(getStartedPostback)])
+
+    before.state.should.equal('QOUT')
+    before.forms.should.eql(['mnchweeklanguage'])
+    after.should.eql(before)
+  })
+
+  it('does not append FALLBACK_FORM and does not wipe the targeting metadata', () => {
+    const after = getState([...liveLog, parseEvent(getStartedPostback)])
+
+    after.forms.should.not.include(process.env.FALLBACK_FORM)
+    after.md.form.should.equal('mnchweeklanguage')
+    after.md.creative.should.equal('Static Hausa -parents')
+    after.md.State.should.equal('Bauchi State')
+  })
+
+  it('DEFERs, naming the reason that becomes the greppable tag', () => {
+    const output = exec(getState(liveLog), parseEvent(getStartedPostback))
+
+    output.action.should.equal('DEFER')
+    output.reason.should.equal(DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION)
+    output.event_type.should.equal('conversation_started')
+  })
+
+  // 44% of the measured population. A bare Get Started arriving here is a race
+  // artefact, not an intent to start another survey.
+  it('refuses mid-survey from every state a live conversation can be in', () => {
+    for (const s of ['QOUT', 'RESPONDING', 'WAIT_EXTERNAL_EVENT', 'BLOCKED', 'ERROR']) {
+      const live = { ...getState(liveLog), state: s }
+      const output = exec(live, parseEvent(getStartedPostback))
+
+      output.action.should.equal('DEFER')
+      step(live, parseEvent(getStartedPostback)).should.eql(live)
+    }
+  })
+
+  // NAMED BEHAVIOUR CHANGE, half the population. Someone who finished a survey
+  // and taps Get Started again used to be entered on FALLBACK_FORM -- another
+  // researcher's live survey, where their answers were recorded. They now get
+  // nothing at all. The documented restart mechanism is REPLYBOT_RESET_SHORTCODE,
+  // not a bare Get Started, so this is a refusal to guess rather than a lost
+  // feature -- and it is what every other post-END interaction already does.
+  it('refuses a participant who taps Get Started again after finishing', () => {
+    const ended = getState([parseEvent(adReferral), tyEcho])
+    ended.state.should.equal('END')
+
+    const after = getState([parseEvent(adReferral), tyEcho, parseEvent(getStartedPostback)])
+    after.should.eql(ended)
+  })
+
+  it('refuses a referral whose ref carries no form pair', () => {
+    exec(getState(liveLog), parseEvent(refWithoutForm)).action.should.equal('DEFER')
+  })
+
+  // The WhatsApp shape of the same defect. A CTWA referral object routinely
+  // carries no `ref`; with no matching autofill text there is nothing to resolve,
+  // so it lands on FALLBACK_FORM. Accepted cost, stated: on WhatsApp the refused
+  // event IS the participant's message, so dropping it drops that message. Still
+  // strictly better than moving them to another researcher's survey, and they
+  // recover by sending anything else.
+  it('refuses a CTWA referral that carries no ref, on a live WhatsApp conversation', () => {
+    const ctwa = {
+      source: 'whatsapp',
+      phone_number_id: WA_PHONE_NUMBER_ID,
+      from: WA_USER_ID,
+      timestamp: T + 1179,
+      type: 'text',
+      text: { body: 'Hello' },
+      referral: { source_id: '120210000', ctwa_clid: 'ARaBcD', headline: 'ad' }
+    }
+    const live = getState([whatsappReferral, echo])
+    live.forms.should.eql(['FOO'])
+
+    exec(live, parseEvent(ctwa)).action.should.equal('DEFER')
+  })
+
+  // ---- everything that must keep working -------------------------------------
+
+  it('still enters FALLBACK_FORM when the bare get_started is the first event', () => {
+    // 35% of production's 162,148 fallback conversations start on exactly this.
+    const state = getState([parseEvent(getStartedPostback)])
+
+    state.state.should.equal('RESPONDING')
+    state.forms.should.eql([process.env.FALLBACK_FORM])
+    state.md.form.should.equal(process.env.FALLBACK_FORM)
+    state.md.startTime.should.equal(getStartedPostback.timestamp)
+    state.md.pageid.should.equal(PAGE_ID)
+  })
+
+  it('still enters FALLBACK_FORM from a referral whose ref names no form', () => {
+    getState([parseEvent(refWithoutForm)]).forms.should.eql([process.env.FALLBACK_FORM])
+  })
+
+  // WHY THE DISCRIMINATOR IS `forms.length` AND NOT `state.state !== 'START'`.
+  // A machine_report error arriving before entry leaves the conversation in ERROR
+  // with an empty stack. There is no conversation to protect there, so entry must
+  // still work -- a START-name test would strand this participant forever.
+  it('still enters FALLBACK_FORM on a non-START state that has no form yet', () => {
+    const errored = { ..._initialState(), state: 'ERROR' }
+    const next = step(errored, parseEvent(getStartedPostback))
+
+    next.forms.should.eql([process.env.FALLBACK_FORM])
+  })
+
+  // The case a `getForm(nxt) === FALLBACK_FORM` test would have broken: three
+  // live production rows entered on `?ref=form.305.country.iraq`. An explicit ref
+  // is an explicit ref even when it names the fallback shortcode.
+  it('still switches a live participant onto a form the ref NAMES, fallback or not', () => {
+    const explicit = raw({
+      referral: { ref: `form.${process.env.FALLBACK_FORM}.country.iraq`, type: 'OPEN_THREAD' }
+    }, T + 1179)
+    const next = getState([...liveLog, parseEvent(explicit)])
+
+    next.forms.should.eql(['mnchweeklanguage', process.env.FALLBACK_FORM])
+    next.md.form.should.equal(process.env.FALLBACK_FORM)
+    next.md.country.should.equal('iraq')
+  })
+
+  it('still repeats the pending question when the live form IS the fallback form', () => {
+    // Reached before the new guard, via _hasForm -- a page that legitimately
+    // enters on FALLBACK_FORM keeps its Get-Started-repeats-the-question
+    // affordance.
+    const onFallback = getState([parseEvent(getStartedPostback), echo])
+    onFallback.state.should.equal('QOUT')
+
+    const output = exec(onFallback, parseEvent(raw(
+      { postback: { title: 'Get Started', payload: 'get_started' } }, T + 5000)))
+
+    output.action.should.equal('RESPOND')
+    output.validation.valid.should.be.false
+  })
+
+  it('still no-ops rather than DEFERs for a USER_BLOCKED participant', () => {
+    const blocked = { ...getState(liveLog), state: 'USER_BLOCKED' }
+
+    exec(blocked, parseEvent(getStartedPostback)).action.should.equal('NONE')
+  })
+
+  it('still honours the reset shortcode on a live conversation', () => {
+    const resetRef = raw({
+      referral: { ref: `form.${process.env.REPLYBOT_RESET_SHORTCODE}` }
+    }, T + 1179)
+
+    exec(getState(liveLog), parseEvent(resetRef)).action.should.equal('RESET')
+  })
+
+  // The two webhooks in the ad-click race that were ALREADY handled. The handover
+  // blank-starts FALLBACK_FORM, the referral switches to the referred form, and a
+  // get_started in that ordering is absorbed by _hasForm rather than the new
+  // guard. If this breaks, the guard has been widened past form-less entries.
+  it('does not disturb the handover-then-referral ordering', () => {
+    const rawHandover = raw({
+      pass_thread_control: { previous_owner_app_id: 263902037430900, metadata: 'new message' }
+    }, T - 1500)
+    const state = getState([rawHandover, adReferral, getStartedPostback].map(parseEvent))
+
+    state.md.form.should.equal('mnchweeklanguage')
+    state.forms.should.eql([process.env.FALLBACK_FORM, 'mnchweeklanguage'])
+  })
+
+  // DEFER must stay a pure no-op in the FOLD. `exec` runs during replay as well
+  // as live, and these logs are historical: every one of the 3,732 rows replays
+  // through this branch on every cache miss.
+  it('replays a log containing refused entries without throwing', () => {
+    const state = getState([adReferral, getStartedPostback, getStartedPostback].map(parseEvent))
+
+    state.forms.should.eql(['mnchweeklanguage'])
+    state.md.form.should.equal('mnchweeklanguage')
   })
 })
 
