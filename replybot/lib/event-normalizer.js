@@ -297,10 +297,37 @@ const WHATSAPP_ENTRY_REF = /^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2
 // shortcode; the shortcode and every metadata token keep the case as typed.
 // The whole ref body is returned as-is — key/value parsing belongs to
 // getMetadata()/_group (typewheels/utils.js) and is not duplicated here.
+// The second entry anchor: an ENCODED recruitment ref, `r.<base64url>`.
+//
+// A separate pattern rather than another branch inside WHATSAPP_ENTRY_REF, on
+// purpose. Sharing the `form.` anchor would mean replybot deciding at runtime
+// whether `form.AbC123` is a literal shortcode or an encoded blob — a heuristic
+// on the routing path, where a wrong guess costs a respondent their survey. Two
+// disjoint anchors make the ref format an explicit property of what the ad
+// shipped rather than something inferred from the shape of a token.
+//
+// The alphabet is exactly base64url's: no `%` branch and no `.`. An encoded ref
+// is a single opaque token by construction, so neither percent escapes nor the
+// dotted key/value grammar apply to it — and because `.` cannot appear, the two
+// patterns are disjoint and can never both match one body. Anchored and
+// full-match like its sibling, which is what stops a mid-survey free-text
+// answer containing a token from re-triggering entry.
+//
+// Case matters here in a way it does not for the dotted form. base64url is
+// case-SIGNIFICANT, and the `i` flag applies only to the literal `r.` prefix —
+// the capture group preserves the body exactly as sent, the same way the
+// shortcode does. Lower-casing it would silently corrupt every encoded ref.
+const WHATSAPP_ENTRY_REF_ENCODED = /^(?:start\s+)?r\.([A-Za-z0-9_-]+)$/i
+
 function _refFromText(data) {
   if (data.type !== 'text') return null
   const body = (data.text && data.text.body) || ''
-  const match = body.trim().match(WHATSAPP_ENTRY_REF)
+  const trimmed = body.trim()
+
+  const encoded = trimmed.match(WHATSAPP_ENTRY_REF_ENCODED)
+  if (encoded) return `r.${encoded[1]}`
+
+  const match = trimmed.match(WHATSAPP_ENTRY_REF)
   return match ? `form.${match[1]}` : null
 }
 

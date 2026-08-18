@@ -246,3 +246,176 @@ describe('hash', () => {
   })
 })
 
+
+// ---------------------------------------------------------------------------
+// The encoded recruitment ref: `r.<base64url>`
+//
+// An optional second ref format. The legacy dotted form is untouched, and these
+// tests assert that too -- every existing Messenger study depends on it.
+//
+// The property that matters most is that a ref which will not decode THROWS
+// rather than resolving nothing. Resolving nothing means md.form falls through
+// to FALLBACK_FORM, a real survey where the misrouted respondent looks like a
+// completion; a throw becomes a tagged ERROR state that is counted and
+// alertable. This format is the ONLY carrier of the shortcode, so "cannot
+// decode" and "do not know the survey" are the same statement.
+// ---------------------------------------------------------------------------
+
+// Build a payload the way vlab must: version | len | shortcode | token.
+// Written out longhand rather than by inverting the decoder, so these tests pin
+// the WIRE FORMAT and not merely a round trip against ourselves.
+function encodeRef(shortcode, tokenHex, version = 1) {
+  const sc = Buffer.from(shortcode, 'utf8')
+  const token = Buffer.from(tokenHex, 'hex')
+  return Buffer.concat([Buffer.from([version, sc.length]), sc, token]).toString('base64url')
+}
+
+describe('decodeRecruitmentRef', () => {
+  it('recovers the shortcode and the token', () => {
+    u.decodeRecruitmentRef(encodeRef('mnchweek', 'a7f3c20b1e'))
+      .should.deep.equal({ form: 'mnchweek', token: 'a7f3c20b1e' })
+  })
+
+  it('stays inside the alphabet both entry gates accept', () => {
+    // base64url is [A-Za-z0-9_-] and contains no `.`, which is what lets an
+    // encoded ref pass the WhatsApp gate and never collide with the dotted
+    // key/value grammar.
+    for (const sc of ['mnchweek', 'ecdenglishincentive', 'a', 'MNCH-week_2']) {
+      const encoded = encodeRef(sc, 'ffeeddccbb')
+      encoded.should.match(/^[A-Za-z0-9_-]+$/)
+      u.decodeRecruitmentRef(encoded).form.should.equal(sc)
+    }
+  })
+
+  it('handles a multi-byte shortcode, since the length is in BYTES not chars', () => {
+    u.decodeRecruitmentRef(encodeRef('café', '0102030405')).form.should.equal('café')
+  })
+
+  it('throws on anything outside the base64url alphabet', () => {
+    for (const bad of ['not base64!', 'has.dot', 'plus+slash/', '']) {
+      ;(() => u.decodeRecruitmentRef(bad)).should.throw(/base64url/)
+    }
+  })
+
+  it('throws on a non-string', () => {
+    for (const bad of [undefined, null, 42, {}, []]) {
+      ;(() => u.decodeRecruitmentRef(bad)).should.throw(/base64url/)
+    }
+  })
+
+  it('throws on a lenient-decoder near-miss rather than silently truncating', () => {
+    // THE reason the round-trip check exists. Node's base64 decoder skips
+    // characters it cannot use instead of failing, so a string of impossible
+    // length decodes to a SHORT buffer and would otherwise read as a valid but
+    // different payload.
+    ;(() => u.decodeRecruitmentRef(encodeRef('mnchweek', 'a7f3c20b1e') + 'A'))
+      .should.throw(/canonical/)
+  })
+
+  it('throws on an unknown version instead of guessing the layout', () => {
+    ;(() => u.decodeRecruitmentRef(encodeRef('mnchweek', 'a7f3c20b1e', 2)))
+      .should.throw(/version/)
+  })
+
+  it('throws when the declared shortcode length overruns the payload', () => {
+    const sc = Buffer.from('mnchweek', 'utf8')
+    const encoded = Buffer.concat([
+      Buffer.from([1, 200]), sc, Buffer.from('a7f3c20b1e', 'hex')
+    ]).toString('base64url')
+    ;(() => u.decodeRecruitmentRef(encoded)).should.throw(/length/)
+  })
+
+  it('throws when there is no token after the shortcode', () => {
+    // A shortcode with no token is unattributable; accepting it silently would
+    // produce conversations that route fine and attribute to nobody.
+    const sc = Buffer.from('mnchweek', 'utf8')
+    const encoded = Buffer.concat([Buffer.from([1, sc.length]), sc]).toString('base64url')
+    ;(() => u.decodeRecruitmentRef(encoded)).should.throw(/length/)
+  })
+
+  it('throws on a zero-length shortcode', () => {
+    const encoded = Buffer.concat([
+      Buffer.from([1, 0]), Buffer.from('a7f3c20b1e', 'hex')
+    ]).toString('base64url')
+    ;(() => u.decodeRecruitmentRef(encoded)).should.throw(/length/)
+  })
+
+  it('carries the REF_DECODE tag so it does not page the platform on-call', () => {
+    // transition.js reads `e.tag || 'STATE_ACTIONS'`, and STATE_ACTIONS is in
+    // every consumer's platform allow-list. An untagged throw here would page
+    // the platform on-call for a study's broken ad.
+    try {
+      u.decodeRecruitmentRef('not base64!')
+      throw new Error('expected a throw')
+    } catch (e) {
+      e.tag.should.equal('REF_DECODE')
+    }
+  })
+})
+
+describe('getMetadata with an encoded ref', () => {
+  let prevFallback
+
+  before(() => {
+    prevFallback = process.env.FALLBACK_FORM
+    process.env.FALLBACK_FORM = 'fallback'
+  })
+  after(() => {
+    process.env.FALLBACK_FORM = prevFallback
+  })
+
+  const event = (ref) => ({
+    event_type: 'conversation_started',
+    timestamp: 1600000000000,
+    user_id: 'user-1',
+    source: { type: 'whatsapp', account_id: 'page-1' },
+    payload: { referral: { ref } }
+  })
+
+  it('resolves the shortcode out of the encoded ref', () => {
+    const md = u.getMetadata(event(`r.${encodeRef('mnchweek', 'a7f3c20b1e')}`))
+    md.form.should.equal('mnchweek')
+    md.vt.should.equal('a7f3c20b1e')
+  })
+
+  it('consumes `r` rather than leaving a half-parsed ref in the metadata', () => {
+    const md = u.getMetadata(event(`r.${encodeRef('mnchweek', 'a7f3c20b1e')}`))
+    should.not.exist(md.r)
+  })
+
+  it('THROWS on a malformed encoded ref instead of falling back', () => {
+    // The whole point. getMetadata's existing try/catch swallows a bad dotted
+    // token so one broken metadata value cannot cost a user their survey. That
+    // reasoning inverts here: the encoded ref is the only carrier of the
+    // shortcode, so swallowing would route the respondent into FALLBACK_FORM.
+    // Asserted on the TAG, not the message: which validation trips first is an
+    // implementation detail, but the tag is the contract — it is what routes the
+    // failure to a study ticket instead of the platform on-call.
+    for (const bad of ['r.not-canonical-A', 'r.AAAA', 'r.' + 'A'.repeat(40)]) {
+      let thrown = null
+      try {
+        u.getMetadata(event(bad))
+      } catch (e) {
+        thrown = e
+      }
+      should.exist(thrown, `expected ${bad} to throw`)
+      thrown.tag.should.equal('REF_DECODE')
+    }
+  })
+
+  it('leaves the legacy dotted ref completely untouched', () => {
+    const md = u.getMetadata(event('creative.Smiling.gender.women.form.mnchweek'))
+    md.form.should.equal('mnchweek')
+    md.creative.should.equal('Smiling')
+    md.gender.should.equal('women')
+    should.not.exist(md.vt)
+  })
+
+  it('still swallows a malformed LEGACY ref, as before', () => {
+    // Unchanged behaviour, asserted so the new throw cannot leak into the old
+    // path: a legacy ref carries `form` in the clear, so a bad metadata token
+    // must not cost the respondent their survey.
+    const md = u.getMetadata(event('form.mnchweek.city.%FF'))
+    md.form.should.equal('mnchweek')
+  })
+})

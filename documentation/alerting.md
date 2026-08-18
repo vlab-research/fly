@@ -1023,3 +1023,97 @@ ordinary hour, and `absent()` on the payment counter would page for quiet.
 5. If `dinersclub_up` exists but only for `vstag`, this alert is doing its job:
    the namespace scope is what stops a staging pod from standing in for the
    production one.
+
+---
+
+## 13. Recruitment arrival health — runbooks
+
+Full background: `documentation/recruitment-arrival-health.md`. In short — every
+other alert in this document measures what happens to a conversation once it
+exists. These two measure whether it started in the right place, which nothing
+here could see before.
+
+### Why an arrival alert needs a gate
+
+"People landed on the fallback form" is not a fault on its own. Anyone who
+messages a page organically has no ref, so `md.form` falls through and they land
+on form `305` by design — measured ~1,771 arrivals/24h on prod 2026-08-18. Both
+alerts below therefore key on something that makes the arrival *unambiguously*
+wrong, not on the raw count.
+
+### RecruitmentAdArrivalsInFallback
+
+**Signal:** `sum by (survey, platform) (survey_arrivals{window="1h", shortcode="305", ad_id="present"}) >= 2` for 30m
+
+Someone clicked an ad and was routed into the fallback survey instead of the study
+that paid for them. They are answering another researcher's questions and will
+reach `END` looking like a completion, so nothing downstream will flag them. This
+is the VIR-19 shape.
+
+**Healthy value is zero.** The threshold is 2/30m only so a single hand-edited
+WhatsApp prefill cannot page.
+
+1. **Which study owns the ads on that platform right now?** The `platform` label
+   tells you the channel; the `survey` label is the *fallback's* survey, not the
+   study at fault, so this needs vlab's side: which studies have ACTIVE ad sets
+   with that `destination_type`.
+2. **Read a raw arrival.** Find recent fallback arrivals carrying an ad id:
+   ```sql
+   SELECT userid, pageid, platform, current_form, ad_id, form_start_time
+   FROM states
+   WHERE current_form = '305'
+     AND ad_id IS NOT NULL
+     AND form_start_time > now() - INTERVAL '2 hours'
+   ORDER BY form_start_time DESC;
+   ```
+   Then pull the raw webhook for one of those userids from `messages` and look at
+   what the referral actually carried.
+3. **The three usual causes**, in order of likelihood:
+   - the creative's routing token is missing or malformed for that channel;
+   - the ad set's `destination_type` opens a channel whose creative carries no
+     token — classically a multi-destination ad whose second arm was never
+     configured;
+   - the shortcode in the ref does not exist as a survey (check `surveys`).
+4. **Escalate to vlab.** Every cause above is fixed by republishing the ad, not by
+   anything in fly. Fly is reporting correctly; the ad is wrong.
+
+**Coverage caveat — do not read silence as health.** This only sees arrivals
+carrying an ad id: effectively all WhatsApp CTWA arrivals, but only ~31% of
+Messenger ad entrants (2,475 of 7,983 measured over 30 days to 2026-08-18),
+because Meta sends the referral webhook for only that share. A quiet alert does
+not prove there is no misroute on Messenger.
+
+### RecruitmentRefDecodeErrors
+
+**Signal:** `sum by (form) (survey_error_states{error_tag="REF_DECODE"}) >= 3` for 30m
+
+Respondents arrived with an encoded recruitment ref (`r.<base64url>`) that would
+not decode. Because that ref is the only carrier of the survey shortcode, replybot
+cannot tell which survey they wanted, so it puts them in an ERROR state rather
+than guessing — guessing would mean the fallback survey and the failure above.
+
+**Healthy value is zero.** vlab mints these refs.
+
+1. **Check whether it is one study or many.** The `form` label here is the
+   *fallback* or `(none)`, since decoding is what failed — so group by page
+   instead:
+   ```sql
+   SELECT pageid, platform, count(*)
+   FROM states
+   WHERE error_tag = 'REF_DECODE'
+     AND errored_at > now() - INTERVAL '2 hours'
+   GROUP BY 1, 2;
+   ```
+   One page → one study's ads. Many pages → a bad encoder deploy in vlab.
+2. **Get the ref that failed.** The raw webhook in `messages` for one of those
+   userids carries the token. Decode it by hand to see how far it gets:
+   `node -e "console.log(require('./replybot/lib/typewheels/utils').decodeRecruitmentRef('<token>'))"`
+   The thrown message names which check failed — alphabet, canonical length,
+   version, shortcode length, or empty shortcode.
+3. **Messenger vs WhatsApp matters.** On Messenger the ref is untamperable, so any
+   failure there is *ours* — a broken encoder or a truncated creative, and urgent.
+   On WhatsApp the ref sits in the respondent's compose box and can be edited
+   before sending, so a low single-digit background is expected and benign.
+4. **v1 thresholds, no measured background.** No study used the encoded format
+   when this shipped. If it fires steadily at a low number on WhatsApp only, that
+   is probably the hand-edit floor — recalibrate rather than chase it.

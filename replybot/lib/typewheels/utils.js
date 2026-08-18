@@ -1,4 +1,5 @@
 const farmhash = require('farmhash')
+const { RefDecodeError } = require('../errors')
 
 function recursiveJSONParser(obj) {
   function traverse(obj) {
@@ -175,6 +176,102 @@ function adIdFromReferral(referral, platform) {
   return _id(referral.ad_id)
 }
 
+// ---------------------------------------------------------------------------
+// The encoded recruitment ref: `r.<base64url>`
+//
+// An OPTIONAL second ref format, alongside the legacy dotted
+// `creative.X.form.Y` one. The legacy format is untouched and permanent —
+// every existing Messenger study depends on it and none will migrate.
+//
+// WHY IT EXISTS. The dotted ref carries a study's stratum vocabulary in clear
+// text, and on WhatsApp that text sits in the respondent's compose box where
+// they can read it: being shown `gender.men.age.25_34` about yourself before a
+// survey starts is a disclosure, not a transport detail. The alternative
+// already in the codebase — shipping only `form.<shortcode>` and recovering the
+// stratum from the ad id — does not work: Meta sends the referral webhook that
+// carries an ad id for only about a third of Messenger ad entrants (measured
+// 2,475 of 7,983 over 30 days to 2026-08-18), so two thirds would have no
+// stratum at all. An encoded ref is carried by the quick-reply payload and the
+// autofill text, which every entrant has, and discloses nothing.
+//
+// WHY AN ENCODING AND NOT A LOOKUP KEY. Routing happens synchronously at the
+// first inbound message and cannot wait on anything; attribution is a batch
+// join done afterwards and can. If the shortcode were only recoverable from a
+// vlab-side mapping, a respondent could arrive before that mapping propagated
+// and we would have no survey to start them on. Encoding it keeps the ref
+// self-describing: fly decodes locally, with no shared state, no network call,
+// and no ordering assumption between vlab creating an ad and someone tapping it.
+//
+// WIRE FORMAT — this is a CROSS-REPO CONTRACT. vlab encodes, fly decodes, and
+// neither can change it alone. base64url (RFC 4648 §5), unpadded, of:
+//
+//     byte 0      version, currently 0x01
+//     byte 1      shortcode length in bytes, 1..255
+//     bytes 2..   the shortcode, UTF-8
+//     remainder   the opaque token, >= 1 byte, surfaced as lowercase hex
+//
+// The token identifies a (stratum x creative) pair in vlab's own mapping. It is
+// deliberately opaque: encoding the stratum id itself would be self-describing
+// for vlab too, but stratum ids routinely spell out the strata
+// ("gender_women_age_25_34"), which would put the disclosure straight back.
+//
+// base64url's alphabet is [A-Za-z0-9_-], which is already inside the WhatsApp
+// entry gate's token class and contains no `.`, so an encoded ref can never be
+// mistaken for the dotted grammar or split by it.
+const B64URL = /^[A-Za-z0-9_-]+$/
+const ENCODED_REF_VERSION = 1
+
+// Decode an encoded ref body, or THROW RefDecodeError. Pure: no IO, no env.
+//
+// Every failure is a throw rather than a null return, because the caller cannot
+// do anything useful with a null — see RefDecodeError's comment. Validation is
+// deliberately exhaustive: Node's base64 decoder is LENIENT and silently skips
+// characters it does not recognise, so `Buffer.from(x, 'base64url')` on garbage
+// returns a short buffer instead of failing. The charset check and the
+// round-trip check below are what turn that silence into an error.
+function decodeRecruitmentRef(encoded) {
+  if (typeof encoded !== 'string' || !B64URL.test(encoded)) {
+    throw new RefDecodeError('encoded ref is not base64url', { encoded })
+  }
+
+  const buf = Buffer.from(encoded, 'base64url')
+
+  // Round-trip: catches inputs whose length is impossible in base64 (a lone
+  // trailing character), which the lenient decoder otherwise absorbs.
+  if (buf.toString('base64url') !== encoded) {
+    throw new RefDecodeError('encoded ref is not canonical base64url', { encoded })
+  }
+
+  // version + length + >=1 shortcode byte + >=1 token byte
+  if (buf.length < 4) {
+    throw new RefDecodeError('encoded ref is too short', { encoded })
+  }
+
+  const version = buf[0]
+  if (version !== ENCODED_REF_VERSION) {
+    throw new RefDecodeError('unknown encoded ref version', { encoded, version })
+  }
+
+  const len = buf[1]
+  if (len < 1 || buf.length < 2 + len + 1) {
+    throw new RefDecodeError('encoded ref shortcode length is out of range', {
+      encoded, len, bytes: buf.length
+    })
+  }
+
+  const form = buf.subarray(2, 2 + len).toString('utf8')
+  const token = buf.subarray(2 + len).toString('hex')
+
+  // A shortcode that survived the length check but decoded to nothing usable
+  // means the payload is not what it claims to be. Guessing here would put a
+  // respondent in an arbitrary survey.
+  if (!form.trim()) {
+    throw new RefDecodeError('encoded ref carries an empty shortcode', { encoded })
+  }
+
+  return { form, token }
+}
+
 function getMetadata(event) {
   let md = {}
   let referral = null
@@ -191,6 +288,22 @@ function getMetadata(event) {
   } catch (e) {
     md = {}
     referral = null
+  }
+
+  // DELIBERATELY OUTSIDE the catch above. That catch exists to stop one
+  // malformed metadata token costing a user their survey — it discards md and
+  // lets `form` fall through. Here that reasoning inverts: the encoded ref is
+  // the ONLY carrier of the shortcode, so a failure to decode means we do not
+  // know the survey. Swallowing it would route the respondent into
+  // FALLBACK_FORM, which is the exact silent misroute this format prevents.
+  //
+  // `r` is fly-owned on the way out: it is consumed into `form` and `vt` and
+  // never left in the metadata, so nothing downstream sees a half-parsed ref.
+  if (md.r !== undefined) {
+    const { form, token } = decodeRecruitmentRef(md.r)
+    delete md.r
+    md.form = form
+    md.vt = token
   }
 
   md.form = md.form || process.env.FALLBACK_FORM
@@ -232,5 +345,6 @@ module.exports = {
   _group,
   getMetadata,
   eventPlatform,
-  adIdFromReferral
+  adIdFromReferral,
+  decodeRecruitmentRef
 }

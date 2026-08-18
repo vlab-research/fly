@@ -171,6 +171,44 @@ studyHealth:
   deanExpiredWaitsThreshold: 10
   deanExpiredWaitsFor: "15m"
 
+  # RecruitmentAdArrivalsInFallback: people who clicked an ad and were routed
+  # into the fallback survey instead of the study that paid for them.
+  #
+  # THE HEALTHY VALUE IS ZERO, which is unusual in this file and worth saying
+  # plainly. Most thresholds here are calibrated against a measured background
+  # because the underlying population is legitimately non-zero. This one is not:
+  # the ad_id gate means every counted user demonstrably arrived from an ad, and
+  # an ad-sourced arrival in someone else's survey has no benign reading.
+  #
+  # The UNGATED signal, for contrast, is useless: form 305 receives ~1,771
+  # arrivals/24h (measured prod 2026-08-18) because every organic entrant who
+  # messages a page with no ref lands there by design. An alert on that count
+  # would fire permanently and be silenced within a week. The gate is the alert.
+  #
+  # 2 rather than 1, with a 30m for:, only so a single event cannot page: one
+  # respondent can reach the fallback by hand-editing a WhatsApp prefill. Two
+  # sustained over half an hour is a broken ad, not a fat finger.
+  # RAISE THIS ONLY WITH A REASON WRITTEN DOWN — a standing floor here means ad
+  # spend is recruiting people into another researcher's survey.
+  recruitmentFallbackThreshold: 2
+  recruitmentFallbackFor: "30m"
+
+  # RecruitmentRefDecodeErrors: encoded recruitment refs that would not decode.
+  #
+  # Also zero-by-design. vlab mints these refs, so a decode failure is a broken
+  # encoder or a creative that shipped truncated — both ours, both urgent.
+  #
+  # The allowance exists for exactly one benign case: on WhatsApp the ref sits in
+  # the respondent's compose box and can be edited before sending. A mangled one
+  # now produces a visible ERROR state rather than a silent misroute — that is
+  # the improvement — but it means a small hand-edit background is expected on
+  # that platform, and none at all on Messenger where the ref is untamperable.
+  #
+  # v1 with NO measured background, because no study uses the encoded format yet.
+  # Revisit after the first campaign rather than trusting these numbers.
+  refDecodeThreshold: 3
+  refDecodeFor: "30m"
+
   # ProviderErrors: the messaging provider is failing us — either returning its own
   # internal errors (category provider_error, Meta code -1) or unreachable before we
   # ever sent a request (category provider_unreachable, code NULL/0).

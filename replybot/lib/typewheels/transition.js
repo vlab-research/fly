@@ -148,6 +148,31 @@ class Machine {
       }
 
     } catch (e) {
+      // Same rule the actions catch below already states: an error carrying its
+      // own tag routes itself. The two were inconsistent — that one honours
+      // `e.tag`, this one hard-coded STATE_TRANSITION and then dropped the whole
+      // report with publish:false. A tagged failure raised during the transition
+      // therefore produced NO error state, and so no metric, no alert, no ticket.
+      //
+      // publish is what creates the error state. The report goes back through
+      // Kafka and machine.js turns `report.error` into action ERROR, which is
+      // what fills states.error_tag and feeds survey_error_states. Withhold it
+      // and the user is stuck with nothing recorded anywhere.
+      //
+      // UNTAGGED ERRORS ARE UNCHANGED, deliberately: still STATE_TRANSITION,
+      // still publish:false. Whatever that behaviour is for, it is not this
+      // change's to revisit — only errors that opt in by carrying a tag take the
+      // new path.
+      if (e.tag) {
+        return {
+          publish: true,
+          timestamp,
+          user,
+          page,
+          error: { ...(e.details || {}), tag: e.tag, message: e.message, stack: e.stack }
+        }
+      }
+
       return {
         publish: false,
         timestamp,

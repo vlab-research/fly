@@ -341,4 +341,99 @@ spec:
               events, or integration failure). Threshold: {{ .Values.studyHealth.deanExpiredWaitsThreshold }}
               (v1, tunable — current expired waits are 0-2 total).
             runbook_url: "{{ $runbook }}#deanexpiredwaits"
+
+        # ---------------------------------------------------------------------
+        # RECRUITMENT ARRIVAL HEALTH — documentation/recruitment-arrival-health.md
+        #
+        # Everything above measures what happens to a conversation once it
+        # exists. These two measure whether it started in the right place, which
+        # nothing here could see before.
+        # ---------------------------------------------------------------------
+
+        # An ad clicker who landed in the FALLBACK survey. Unambiguously broken.
+        #
+        # WHY THE ad_id GATE IS THE WHOLE ALERT. Arrivals on the fallback form are
+        # NOT by themselves a fault: anyone who messages a page organically has no
+        # ref, so md.form falls through and they land there by design. Measured on
+        # prod 2026-08-18 that background is ~1,771 arrivals/24h — an alert on the
+        # absolute count would fire permanently and be switched off within a week.
+        #
+        # ad_id="present" removes the ambiguity completely. fly stamps an ad id
+        # only when the referral says the arrival came from an ad, so this series
+        # counts people who demonstrably clicked an ad and still ended up in
+        # someone else's survey. There is no benign reading of that. It is the
+        # VIR-19 shape exactly — 1,770 users over four days, invisible because the
+        # fallback is a real survey where misrouted people answer questions, reach
+        # END, and look like completions.
+        #
+        # COVERAGE, stated so nobody reads a quiet alert as "all good": this can
+        # only see arrivals carrying an ad id. On WhatsApp click-to-WhatsApp that
+        # is effectively all of them. On Messenger it is about a third — measured
+        # 2,475 of 7,983 ad entrants over 30 days to 2026-08-18 — because Meta
+        # sends the referral webhook for only that share, and the rest arrive
+        # through the quick-reply payload with no ad id to capture. So a FIRING
+        # alert proves a misroute; a quiet one does not prove its absence. For
+        # studies on the encoded ref format, RecruitmentRefDecodeErrors below
+        # covers the remainder without that blind spot.
+        - alert: RecruitmentAdArrivalsInFallback
+          expr: |
+            sum by (survey, platform) (
+              survey_arrivals{window="1h", shortcode="{{ .Values.studyHealth.fallbackForm }}", ad_id="present"}
+            ) >= {{ .Values.studyHealth.recruitmentFallbackThreshold }}
+          for: {{ .Values.studyHealth.recruitmentFallbackFor }}
+          labels:
+            severity: warning
+            component: study-health
+          annotations:
+            summary: "{{`{{ $value }}`}} ad clickers landed in the fallback survey ({{`{{ $labels.platform }}`}})"
+            description: >-
+              {{`{{ $value }}`}} people arrived from an ad on {{`{{ $labels.platform }}`}} in the
+              past hour and were routed into the fallback survey instead of the study that paid
+              for them. They are answering someone else's questions and will look like
+              completions, so nothing downstream will flag them. Usual causes: the ad's routing
+              token is missing or malformed, or the ad set's destination_type sends people to a
+              channel whose creative carries no token (a multi-destination ad whose second arm
+              was never configured). Check which study owns the ads running on this platform.
+              Threshold: {{ .Values.studyHealth.recruitmentFallbackThreshold }}
+              (v1 — the healthy value is zero, so this sits deliberately near the floor).
+            runbook_url: "{{ $runbook }}#recruitmentadarrivalsinfallback"
+
+        # A study's ENCODED refs will not decode.
+        #
+        # The encoded ref (r.<base64url>) carries the shortcode itself, so a ref
+        # that will not decode means fly does not know which survey the person
+        # wanted. replybot throws RefDecodeError rather than guessing, and the
+        # respondent lands in a tagged ERROR state instead of a wrong survey —
+        # which is what makes this alertable at all.
+        #
+        # The healthy value is ZERO. vlab minted the ref, so a decode failure is
+        # either a broken encoder, a creative that shipped truncated, or a
+        # respondent who edited the prefilled text on WhatsApp. The first two are
+        # ours and urgent; the third is background noise that should stay in the
+        # low single digits — hence a threshold above 1 and a sustained for:
+        # rather than paging on a single event.
+        #
+        # STUDY-SIDE BY CLASSIFICATION, not by accident: REF_DECODE is absent from
+        # every consumer's platform allow-list, so it tickets the study rather
+        # than paging the platform on-call. That is correct — the artifact at
+        # fault is one study's ad.
+        - alert: RecruitmentRefDecodeErrors
+          expr: |
+            sum by (form) (survey_error_states{error_tag="REF_DECODE"}) >= {{ .Values.studyHealth.refDecodeThreshold }}
+          for: {{ .Values.studyHealth.refDecodeFor }}
+          labels:
+            severity: warning
+            component: study-health
+          annotations:
+            summary: "{{`{{ $value }}`}} respondents hit an undecodable recruitment ref ({{`{{ $labels.form }}`}})"
+            description: >-
+              {{`{{ $value }}`}} people arrived in the past hour with an encoded recruitment ref
+              that would not decode, and were put into an ERROR state because the ref is the only
+              carrier of the survey shortcode — fly cannot tell which survey they wanted. vlab
+              minted that ref, so unless a respondent edited the prefilled text on WhatsApp this
+              is a broken ad: check the study's creative and the encoder that produced it.
+              Threshold: {{ .Values.studyHealth.refDecodeThreshold }} sustained
+              {{ .Values.studyHealth.refDecodeFor }} (v1 — the healthy value is zero; the
+              allowance exists only for hand-edited WhatsApp prefills).
+            runbook_url: "{{ $runbook }}#recruitmentrefdecodeerrors"
 {{- end }}
