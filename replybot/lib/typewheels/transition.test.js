@@ -382,6 +382,28 @@ describe('Machine integrated', () => {
     })
   })
 
+  // The response row archived into chatroach.responses must carry the
+  // conversation's platform. It is threaded from the event through transition()
+  // into actionsResponses() -> responseVals(), and scribble writes it to the
+  // nullable `platform` column (migration 26). Nothing else populates it.
+  it('includes the conversation platform on the response row', async () => {
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'foo', ref: 'foo' },
+        { type: 'short_text', title: 'bar', ref: 'bar' }
+      ]
+    }, 'foo'])
+
+    const report = await m.run({ state: 'QOUT', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', text)
+
+    should.not.exist(report.error)
+    should.exist(report.responses)
+    report.responses.platform.should.equal('messenger')
+  })
+
   it('returns no payment when the message is a repeat', async () => {
     const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md } })
     const m = new Machine()

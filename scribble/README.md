@@ -187,6 +187,25 @@ carry no account at all (3 in a uniform 200,000-row production sample) plus any
 malformed `content`. A plain count of `NULL account_id` therefore never reaches
 zero, and should not.
 
+### `responses` carries the platform
+
+`responses` has a nullable `platform` column (migration 26). `response.go`
+reads it from the response payload's `platform` field, which replybot's
+`responseVals` (`lib/responses/responser.js`) threads from the event through
+`transition.js`'s `actionsResponses`. The platform arrives at `responseVals`
+from `transition()`, which derives it from the event via `eventPlatform` — the
+same rule as `page` and the same source as `messages.platform`.
+
+`platform` is **nullable**, not `NOT NULL` like `pageid`. It is not part of the
+primary key, so an absent platform is written as `NULL` via `nullIfEmpty` (see
+`account.go`), not as the empty-string sentinel that `pageid` uses. This matches
+`messages.platform` deliberately: the column can say "unknown" honestly without
+grouping every unattributable row under one fake platform.
+
+The column exists because `credentials` cascades on user delete, which would
+otherwise strip the platform binding from history — see
+`planning/conversation-identity.md` §3.1.
+
 ### Adding a New Destination
 
 1. Create a new Go file (e.g., `mydata.go`) with:

@@ -582,6 +582,85 @@ func TestResponseWriterIgnoresRepeatMessages(t *testing.T) {
 
 }
 
+// responses.platform is a nullable column (migration 26). A response carrying
+// the conversation's platform writes it; the column binds the row to its
+// transport after `credentials` cascades on user delete, which would otherwise
+// strip the platform binding from history.
+func TestResponseWriterWritesPlatformWhenPresent(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, insertSurveySql, "d6c21c81-fcd0-4aa4-8975-8584d8bdb820", formA, `{}`)
+
+	msgs := makeMessages([]string{
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "parent_shortcode":"baz",
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "baz",
+          "platform": "whatsapp",
+          "question_ref":"bar",
+          "question_idx":1,
+          "question_text":"foobar",
+          "response":"LOL",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+	})
+
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	res := getCol(pool, "responses", "platform")
+	assert.Equal(t, 1, len(res))
+	if assert.NotNil(t, res[0]) {
+		assert.Equal(t, "whatsapp", *res[0])
+	}
+}
+
+// platform is nullable, so an absent platform is NULL -- not the empty-string
+// sentinel that pageid uses (pageid is NOT NULL, part of the primary key).
+// See scribble/account.go's nullIfEmpty for the precedent: the column is not
+// part of the primary key, so it can say "unknown" honestly.
+func TestResponseWriterWritesNullPlatformWhenAbsent(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, insertSurveySql, "d6c21c81-fcd0-4aa4-8975-8584d8bdb820", formA, `{}`)
+
+	msgs := makeMessages([]string{
+		`{"parent_surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "parent_shortcode":"baz",
+          "surveyid":"d6c21c81-fcd0-4aa4-8975-8584d8bdb820",
+          "shortcode":"baz",
+          "flowid":1,
+          "userid":"foo",
+          "pageid": "baz",
+          "question_ref":"bar",
+          "question_idx":1,
+          "question_text":"foobar",
+          "response":"LOL",
+          "seed":858044518,
+          "metadata": {"foo":"bar","seed": 8978437},
+          "timestamp":1599039840517}`,
+	})
+
+	writer := GetWriter(NewResponseScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	res := getCol(pool, "responses", "platform")
+	assert.Equal(t, 1, len(res))
+	assert.Nil(t, res[0])
+}
+
 func TestResponseWriterTranslatesSuccesfullyToOtherForm(t *testing.T) {
 	pool := testPool()
 	defer pool.Close()

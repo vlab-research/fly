@@ -517,6 +517,15 @@ publishes to `VLAB_STATE_TOPIC`, so it lands in the `states` table's
 (`devops/migrations/21-states-platform.sql`) exposes it — and in
 `responses.metadata` (which is `state.md`).
 
+The platform is also threaded as a first-class column on `responses`.
+`transition.js`'s `actionsResponses` receives `platform` (derived from the
+event by `transition()`) and passes it to `responseVals` in
+`lib/responses/responser.js`, which includes it in the response payload.
+Scribble writes it to the nullable `responses.platform` column (migration 26).
+It is stored there because `credentials` cascades on user delete, which would
+otherwise strip the platform binding from history — see
+`planning/conversation-identity.md` §3.1.
+
 It is persisted for **observability and downstream consumers**, not for routing.
 `md.platform` and `md.pageid` are **never read back** to decide where a message goes.
 

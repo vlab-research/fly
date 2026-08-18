@@ -100,7 +100,7 @@ class Machine {
     // newState.md.platform, which is a field that bleeds between conversations.
     const { messages, payment, handoff } = act({ form, user, page: { id: pageId }, timestamp, platform }, state, output)
 
-    const responses = responseVals(newState, upd, form, surveyId, pageId, user, timestamp)
+    const responses = responseVals(newState, upd, form, surveyId, pageId, user, timestamp, platform)
 
     return { actions: messages, responses, timestamp, payment, handoff }
   }

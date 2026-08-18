@@ -17,7 +17,7 @@ const { getField } = require('../typewheels/form')
 //
 // `responseVals` stays: it is pure, it is the actual response-row builder, and
 // `typewheels/transition.js` imports it on the live path.
-function responseVals(newState, update, form, surveyid, pageid, user, timestamp) {
+function responseVals(newState, update, form, surveyid, pageid, user, timestamp, platform) {
   if (update) {
     const [q, response] = update
     const shortcode = newState.forms.slice(-1)[0]
@@ -42,6 +42,13 @@ function responseVals(newState, update, form, surveyid, pageid, user, timestamp)
       seed,
       metadata,
       timestamp,
+      // The conversation's transport ('messenger' | 'whatsapp'). Threaded from
+      // the event through transition() -> actionsResponses(); scribble writes
+      // it to the nullable `responses.platform` column (migration 26). It is
+      // stored on the archival table because `credentials` cascades on user
+      // delete, which would otherwise strip the platform binding from history.
+      // See planning/conversation-identity.md §3.1.
+      platform,
     }
   }
 }

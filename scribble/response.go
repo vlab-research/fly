@@ -30,6 +30,7 @@ type Response struct {
 	Seed               int64           `json:"seed" validate:"required"`
 	Timestamp          *JSTimestamp    `json:"timestamp" validate:"required"`
 	Metadata           json.RawMessage `json:"metadata" validate:"required"`
+	Platform           string          `json:"platform"`
 }
 
 func (r *Response) GetRow() []interface{} {
@@ -38,7 +39,12 @@ func (r *Response) GetRow() []interface{} {
 	// written as the empty-string "account unknown" sentinel, the same value the
 	// migration backfilled the historical NULLs to. This path is cold: the
 	// newest NULL-pageid row in production dates from 2020-09-06.
-
+	//
+	// platform is NOT part of the primary key (migration 26 added it as a
+	// nullable VARCHAR), so an absent platform is written as NULL, not ''.
+	// This matches messages.platform (see account.go's nullIfEmpty / PlatformOrNil)
+	// and differs from pageid deliberately: the column can say "unknown"
+	// honestly without grouping every unattributable row under one fake platform.
 	// Required fields are validated by validator, no need for nil checks
 	return []interface{}{
 		r.ParentShortcode.String,
@@ -55,6 +61,7 @@ func (r *Response) GetRow() []interface{} {
 		r.Seed,
 		r.Timestamp.Time,
 		r.Metadata,
+		nullIfEmpty(r.Platform),
 	}
 }
 
@@ -80,6 +87,7 @@ func (s *ResponseScribbler) SendBatch(data []Writeable) error {
 		"seed",
 		"timestamp",
 		"metadata",
+		"platform",
 	}
 	query := SertQuery("INSERT", "responses", fields, len(data))
 	// The conflict target is the conversation, not the participant. Without
