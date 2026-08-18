@@ -14,6 +14,7 @@ data:
         - study_health
         - study_traffic
         - media_health
+        - messaging_account_health
 
     # ---------------------------------------------------------------------------
     # INDEX DISCIPLINE — read before adding or editing any query here.
@@ -833,3 +834,92 @@ data:
           - query_name: media_assets
             query: |
               SELECT COUNT(*)::INT AS assets FROM media_asset;
+
+      # =========================================================================
+      # MESSAGING ACCOUNT REGISTRY HEALTH
+      #
+      # The §5.3 standing assertion for chatroach.messaging_accounts
+      # (devops/migrations/25-messaging-accounts.sql). See
+      # documentation/messaging-accounts.md.
+      #
+      # WHAT THIS IS GUARDING. A messaging credential with no registry row is an
+      # INVISIBLE ACCOUNT: messages arrive for it and route nowhere. The registry
+      # is written by dashboard-server in the same transaction as the credential,
+      # so this should be structurally impossible — which is exactly why it is
+      # worth measuring. The metric exists to catch the dual-write being bypassed:
+      # a credential inserted by hand, a new create path that forgot the registry,
+      # or a rolled-back deploy serving the pre-dual-write build.
+      #
+      # WHY NOT THE COUNT-EQUALITY CHECK §5.3 SPECIFIES. §5.3 asserts
+      #   count(messaging_accounts) == count(credentials WHERE entity IN (...))
+      # That equality is TRANSITIONAL and will break on a correct change, not
+      # only on a broken one: one credential can legitimately back MORE THAN ONE
+      # registry row, because Instagram DMs send through the connected Page's
+      # token (one facebook_page credential -> ('messenger', page_id) AND
+      # ('instagram', igsid)). The first Instagram account connected makes the
+      # counts unequal with nothing wrong.
+      #
+      # So the durable invariant is the NON-EXISTENCE one — "no messaging
+      # credential lacks a registry row" — which is Instagram-proof and is the
+      # direction that actually hurts. Both raw counts are exported alongside it
+      # so §5.3's equality can still be evaluated in PromQL during the transition,
+      # and so its divergence is VISIBLE rather than an alert.
+      # =========================================================================
+      - collector_name: messaging_account_health
+        min_interval: {{ .Values.database.minInterval }}s
+
+        queries:
+          - query_name: messaging_account_registry
+            query: |
+              SELECT
+                (SELECT COUNT(*) FROM messaging_accounts)::INT AS registry_rows,
+                (SELECT COUNT(*) FROM credentials
+                  WHERE entity IN ('facebook_page', 'whatsapp_business'))::INT
+                  AS messaging_credentials,
+                (SELECT COUNT(*) FROM credentials c
+                  WHERE c.entity IN ('facebook_page', 'whatsapp_business')
+                    AND NOT EXISTS (
+                      SELECT 1 FROM messaging_accounts m
+                      WHERE m.userid = c.userid
+                        AND m.credentials_entity = c.entity
+                        AND m.credentials_key = c.key))::INT
+                  AS invisible_accounts;
+
+        metrics:
+          # THE ALERTING METRIC. MUST BE 0 AT ALL TIMES.
+          #
+          # Non-zero means a messaging credential exists that the registry does not
+          # know about. Under the tuple model nothing routes to it, so the
+          # researcher's account appears connected in the dashboard and silently
+          # receives nothing. There is no self-healing path: it stays broken until
+          # someone inserts the row.
+          #
+          # REMEDIATION is the backfill in migration 25 — it is idempotent
+          # (ON CONFLICT DO NOTHING), so re-running the migration repairs this
+          # without side effects. Do that, then find how the row was created
+          # without the transaction.
+          - metric_name: messaging_accounts_invisible
+            type: gauge
+            help: "Messaging credentials with NO registry row — invisible accounts, messages route nowhere. MUST be 0 (§5.3)"
+            values:
+              - invisible_accounts
+            query_ref: messaging_account_registry
+
+          # The two halves of §5.3's count equality, exported separately rather
+          # than pre-compared, so that Instagram making them unequal is a visible
+          # fact instead of a firing alert. During the transition (no Instagram
+          # yet) these are expected EQUAL; after the first Instagram connect,
+          # registry_rows > messaging_credentials is CORRECT.
+          - metric_name: messaging_accounts_registered
+            type: gauge
+            help: "Rows in chatroach.messaging_accounts — one per (platform, account_id)"
+            values:
+              - registry_rows
+            query_ref: messaging_account_registry
+
+          - metric_name: messaging_credentials_total
+            type: gauge
+            help: "Credentials with a messaging entity (facebook_page, whatsapp_business) — §5.3's other half"
+            values:
+              - messaging_credentials
+            query_ref: messaging_account_registry

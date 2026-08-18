@@ -11,16 +11,23 @@ User (test) → Hermes → Redpanda → Replybot → Redpanda
                                               ↓
                           [Message-Worker: translate & send]
                                               ↓
-                          Scribble → CockroachDB (state/responses)
+                          Scribble → CockroachDB (states/responses/messages/chat_log)
                             ↓
                       Form logic, question-to-send
                             ↓
                           Facebot (mock receives sends)
 ```
 
-The stack includes **two Scribble instances** with distinct roles:
+The stack includes **four Scribble instances** with distinct roles:
 - **`scribble-states`**: Persists conversation state (current question, user progress)
 - **`scribble-responses`**: Persists survey responses
+- **`scribble-messages`**: Archives the raw `chat-events` bodies into `chatroach.messages`.
+  This is the **durable event log**, and replybot replays from it whenever its Redis state
+  cache misses. It was absent from the harness until 2026-08 — which meant every replay in
+  the test suite reconstructed from an empty history, and any assertion about replay passed
+  vacuously. Anything testing cache-miss behaviour depends on this sink running.
+- **`scribble-chat-log`**: Consumes `vlab-chat-log` into `chatroach.chat_log`. Replybot has
+  always produced to this topic in the harness; nothing consumed it until the same change.
 
 Tests also validate **dean** (the scheduler for timeouts, followups, and retries):
 
@@ -42,6 +49,15 @@ Testcontainers boots a complete, isolated Docker network with every component: C
 
 **Speed**: Cold start ~60s (rebuilds all images), warm ~30s (containers only)  
 **Dean behavior**: Triggered imperatively per test via `triggerDean()`—no cron waits needed. Timeout tests run in ~2s instead of ~180s.
+
+**Conversation identity**: the suite covers the fact that a conversation is
+`(platform, account_id, user_id)` and not a user id. The fixture seeds **two researchers**
+owning **four messaging accounts** (two Messenger pages, two WhatsApp numbers), each with a
+distinct credential token, because on Messenger the account appears nowhere on the outbound
+wire — `/me/messages` carries no page id and only `Authorization: Bearer <token>` identifies
+the page. Tests drive two simultaneous conversations for one participant across two accounts
+and assert they never observe each other's state. See
+`planning/conversation-identity-test-plan.md`.
 
 **Test coverage gaps**:
 - **Exporter not covered**: The exporter service (database-polling CSV export) is not integrated into the testcontainers stack. See `planning/exporter-integration-test-plan.md` for the proposal.

@@ -60,7 +60,9 @@ User sends message on Facebook Messenger
        |
   [Replybot] consumes event from Kafka
        |
-       +---> Replays state from event log (cached in Redis for performance)
+       +---> Reads the cached state for THIS CONVERSATION
+       |         (state:<platform>:<account_id>:<userid>), replaying from the
+       |          event log on a miss
        |
        +---> Machine.transition(state, event)
        |         |
@@ -71,17 +73,224 @@ User sends message on Facebook Messenger
        |
        +---> act() sends messages to Facebook Graph API
        |
-       +---> Stateman.put() UPSERTs to CockroachDB `states` table
-       |         (observability/debugging only -- replybot never reads this)
-       |
        +---> State published to Kafka VLAB_STATE_TOPIC
                   |
              [Scribble] consumes and writes to `states` table
+                       (observability/debugging only -- replybot never reads it)
 ```
+
+> **Correction.** This diagram used to show a `Stateman.put()` UPSERT into `states`
+> alongside the Kafka publish. There was never a second writer on the live path:
+> `replybot/lib/responses/stateman.js` was a dev-only consumer that could not run at all
+> (it called a three-argument `machine.transition` against a two-argument method), it was
+> deployed in no environment, and it has now been deleted. **Scribble is the only writer of
+> the `states` table.**
 
 ### Key architectural insight
 
 **Redis is the runtime source of truth for state, not CockroachDB.** Replybot replays state from the Kafka event log with Redis as a cache. The `states` table in CockroachDB is a denormalized dump for observability: it exists so that Dean can automate operational tasks and the dashboard can show participant status. Replybot never reads from the `states` table.
+
+### The Redis cache is keyed by the conversation, not by the participant
+
+A conversation is **`(platform, account_id, user_id)`**, and the cache key carries all three:
+
+```
+state:<platform>:<account_id>:<userid>
+
+state:whatsapp:1203867182815254:15419799714
+state:messenger:935593143497601:1051551461692797
+```
+
+Built by `makeKey` in `replybot/lib/typewheels/statestore.js` — the only place the shape is
+written. `devops/clear-state-cache.sh` matches it with `SCAN MATCH state:*:*:<userid>`, so
+the two must agree.
+
+**Finding a participant's keys.** One participant can hold several — one per account they
+have messaged. Match on the userid **suffix**, and use `SCAN`, never `KEYS` (production
+Redis has a large keyspace and `KEYS` blocks the server):
+
+```bash
+PW=$(kubectl -n vprod get secret gbv-redis \
+  -o go-template='{{index .data "redis-password" | base64decode}}')
+
+# every conversation this participant has state for
+kubectl -n vprod exec -i gbv-redis-master-0 -c redis -- \
+  env REDISCLI_AUTH="$PW" redis-cli --scan --pattern 'state:*:*:15419799714'
+
+# and what one of them holds
+kubectl -n vprod exec -i gbv-redis-master-0 -c redis -- \
+  env REDISCLI_AUTH="$PW" redis-cli GET 'state:whatsapp:1203867182815254:15419799714'
+```
+
+**Which participants have more than one conversation** — the population that was exposed to
+the collision below:
+
+```sql
+SELECT userid, count(DISTINCT pageid)
+FROM chatroach.states
+GROUP BY userid HAVING count(DISTINCT pageid) > 1;
+```
+
+**Why it is keyed this way.** It used to be `state:<userid>`. A participant who messaged two
+of a researcher's accounts therefore shared **one** state blob, and the last conversation
+written was served to the next one to arrive. Reproduced live on 2026-08-16: an entry on one
+WhatsApp number wrote `state:15419799714`; thirteen minutes later a button press on a
+*different* number read that state back, recorded the press as an answer to the other
+survey's field, and raised
+
+```
+FIELD_NOT_FOUND: Could not find the requested field, b485a02d-…, in our form: xleHnFWa
+```
+
+The conversation went to `ERROR` and **stayed** there: `FIELD_NOT_FOUND` is not in
+`DEAN_ERROR_TAGS`, so nothing retried it, and every touch refreshed the 24h TTL. It also
+wrote one researcher's participant data into another researcher's account scope — which is
+what the dashboard's `states` queries use to decide visibility. Full write-up:
+`planning/conversation-identity.md`.
+
+Two consequences worth knowing while debugging:
+
+- **The account and platform on a cached state come from the event, never from
+  `state_json.md`.** `md.pageid` and `md.platform` are the fields that bled, so nothing reads
+  them back to route or to key. If you see `md.pageid` naming an account the event did not
+  arrive on, that is a bug, not a quirk.
+- **A cache miss now replays only that conversation's events.** `messages` carries
+  `account_id` and `platform` (`devops/migrations/26-messages-account.sql`), and
+  `chatbase.get()` takes `({ userid, account }, limit)` and scopes on both. Passing a bare
+  user id throws rather than quietly reading unscoped, because the failure mode of this whole
+  class of bug is silence.
+
+  Two things to know while debugging a replay:
+
+  - **Un-backfilled rows are still included.** `get()` matches
+    `account_id = $2 OR account_id IS NULL`, so rows archived before migration 26 replay for
+    whichever account is asking — exactly as they did before, no better and no worse. This is
+    temporary scaffolding that drains as `devops/backfill-messages-account.sh` runs. So if a
+    replay looks like it is mixing two conversations, **check whether those rows have a NULL
+    `account_id`** before treating it as a regression:
+
+    ```sql
+    SELECT account_id, platform, count(*) FROM chatroach.messages
+    WHERE userid = $1 GROUP BY 1, 2 ORDER BY 3 DESC;
+    ```
+
+  - **The `message_pointer` checkpoint is now per-account.** `get()` filters the `states`
+    subquery to the one account instead of joining on `userid`, so a `form.reset` on one
+    account no longer satisfies the checkpoint for another, and message rows are no longer
+    duplicated once per account the participant holds state on. If you are comparing against
+    an older transcript, a shorter replay is the fix working.
+
+### The degraded path: an event that cannot name its conversation
+
+An event that does not carry both a top-level `platform` and an `account_id` is **not allowed
+to touch the cache at all** — neither read nor write. Its state is computed from
+`chatroach.messages` instead, and `StateStore.getState` logs one line:
+
+```
+CONVERSATION_TUPLE_MISSING cache bypassed, computing from the event log {"user":…,"platform":null,"account":"…","replay":"account-scoped"}
+```
+
+Never key a conversation under a name we cannot verify. But **this path is materially worse
+than a cache miss, and the difference is what to look for when debugging it.**
+
+**Who lands on it.** All six *service* synthetic posters send the full triple (dean,
+dinersclub, message-worker, replybot, linksniffer, exodus). **`moviehouse` is a seventh poster
+and it does not** — it is a browser, not a service, so it does not appear in a `BOTSERVER_URL`
+grep. `moviehouse/src/script.js` POSTs `{ user, page, data, event }` straight to hermes' public
+ingress with **no `platform`**, for every `play`/`pause`/`seeked` and for a heartbeat every
+30 s while the video plays. So a participant watching a video is on the degraded path for the
+whole video, and `CONVERSATION_TUPLE_MISSING` is expected to be non-zero in production today.
+When you are counting the tag as a canary, subtract moviehouse or you will read its normal
+operation as a regression.
+
+**Why it is worse than a cache miss.** Three reasons, and all three show up as symptoms:
+
+1. **The replay can be short.** A cache miss happens to an established conversation, so the
+   archive has had a day to catch up. The degraded path happens to whatever arrives — including
+   the second event of a brand-new conversation. Replybot and scribble consume `chat-events`
+   in **parallel**, and the messages sink flushes on a 2 s poll timeout for low-volume traffic,
+   so for a new conversation the archive is *behind by construction*.
+2. **The replay can be empty even with a current archive**, if the event named an account the
+   conversation does not live on. `linksniffer` and `moviehouse` both read their `pageid` out of
+   a **researcher-authored webview query string**, so a stale or hardcoded page id produces an
+   empty account-scoped replay every time, repeatably.
+3. **There is no memoization**, because the write is refused too. Every event re-scans up to
+   `STATE_STORE_LIMIT=30000` rows.
+
+**The symptom to recognise: a `305` conversation that appeared out of nowhere.** An empty replay
+reconstructs as `START`. Until 2026-08-17, a synthetic external event arriving in that state
+blank-started `FALLBACK_FORM` — production `305`, a **real, live survey belonging to another
+researcher** whose misrouted participants complete in one message and therefore look like
+completions rather than errors. The participant's real conversation was overwritten in `states`
+and their answers attributed to `305`. Same signature as VIR-19 and as the CTWA defect in
+`planning/conversation-identity.md` Appendix A.
+
+```sql
+-- participants switched onto the fallback survey on top of an existing conversation.
+-- The tell is a 305 form stack with NO targeting keys in md, on a (userid, pageid) that
+-- also has responses under a different shortcode.
+SELECT s.userid, s.pageid, s.state_json->'forms' AS forms, s.updated
+FROM chatroach.states s
+WHERE s.state_json->'md'->>'form' = '305'
+  AND jsonb_array_length(s.state_json->'forms') > 1;
+```
+
+**What happens now instead: `DEFER`.** A synthetic event on a conversation that reconstructs as
+`START` is refused. `machine.js`'s `_handleExternalEvent` returns `{ action: 'DEFER' }`, which
+folds as a pure no-op, and `transition.js`'s `run` returns **without `newState`** — so
+`lib/index.js` publishes no state and writes no cache key, and one line is logged:
+
+```
+SYNTHETIC_EVENT_NO_CONVERSATION refusing to blank-start FALLBACK_FORM from a synthetic event; dropping it {"user":…,"page":…,"platform":…,"event_type":"synthetic_external"}
+```
+
+**Publishing nothing is the point, not a side effect.** `scribble/state.go` writes with a bare
+`UPSERT`, so any state published here would overwrite the conversation's real `states` row —
+and that row is what every recovery sweep selects on. Leaving it alone **is** the retry: dean's
+`Timeouts()` re-fires every 10 minutes for up to `DEAN_TIMEOUT_MAX_PAST=72 hours` while
+`current_state = 'WAIT_EXTERNAL_EVENT'`, dean's `Payments()` re-issues a `repeat_payment` after
+2 hours, and moviehouse heartbeats again in 30 s. A linksniffer click has no re-send and is
+genuinely lost.
+
+An `ERROR` state with a retryable tag was considered and is **worse**: it clobbers that row, a
+new tag is not in `DEAN_ERROR_TAGS` so nothing sweeps it, and even inside the tag set a redo
+re-reads the same corrupt cached state and re-fails — see the `FIELD_NOT_FOUND` comment at
+`devops/values/production.yaml:170-183`, where a sweep of 40 participants recovered exactly
+zero.
+
+**There is a second `DEFER` reason, with its own tag.** A **form-less entry event** — Messenger's
+bare `get_started`, or a referral whose `ref` names no form — arriving on a conversation that
+already has a form is refused the same way, by `machine.js`'s `REFERRAL` case. Same mechanism (no
+`newState`, so no `states` UPSERT and no cache key), different line:
+
+```
+FALLBACK_ENTRY_ON_LIVE_CONVERSATION refusing to re-enter a live conversation on FALLBACK_FORM; dropping the entry event {"user":…,"page":…,"platform":…,"event_type":"conversation_started","state":"QOUT","form":"mnchweeklanguage"}
+```
+
+The tags are separate on purpose: this one is *expected* to be non-zero (10–90/month
+historically), while `SYNTHETIC_EVENT_NO_CONVERSATION` is the canary that should read zero. The
+`state` and `form` fields say which conversation was protected. If a participant reports "I
+tapped Get Started and nothing happened", this is why — and the answer is an explicit
+`form.<shortcode>` ref, not a bare Get Started. Full account, including the detector query:
+`documentation/referral-form-resolution.md`, "A form-less entry event may not re-enter a live
+conversation".
+
+**Two things `DEFER` deliberately does not cover:**
+
+- **A Messenger thread-control handover still blank-starts `FALLBACK_FORM`, and should.** It is
+  a real platform event, and on an ad click it lands ~1.5 s *before* the quick_reply carrying
+  the referral, which then switches the participant onto the referred form
+  (`documentation/referral-form-resolution.md` §6b). The discriminator is
+  `source.type === 'synthetic'`, not "arrived as an external event".
+- **An exodus `bailout` still switches forms from `START`.** It names its own form, so it never
+  resolves through `FALLBACK_FORM`, and exodus has no re-sweep — dropping it would silently
+  un-bail someone.
+
+**Still open.** `DEFER` closes the `FALLBACK_FORM` door, not the general one. On the degraded
+path any event whose replay comes back short still publishes a truncated state, and the bare
+`UPSERT` makes that a clobber — a no-op `machine_report` at `START` publishes a `START` row over
+a live conversation. Transient rather than terminal (the next event re-replays), but if you see
+a `states` row inexplicably reset to `START`, this is the mechanism.
 
 ### Blocking a participant destroys `md`: the `getForm`/`INTERNAL` failure
 
@@ -94,21 +303,23 @@ missing `startTime`.**
 > mechanism: 12 of 15 production cases traced to a live, cached state with no re-fold
 > involved. Lead with `BLOCK_USER`.
 
-`md` is only ever *created* by `getMetadata()` (`utils.js:75`), which runs on a
+`md` is only ever *created* by `getMetadata()` (`utils.js`), which runs on a
 `conversation_started` referral (`_blankStart`) or on `_stitch`. Every other write
 **merges** (`{ ...state.md, ...output.md }`). So nothing downstream can regenerate `md`
 once it is gone — a merge into `undefined` yields `{}`, or a **husk** holding only
 event metadata such as `{"e_handover_metadata": "new message"}`.
 
 The secondary path, for completeness: `StateStore.getState`
-(`replybot/lib/typewheels/statestore.js:76`) checks Redis, and on a miss re-folds from
-the event log via `chatbase-postgres`, whose `get()` is windowed —
-`WHERE userid = $1 AND (message_pointer IS NULL OR message_pointer <= timestamp)`. The
+(`replybot/lib/typewheels/statestore.js` `getState`) checks Redis, and on a miss re-folds from
+the event log via `replybot/lib/chatbase`, whose `get()` is windowed *and*
+conversation-scoped — `WHERE userid = $1 AND (account_id = $2 OR account_id IS NULL)
+AND (message_pointer IS NULL OR message_pointer <= timestamp)`, with the pointer taken
+from that account's `states` row alone. The
 fold therefore starts at `START` from `states.message_pointer`, not from the beginning
 of the conversation, and `state_json` is never read back (it is write-only for this
 purpose). A window that excludes the original referral cannot rebuild `md` either.
 
-The husk is what makes this fail loudly rather than silently. `transition.js:48`
+The husk is what makes this fail loudly rather than silently. `transition.js` `actionsResponses`
 guards with `if (!newState.md)`, which a truthy husk passes; `actionsResponses` then
 destructures `const { startTime } = newState.md` → `undefined` and calls
 `getForm(pageId, shortcode, undefined)`, whose arity guard (`ourform.js:29`) throws:
@@ -117,7 +328,7 @@ destructures `const { startTime } = newState.md` → `undefined` and calls
 TypeError: Trying to get a form without a pageid or shortcode or timestamp! <page>, <shortcode>, undefined
 ```
 
-`iowrap('getForm', 'INTERNAL', ...)` (`transition.js:53`) relabels any non-`MachineIOError`
+`iowrap('getForm', 'INTERNAL', ...)` (`transition.js`) relabels any non-`MachineIOError`
 as **`INTERNAL`**, so a lost-metadata bug is reported as a platform fault with the
 message `getForm`.
 
@@ -159,7 +370,7 @@ Two independent defects then convert that into the husk:
 - **`message_pointer` is floored to the whole second**, so the pointer does not
   actually exclude the event that set it. The generated column is
   `floor((state_json->>'pointer')::INT8 / 1000)::INT8::TIMESTAMPTZ`
-  (`devops/migrations/04-pointers.sql`), while `chatbase-postgres`'s `get()` filters
+  (`devops/migrations/04-pointers.sql`), while `replybot/lib/chatbase`'s `get()` filters
   `message_pointer <= timestamp`. Measured drift on the 12 affected states: 50–979 ms,
   always positive. The `block_user` event therefore satisfies the filter and is
   **re-included as the first event of every windowed re-fold** — where it hits
@@ -470,13 +681,13 @@ This is how page-scoped state data connects back to user-owned surveys.
 
 | Component | Language | Role in States System | Key Files |
 |-----------|----------|----------------------|-----------|
-| **Replybot** | Node.js | Produces state via the state machine. Caches in Redis, publishes to Kafka. Never reads `states` table. | `replybot/lib/typewheels/machine.js`, `replybot/lib/index.js` |
+| **Replybot** | Node.js | Produces state via the state machine. Caches in Redis, publishes to Kafka. Never reads `state_json` back — its one read of `states` is the `message_pointer` that windows a replay (see "The secondary path" above). | `replybot/lib/typewheels/machine.js`, `replybot/lib/index.js`, `replybot/lib/chatbase/chatbase.js` (the replay client — vendored into replybot; formerly the `@vlab-research/chatbase-postgres` package) |
 | **Scribble** | Go | Kafka-to-DB writer. Consumes from state topic, UPSERTs to `states` table. | `scribble/` |
 | **Dean** | Go | Reads `states` table for operational automation: retries, timeouts, stuck detection, spam detection, follow-ups. | `dean/queries.go` |
 | **Dashboard-server** | Node.js | Reads `states` table for user-facing debugging and survey health views. Queries scoped by authenticated user. | `dashboard-server/` |
 | **Formcentral** | Go | Maps (shortcode + join timestamp) to a specific survey version. Used by replybot at runtime, not by the states table directly. | `formcentral/db.go` |
 | **Botserver** | Node.js | Event ingress. Receives Facebook webhooks and synthetic events, publishes to Kafka chat-events topic. Upstream of replybot. | `botserver/server/handlers.js` |
-| **Redis** | -- | Runtime state cache. Source of truth for replybot's state replay. Not queryable by other services. | -- |
+| **Redis** | -- | Runtime state cache, keyed `state:<platform>:<account_id>:<userid>` — one key per conversation, not per participant. Source of truth for replybot's state replay. Not queryable by other services. | `replybot/lib/typewheels/statestore.js`, `devops/clear-state-cache.sh` |
 | **CockroachDB** | -- | Stores the `states` table. Queryable by Dean and dashboard-server. Not the runtime source of truth. | `devops/migrations/01-init.sql` |
 
 ## Common Debugging Scenarios
@@ -486,6 +697,18 @@ Query `states` for `stuck_on_question = true`. The `state_json.qa` array will sh
 
 ### Participant in ERROR state
 Filter by `current_state = 'ERROR'`. The `error_tag` and `fb_error_code` computed columns classify the error without needing to parse JSON. Common errors: Facebook API rate limits, invalid recipient (user deleted account), payment failures.
+
+A **stuck** `ERROR` — one no retry sweep can clear, because its tag is not in
+`DEAN_ERROR_TAGS` (`NETWORK,INTERNAL,STATE_ACTIONS`) — needs the cached state cleared, or the
+fixed code will never see the participant:
+
+```bash
+DRY_RUN=1 devops/clear-state-cache.sh vprod ids.txt   # see what would go
+devops/clear-state-cache.sh vprod ids.txt
+```
+
+Non-destructive: state is derived, the event log is durable, a miss recomputes, and nothing
+is sent to anyone. See the Redis cache-key section above for how to find the keys by hand.
 
 ### Participant waiting too long
 Filter by `current_state = 'WAIT_EXTERNAL_EVENT'` and check `timeout_date`. Dean normally handles timeouts automatically, but if Dean is down or misconfigured, participants can get stuck waiting. The `state_json.wait` field describes what event is expected.

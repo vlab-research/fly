@@ -1,5 +1,42 @@
 # Question types
 
+## Where you write all of this
+
+**Every field is authored in Typeform.** There is no field builder in the Fly
+dashboard — the dashboard's "create survey" flow is a *picker*: you choose one of
+your existing Typeform forms, give it a shortcode and a name, and Fly fetches the
+form's JSON from the Typeform API and stores it verbatim
+(`dashboard-server/api/surveys/survey.controller.js` → `TypeformUtil.TypeformForm`).
+Editing a question means editing it in Typeform and re-importing.
+
+Simple types are just Typeform question types — "In Typeform, pick Short Text".
+
+**Everything richer is written in the field's Description box.** Fly reads
+`properties.description`, parses it as YAML (JSON is valid YAML, so both the
+`{"type": "webview", ...}` and the `type: webview` forms below work), and if the
+result has a `type` key it *replaces the field's type with that value* and merges
+the whole blob into the field's metadata. That promotion step is
+`addCustomType` in `replybot/lib/typewheels/form.js`.
+
+Three consequences worth knowing, because they are not obvious:
+
+1. **The Typeform question type barely matters for these.** Put `type: webview`
+   in the Description of a Statement and Fly treats it as a webview. What
+   Typeform thinks it is only decides how the *editor* renders it. In production
+   right now, **zero** stored fields carry a literal `"type": "webview"` in their
+   Typeform JSON — every single one arrives through this promotion.
+2. **Your Description must be valid YAML.** If it does not parse, Fly silently
+   keeps the field as its original Typeform type and your configuration is
+   ignored — no error. The most common cause is an unquoted value containing
+   `[`, `]`, `:` or `#`.
+3. **Typeform auto-linkifies URLs you paste**, turning `https://who.int` into
+   `[who.int](https://who.int)`. Fly unwraps markdown links back to the bare URL,
+   but a link inside an *unquoted* YAML value breaks the parse (see point 2), so
+   **quote any value containing a URL**.
+
+Interpolation (`{{hidden:id}}`, `{{field:some_ref}}`) is applied to the
+Description *before* it is parsed, so you can build values out of hidden fields.
+
 Fly supports the following question types:
 
 ## Short Text
@@ -70,18 +107,162 @@ JSON:
 }
 ```
 
-## Links
+## Tracked links
 
-It's possible to send a link as a button and allow the users to open it in a Messenger webview:
+Send a link as a button, record the click, and optionally wait for it before
+moving on. Fly builds the whole URL — you supply the destination.
 
-JSON:
+```yaml
+type: link_tracking
+url: "https://asiapacific.unwomen.org/en/countries/india"
+buttonText: Visit UN Women
+keepMoving: true
+```
+
+That is the entire field. There is no participant id to pass, no page id to copy
+from another survey, and no hidden field to wire up: Fly knows which conversation
+it is sending into, and stamps the participant, the account and the platform into
+the URL itself.
+
+`tel:`, `mailto:` and `sms:` destinations work the same way and are tracked the
+same way:
+
+```yaml
+type: link_tracking
+url: "tel:+234-0700-220-1122"
+buttonText: Call NPHCDA
+keepMoving: true
+```
+
+Set `keepMoving: true` to make the message behave like a Statement and continue
+to the next question immediately. Otherwise combine it with a `wait` to hold the
+conversation until the participant actually clicks:
+
+```yaml
+type: link_tracking
+url: "https://asiapacific.unwomen.org/en/countries/india"
+buttonText: Visit UN Women
+responseMessage: Click on the button to visit the website
+wait:
+  type: external
+  value:
+    type: linksniffer:click
+```
+
+> **A `wait` with no timeout hangs forever if the click never arrives.** If the
+> participant closes the message, the conversation stops there. Prefer pairing it
+> with a timeout so there is always a way out:
+>
+> ```yaml
+> wait:
+>   op: or
+>   vars:
+>     - type: external
+>       value:
+>         type: linksniffer:click
+>     - type: timeout
+>       value: 1 day
+> ```
+
+## Videos (Moviehouse)
+
+Play a Vimeo video and get an event for every play, pause, seek and finish, plus
+a heartbeat every 30 seconds while it plays. You supply the video id:
+
+```yaml
+type: moviehouse
+videoId: "164118668"
+buttonText: Watch the video
+wait:
+  type: external
+  value:
+    type: moviehouse:play
+```
+
+The `videoId` is the number in the Vimeo URL — `https://vimeo.com/164118668` is
+`164118668`. **Quote it.** Unquoted, YAML reads it as a number, which mostly
+works but will bite you on an id with a leading zero.
+
+As with tracked links, that is the whole field. You do not pass `userId`, you do
+not pass `pageId`, and you do not choose between the production and staging video
+players — Fly picks the right one for the environment the survey is running in.
+
+The events you can `wait` on are `moviehouse:play`, `moviehouse:pause`,
+`moviehouse:ended`, `moviehouse:seeked`, `moviehouse:volumechange`,
+`moviehouse:playbackratechange` and `moviehouse:error`. The same warning about a
+`wait` with no timeout applies, and applies harder: a video the participant never
+opens produces no event at all.
+
+### Why these replaced the old way of doing it
+
+Both of these used to be written as a `webview` (below) with a hand-built URL —
+you typed the tracking service's hostname yourself and passed the participant and
+the account as query parameters, usually copied from another survey. That put
+four things in researchers' hands that were never really theirs to get right, and
+all four went wrong in production:
+
+| What you used to write by hand | How it failed |
+|---|---|
+| the service's hostname | two of the hostnames in circulation are now dead. `virtuallab-videos.netlify.com` returns 404 and carries **490 stored fields**; `gbvlinks.nandan.cloud` fails its TLS certificate and carries **193**. Every one of them is a button that cannot open. |
+| `pageId` / `pageid` | **465 of 570** Moviehouse fields hardcode an account id copied from elsewhere. 63 of those are not valid ids at all. On 2026-08-13 one of them sent a WhatsApp participant's video event to a Facebook page, and that participant's conversation was lost. |
+| `userId` / `id` | **411 of 570** Moviehouse fields omit it, which stops the video loading entirely. `{{hidden:userid}}` — an easy typo for `{{hidden:id}}` — is not a real key and silently becomes empty. |
+| the platform | a hand-written link cannot know whether the conversation is on Messenger or WhatsApp, so it was assumed to be Messenger. On a WhatsApp survey that assumption is wrong, and a `wait` on the click never resolves. |
+
+None of those are expressible any more. Choosing the field type *is* the opt-in;
+there is no flag to remember and nothing to copy.
+
+**Migrating an existing field** is usually deleting most of it. This:
+
+```json
+{"type": "webview",
+ "url": "https://virtuallab-videos.netlify.com/?id=164118668&pageId=105246245358509&userId={{hidden:id}}",
+ "buttonText": "Watch the video",
+ "extensions": false,
+ "wait": {"type": "external", "value": {"type": "moviehouse:play", "id": "164118668"}}}
+```
+
+becomes this:
+
+```yaml
+type: moviehouse
+videoId: "164118668"
+buttonText: Watch the video
+wait:
+  type: external
+  value:
+    type: moviehouse:play
+```
+
+`keepMoving`, `wait`, `responseMessage` and `buttonText` all mean exactly what
+they meant before, so a field's behaviour in the conversation does not change —
+only the URL it produces does.
+
+## Webview (raw link)
+
+For a link to a page that is not one of ours, use `webview`. It sends the URL
+exactly as you write it, with no tracking and nothing added:
+
+```json
+{
+  "type": "webview",
+  "url": "https://asiapacific.unwomen.org/en/countries/india",
+  "buttonText": "Visit UN Women",
+  "extensions": false,
+  "keepMoving": true
+}
+```
+
+`url` accepts **two forms**, and both are in wide use — roughly 780 production
+fields use the string form above and 227 use the object form below, which builds
+the URL from a bare host plus query parameters:
+
 ```json
 {
   "type": "webview",
   "url": {
-    "base": "links.vlab.digital",
+    "base": "asiapacific.unwomen.org/en/countries/india",
     "params": {
-      "url": "asiapacific.unwomen.org/en/countries/india"
+      "vlab_id": "{{hidden:id}}"
     }
   },
   "buttonText": "Visit UN Women",
@@ -90,50 +271,22 @@ JSON:
 }
 ```
 
-To track information about the user, add metadata as query parameters in addition to `url` in the `url` value. For example, you can add the user id by adding `id` with a typeform ref to a "hidden field" called "id" (note, you will probably need to type out the "@id" part inside Typeform so it links it to a hidden field properly):
+The object form also takes an optional `protocol` (default `https`).
 
-```json
-{
-  "type": "webview",
-  "url": {
-    "base": "links.vlab.digital",
-    "params": {
-      "url": "asiapacific.unwomen.org/en/countries/india",
-      "id": @id
-    }
-  },
-  "buttonText": "Visit UN Women",
-  "extensions": false,
-  "keepMoving": true
-}
-```
+`keepMoving` and `wait` work as they do above, though there is no click event to
+wait on for a third-party page.
 
-Set `keepMoving` to `true` if you want the message to act like a "statement" and continue to the next message. Otherwise, you can combine with a "wait" to wait until the user has clicked the link:
+Set `extensions` to `true` only if the page uses Messenger Extensions **and** its
+domain is whitelisted in the Facebook app. If it is not whitelisted, the button
+will not open. Fly's own link types set this correctly for you.
 
-JSON:
-```json
-{
-  "type": "webview",
-  "url": {
-    "base": "links.vlab.digital",
-    "params": {
-      "url": "asiapacific.unwomen.org/en/countries/india"
-    }
-  },
-  "buttonText": "Visit UN Women",
-  "responseMessage": "Click on the button to visit the website",
-  "extensions": false,
-  "wait": {
-    "type": "external",
-    "value": {
-      "type": "linksniffer:click",
-      "url": "https://asiapacific.unwomen.org"
-    }
-  }
-}
-```
-
-You can set `extensions` to `true` if the page you are visiting is using Messenger Extensions (i.e. Fly Survey's "Moviehouse" which can be used to watch Vimeo videos and track video-watching events)
+> **A `webview` pointing at one of Fly's own services is not tracked.** If you
+> write a raw `webview` whose URL happens to be `links.vlab.digital` or
+> `virtuallab-videos.netlify.app`, Fly does not recognise it, does not add the
+> participant's identity, and does not fix the hostname — it sends exactly what
+> you typed. Those fields keep working exactly as well (or as badly) as they do
+> today. To get tracking, change the field's `type` to `link_tracking` or
+> `moviehouse` as shown above.
 
 ## Stitch
 
