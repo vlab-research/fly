@@ -42,7 +42,7 @@ versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
 versionReplybot: &vreplybot v0.0.218
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.44-wa
+versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.45
 versionFormcentral: &vformcentral v0.0.14-wa
