@@ -418,4 +418,20 @@ describe('getMetadata with an encoded ref', () => {
     const md = u.getMetadata(event('form.mnchweek.city.%FF'))
     md.form.should.equal('mnchweek')
   })
+
+  it('owns `vt`: a dotted ref cannot inject a join key', () => {
+    // The defence-in-depth the `delete md.vt` exists for. A dotted ref like
+    // `creative.foo.vt.bar` parses via _group into md.vt = "bar", and since
+    // there is no md.r the decode branch would not fire to overwrite it. Without
+    // the delete, that author-set "bar" becomes vlab's attribution join key --
+    // a silent mis-join onto any row whose token is "bar". The delete makes vt
+    // fly-owned, same as ad_id: only the decode branch can set it.
+    //
+    // This test is the one that fails if anyone removes the `delete md.vt`.
+    const md = u.getMetadata(event('creative.Smiling.vt.injected.gender.women.form.mnchweek'))
+    should.not.exist(md.vt)
+    md.form.should.equal('mnchweek')
+    md.creative.should.equal('Smiling')
+    md.gender.should.equal('women')
+  })
 })

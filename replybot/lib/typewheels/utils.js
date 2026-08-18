@@ -297,8 +297,18 @@ function getMetadata(event) {
   // know the survey. Swallowing it would route the respondent into
   // FALLBACK_FORM, which is the exact silent misroute this format prevents.
   //
-  // `r` is fly-owned on the way out: it is consumed into `form` and `vt` and
-  // never left in the metadata, so nothing downstream sees a half-parsed ref.
+  // `r` and `vt` are both fly-owned on the way out: `r` is consumed into
+  // `form` and `vt`, and neither is left in the metadata for downstream to see
+  // half-parsed. `vt` is deleted before the decode branch stamps it for the
+  // same reason `ad_id` is (below): a dotted ref like `creative.foo.vt.bar`
+  // would set `md.vt = "bar"` via `_group`, and since there is no `md.r` the
+  // decode branch never fires to overwrite it. That author-injected `vt` would
+  // then be the join key vlab attributes the respondent by -- a silent mis-join
+  // onto any row whose token is "bar". The delete is UNCONDITIONAL and before
+  // the branch, so it runs for a dotted ref too (where the branch does not);
+  // the branch then sets `vt` only from the decode. Same defence-in-depth
+  // `ad_id` gets.
+  delete md.vt
   if (md.r !== undefined) {
     const { form, token } = decodeRecruitmentRef(md.r)
     delete md.r
