@@ -194,11 +194,20 @@ function getMetadata(event) {
 
     if (referral && referral.ref) {
       const pairs = referral.ref.split('.')
-      md = _group(pairs.map(decodeURIComponent))
+      md = _group(pairs.map(_decodeToken))
     }
   } catch (e) {
     md = {}
     referral = null
+  }
+
+  // fly-owned; see "The encoded ref" below. DELIBERATELY outside the catch.
+  delete md.vt
+  if (md.r !== undefined) {
+    const { form, token } = decodeRecruitmentRef(md.r)
+    delete md.r
+    md.form = form
+    md.vt = token
   }
 
   md.form = md.form || process.env.FALLBACK_FORM
@@ -218,6 +227,9 @@ function getMetadata(event) {
 **Key behavior**:
 - **Only `conversation_started` events can carry a form.** Any other event type
   yields `md = {}` and falls through to the fallback shortcode.
+- **The encoded-ref branch is outside the `try`/`catch`, deliberately.** See
+  "The encoded ref" below — a decode failure must not fall through to the
+  fallback survey.
 - Falls back to `process.env.FALLBACK_FORM` if no `form` key is found
 - `pageid` comes from `event.source.account_id` (the messaging account id, i.e.
   the page id for Messenger)
@@ -691,11 +703,91 @@ if (r && r.ref) {
 
 ---
 
+## The encoded ref (`md.r` → `md.form` + `md.vt`)
+
+A second ref format, opt-in per study, alongside the dotted one. Where the
+dotted ref spells the whole stratum vocabulary out
+(`creative.Static English.Age.Age.State.Bauchi.form.mnchweek`), the encoded ref
+carries just a shortcode and an opaque token:
+
+```
+r.<base64url(v1 | len(shortcode) | shortcode | token)>
+```
+
+- `base64url` unpadded — alphabet `[A-Za-z0-9_-]`, so it contains no `.` and
+  cannot collide with the dotted key/value grammar, and it passes fly's
+  WhatsApp entry gate unencoded.
+- **Length-prefixed, not delimited.** A delimiter is a character a shortcode
+  might contain, and that failure would be a silent mis-route. The length is in
+  *bytes*, not characters, because UTF-8 is variable width.
+- The token is vlab's attribution join key, minted deterministically by adopt
+  from `(study_id, stratum_id, creative_name, destination_name)`.
+
+**fly decodes it locally** — `decodeRecruitmentRef` in
+`replybot/lib/typewheels/utils.js`. No lookup, no shared state, no call to
+vlab. The WhatsApp entry gate accepts a second anchor `r.<base64url>`
+(`WHATSAPP_ENTRY_REF_ENCODED` in `replybot/lib/event-normalizer.js`) alongside
+`form.<shortcode>`.
+
+### A decode failure is loud, not swallowed
+
+The decode branch sits **outside** `getMetadata`'s `try`/`catch`, and the
+inversion is the point. That catch exists so one malformed metadata token does
+not cost a respondent their survey: it discards `md` and lets `form` fall
+through to `FALLBACK_FORM`. Here the reasoning reverses — the encoded ref is
+the *only* carrier of the shortcode, so a ref that will not decode means fly
+does not know which survey the person wanted. Falling through would put them in
+a real but wrong survey, which is the exact silent misroute the format exists
+to prevent.
+
+So it throws `RefDecodeError` (tag `REF_DECODE`) and the respondent lands in a
+**visible ERROR state**. The `RecruitmentRefDecodeErrors` alert watches it; see
+`documentation/recruitment-arrival-health.md`.
+
+### Ownership: fly owns `vt`, same as `ad_id`
+
+`getMetadata` deletes `md.vt` **unconditionally and before** the decode branch.
+
+The unconditional part is what matters, because of the case where the branch
+does *not* run. A dotted ref like
+`creative.Smiling.vt.injected.gender.women.form.mnchweek` parses through the
+ordinary `_group` dot-pairing into `md.vt = "injected"` — and since there is no
+`md.r`, the decode branch never fires to overwrite it. That author-set value
+would then be the join key vlab attributes the respondent by: a silent mis-join
+onto whichever attribution row happens to carry the token `injected`.
+
+Only the decode branch may set `vt`. Same defence-in-depth `ad_id` gets below.
+``owns `vt`: a dotted ref cannot inject a join key`` in `utils.test.js` is the
+test that fails if anyone removes the delete.
+
+`r` is fly-owned on the way out too: it is consumed into `form` and `vt` and
+never left in the metadata, so nothing downstream sees a half-parsed ref.
+
+### What vlab does with the token
+
+vlab joins it against `ad_attributions.ref_token` to recover the respondent's
+stratum. An extraction conf declaring `mapping: "ad_table_lookup"` names the
+metadata key the token arrives under — `vt`, by this convention, though the key
+is conf-declared rather than hardcoded on either side. See
+`documentation/ad-attributions.md` in the vlab repo.
+
+The token supersedes `ad_id` as the join key: `ad_id` rides Meta's referral
+webhook, which Meta sends for only ~31% of Messenger ad entrants, while the
+token rides a carrier vlab authors and so reaches everyone. `md.ad_id` below is
+still captured, and still feeds arrival-health alerting — it is just no longer
+what attribution joins on.
+
+---
+
 ## Ad identity (`md.ad_id`)
 
-vlab keys ad attribution on an **opaque ad id** and owns the
-`(network, ad_id) -> stratum metadata` mapping itself, joining at analysis time.
-**Fly's entire role is to capture and expose that one identifier.**
+vlab owns an `(network, ad_id) -> stratum metadata` mapping and fly's role is to
+capture and expose the identifier. **Note that this is no longer what
+attribution joins on** — the encoded ref's `vt` token superseded it, because
+Meta sends the referral carrying `ad_id` for only ~31% of Messenger ad entrants
+(see "The encoded ref" above). `md.ad_id` is still captured, still exported, and
+still what the recruitment-health alerting gates on; it is simply not the join
+key any more. Everything below still describes how it is resolved and owned.
 
 This is purely additive. The legacy dotted-ref path above
 (`creative.Static English.Age.Age.State.Bauchi.form.mnchweek` → dot-parsed into

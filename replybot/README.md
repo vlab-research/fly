@@ -271,6 +271,14 @@ looks like a transcription of *Messenger's* referral `source` field (`"ADS"`,
   id; capturing it would write post ids into the ad_id field, where they can
   never match vlab's `(network, ad_id)` mapping. See
   `documentation/referral-form-resolution.md` § "Ad identity (`md.ad_id`)".
+- **`vt`**: the attribution join token, present only for a study using the
+  **encoded ref** (`r.<base64url>`). `getMetadata` decodes it locally into
+  `md.form` + `md.vt`; a ref that will not decode throws `RefDecodeError` rather
+  than falling through to the fallback survey. `vt` is fly-owned — deleted
+  unconditionally before the decode branch, so a dotted ref cannot inject a join
+  key. This is what vlab actually attributes on now; `ad_id` reaches only ~31% of
+  Messenger ad entrants and is kept for monitoring. See
+  `documentation/referral-form-resolution.md` § "The encoded ref".
 - **Not mapped**: `ctwa_clid`, `headline`, `body`, `media_type`, `source_url`,
   `image_url`, `welcome_message` are preserved on the raw event but do not reach
   state metadata. (`ctwa_clid` in particular is deliberately deferred.)

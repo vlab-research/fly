@@ -86,6 +86,30 @@ one, which is the whole point.
 Legacy dotted refs are untouched and permanent. Every existing Messenger study
 keeps `creative.X.form.Y` forever; the encoded form is opt-in per study.
 
+#### fly owns `vt`
+
+A decoded ref yields two things: `md.form` (which survey to route to) and
+`md.vt` (the opaque token vlab joins attribution on). `getMetadata` deletes
+`md.vt` **unconditionally and before** the decode branch, exactly as it owns
+`md.ad_id`.
+
+The delete has to be unconditional because of the case where the branch does
+*not* run. A dotted ref like `creative.Smiling.vt.injected.gender.women.form.mnchweek`
+parses through the ordinary `_group` dot-pairing into `md.vt = "injected"`, and
+since there is no `md.r`, the decode branch never fires to overwrite it. That
+author-set value would then be the join key vlab attributes the respondent by —
+a silent mis-join onto whichever `ad_attributions` row happens to carry the
+token `injected`.
+
+Only the decode branch may set `vt`. `utils.test.js` pins it with
+``owns `vt`: a dotted ref cannot inject a join key`` — the test that fails if
+anyone removes the delete.
+
+vlab's side of this join is `documentation/ad-attributions.md` in the vlab repo:
+an extraction conf declaring `mapping: "ad_table_lookup"` reads the token from
+the metadata key it names (`vt`, by this convention) and resolves stratum
+variables off the frozen row.
+
 ## 3. What is exported
 
 `survey_arrivals{shortcode, survey, researcher, platform, ad_id, page}` — the
