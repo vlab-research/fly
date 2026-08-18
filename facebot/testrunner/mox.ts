@@ -1,12 +1,15 @@
 import * as fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { WHATSAPP_PHONE_NUMBER_ID } from './seed-db';
+import { PAGE_A, WHATSAPP_PHONE_NUMBER_ID, ACCOUNT_PLATFORM } from './seed-db';
+import { Conversation } from './conversation';
 
 // translate-typeform has no TypeScript types
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { translator, addCustomType } = require('@vlab-research/translate-typeform');
 
-export const PAGE_ID = '935593143497601';
+// Alias for backward compatibility. PAGE_A is the default Messenger page;
+// existing 40+ tests hardcode this id and rely on it as the default account.
+export const PAGE_ID = PAGE_A;
 
 export interface QuickReply {
   content_type: string;
@@ -79,6 +82,10 @@ export function makeReferral(userId: string, formId: string, time = Date.now(), 
   };
 }
 
+// Emit an echo (inversion of sender/recipient). The account parameter MUST be the
+// account the conversation is running on. Passing the wrong one stamps the echo with
+// the wrong page, which corrupts the very state a two-account test is measuring.
+// Tip: prefer makeEchoFor(conv, message, time) to avoid this footgun.
 export function makeEcho(message: Field, userId: string, time = Date.now(), pageId = PAGE_ID): any {
   const extra = {
     sender: { id: pageId },
@@ -89,6 +96,8 @@ export function makeEcho(message: Field, userId: string, time = Date.now(), page
       text: message.text ?? message.attachment?.payload?.text,
     },
   };
+  // Note: baseMessage's sender/recipient are overwritten by the spread of extra.
+  // The sender here is the PAGE (account), and recipient is the USER (echo inversion).
   return baseMessage(userId, extra, time);
 }
 
@@ -119,12 +128,37 @@ export function makeTextResponse(userId: string, text: string, time = Date.now()
   return baseMessage(userId, { message: { text } }, time, pageId);
 }
 
-export function makeSynthetic(userId: string, event: SyntheticEvent, pageId = PAGE_ID): any {
+// Emit a synthetic event with the full account envelope per §7.3.1.
+// The platform is derived from the account id; pass explicitly only if the account
+// belongs to an unseen platform (which should not happen in the test suite).
+// Keeps 'page' as a deprecated alias for backward compatibility with §4.2.
+export function makeSynthetic(userId: string, event: SyntheticEvent, accountId = PAGE_A, platform?: string): any {
+  const plat = platform || ACCOUNT_PLATFORM[accountId];
+  if (!plat) {
+    throw new Error(
+      `makeSynthetic: unknown account '${accountId}'. Seeded accounts are: ` +
+      Object.keys(ACCOUNT_PLATFORM).join(', ')
+    );
+  }
   return {
     user: userId,
     source: 'synthetic',
-    page: pageId,
+    account_id: accountId,
+    page: accountId,
+    platform: plat,
     event,
+  };
+}
+
+// Post a deliberately malformed synthetic body untouched through the synthetic
+// routing path (source: 'synthetic'), for testing rejection and accept-but-not-require
+// rollout steps. This is how we test that Hermes rejects incomplete events (missing
+// account_id or platform), and that the pre-rejection "accept and stamp" phase is
+// non-breaking for legacy posters that don't send the fields yet.
+export function makeSyntheticRaw(body: any): any {
+  return {
+    source: 'synthetic',
+    ...body,
   };
 }
 
@@ -232,4 +266,49 @@ export function makeWhatsAppReply(field: Field, userId: string, idx: number, tim
       button_reply: { id: qr.payload || String(idx), title: qr.title || '' },
     },
   }, phoneNumberId);
+}
+
+// --- Conversation-aware convenience builders ---
+// These dispatch to the appropriate builder (Messenger or WhatsApp) based on
+// the conversation's platform. Use these in two-account tests to avoid repeating
+// if/else logic on every step.
+
+export function makeReferralFor(conv: Conversation, formId: string, time = Date.now()): any {
+  if (conv.platform === 'whatsapp') {
+    return makeWhatsAppReferral(conv.userId, formId, time, conv.accountId);
+  } else {
+    return makeReferral(conv.userId, formId, time, conv.accountId);
+  }
+}
+
+export function makeTextResponseFor(conv: Conversation, text: string, time = Date.now()): any {
+  if (conv.platform === 'whatsapp') {
+    return makeWhatsAppText(conv.userId, text, time, conv.accountId);
+  } else {
+    return makeTextResponse(conv.userId, text, time, conv.accountId);
+  }
+}
+
+export function makePostbackFor(field: Field, conv: Conversation, idx: number, time = Date.now()): any {
+  if (conv.platform === 'whatsapp') {
+    return makeWhatsAppReply(field, conv.userId, idx, time, conv.accountId);
+  } else {
+    return makePostback(field, conv.userId, idx, time, conv.accountId);
+  }
+}
+
+export function makeQRFor(field: Field, conv: Conversation, idx: number, time = Date.now()): any {
+  if (conv.platform === 'whatsapp') {
+    return makeWhatsAppReply(field, conv.userId, idx, time, conv.accountId);
+  } else {
+    return makeQR(field, conv.userId, idx, time, conv.accountId);
+  }
+}
+
+export function makeEchoFor(message: Field, conv: Conversation, time = Date.now()): any {
+  return makeEcho(message, conv.userId, time, conv.accountId);
+}
+
+export function makeSyntheticFor(conv: Conversation, event: SyntheticEvent): any {
+  return makeSynthetic(conv.userId, event, conv.accountId, conv.platform);
 }
