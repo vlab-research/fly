@@ -48,6 +48,7 @@ fn make_config() -> Config {
         port: 8080,
         fb_app_secret: None,
         whatsapp_verify_token: Some("test-wa-token".into()),
+        synthetic_require_conversation: false,
     }
 }
 
@@ -333,14 +334,17 @@ async fn synthetic_event_produces_with_correct_key_and_source() {
 }
 
 #[tokio::test]
-async fn synthetic_event_missing_user_returns_500() {
+async fn synthetic_event_missing_user_returns_400() {
+    // Missing user is a malformed POST (client error), not a server error.
+    // All non-200 responses are treated identically by callers (reject, don't retry),
+    // so this is safe for all existing posters.
     let producer = Arc::new(MockProducer::new());
     let app = make_app(producer.clone());
 
     let payload = json!({ "some_field": "val" });
 
     let resp = app.oneshot(json_post("/synthetic", payload)).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert_eq!(producer.get_calls().len(), 0);
 }
 
@@ -671,4 +675,183 @@ async fn verify_handshake_and_synthetic_bypass_signature_check() {
     let resp = app.oneshot(json_post("/synthetic", synthetic)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(producer.get_calls().len(), 1);
+}
+
+// --- Envelope stamping tests for account_id and platform ---
+
+#[tokio::test]
+async fn synthetic_with_full_triple_produces_stamped_event() {
+    // /synthetic with user, account_id, platform all present
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "user": "u1",
+        "account_id": "acct123",
+        "platform": "messenger",
+        "event": { "type": "message_received" }
+    });
+
+    let resp = app.oneshot(json_post("/synthetic", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 1);
+    let event: serde_json::Value = serde_json::from_slice(&calls[0].2).unwrap();
+    assert_eq!(event["source"], "synthetic");
+    assert_eq!(event["platform"], "messenger");
+    assert_eq!(event["account_id"], "acct123");
+    assert_eq!(event["user"], "u1");
+}
+
+#[tokio::test]
+async fn synthetic_with_page_alias_stamps_account_id_from_page() {
+    // /synthetic with "page" instead of "account_id"
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "user": "u1",
+        "page": "page_id_123",
+        "platform": "whatsapp",
+        "event": { "type": "test" }
+    });
+
+    let resp = app.oneshot(json_post("/synthetic", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 1);
+    let event: serde_json::Value = serde_json::from_slice(&calls[0].2).unwrap();
+    assert_eq!(event["account_id"], "page_id_123");
+    assert_eq!(event["platform"], "whatsapp");
+    // Original page field must survive
+    assert_eq!(event["page"], "page_id_123");
+}
+
+#[tokio::test]
+async fn synthetic_gate_off_missing_platform_warns_and_succeeds() {
+    // Gate off (default): missing platform is accepted with warning
+    let producer = Arc::new(MockProducer::new());
+    let mut config = make_config();
+    config.synthetic_require_conversation = false;
+    let app = make_app_with_config(producer.clone(), config);
+
+    let payload = json!({
+        "user": "u1",
+        "account_id": "acct123",
+        "event": { "type": "test" }
+    });
+
+    let resp = app.oneshot(json_post("/synthetic", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(producer.get_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn synthetic_gate_on_missing_platform_returns_400() {
+    // Gate on: missing platform returns 400, nothing produced
+    let producer = Arc::new(MockProducer::new());
+    let mut config = make_config();
+    config.synthetic_require_conversation = true;
+    let app = make_app_with_config(producer.clone(), config);
+
+    let payload = json!({
+        "user": "u1",
+        "account_id": "acct123",
+        "event": { "type": "test" }
+    });
+
+    let resp = app.oneshot(json_post("/synthetic", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(producer.get_calls().len(), 0);
+}
+
+#[tokio::test]
+async fn synthetic_gate_on_with_full_triple_succeeds() {
+    // Gate on: all three present → 200
+    let producer = Arc::new(MockProducer::new());
+    let mut config = make_config();
+    config.synthetic_require_conversation = true;
+    let app = make_app_with_config(producer.clone(), config);
+
+    let payload = json!({
+        "user": "u1",
+        "account_id": "acct123",
+        "platform": "messenger",
+        "event": { "type": "test" }
+    });
+
+    let resp = app.oneshot(json_post("/synthetic", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(producer.get_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn messenger_echo_produces_account_id_from_sender() {
+    // Messenger echo: account_id should be sender.id
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "entry": [{
+            "id": "page123",
+            "messaging": [{
+                "sender": { "id": "account_id_value" },
+                "recipient": { "id": "participant_id" },
+                "timestamp": 1_640_995_200_000_i64,
+                "message": {
+                    "mid": "mid.1",
+                    "is_echo": true,
+                    "text": "Echo message"
+                }
+            }]
+        }]
+    });
+
+    let resp = app.oneshot(json_post("/webhooks", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 1);
+    let event: serde_json::Value = serde_json::from_slice(&calls[0].2).unwrap();
+    assert_eq!(event["platform"], "messenger");
+    assert_eq!(event["account_id"], "account_id_value");
+}
+
+#[tokio::test]
+async fn whatsapp_produces_account_id_from_phone_number_id_and_platform() {
+    // WhatsApp: account_id should be phone_number_id, platform should be "whatsapp"
+    let producer = Arc::new(MockProducer::new());
+    let app = make_app(producer.clone());
+
+    let payload = json!({
+        "entry": [{
+            "id": "WABA_ID",
+            "changes": [{
+                "field": "messages",
+                "value": {
+                    "messaging_product": "whatsapp",
+                    "metadata": { "display_phone_number": "1555", "phone_number_id": "PHONE_ID_ACCT" },
+                    "messages": [{
+                        "from": "27123456789",
+                        "id": "wamid.abc",
+                        "timestamp": "1640995200",
+                        "type": "text",
+                        "text": { "body": "WhatsApp message" }
+                    }]
+                }
+            }]
+        }]
+    });
+
+    let resp = app.oneshot(json_post("/whatsapp", payload)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let calls = producer.get_calls();
+    assert_eq!(calls.len(), 1);
+    let event: serde_json::Value = serde_json::from_slice(&calls[0].2).unwrap();
+    assert_eq!(event["platform"], "whatsapp");
+    assert_eq!(event["account_id"], "PHONE_ID_ACCT");
+    assert_eq!(event["phone_number_id"], "PHONE_ID_ACCT");
 }

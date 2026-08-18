@@ -25,3 +25,9 @@
 
 # End of https://www.toptal.com/developers/gitignore/api/go
 .env
+
+# Binary output. `go build ./...` here drops a `dean` executable with no
+# extension, which none of the patterns above catch. dinersclub and
+# message-worker already gitignore theirs the same way (/dinersclub,
+# /message-worker); dean was the one that got missed.
+/dean

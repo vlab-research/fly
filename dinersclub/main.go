@@ -12,14 +12,13 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/nandanrao/chance"
-	"github.com/vlab-research/botparty"
 	"github.com/vlab-research/spine"
 )
 
 type DC struct {
 	cfg         *Config
 	pool        *pgxpool.Pool
-	botparty    *botparty.BotParty
+	poster      Poster
 	cache       *ristretto.Cache
 	getProvider GetProvider
 }
@@ -83,8 +82,13 @@ func (dc *DC) sendResult(pe *PaymentEvent, res *Result) error {
 	}
 
 	op := func() error {
-		ee := botparty.NewExternalEvent(pe.Userid, pe.Pageid, "external", &jm)
-		return dc.botparty.Send(ee)
+		ee := &SyntheticEvent{
+			User:      pe.Userid,
+			AccountID: pe.Pageid,
+			Platform:  pe.Platform,
+			Event:     &Event{"external", &jm},
+		}
+		return dc.poster.Send(ee)
 	}
 
 	return backoff.Retry(op, backoffTime(dc.cfg.RetryBotserver, dc.cfg.BackOffRandomFactor))
@@ -223,14 +227,14 @@ func checkError(err error) {
 func main() {
 	cfg := getConfig()
 	pool := getPool(cfg)
-	bp := botparty.NewBotParty(cfg.Botserver)
+	poster := NewHTTPPoster(cfg.Botserver)
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
 		BufferItems: cfg.CacheBufferItems,
 	})
 	handle(err)
-	dc := &DC{cfg, pool, bp, cache, getProvider}
+	dc := &DC{cfg, pool, poster, cache, getProvider}
 
 	// TODO: need to change maximum poll interval for long retries!!
 

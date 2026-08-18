@@ -98,6 +98,9 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to create event producer", zap.Error(err))
 	}
+	// message-worker writes to chat-events directly, so the envelope guard is
+	// this service's own responsibility -- nothing upstream stamps for it.
+	eventProducer.WithStrictEnvelope(config.StrictEventEnvelope)
 	defer eventProducer.Close()
 
 	// Create platform clients map

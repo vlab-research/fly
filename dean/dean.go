@@ -75,10 +75,23 @@ func send(cfg *Config, client *http.Client, e *ExternalEvent) error {
 		return err
 	}
 
-	resp, err := client.Post(cfg.Botserver, "application/json", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", cfg.Botserver, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Vlab-Poster", "dean")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	// Neither this function nor the botparty.Send it mirrors ever closed the
+	// response body, so every synthetic post leaked its connection to hermes.
+	// Closing it brings dean in line with the new local posters in dinersclub and
+	// message-worker.
+	defer resp.Body.Close()
 
 	code := resp.StatusCode
 	if code != 200 {

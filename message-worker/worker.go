@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/vlab-research/botparty"
 	"github.com/vlab-research/fly/message-worker/mediaresolve"
 	"github.com/vlab-research/fly/message-worker/types"
 	"go.uber.org/zap"
@@ -59,7 +58,7 @@ type Worker struct {
 	clients  map[types.PlatformType]MessageSender
 	producer EventProducer
 	config   RetryConfig
-	bp       *botparty.BotParty
+	poster   SyntheticPoster
 	logger   *zap.Logger
 
 	mediaStore     MediaStore
@@ -68,12 +67,12 @@ type Worker struct {
 }
 
 func NewWorker(clients map[types.PlatformType]MessageSender, producer EventProducer, botserverURL string, logger *zap.Logger) *Worker {
-	bp := botparty.NewBotParty(botserverURL + "/synthetic")
+	poster := NewHTTPSyntheticPoster(botserverURL + "/synthetic")
 	return &Worker{
 		clients:  clients,
 		producer: producer,
 		config:   DefaultRetryConfig(),
-		bp:       bp,
+		poster:   poster,
 		logger:   logger,
 	}
 }
@@ -255,27 +254,24 @@ func (w *Worker) resolveMedia(ctx context.Context, cmd *types.SendMessageCommand
 // carrying the outbound message's metadata. The replybot normalizer maps it to
 // event_type "bot_message_sent"; its ECHO handler reads payload.metadata (the
 // ref/type/wait flags) to move the conversation forward.
+//
+// THIS WRITES STRAIGHT TO chat-events, bypassing hermes. message-worker is
+// therefore a direct producer to that topic and must stamp the envelope
+// itself -- nothing upstream will do it for it. See envelope.go for the
+// correction this forced to the plan, and BuildWhatsAppEcho for the body.
+//
+// Until 2026-08-17 the body carried six fields and neither `account_id` nor
+// `platform`. Every WhatsApp send therefore minted a `messages` row with a
+// permanently NULL account, and the replay query's deliberately temporary
+// `AND (account_id = $2 OR account_id IS NULL)` clause -- which exists so
+// un-backfilled HISTORICAL rows keep replaying -- matched those NULL rows for
+// EVERY account, leaking a participant's echoes across all of their
+// conversations. That is the exact bug this effort exists to fix, reproduced
+// on the one platform where it is deterministic. It also returned null from
+// replybot's conversationFromRawEvent, so the echo could never key the state
+// cache and always fell back to a replay.
 func (w *Worker) emitWhatsAppEcho(ctx context.Context, cmd types.SendMessageCommand) error {
-	metadata := cmd.Message.Metadata
-	if len(metadata) == 0 {
-		metadata = json.RawMessage("null")
-	}
-	echo := struct {
-		Source        string          `json:"source"`
-		PhoneNumberID string          `json:"phone_number_id"`
-		From          string          `json:"from"`
-		Type          string          `json:"type"`
-		Metadata      json.RawMessage `json:"metadata"`
-		Timestamp     int64           `json:"timestamp"`
-	}{
-		Source:        "whatsapp",
-		PhoneNumberID: cmd.PlatformAccountID,
-		From:          cmd.UserID,
-		Type:          "bot_echo",
-		Metadata:      metadata,
-		Timestamp:     time.Now().UnixMilli(),
-	}
-	data, err := json.Marshal(echo)
+	data, err := json.Marshal(BuildWhatsAppEcho(cmd, time.Now()))
 	if err != nil {
 		return err
 	}
@@ -483,9 +479,17 @@ func (w *Worker) reportError(cmd types.SendMessageCommand, err error) error {
 	}
 
 	rawValue := json.RawMessage(valueJSON)
-	event := botparty.NewExternalEvent(cmd.UserID, cmd.PlatformAccountID, "machine_report", &rawValue)
+	event := &SyntheticEvent{
+		User:      cmd.UserID,
+		AccountID: cmd.PlatformAccountID,
+		Platform:  string(cmd.Platform),
+		Event: &SyntheticEventType{
+			Type:  "machine_report",
+			Value: &rawValue,
+		},
+	}
 
-	sendErr := w.bp.Send(event)
+	sendErr := w.poster.Send(event)
 	if sendErr != nil {
 		w.logger.Error("failed to send machine_report to botserver — best-effort, skipping",
 			zap.String("command_id", cmd.CommandID),
