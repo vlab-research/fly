@@ -36,7 +36,7 @@ versionHermes: &vhermes v0.0.3-wa
 # replybot image built with `npm ci` against a committed package-lock.json.
 versionReplybot: &vreplybot v0.0.218
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.44-wa
+versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.45
 versionFormcentral: &vformcentral v0.0.14-wa
@@ -136,10 +136,14 @@ dinersclub:
       value: "dinersclub"
     - name: DINERSCLUB_BATCH_SIZE
       value: "1"
+    # Keep in step with production -- see the budget comment there. spine's
+    # 300s max.poll.interval.ms is the same in both environments.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "2m"
+      value: "45s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "2m"
+      value: "45s"
+    - name: DINERSCLUB_PROVIDER_TIMEOUT
+      value: "30s"
     - name: DINERSCLUB_POOL_SIZE
       value: "1"
     - name: DINERSCLUB_PROVIDERS

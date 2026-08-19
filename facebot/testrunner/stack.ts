@@ -381,7 +381,12 @@ export async function startStack(): Promise<Stack> {
     BOTSERVER_URL: 'http://botserver',
     FACEBOOK_GRAPH_URL: 'http://facebot:3000',
     WHATSAPP_GRAPH_URL: 'http://facebot:3000',
-    NUM_WORKERS: '1',
+    // Deliberately > 1. The e2e suite asserts that a user's messages arrive in
+    // the order the state machine produced them, so running the worker pool
+    // concurrently is what proves burrow's key-affinity dispatch (v0.1.5)
+    // actually holds that guarantee. At NUM_WORKERS=1 the tests pass trivially
+    // and would keep passing if key affinity regressed.
+    NUM_WORKERS: '8',
     TOKEN_CACHE_TTL: '300',
     // Media handle layer (planning/media-abstraction.md §8.5). This DEFAULTS TO
     // OFF in message-worker/config.go because the feature ships dark in

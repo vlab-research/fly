@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -21,6 +22,16 @@ type ReloadlyProvider struct {
 func NewReloadlyProvider(pool *pgxpool.Pool) (Provider, error) {
 	cfg := getConfig()
 	svc := reloadly.NewTopups()
+
+	// LOAD-BEARING. reloadly.NewTopups() hands back http.DefaultClient, which
+	// has NO timeout, so a call that never answers blocks forever. backoff
+	// does not save us: MaxElapsedTime is only consulted *between* attempts,
+	// so one hung attempt is unbounded. That is how a slow Reloadly took the
+	// whole consumer down on 2026-08-17 -- a batch outran spine's hardcoded
+	// max.poll.interval.ms (300s), Kafka evicted the group, the uncommitted
+	// batch was redelivered, and dinersclub crash-looped on it indefinitely.
+	svc.Client = &http.Client{Timeout: cfg.ProviderTimeout}
+
 	if cfg.Sandbox {
 		svc.Sandbox()
 	}

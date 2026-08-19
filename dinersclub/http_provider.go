@@ -140,7 +140,8 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 
 	b := strings.NewReader(body)
 
-	ctx, _ := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, order.Method, url, b)
 	if err != nil {
 		return formatError(result, event, err.Error(), "BAD_HTTP_REQUEST")

@@ -42,7 +42,7 @@ versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
 versionReplybot: &vreplybot v0.0.218
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.44-wa
+versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
 versionDinersclub: &vdinersclub v0.0.45
 versionFormcentral: &vformcentral v0.0.14-wa
@@ -140,10 +140,32 @@ dinersclub:
       value: "dinersclub"
     - name: DINERSCLUB_BATCH_SIZE
       value: "2"
+    # THESE THREE ARE A BUDGET, NOT INDEPENDENT KNOBS. spine hardcodes
+    # max.poll.interval.ms=300s; if one batch outruns that, Kafka evicts the
+    # group, the uncommitted batch is redelivered, and dinersclub crash-loops
+    # on it forever making zero progress. That happened on 2026-08-17 with the
+    # old 2m/2m values and no provider timeout at all.
+    #
+    # Worst case for a batch (POOL_SIZE == BATCH_SIZE, so messages run
+    # concurrently and the batch costs about what one message costs):
+    #   auth on cache miss     <=  30s  (1 provider call)
+    #   Payout backoff         <=  45s elapsed + 60s last attempt (Reloadly
+    #                                   DoJob = FindOperator + Topup = 2 calls)
+    #   sendResult backoff     <=  45s elapsed + one in-cluster hermes call
+    #   -------------------------------------------------------------
+    #   ~180s, leaving headroom under the 300s eviction deadline.
+    #
+    # Raising any of these, or BATCH_SIZE above POOL_SIZE, must be re-checked
+    # against that 300s ceiling.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "2m"
+      value: "45s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "2m"
+      value: "45s"
+    # Hard ceiling on ONE outbound provider HTTP call. RETRY_PROVIDER cannot do
+    # this job: backoff only checks elapsed time between attempts, so a single
+    # hung call is unbounded without this.
+    - name: DINERSCLUB_PROVIDER_TIMEOUT
+      value: "30s"
     - name: DINERSCLUB_POOL_SIZE
       value: "2"
     - name: DINERSCLUB_PROVIDERS
@@ -795,10 +817,25 @@ exodus:
         memory: 64Mi
 
 message-worker:
-  # Scaled up for the first time in this release. replybot v0.0.210-wa has NO
-  # send path of its own — it publishes commands here — so a worker at 0
-  # replicas means production sends nothing at all, silently.
-  replicaCount: 1
+  # replybot v0.0.210-wa has NO send path of its own — it publishes commands
+  # here — so a worker at 0 replicas means production sends nothing at all,
+  # silently.
+  #
+  # 6 replicas == the partition count of vlab-prod-commands. One pod per
+  # partition is the maximum useful parallelism; going higher just leaves pods
+  # idle, and going higher usefully requires adding partitions first.
+  #
+  # Scale HERE, not via NUM_WORKERS (which stays 1 — see the note on that env
+  # var below). Commands are keyed by user_id (replybot/lib/index.js), so a
+  # user's messages sit on one partition, owned by one pod, processed by one
+  # worker: order is preserved end to end. Replicas keep that property;
+  # in-process workers do not.
+  #
+  # Background: planning/message-worker-command-lag.md (2026-08-17) — a bulk
+  # utility-message campaign drove ~520 commands of lag and multi-minute
+  # delivery delays for live surveys in other studies, because one serial
+  # consumer drained a six-partition topic.
+  replicaCount: 6
   image:
     repository: ghcr.io/vlab-research/message-worker
     tag: *vmessageworker
@@ -841,6 +878,19 @@ message-worker:
     # means every WhatsApp send fails while Messenger keeps working.
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
+    # The burrow pool's goroutine count (code default 100).
+    #
+    # Raising this was UNSAFE before burrow v0.1.5: dispatch went through one
+    # shared channel with no key affinity, so N>1 let two commands for the SAME
+    # user send concurrently and arrive out of order — a survey question before
+    # its own preamble. v0.1.5 routes by hash(user_id) to a fixed worker, so
+    # same-user commands stay FIFO while different users run in parallel, and
+    # message-worker sets KeyAffinity unconditionally.
+    #
+    # Still 1 here pending UAT smoke testing of the concurrent path. The
+    # integration suite runs at 8. Raise deliberately, and read the poll-loop
+    # backpressure note in burrow's KEY_AFFINITY.md before going large — a
+    # single backed-up worker stalls the whole pod's polling.
     value: "1"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"
