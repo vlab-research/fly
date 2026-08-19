@@ -254,10 +254,9 @@ frequency *per participant*:** a heartbeat every 30 seconds for the duration of 
 `dean`, `dinersclub`, `message-worker` and `replybot` all have the conversation's real
 platform at the call site. `linksniffer`, `exodus` and `moviehouse` do not always.
 linksniffer and exodus fill the gap with `messenger`; moviehouse leaves it out. The
-*assumed* case is invisible to any check that only asks whether the field is *present*, and
-it is what hermes' **verify** mode exists to catch — see
-`documentation/messaging-accounts.md` §9.6. The *omitted* case is visible to
-`[INCOMPLETE_CONVERSATION]`, which is the point of choosing it.
+*assumed* case is invisible to any check that only asks whether the field is *present*.
+Nothing catches it today. The *omitted* case is visible to `[INCOMPLETE_CONVERSATION]`,
+which is the point of choosing it.
 
 ### moviehouse is a producer, and a `BOTSERVER_URL` grep cannot see it
 
@@ -308,8 +307,8 @@ The reasoning, in the order that decided it:
    un-gateable.
 3. **Omission is counted; assumption needs an instrument that is not built.** An absent
    platform lands on `[INCOMPLETE_CONVERSATION]` and drains to zero as surveys adopt the
-   `moviehouse` field type. An assumed platform stamps cleanly and passes the gate; only verify mode
-   sees it.
+   `moviehouse` field type. An assumed platform stamps cleanly and passes the gate, and
+   nothing we have distinguishes it from a correct one.
 4. **The gate makes omission self-limiting.** `SYNTHETIC_REQUIRE_CONVERSATION` may only be
    turned on once `[INCOMPLETE_CONVERSATION]` reads zero, and that condition *is* "no
    moviehouse event omits a platform". "Gate on **and** platform absent" is contradictory by
@@ -411,7 +410,7 @@ Two details worth keeping:
 
 An earlier revision of this section said conditions-based bails "do not yet select
 `s.platform`" and therefore "would 400 once the gate is on." That was true when written and is
-no longer; the residual issue is an *assumed* platform, which only verify mode can see.
+no longer; the residual issue is an *assumed* platform, which no current check can see.
 
 ---
 
@@ -476,10 +475,9 @@ conversation identity:
 2. **exodus's `COALESCE` default applies to 97.8% of rows**, so the great majority of
    conditions-based bails carry an assumed platform. Nothing counts that today.
 
-Neither is caught by fill mode, which fires only on an *absent* platform and is consequently a
-no-op now. Only hermes' **verify** mode — check the envelope's `platform` against the registry —
-sees a present-but-wrong value, and it is not built. See `documentation/messaging-accounts.md`
-§9.6.
+Neither is caught by a presence check, which is all we have: both send a platform, it is
+just the wrong one. Detecting a present-but-wrong platform would need something that knows
+which platform an account actually belongs to, and no such thing exists today.
 
 Because `linksniffer:click` is what `wait` conditions on webview fields resolve against, a
 wrong platform hangs the conversation just as surely as a rejected event does — it simply

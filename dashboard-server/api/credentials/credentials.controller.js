@@ -1,45 +1,16 @@
 const { Credential } = require('../../queries');
-const {
-  shouldCreateMessagingRegistry,
-  validateMessagingCredential,
-  entityToPlatform,
-} = require('./credentials.core');
 
 // TODO: create unified error handler to clean this up!
 // and make useful error codes
 
 exports.createCredential = async function (req, res) {
   const { email } = req.user;
-  const { entity } = req.body;
-
-  // Validate messaging credentials before creating them
-  if (shouldCreateMessagingRegistry(entity)) {
-    const validation = validateMessagingCredential(req.body);
-    if (!validation.valid) {
-      return res.status(400).json({ error: validation.error });
-    }
-  }
 
   try {
-    let cred;
-
-    // Use transaction-based create for messaging entities to ensure
-    // atomicity: both credential and registry rows succeed or both fail
-    if (shouldCreateMessagingRegistry(entity)) {
-      const platform = entityToPlatform(entity);
-      cred = await Credential.createWithMessagingRegistry({
-        ...req.body,
-        email,
-        platform,
-      });
-    } else {
-      // Non-messaging entities use the standard single-insert create
-      cred = await Credential.create({ ...req.body, email });
-    }
-
+    const cred = await Credential.create({ ...req.body, email });
     return res.status(201).json(cred);
   } catch (e) {
-    console.error(e);
+    console.error(e)
 
     if (e.code && e.code === '23505') {
       return res.status(400).json(e);
@@ -51,7 +22,7 @@ exports.createCredential = async function (req, res) {
 
     return res.status(500).send(e);
   }
-};
+}
 
 
 exports.updateCredential = async function (req, res) {

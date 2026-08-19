@@ -71,7 +71,7 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
 
-### Credentials and the messaging account registry
+### Credentials
 
 `POST /api/v1/credentials` is the **single** credential-create path. Both messaging
 connect flows go through it — `dashboard-client` `FacebookPages.js` and
@@ -79,41 +79,10 @@ connect flows go through it — `dashboard-client` `FacebookPages.js` and
 "connect" endpoint distinct from a generic one, which is worth knowing before adding
 entity-specific behaviour here.
 
-For `entity IN ('facebook_page','whatsapp_business')` the route writes **two rows in one
-transaction**: the credential, and a `chatroach.messaging_accounts` registry row
-(migration `25-messaging-accounts.sql`). See `documentation/messaging-accounts.md`.
-
-**Why atomicity is the requirement, not a nicety.** A messaging credential with no
-registry row is an **invisible account** — once consumers route on the registry,
-messages arrive for it and go nowhere while the dashboard shows it connected, with no
-self-healing path. A non-atomic dual-write would *manufacture* the exact state the
-registry exists to prevent.
-
-| File | Role |
-|---|---|
-| `api/credentials/credentials.core.js` | Pure decision layer — `entityToPlatform`, `shouldCreateMessagingRegistry`, `validateMessagingCredential`. No IO |
-| `api/credentials/credentials.controller.js` | Validates, then routes messaging vs non-messaging to the right query |
-| `queries/credentials/credentials.queries.js` → `createWithMessagingRegistry` | The imperative shell: `connect` → `BEGIN` → both INSERTs → `COMMIT`, `ROLLBACK` on any error, `release` in `finally` |
-
-**This is the only explicit transaction in dashboard-server.** Every other query is a bare
-`pool.query()`. It uses `pool.connect()` and an explicit `BEGIN`/`COMMIT` because pooled
-single-statement calls give no atomicity across two tables.
-
-Notes for anyone extending this:
-
-- `entityToPlatform` (`facebook_page → messenger`, `whatsapp_business → whatsapp`) is a
-  **write-path default**, not a general `entity → platform` function. One credential can
-  legitimately back several platform rows — Instagram DMs send through the connected
-  Page's token — so an extra platform is registered as its own row, never derived from
-  the entity.
-- Non-messaging entities (`api_token`, `reloadly`, `secrets`, `typeform_token`,
-  `facebook_ad_user`) keep the original single-insert path unchanged.
-- The validation rejects *malformed* messaging creates (missing/empty `key`, or a
-  `details.id` disagreeing with `key`) — **not** all messaging entities. A blanket
-  rejection would break both live client connect flows, since they share this route.
-- `messaging_accounts.created` is the registry row's own insert time. Migration 25's
-  backfill instead copies `credentials.created`, that being the best available
-  approximation of connect time for pre-existing rows.
+A messaging credential's `key` **is** the platform account id (`facebook_page` →
+page id, `whatsapp_business` → phone_number_id), and those ids are globally unique
+across messaging entities, so a token can be resolved from an account id alone
+without knowing the platform. See `message-worker/tokenstore.go`.
 
 ### Media
 

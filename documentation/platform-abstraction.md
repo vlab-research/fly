@@ -235,86 +235,7 @@ WHERE key = $1 AND entity IN ('facebook_page', 'whatsapp_business')
 | `dean/queries.go` `FollowUps` | join `ON pageid = c.key AND c.entity IN (...)` — NOTE: a 9th consumer missed by the original 8-consumer inventory |
 | dashboard-server queries (states, templates, media) + dashboard-client UI | DONE (commit `2bea1f8f`): states SCOPE_SQL scopes `states.pageid` via `key` + entity filter; migration 22 renames `media.facebook_page_id` / `message_templates.facebook_page_id` → `account_id` (those tables' own columns, not the credentials computed column); API accepts `accountId` with legacy `pageId` fallback. Hermes tags all inbound events with `source.account_id` (Messenger page_id, WhatsApp phone_number_id). |
 
-> ### ⚠️ REVERSED 2026-08-17 — read this before the decision it overturns
->
-> **The ratified decision below was reversed. `PRIMARY KEY (platform, account_id)` now
-> stands**, in the messaging account registry `chatroach.messaging_accounts`
-> (`devops/migrations/25-messaging-accounts.sql`). The full model, the consumer inventory
-> and the onboarding path for a new platform are in
-> **`documentation/messaging-accounts.md`**, which is the authority on account identity
-> from this date. The text below is preserved unchanged because a future reader needs to
-> see what was decided, on what basis, and what actually changed — not a rewritten history
-> in which we were always right.
->
-> **None of the three tripwires fired.** The decision below named three conditions that
-> would reopen it: an allocator whose ids cannot be prefix-encoded; a need to shard or
-> segregate by platform; any observed failure of an allocator's id-space uniqueness. As of
-> 2026-08-17 **none of them has occurred.** Re-verified in production that day: zero
-> duplicate `key` values across both messaging entities, and 64/64 messaging rows satisfy
-> `key = details->>'id'`. No collision has ever been observed.
->
-> **The id-uniqueness reasoning below is still correct on its own terms.** Meta is one
-> allocator across page ids and `phone_number_id`s, and a bare Meta id really is
-> unambiguous across both Meta platforms. Nothing in the reversal contradicts that, and the
-> reversal does *not* rest on it being wrong.
->
-> **What carried is a different objection: `entity → platform` is not a function, so
-> platform cannot be an attribute *of* an account.** The decision below asserts that
-> "platform is an attribute of an account, never part of its identity." That is the load-
-> bearing claim, and Instagram breaks it structurally. Instagram DMs are delivered through
-> the connected Facebook **Page's** token. Precisely what our own code records is the weaker
-> half of that — `message-worker/translator_instagram.go:10`, *"Instagram uses the same API
-> structure as Messenger"* — and the Page-token fact is Meta's documented model for Instagram
-> messaging on a professional account, not a claim this repo makes anywhere. So
-> `platform='instagram'` and
-> `platform='messenger'` are two platforms sharing **one** credential and **one**
-> `credentials.entity`. An attribute is single-valued per entity; this is not. The live
-> symptom is the hand-written `platformToEntity` map duplicated in
-> `message-worker/tokenstore.go:29` and `dinersclub/provider.go:74`, each carrying a
-> load-bearing fallback for when the platform is "absent or unmapped" — a map that exists
-> precisely because the relation it encodes is not a function. The registry replaces it
-> with a column.
->
-> **Honesty about Instagram's status: this is a *prospective* structural break, not an
-> observed production failure.** Instagram is **not live.** A translator and a stub client
-> exist (`message-worker/translator_instagram.go`; `main.go:118` logs *"registered
-> Instagram client (stub)"*) and `PlatformInstagram` is in the enum
-> (`message-worker/types/command.go:13`), but hermes has no Instagram webhook, no
-> `instagram` credential entity can be registered, and **nothing anywhere produces
-> `platform='instagram'`.** The structural claim therefore rests on *Meta's* API design —
-> external, documented and stable — rather than on our own dead code. Anyone re-examining
-> this reversal should weigh it as an argument about the model, not as an incident report.
->
-> **Secondary argument (§5.1 of `planning/conversation-identity.md`): the invariant's scope
-> is an allowlist.** `entity IN ('facebook_page','whatsapp_business')` is duplicated across
-> **six** runtime call sites — not the ten the planning doc claimed; see
-> `documentation/messaging-accounts.md` for the verified list with `file:line`. Add SMS or
-> Telegram and the new entity falls outside every one of those predicates, so its account
-> ids become silently unconstrained. The failure mode is a **silent collision**, not a
-> rejected INSERT. Moving the invariant into a messaging-owned table makes a new platform a
-> row rather than an eleventh place to edit.
->
-> **A genuine counter-consideration, recorded because it is in the tree and shipped.**
-> `devops/migrations/24-media-assets.sql` keys `media_handle` on `account_id` **alone** and
-> argues explicitly against a `(platform, account_id)` key: this codebase spells the
-> platform two ways (`messenger`/`whatsapp` in `SendMessageCommand` versus
-> `facebook_page`/`whatsapp_business` in `credentials.entity`), so a two-part key "invites
-> the writer and the reader to disagree" — and there the failure is invisible, because a
-> handle miss is the designed URL fallback rather than an error. That objection is about
-> *derived* tables keyed by a tuple each writer must reconstruct. The registry answers it
-> by being the **single authority** that fixes the spelling once, so derived tables can look
-> the platform up instead of each guessing it. `media_handle`'s key is unaffected by this
-> reversal and is not being changed.
->
-> **What has NOT changed:** nothing reads the registry yet. Migration 25 plus the
-> dashboard-server dual-write land first; consumer migration, deleting `platformToEntity`,
-> and dropping `unique_messaging_account` from `credentials` are all explicitly later, gated
-> on the registry's count assertion holding across a week of real account connects
-> (`planning/conversation-identity.md` §5.5). The consumer table above therefore still
-> describes live behaviour.
-
 **RATIFIED DESIGN DECISION (2026-07-22): account identity = `(allocator, id)`, serialized to one string.**
-**— SUPERSEDED 2026-08-17, see the reversal note above. Retained as the historical record.**
 Considered and decided against the alternative — first-class `(platform, account_id)`
 pairs threaded through every key, join, and event schema. Basis:
 
@@ -339,35 +260,7 @@ pairs threaded through every key, join, and event schema. Basis:
   ids cannot be prefix-encoded; a need to shard or segregate data by
   platform; any observed failure of an allocator's id-space uniqueness.
 
-**Account-id namespace policy — RECONCILED WITH THE REVERSAL, 2026-08-17.** The prefix rule
-below **still stands, and is still required**, but for only one of the two purposes it was
-originally written to serve. The 2026-07-22 policy conflated two jobs:
-
-1. *Encoding the pair into one opaque string, as identity.* **Subsumed by the platform
-   column.** In `messaging_accounts`, `('sms', '+2348012345678')` is unambiguous with no
-   prefix, and the primary key admits **correlated reuse** natively — the same physical phone
-   number deliberately used on two channels is two rows, `('sms', '+234…')` and
-   `('signal', '+234…')`, which is exactly the case the prefix was invented to encode. For
-   the registry's own identity, prefixing is now redundant.
-2. *Keeping the bare id globally unique, so that a consumer carrying only an account id can
-   still resolve it.* **Still required, and now load-bearing for one more reason than
-   before.** Every other place an account id lives is still a single field with no platform
-   beside it: `states.pageid`, `responses.pageid`, `chat_log.pageid`,
-   `media_handle.account_id` (keyed on `account_id` *alone*, per migration 24), and the event
-   payloads. Six runtime consumers still resolve a credential from the bare id. On top of
-   that, the account → platform resolution the registry now enables is only *single-valued*
-   because bare account ids are unique; two rows sharing an `account_id` would make it
-   ambiguous.
-
-So: **prefix because the legacy single-field representation still exists, not because
-identity needs it.** The rule retires when — and only when — the transitional
-`UNIQUE INDEX global_account_id (account_id)` is dropped from `messaging_accounts` AND every
-column that carries an account id carries a platform beside it (`planning/conversation-identity.md`
-§7.4/§7.7). Until both are true, an unprefixed non-Meta id is a silent-collision risk. Note
-the ordering consequence: dropping that index is what finally *permits* unprefixed
-correlated reuse, so the index and the prefix rule retire together, not separately.
-
-With that scoping, the original rule: the bare-numeric namespace is reserved for Meta graph ids (page ids, WhatsApp `phone_number_id` — note WhatsApp is keyed by the Meta graph id, *not* the phone number, which is display metadata). Any platform whose account ids are not Meta graph ids — raw phone numbers (SMS providers), Telegram bot ids, etc. — MUST be namespaced with a channel prefix stamped once at Hermes ingestion (e.g. `sms:+2348012345678`, `tg:7123456789`); the platform's outbound API client strips its own prefix. This matters most for *correlated reuse*: the same physical phone number deliberately used on two channels (`sms:` vs `signal:`) must not collide. A prefixed id is the `(entity, key)` pair encoded into the one opaque string that fits through `states.pageid`, event payloads, and every API that only carries a single account-id field. When the first prefixed entity is added to the index predicate, also add a CHECK (Meta entities `^[0-9]+$`, others `^[a-z]+:`) to turn the convention into a constraint.
+**Account-id namespace policy (standing rule for new platforms):** the bare-numeric namespace is reserved for Meta graph ids (page ids, WhatsApp `phone_number_id` — note WhatsApp is keyed by the Meta graph id, *not* the phone number, which is display metadata). Any platform whose account ids are not Meta graph ids — raw phone numbers (SMS providers), Telegram bot ids, etc. — MUST be namespaced with a channel prefix stamped once at Hermes ingestion (e.g. `sms:+2348012345678`, `tg:7123456789`); the platform's outbound API client strips its own prefix. This matters most for *correlated reuse*: the same physical phone number deliberately used on two channels (`sms:` vs `signal:`) must not collide. A prefixed id is the `(entity, key)` pair encoded into the one opaque string that fits through `states.pageid`, event payloads, and every API that only carries a single account-id field. When the first prefixed entity is added to the index predicate, also add a CHECK (Meta entities `^[0-9]+$`, others `^[a-z]+:`) to turn the convention into a constraint.
 
 **Test-DB gotcha (fixed):** the per-app test initdb concatenates `devops/migrations/*` through `cockroach sql`; migrations 16/17 used unqualified `export_status`, which aborted the run before later migrations applied. They are now qualified (`chatroach.export_status`). Any migration must use fully-qualified `chatroach.` table names or it will break the test bootstrap for everything after it.
 
