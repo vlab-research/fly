@@ -48,7 +48,7 @@ versionDinersclub: &vdinersclub v0.0.45
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.18
+versionMessageWorker: &vmessageworker v0.1.19
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
@@ -157,6 +157,15 @@ dinersclub:
     #
     # Raising any of these, or BATCH_SIZE above POOL_SIZE, must be re-checked
     # against that 300s ceiling.
+    #
+    # NOT LIVE AS OF 2026-08-20. The v0.0.45 image (which reads these) is
+    # deployed, but the cluster still runs 2m/2m with no PROVIDER_TIMEOUT --
+    # helm revision 643 was applied from a tree without commit 19692c1b, so the
+    # code shipped and its config did not. Production is therefore running the
+    # fix with the budget that caused the incident it fixes. The next
+    # `helm upgrade` with this file corrects it; that was deliberately deferred
+    # out of the message-worker deploy (rev 644) to keep a payments change off
+    # an unrelated rollout.
     - name: DINERSCLUB_RETRY_BOTSERVER
       value: "45s"
     - name: DINERSCLUB_RETRY_PROVIDER
@@ -887,11 +896,17 @@ message-worker:
     # same-user commands stay FIFO while different users run in parallel, and
     # message-worker sets KeyAffinity unconditionally.
     #
-    # Still 1 here pending UAT smoke testing of the concurrent path. The
-    # integration suite runs at 8. Raise deliberately, and read the poll-loop
-    # backpressure note in burrow's KEY_AFFINITY.md before going large — a
-    # single backed-up worker stalls the whole pod's polling.
-    value: "1"
+    # 8 as of 2026-08-20, after smoke testing the concurrent path in vstag
+    # (v0.1.19, NUM_WORKERS=8, sends delivered in order on one partition).
+    # With 6 replicas that is 48-way outbound concurrency against a
+    # 6-partition topic — far more headroom than the lag incident needed.
+    #
+    # Not higher, despite the code default of 100: per-worker queues are
+    # JobQueueSize / NumWorkers, and burrow's poll loop is single-threaded, so
+    # a backed-up worker stalls the whole pod's polling — including workers
+    # sitting idle. See KEY_AFFINITY.md in the burrow repo. Raise only against
+    # a measured send rate.
+    value: "8"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"
   - name: INITIAL_BACKOFF_MS
