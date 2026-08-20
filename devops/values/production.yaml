@@ -148,32 +148,67 @@ dinersclub:
     #
     # Worst case for a batch (POOL_SIZE == BATCH_SIZE, so messages run
     # concurrently and the batch costs about what one message costs):
-    #   auth on cache miss     <=  30s  (1 provider call)
-    #   Payout backoff         <=  45s elapsed + 60s last attempt (Reloadly
-    #                                   DoJob = FindOperator + Topup = 2 calls)
-    #   sendResult backoff     <=  45s elapsed + one in-cluster hermes call
+    #   auth on cache miss     <=  15s  (1 provider call)
+    #   Payout backoff         <=  60s elapsed + 45s last attempt
+    #   sendResult backoff     <=  60s elapsed + one in-cluster hermes call
     #   -------------------------------------------------------------
     #   ~180s, leaving headroom under the 300s eviction deadline.
+    #
+    # ONE ATTEMPT IS THREE CALLS, NOT ONE. Reloadly's DoJob makes FindOperator
+    # + Topup, and AutoFallback can add a second Topup on a refusal -- so an
+    # attempt costs up to 3x PROVIDER_TIMEOUT (45s), which is why the per-call
+    # ceiling has to be so much smaller than the budget that contains it.
+    #
+    # The retry budget now applies to declined payments, not just to system
+    # faults: since dinersclub/classify.go, a provider error code classified
+    # `transient` is retried inside this budget instead of being handed
+    # straight to the respondent as a failure. 60s buys ~2 real attempts.
     #
     # Raising any of these, or BATCH_SIZE above POOL_SIZE, must be re-checked
     # against that 300s ceiling.
     #
-    # NOT LIVE AS OF 2026-08-20. The v0.0.45 image (which reads these) is
-    # deployed, but the cluster still runs 2m/2m with no PROVIDER_TIMEOUT --
-    # helm revision 643 was applied from a tree without commit 19692c1b, so the
-    # code shipped and its config did not. Production is therefore running the
-    # fix with the budget that caused the incident it fixes. The next
-    # `helm upgrade` with this file corrects it; that was deliberately deferred
-    # out of the message-worker deploy (rev 644) to keep a payments change off
-    # an unrelated rollout.
+    # CORRECTION to the note this replaces, which had it backwards. That note
+    # said the v0.0.45 image "reads these" and that "the code shipped and its
+    # config did not". The opposite is true: dinersclub-v0.0.45 points at
+    # bc0ec780 (2026-08-01), which PREDATES commit 19692c1b (2026-08-17) --
+    # the tag was cut before the timeout work existed. So neither half shipped.
+    # v0.0.45 has no bounded provider client at all and ignores
+    # DINERSCLUB_PROVIDER_TIMEOUT as an unknown variable.
+    #
+    # That is why the image and these values are ONE deploy, not two. Applying
+    # this file to v0.0.45 would set a per-call ceiling nothing reads, and
+    # point the new metrics Service at a port that binary does not listen on --
+    # which would page DinersClubMetricsMissing for a healthy pod.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "2m"
+      value: "60s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "2m"
+      value: "60s"
+    # Hard ceiling on ONE outbound provider HTTP call. RETRY_PROVIDER cannot do
+    # this job: backoff only checks elapsed time between attempts, so a single
+    # hung call is unbounded without this.
+    - name: DINERSCLUB_PROVIDER_TIMEOUT
+      value: "15s"
     - name: DINERSCLUB_POOL_SIZE
       value: "2"
     - name: DINERSCLUB_PROVIDERS
       value: "fake,reloadly,giftcard,http"
+    # Must match dinersclub.metrics.port below -- the Service targets the
+    # container port by name, but the process binds whatever this says.
+    - name: DINERSCLUB_METRICS_PORT
+      value: "9090"
+
+  # Prometheus scrape target. dinersclub is the first application service here
+  # that Prometheus scrapes, and these metrics are not optional colour: since
+  # dinersclub/classify.go, a transient or precondition payment failure sends
+  # no event and so leaves no row for sql_exporter to find. An empty
+  # researcher wallet is invisible everywhere else. Turning this off makes the
+  # withheld failures unaccountable and blinds the PaymentWalletEmpty alert in
+  # devops/alerts/templates/payment-health.yaml.
+  metrics:
+    enabled: true
+    port: 9090
+    serviceMonitor:
+      enabled: true
 
 dean:
   image:

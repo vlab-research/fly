@@ -1,6 +1,12 @@
 # DinersClub - Payment Provider Platform
 
-DinersClub is a Kafka-based payment processing service that executes payment transactions through pluggable payment providers. It consumes payment events from Kafka, routes them to the appropriate provider, executes the payment, and sends results back to the botserver.
+DinersClub is a Kafka-based payment processing service that executes payment transactions through pluggable payment providers. It consumes payment events from Kafka, routes them to the appropriate provider, executes the payment, and — **depending on how the failure can recover** — sends a result back to the botserver.
+
+> **Read `documentation/payment-recovery.md` first if you are here about a
+> failed payment.** dinersclub is one of three layers that retry, and the most
+> important thing it does with a failure is often *nothing*: a `transient` or
+> `precondition` failure sends no event, which is what keeps the respondent
+> parked so dean can pay them later. That is deliberate and is explained there.
 
 ## Quick Start
 
@@ -26,9 +32,13 @@ export DINERSCLUB_BATCH_SIZE=100
 # Processing
 export DINERSCLUB_PROVIDERS=fake,reloadly,giftcard,http,dingconnect
 export DINERSCLUB_POOL_SIZE=10
-export DINERSCLUB_RETRY_PROVIDER=2m
-export DINERSCLUB_RETRY_BOTSERVER=2m
+export DINERSCLUB_RETRY_PROVIDER=60s
+export DINERSCLUB_RETRY_BOTSERVER=60s
+export DINERSCLUB_PROVIDER_TIMEOUT=15s
 export BACK_OFF_RANDOM_FACTOR=0.5
+
+# Metrics
+export DINERSCLUB_METRICS_PORT=9090
 
 # Caching
 export CACHE_TTL=1h
@@ -153,11 +163,20 @@ Check cache for auth state
 Call provider.Auth() → Cache result
     ↓
 Call provider.Payout() with exponential backoff retry
+    ↓          (a `transient` error code is retried here too, not just
+    ↓           a system fault — see "Recovery classes" below)
+Classify the result
     ↓
-Marshal result to JSON
-    ↓
-Send to botserver with exponential backoff retry
+    ├─ success ..................... send to botserver
+    ├─ permanent failure ........... send to botserver
+    └─ transient / precondition .... SEND NOTHING, record a metric
+                                     (respondent stays in WAIT_EXTERNAL_EVENT;
+                                      dean re-drives the payment)
 ```
+
+Every branch commits the Kafka offset. Nothing in dinersclub blocks a partition
+waiting for a provider to come back — that is dean's job, and dinersclub
+blocking is what caused the 2026-08-17 incident.
 
 ### Component Files
 
@@ -172,6 +191,8 @@ Send to botserver with exponential backoff retry
 | `giftcards.go` | Reloadly gift card provider |
 | `http_provider.go` | Generic HTTP provider for arbitrary APIs |
 | `dingconnect.go` | DingConnect mobile topup provider (global API key, instant mode) |
+| `classify.go` | **Pure** mapping from provider error code to recovery class. Decides whether a failure is sent at all |
+| `metrics.go` | Prometheus collectors and the `/metrics` endpoint |
 
 ## Payment Providers
 
@@ -408,32 +429,50 @@ DINERSCLUB_PROVIDERS=fake,reloadly,giftcard,http,dingconnect
 | DINERSCLUB_POOL_SIZE | - | Yes | Maximum concurrent payment jobs |
 | DINERSCLUB_RETRY_PROVIDER | - | Yes | Max **elapsed** duration to retry provider calls with exponential backoff |
 | DINERSCLUB_RETRY_BOTSERVER | - | Yes | Max **elapsed** duration to retry botserver calls with exponential backoff |
-| DINERSCLUB_PROVIDER_TIMEOUT | 30s | No | Hard timeout on a **single** outbound provider HTTP call. Not the same thing as the retry budgets — see below |
+| DINERSCLUB_PROVIDER_TIMEOUT | 30s | No | Hard timeout on a **single** outbound provider HTTP call. Not the same thing as the retry budgets — see below. Production sets 15s |
+| DINERSCLUB_METRICS_PORT | 9090 | No | Port for `/metrics`. Must match `dinersclub.metrics.port` in `devops/values/<env>.yaml`, which is what the Service targets |
 | BACK_OFF_RANDOM_FACTOR | 0.5 | No | Randomization factor for backoff (0.0 to 1.0) |
 
 ### These are a budget, not independent knobs
 
-`spine` hardcodes `max.poll.interval.ms = 300000` (5 min) in `kafka.go`, and runs
-with `enable.auto.commit = false`. If processing one batch outruns 300s, Kafka
-evicts the consumer from the group, the in-flight batch is **never committed**,
-and on restart the service reads the *same* messages and hangs again — a crash
-loop that makes zero progress while lag climbs. See "Provider call hangs / crash
-loop" under Common Issues.
+`spine` hardcodes `max.poll.interval.ms = 300000` (5 min) in `kafka.go`, and
+runs with `enable.auto.commit = false`. If processing one batch outruns 300s,
+Kafka evicts the consumer from the group, the in-flight batch is **never
+committed**, and on restart the service reads the *same* messages and hangs
+again — a crash loop that makes zero progress while lag climbs. See "Provider
+call hangs / crash loop" under Common Issues.
+
+**One attempt is up to three calls, not one.** Reloadly's `DoJob` makes
+`FindOperator` + `Topup`, and `AutoFallback` can add a second `Topup` on a
+refusal. That is why the per-call ceiling has to be much smaller than the
+budget that contains it — a budget shorter than one attempt buys nothing at all,
+because `backoff` only consults `MaxElapsedTime` *between* attempts.
 
 Worst case for a batch, when `POOL_SIZE == BATCH_SIZE` (messages run
 concurrently, so a batch costs roughly what one message costs):
 
 ```
-auth on cache miss    <= PROVIDER_TIMEOUT                (1 call)
-Payout backoff        <= RETRY_PROVIDER  + 2x PROVIDER_TIMEOUT
-                                  (Reloadly DoJob = FindOperator + Topup)
+auth on cache miss    <= PROVIDER_TIMEOUT                 (1 call)
+Payout backoff        <= RETRY_PROVIDER  + 3x PROVIDER_TIMEOUT
 sendResult backoff    <= RETRY_BOTSERVER + one in-cluster hermes call
 ```
 
-At the current production values (45s / 45s / 30s) that is ~180s, leaving
-headroom under the 300s ceiling. **Raising any of these — or setting
-`BATCH_SIZE` above `POOL_SIZE`, which makes the batch serial — must be
-re-checked against that ceiling.**
+At the production values (15s / 60s / 60s) that is ~180s, leaving headroom under
+the 300s ceiling. **Raising any of these — or setting `BATCH_SIZE` above
+`POOL_SIZE`, which makes the batch serial — must be re-checked against that
+ceiling.**
+
+The retry budget is not only for system faults. Since `classify.go`, a provider
+error code classified `transient` is retried inside `RETRY_PROVIDER` as well;
+60s buys roughly two real attempts. Before that, a declined payment came back as
+`(Result, nil)` and the budget never saw it, so a provider answering 503s burned
+straight through the queue telling every respondent their payment had failed.
+
+> The 300s ceiling is no longer the thing holding the design together — nothing
+> should block long enough to approach it. It is a backstop, and the fact that
+> it does not need raising is the sign the budget is right. If you find yourself
+> wanting to raise `max.poll.interval.ms`, the answer is almost certainly that
+> something is blocking that should have been deferred to dean instead.
 
 ### Cache Configuration
 
@@ -510,35 +549,102 @@ CREATE TABLE credentials (
 
 ## Error Handling
 
+### Recovery classes
+
+`classify.go` maps every provider error code to one of three classes. The class
+is a **fact about the failure** — it does not encode who retries, who is
+alerted, or what state the respondent ends up in. Those are other components'
+decisions, and dinersclub cannot see them.
+
+| class | meaning | dinersclub does | examples |
+|---|---|---|---|
+| `transient` | the same call, later, may just work | retries in-process, then **sends nothing** | provider 5xx, `OPERATOR_UNAVAILABLE_OR_CURRENTLY_INACTIVE`, `TRANSACTION_CANNOT_BE_PROCESSED_AT_THE_MOMENT` |
+| `precondition` | a human off-stage must act first | **sends nothing** | `INSUFFICIENT_BALANCE`, `AUTH_ERROR` |
+| `permanent` | never going to work as configured | **sends the failure Result** | `INVALID_RECIPIENT_PHONE`, `IMPOSSIBLE_AMOUNT`, `PHONE_RECENTLY_RECHARGED` |
+
+**Sending is releasing.** replybot's wait matcher is a subset check over `type`
+and `id` and never looks at `success`, so *any* Result takes the respondent out
+of `WAIT_EXTERNAL_EVENT`. Not sending is the only way to keep someone parked,
+and being parked is the only way dean's `Payments` sweep can find them again.
+This is why the behavioural axis is a binary even though there are three
+classes: `transient` and `precondition` are kept apart because they differ in
+what a *human* should do, which is what the metrics and alerts read.
+
+**An unrecognised code is `permanent`** — it is sent, exactly as every failure
+was sent before classification existed. New behaviour applies only where we can
+name the reason, and the mistake is cheap to correct: the code is counted by
+`dinersclub_unclassified_error_codes_total` and the
+`PaymentUnclassifiedErrorCode` alert asks someone to add a row.
+
+> **Changing a code's class is a decision, not a refactor.** `classify_test.go`
+> pins every code in the map with its observed production frequency and asserts
+> that the map contains nothing unpinned, so a class cannot drift as a side
+> effect of an edit — someone has to come to the test and say so.
+
+Classify on the **error code, never the HTTP status.** DingConnect returns
+`InsufficientBalance` with HTTP 500 (`dingconnect_test.go:422` documents it),
+and `go-reloadly` synthesises an `APIError` carrying the bare status from any
+non-2xx. A "5xx means transient" rule would retry an empty wallet forever.
+
 ### Result Error Codes
 
-| Code | Meaning | Retryable | Next Step |
-|------|---------|-----------|-----------|
-| INVALID_PROVIDER | Provider not in DINERSCLUB_PROVIDERS list | No | Check provider name and configuration |
-| AUTH_ERROR | Provider authentication failed | No | Check credentials in database |
-| INVALID_JSON_FORMAT | Payment details JSON malformed | No | Check JSON format of details |
-| MISSING_SECRET | HTTP provider missing interpolation secret | No | Add secret to credentials table |
-| BAD_HTTP_REQUEST | HTTP provider request invalid | No | Check URL and headers |
-| HTTP_REQUEST_FAILED | HTTP provider network error | Yes (auto) | Check network/API availability |
-| HTTP 4xx/5xx codes | API returned error | No | Check API response/logs |
+| Code | Meaning | Class | Next Step |
+|------|---------|-------|-----------|
+| INVALID_PROVIDER | Provider not in DINERSCLUB_PROVIDERS list | permanent | Check provider name and configuration |
+| AUTH_ERROR | Provider authentication failed | **precondition** | Fix credentials; parked payments land on dean's next sweep |
+| INSUFFICIENT_BALANCE | Researcher's provider wallet is empty | **precondition** | Top the account up — pages as `PaymentWalletEmpty` |
+| INVALID_JSON_FORMAT | Payment details JSON malformed | permanent | Check JSON format of details |
+| MISSING_SECRET | HTTP provider missing interpolation secret | permanent | Add secret to credentials table |
+| BAD_HTTP_REQUEST | HTTP provider request invalid | permanent | Check URL and headers |
+| HTTP_REQUEST_FAILED | Never reached the provider | **transient** | Check network/API availability |
+| HTTP 5xx / 429 | Server-side fault or throttling | **transient** | Retried, then deferred to dean |
+| HTTP 4xx | Request the provider refused | permanent | Check API response/logs |
+
+The full table, with production frequencies, is `recoveryByCode` in
+`classify.go`.
 
 ### Failure Modes
 
-**Hard Failures** (message causes Job to fail, Kafka offset doesn't commit):
-- Malformed message JSON
+**Sent to the respondent** (Result delivered, wait fulfilled, message consumed):
+- Successful payments
+- `permanent` payment failures, including unrecognised error codes
+- Provider not found or not enabled
+
+**Withheld** (nothing sent, respondent stays in `WAIT_EXTERNAL_EVENT`, message
+consumed, dean re-drives):
+- `transient` payment failures that outlived the retry budget
+- `precondition` payment failures
+- Provider calls that never produced a verdict at all (every attempt a system
+  fault)
+
+**Faults in dinersclub** (nothing sent, message consumed, counted in
+`dinersclub_processing_faults_total`, logged loudly):
+- Malformed message JSON — the rest of the batch still processes
 - Missing required PaymentEvent fields
 - Database connectivity error
 - Botserver unreachable after max retries
 
-**Soft Failures** (result sent to botserver, message consumed):
-- Provider not found or not enabled
-- User not found in database
-- Authentication failure
-- Provider-specific errors (captured in Result.Error)
+**Fatal** (process exits):
+- Kafka faults only (`monitor()`). The consumer has lost its group and nothing
+  further will be processed anyway.
 
-**Transient Failures** (automatic exponential backoff retry):
-- provider.Payout() returns error
-- Botserver temporarily unavailable
+### Why nothing else is fatal any more
+
+`spine`'s `SideEffect` commits the batch **immediately after `checkError`
+returns**, so `log.Fatalf` was the only thing standing between a fault and a
+lost message — and it bought that at the price of never committing anything. On
+2026-08-17 that turned a hung Reloadly into a crash loop that made zero progress
+for ~50 minutes: the batch was never committed, the pod restarted, read the same
+two messages, and hung again.
+
+Committing past a fault is safe **because nothing was sent to the respondent.**
+They are still parked, and dean re-drives the payment for up to 14 days.
+dinersclub is not the last line of defence and must not behave as though it is.
+
+The cost is that dinersclub can now be failing every message while looking
+perfectly healthy to Kubernetes, since there is no restart to notice. That is
+what `dinersclub_processing_faults_total` and the `DinersClubProcessingFaults`
+alert replace.
 
 ## Testing
 
@@ -656,6 +762,41 @@ helm upgrade dinersclub ./chart --values chart/values.yaml
 
 ## Monitoring and Debugging
 
+### Metrics
+
+dinersclub exposes Prometheus metrics on `DINERSCLUB_METRICS_PORT` at
+`/metrics`. It is the **only application service in this repo that Prometheus
+scrapes** (`chart/templates/servicemonitor.yaml`).
+
+They are not decorative. A `transient` or `precondition` failure sends no event
+and therefore writes **no state**, so the tracking that
+`md.e_payment_<provider>_error_code` used to provide disappears for exactly the
+failures most worth watching — an empty researcher wallet above all. Deleting
+these counters, or setting `metrics.enabled: false`, does not merely lose
+observability: it makes the silent path unaccountable and blinds every alert in
+`documentation/alerting.md` §12.
+
+| metric | labels | what it answers |
+|---|---|---|
+| `dinersclub_payment_results_total` | `provider`, `outcome`, `recovery`, `code` | the ledger: every attempt that reached a verdict, once |
+| `dinersclub_unclassified_error_codes_total` | `provider`, `code` | which rows are missing from `recoveryByCode` |
+| `dinersclub_payment_duration_seconds` | `provider`, `outcome` | are we anywhere near the Kafka poll budget |
+| `dinersclub_processing_faults_total` | `stage` | is dinersclub itself broken (replaces "the pod restarted") |
+| `dinersclub_up` | — | is anyone scraping this at all |
+
+`recovery != "permanent"` is precisely the set of failures the respondent was
+never told about.
+
+**`dinersclub_up` exists because a `CounterVec` with no observations exports no
+series.** A healthy dinersclub that has simply had no payments to make publishes
+no `dinersclub_payment_results_total` at all, so `absent()` on the payment
+counter would alert for quiet rather than for a broken scrape. `dinersclub_up`
+is unconditional and is what `DinersClubMetricsMissing` keys on.
+
+The independent cross-check on all of it lives outside this process: a
+respondent parked on an ageing `payment:*` wait is visible in state whether or
+not any counter here moved.
+
 ### Logging
 
 All requests logged to stdout:
@@ -754,6 +895,14 @@ never committed, `monitor()` calls `log.Fatalf`, and the restarted pod re-reads
 the identical messages and hangs again. It cannot self-heal — the alert
 `KafkaConsumerStuck` fires for it.
 
+> **This should no longer be reachable.** Every outbound provider call is now
+> bounded by `DINERSCLUB_PROVIDER_TIMEOUT`, and a processing fault no longer
+> kills the process, so a batch cannot approach 300s and a poison message
+> cannot loop. If you see this signature anyway, the interesting question is
+> which call escaped the bound — a new provider that builds its own HTTP client
+> is the likeliest answer (see "Why provider calls have a hard timeout"). The
+> runbook below is kept because the diagnosis is still the right one.
+
 Confirm and diagnose:
 
 ```bash
@@ -833,13 +982,22 @@ Cache key is `provider + key + userid` to handle cases where the same user has m
 ## Future Improvements
 
 Potential enhancements:
-1. Request ID tracking to prevent duplicate payments
-2. Configurable HTTP timeouts per provider
-3. Audit logging of all payment attempts
-4. Provider-specific error retry strategies
-5. Metrics/instrumentation for monitoring
-6. Support for batch payments
-7. Async webhook-based confirmation instead of polling
+1. **Request ID tracking to prevent duplicate payments.** The highest-value item
+   here. `CUSTOM_IDENTIFIER_ALREADY_USED` fired 2,385 times on production and
+   1,483 of those states also record `success=true` — Reloadly's dedup works,
+   and we mostly do not use it. A stable, event-derived `custom_identifier` on
+   every payment would make retries safe by construction, which is what the
+   payment-safety caveat above is really asking for.
+2. **Name the credential in the metrics.** `PaymentWalletEmpty` can say which
+   provider is out of money but not whose account, which is the first question
+   anyone asks. Weighed against putting researcher identifiers in metric labels.
+3. Configurable HTTP timeouts per provider
+4. Audit logging of all payment attempts
+5. Support for batch payments
+6. Async webhook-based confirmation instead of polling
+
+Shipped, kept here so the list is not read as outstanding: provider-specific
+error handling (`classify.go`) and metrics/instrumentation (`metrics.go`).
 
 ## Related Components
 
@@ -847,3 +1005,14 @@ Potential enhancements:
 - **go-reloadly**: Client library for Reloadly API
 - **spine**: Kafka consumer abstraction
 - **ristretto**: Cache implementation
+- **dean**: re-drives payments for respondents dinersclub deliberately left
+  parked. The recovery half of this design — see `dean/README.md`
+  ("`Payments` and the `repeat_payment` event")
+
+## Related Documentation
+
+- `documentation/payment-recovery.md` — the cross-component picture: who
+  retries, who is told, how a silent failure still gets paid
+- `documentation/alerting.md` §12 — runbooks for every payment alert
+- `planning/payment-failure-handling.md` — the decision and the reasoning
+- `planning/external-event-taxonomy.md` — the event contract this anticipates

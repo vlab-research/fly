@@ -1,0 +1,15 @@
+# Defaults for the dinersclub subchart. Real values come from
+# devops/values/<env>.yaml under the `dinersclub:` key.
+
+# Prometheus scraping. dinersclub is the first application service in this repo
+# to export metrics, and they are load-bearing rather than decorative: since
+# classify.go, a transient or precondition payment failure sends no event and so
+# leaves no trace in any state a SQL exporter could read. Turning this off makes
+# the silent path unaccountable -- see planning/payment-failure-handling.md §0.2.
+metrics:
+  enabled: true
+  # Must match DINERSCLUB_METRICS_PORT in the env block.
+  port: 9090
+  serviceMonitor:
+    # Requires the prometheus-operator CRDs. Off in environments without them.
+    enabled: true

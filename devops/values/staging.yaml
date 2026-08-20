@@ -139,16 +139,31 @@ dinersclub:
     # Keep in step with production -- see the budget comment there. spine's
     # 300s max.poll.interval.ms is the same in both environments.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "45s"
+      value: "60s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "45s"
+      value: "60s"
     - name: DINERSCLUB_PROVIDER_TIMEOUT
-      value: "30s"
+      value: "15s"
+    # Must match dinersclub.metrics.port below.
+    - name: DINERSCLUB_METRICS_PORT
+      value: "9090"
     - name: DINERSCLUB_POOL_SIZE
       value: "1"
     - name: DINERSCLUB_PROVIDERS
       value: "fake,reloadly,giftcard,http"
 
+  # Prometheus scrape target. dinersclub is the first application service here
+  # that Prometheus scrapes, and these metrics are not optional colour: since
+  # dinersclub/classify.go, a transient or precondition payment failure sends
+  # no event and so leaves no row for sql_exporter to find. An empty
+  # researcher wallet is invisible everywhere else. Turning this off makes the
+  # withheld failures unaccountable and blinds the PaymentWalletEmpty alert in
+  # devops/alerts/templates/payment-health.yaml.
+  metrics:
+    enabled: true
+    port: 9090
+    serviceMonitor:
+      enabled: true
 
 dean:
   image:

@@ -1,0 +1,26 @@
+{{- if .Values.metrics.enabled }}
+# A Service exists here for ONE reason: a ServiceMonitor selects Services, not
+# pods, so Prometheus cannot scrape dinersclub without one. Nothing calls
+# dinersclub over the network -- it is a Kafka consumer, it has no API, and
+# this Service must never grow one.
+#
+# clusterIP: None (headless) is deliberate. There is nothing to load-balance,
+# and a headless Service gives the ServiceMonitor an Endpoints object per pod,
+# which is what makes per-pod metrics distinguishable when replicaCount > 1.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dinersclub.fullname" . }}-metrics
+  labels:
+    {{- include "dinersclub.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    {{- include "dinersclub.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

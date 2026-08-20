@@ -13,8 +13,35 @@
 
 ## 0. DECIDED (2026-08-20) — read this first
 
-The sections below record how we got here and remain accurate as analysis, but
-the plan itself is settled. Short term:
+**SHIPPED 2026-08-20 on `feature/payment-recovery-classes`.** Everything in this
+section is implemented; the sections below it record how we got here and remain
+accurate as analysis. The living documentation is
+`documentation/payment-recovery.md` (cross-component),
+`dinersclub/README.md` (the service) and `documentation/alerting.md` §12
+(runbooks) — prefer those over this file, which is a record of a decision rather
+than a description of the system.
+
+| decided | landed as |
+|---|---|
+| §0.1 send permanent, withhold the rest | `dinersclub/classify.go`, `classify_test.go`, `recovery_test.go`, dispatch in `main.go` |
+| §0.2 metrics close the tracking gap | `dinersclub/metrics.go`, `chart/templates/{service,servicemonitor}.yaml` |
+| §0.3 the `INSUFFICIENT_BALANCE` alert | `devops/alerts/templates/payment-health.yaml` → `PaymentWalletEmpty` (critical) |
+| §0.4 retry budget vs the poll interval | 15s per call / 60s budgets in `devops/values/{production,staging}.yaml` |
+| §0.5 long-term event contract | still deferred, by design |
+
+Two things were decided during implementation and are **not** what the sections
+below say:
+
+- **An unrecognised error code is `permanent`, not transient.** §1 says the
+  opposite. §0.1 settled on "everything not explicitly silenced behaves as it
+  does today", and silently parking respondents for 14 days on a code nobody has
+  read is the larger risk. The `PaymentUnclassifiedErrorCode` alert is what
+  converges the table instead.
+- **Alert routing (§7 q2) is answered**: AlertManager already splits
+  `severity=critical` to `#vlab-alerts-critical`, so `PaymentWalletEmpty` pages
+  there rather than landing in the channel people have learned to ignore.
+
+Short term:
 
 ### 0.1 Send permanent failures, stay silent on the rest
 
