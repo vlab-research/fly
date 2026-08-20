@@ -3532,3 +3532,271 @@ describe('WhatsApp CTWA ad entry resolves the form from the autofill message', (
     state.md.form.should.equal('fallback')
   })
 })
+
+// WHATSAPP_ENTRY_REF percent-escape widening, end-to-end: raw webhook ->
+// parseEvent (event-normalizer) -> getState (machine), not just the pattern
+// or getMetadata in isolation. vlab's targeting metadata contains spaces and
+// punctuation ("Static English - Girls", "Bauchi State"); on WhatsApp CTWA
+// there is no advertiser-settable `ref`, so vlab percent-encodes those values
+// into the ad's autofill message text. See event-normalizer.js
+// (WHATSAPP_ENTRY_REF) and typewheels/utils.js (_decodeToken) for the two
+// halves of this fix.
+describe('WhatsApp percent-encoded metadata resolves end-to-end through getState', () => {
+  const ctwaAdReferral = {
+    source_url: 'https://fb.me/3cr4Wqqkv',
+    source_id: '120226305854810726',
+    source_type: 'ad',
+    headline: 'Take our survey',
+    body: 'Tap to start',
+    media_type: 'image',
+    ctwa_clid: 'AAbbCCddEE'
+  }
+
+  const rawWa = body => ({
+    source: 'whatsapp',
+    from: WA_USER_ID,
+    phone_number_id: WA_PHONE_NUMBER_ID,
+    timestamp: 1542123799219,
+    type: 'text',
+    text: { body }
+  })
+
+  it('round-trips a percent-encoded value with spaces and a literal hyphen', () => {
+    const state = getState([rawWa('form.hpvintrotriple.creative.Static%20English%20-%20Girls')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.creative.should.equal('Static English - Girls')
+  })
+
+  it('decodes multiple percent-encoded key.value pairs', () => {
+    const state = getState([rawWa('form.hpvintrotriple.state.Bauchi%20State.region.South%20East')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.state.should.equal('Bauchi State')
+    state.md.region.should.equal('South East')
+  })
+
+  it('decodes the same percent-encoded ref arriving as a CTWA referral (the ad path, not wa.me)', () => {
+    const rawCtwa = {
+      ...rawWa('form.hpvintrotriple.creative.Static%20English%20-%20Girls'),
+      referral: ctwaAdReferral
+    }
+    const state = getState([rawCtwa].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.creative.should.equal('Static English - Girls')
+  })
+
+  // A syntactically malformed escape is rejected by WHATSAPP_ENTRY_REF itself,
+  // before decodeURIComponent is ever reached. The text then falls through
+  // exactly like any other non-matching bare text: no referred-form entry, so
+  // the conversation lands on FALLBACK_FORM instead of the advertised form.
+  it('does not start the referred form when the ref contains a malformed escape (%zz)', () => {
+    const state = getState([rawWa('form.hpvintrotriple.k.%zz')].map(parseEvent))
+
+    state.md.form.should.equal('fallback')
+    state.md.form.should.not.equal('hpvintrotriple')
+  })
+
+  // The containment case: %FF is a well-formed %XX escape (passes the
+  // pattern) but is not valid UTF-8, so decodeURIComponent throws on it.
+  // Before _decodeToken, that throw was uncaught within getMetadata's
+  // try/catch around the WHOLE ref parse, so one bad token discarded the
+  // entire md -- including `form` -- and the user lost their survey to
+  // FALLBACK_FORM. Now the bad token survives raw and the rest of the ref,
+  // `form` especially, still resolves normally.
+  it('keeps a malformed-UTF-8-but-well-formed escape raw without losing the form', () => {
+    const state = getState([rawWa('form.hpvintrotriple.k.%FF')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+    state.md.k.should.equal('%FF')
+  })
+
+  it('leaves plain unencoded wa.me entry unaffected', () => {
+    const state = getState([rawWa('form.hpvintrotriple')].map(parseEvent))
+
+    state.md.form.should.equal('hpvintrotriple')
+  })
+})
+
+// md.ad_id — see the "Ad identity" block comment in lib/typewheels/utils.js.
+// vlab keys ad attribution on this opaque id and owns the (network, ad_id)
+// mapping itself; fly's only job is to capture it off the referral and carry
+// it in state.md, untouched. adIdFromReferral is unit-tested exhaustively in
+// utils.test.js as a pure function -- these tests instead drive RAW webhooks
+// through the real event-normalizer (parseEvent) into getState, exactly like
+// the CTWA / bare-text blocks above, to prove the whole chain: normalizer ->
+// getMetadata -> state.md, not just the resolver function in isolation.
+describe('md.ad_id — ad attribution identity captured from the referral', () => {
+  const ctwaAdReferral = {
+    source_url: 'https://fb.me/3cr4Wqqkv',
+    source_id: '120226305854810726',
+    source_type: 'ad',
+    headline: 'Take our survey',
+    body: 'Tap to start',
+    media_type: 'image',
+    ctwa_clid: 'AAbbCCddEE'
+  }
+
+  const rawCtwaAdArrival = {
+    source: 'whatsapp',
+    from: WA_USER_ID,
+    phone_number_id: WA_PHONE_NUMBER_ID,
+    timestamp: 1542123799219,
+    type: 'text',
+    text: { body: 'form.hpvintrotriple.creative.3b.gender.men.geography.other_states2' },
+    referral: ctwaAdReferral
+  }
+
+  it('messenger: referral.ad_id lands on state.md.ad_id, and state.md.form still resolves as before', () => {
+    const rawMessengerAdReferral = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1542123799219,
+      referral: { ref: 'form.hpvintrotriple', source: 'ADS', type: 'OPEN_THREAD', ad_id: '6041234567890' }
+    }
+    const state = getState([rawMessengerAdReferral].map(parseEvent))
+
+    state.md.ad_id.should.equal('6041234567890')
+    state.md.form.should.equal('hpvintrotriple')
+  })
+
+  it('messenger: an older referral with no ad_id field leaves state.md.ad_id entirely absent', () => {
+    // Not falsy -- ABSENT. A present-but-undefined/null `ad_id` key would
+    // still serialize into persisted state and confuse consumers that only
+    // check `'ad_id' in md`.
+    const rawMessengerReferralNoAdId = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1542123799219,
+      referral: { ref: 'form.hpvintrotriple', source: 'SHORTLINK', type: 'OPEN_THREAD' }
+    }
+    const state = getState([rawMessengerReferralNoAdId].map(parseEvent))
+
+    state.md.should.not.have.property('ad_id')
+    state.md.form.should.equal('hpvintrotriple')
+  })
+
+  it('whatsapp: CTWA source_type "ad" + source_id lands on state.md.ad_id', () => {
+    const state = getState([rawCtwaAdArrival].map(parseEvent))
+
+    state.md.ad_id.should.equal('120226305854810726')
+    state.md.form.should.equal('hpvintrotriple')
+  })
+
+  // THE regression that matters most. An organic reshare of a page post
+  // carries the exact same source_id shape as a CTWA ad click -- source_type
+  // is the ONLY signal that tells them apart. If this gate is ever weakened
+  // to accept post-sourced referrals, post ids get written into md.ad_id,
+  // can never match vlab's (network, ad_id) mapping, and pile up forever in
+  // the "unmapped" bucket that exists to catch real bugs -- silently and
+  // permanently, because the conversation itself proceeds completely
+  // normally otherwise (form still resolves, targeting metadata still
+  // captured).
+  it('whatsapp: source_type "post" must NOT produce an ad_id', () => {
+    const rawCtwaPostArrival = {
+      source: 'whatsapp',
+      from: WA_USER_ID,
+      phone_number_id: WA_PHONE_NUMBER_ID,
+      timestamp: 1542123799219,
+      type: 'text',
+      text: { body: 'form.hpvintrotriple.creative.3b.gender.men.geography.other_states2' },
+      referral: {
+        source_url: 'https://fb.me/somepost',
+        source_id: '999888777666', // a POST id, not an ad id
+        source_type: 'post',
+        headline: 'Someone shared this',
+        body: 'Check it out',
+        media_type: 'image'
+      }
+    }
+    const state = getState([rawCtwaPostArrival].map(parseEvent))
+
+    state.md.should.not.have.property('ad_id')
+    state.md.form.should.equal('hpvintrotriple')
+  })
+
+  it('whatsapp: a referral with no source fields at all resolves no ad_id, form still resolves', () => {
+    const rawWhatsAppReferralNoSourceFields = {
+      source: 'whatsapp',
+      from: WA_USER_ID,
+      phone_number_id: WA_PHONE_NUMBER_ID,
+      timestamp: 1542123799219,
+      type: 'text',
+      text: { body: 'hello' },
+      referral: { ref: 'form.hpvintrotriple' }
+    }
+    const state = getState([rawWhatsAppReferralNoSourceFields].map(parseEvent))
+
+    state.md.should.not.have.property('ad_id')
+    state.md.form.should.equal('hpvintrotriple')
+  })
+
+  it('whatsapp: bare-text wa.me entry (no referral object at all) has no ad_id', () => {
+    const rawBareTextEntry = {
+      source: 'whatsapp',
+      from: WA_USER_ID,
+      phone_number_id: WA_PHONE_NUMBER_ID,
+      timestamp: 1542123799219,
+      type: 'text',
+      text: { body: 'form.hpvintrotriple' }
+    }
+    const state = getState([rawBareTextEntry].map(parseEvent))
+
+    state.md.should.not.have.property('ad_id')
+    state.md.form.should.equal('hpvintrotriple')
+  })
+
+  // fly owns the `ad_id` key. getMetadata's `_group` parses the ref's dotted
+  // path into md BEFORE the ad_id resolution step runs, so a ref token
+  // literally spelled `ad_id` (e.g. a study author's creative naming
+  // collides with our key) would otherwise land in md.ad_id as a string like
+  // 'injected'. getMetadata deletes it first so fly's resolved value always
+  // wins the collision.
+  it('messenger: a ref token literally named ad_id never wins over the real ad_id field', () => {
+    const rawCollision = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1542123799219,
+      referral: { ref: 'form.hpvintrotriple.ad_id.injected', source: 'ADS', type: 'OPEN_THREAD', ad_id: '999888777' }
+    }
+    const state = getState([rawCollision].map(parseEvent))
+
+    state.md.ad_id.should.equal('999888777')
+    state.md.ad_id.should.not.equal('injected')
+  })
+
+  it('messenger: a ref token named ad_id with NO real ad_id field leaves ad_id absent, not "injected"', () => {
+    const rawCollision = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1542123799219,
+      referral: { ref: 'form.hpvintrotriple.ad_id.injected', source: 'SHORTLINK', type: 'OPEN_THREAD' }
+    }
+    const state = getState([rawCollision].map(parseEvent))
+
+    state.md.should.not.have.property('ad_id')
+  })
+
+  // Verify persistence: md is stamped once at conversation_started (inside
+  // getMetadata, called from the REFERRAL transition) and rides along in
+  // state as later events are folded in -- it is not re-derived or dropped
+  // on every subsequent event.
+  it('ad_id is stamped once at conversation_started and survives a later user reply', () => {
+    const rawReply = {
+      source: 'whatsapp',
+      from: WA_USER_ID,
+      phone_number_id: WA_PHONE_NUMBER_ID,
+      timestamp: 1542123800000,
+      type: 'text',
+      text: { body: 'Yes' }
+    }
+    const state = getState([rawCtwaAdArrival, rawReply].map(parseEvent))
+
+    state.md.ad_id.should.equal('120226305854810726')
+  })
+})

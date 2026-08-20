@@ -168,6 +168,14 @@ def _iter_messages(raw_rows, allowed_types, include_raw_json, stats=None):
         yield out
 
 
+# Metadata keys promoted to CSV columns on every responses export, whether or
+# not the user asked for them. `ad_id` is the opaque ad identifier replybot
+# stamps onto `state.md` at conversation start; vlab owns the
+# (network, ad_id) -> stratum mapping and the join happens at analysis time, so
+# this column is the researcher's only handle on it from a raw CSV.
+ALWAYS_EXPORTED_METADATA = ["ad_id"]
+
+
 class ExportOptions(BaseModel):
     pivot: bool = False
     keep_final_answer: bool = False
@@ -194,8 +202,26 @@ def format_data(
         fns.append(p.keep_final_answer)
 
     # TODO: autopopulate metadata??? Just add it all?
-    if options.metadata:
-        fns.append(p.add_metadata(options.metadata))
+    #
+    # `ad_id` is always exported, never opt-in. It is the key a researcher joins
+    # vlab's (network, ad_id) -> stratum mapping on, and this CSV is the whole
+    # manual join path for people working in R or Stata. Leaving it to the
+    # free-text "Metadata to add as columns" box would mean most exports simply
+    # ship without the join key, which defeats the point. Requested keys follow
+    # it, de-duplicated so asking for `ad_id` explicitly stays harmless.
+    #
+    # Guarded on the column existing because `add_metadata` reaches for
+    # `df.metadata`, and this step is now unconditional where it used to run
+    # only when the user opted in -- so any frame lacking that column would
+    # newly raise. (Note: the fully columnless `pd.DataFrame([])` produced by a
+    # zero-response survey still fails earlier, inside `add_form_data`'s merge
+    # on 'surveyid'. That is a pre-existing bug this guard neither causes nor
+    # cures; see the xfail in tests/test_exporter.py.)
+    metadata_keys = list(
+        dict.fromkeys(ALWAYS_EXPORTED_METADATA + (options.metadata or []))
+    )
+    if metadata_keys and "metadata" in responses.columns:
+        fns.append(p.add_metadata(metadata_keys))
 
     if options.drop_users_without:
         fns.append(p.drop_users_without(options.drop_users_without))

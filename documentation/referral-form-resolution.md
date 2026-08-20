@@ -177,7 +177,7 @@ case 'REFERRAL': {
 
 ### 6. Form Shortcode Extraction with Fallback
 
-**File**: `replybot/lib/typewheels/utils.js:75-105`
+**File**: `replybot/lib/typewheels/utils.js` — `getMetadata`
 
 The `getMetadata(event)` function reads the referral off the **normalized** event
 and applies the fallback:
@@ -185,25 +185,40 @@ and applies the fallback:
 ```javascript
 function getMetadata(event) {
   let md = {}
+  let referral = null
 
   try {
-    let r
     if (event.event_type === 'conversation_started') {
-      r = event.payload.referral
+      referral = event.payload.referral
     }
 
-    if (r && r.ref) {
-      const pairs = r.ref.split('.')
-      md = _group(pairs.map(decodeURIComponent))
+    if (referral && referral.ref) {
+      const pairs = referral.ref.split('.')
+      md = _group(pairs.map(_decodeToken))
     }
   } catch (e) {
     md = {}
+    referral = null
+  }
+
+  // fly-owned; see "The encoded ref" below. DELIBERATELY outside the catch.
+  delete md.vt
+  if (md.r !== undefined) {
+    const { form, token } = decodeRecruitmentRef(md.r)
+    delete md.r
+    md.form = form
+    md.vt = token
   }
 
   md.form = md.form || process.env.FALLBACK_FORM
   md.startTime = event.timestamp
   md.pageid = event.source.account_id
   md.platform = eventPlatform(event)
+
+  // fly-owned; see "Ad identity" below
+  delete md.ad_id
+  const adId = adIdFromReferral(referral, md.platform)
+  if (adId !== undefined) md.ad_id = adId
 
   return { ...md, ...randomSeed(event, md) }
 }
@@ -212,6 +227,9 @@ function getMetadata(event) {
 **Key behavior**:
 - **Only `conversation_started` events can carry a form.** Any other event type
   yields `md = {}` and falls through to the fallback shortcode.
+- **The encoded-ref branch is outside the `try`/`catch`, deliberately.** See
+  "The encoded ref" below — a decode failure must not fall through to the
+  fallback survey.
 - Falls back to `process.env.FALLBACK_FORM` if no `form` key is found
 - `pageid` comes from `event.source.account_id` (the messaging account id, i.e.
   the page id for Messenger)
@@ -467,6 +485,19 @@ To support per-page default forms:
 | User is referrer | (self-referral case) | No-op (prevent loop) |
 | Blocked user | any | No-op (user blocked) |
 
+### Ad identity scenarios (`md.ad_id`)
+
+| Scenario | Referral | `md.ad_id` |
+|---|---|---|
+| Messenger ad click | `{ ref: 'form.ABC', ad_id: '123' }` | `'123'` |
+| Messenger, older event | `{ ref: 'form.ABC' }` | **absent** |
+| WhatsApp CTWA ad | `{ source_type: 'ad', source_id: '120254866237980150' }` | `'120254866237980150'` |
+| **WhatsApp organic post reshare** | `{ source_type: 'post', source_id: '999' }` | **absent** — `source_id` is a *post* id here |
+| WhatsApp, no source fields | `{ ref: 'form.ABC' }` | **absent** |
+| WhatsApp legacy spelling | `{ source: 'ads', source_id: '5' }` | `'5'` (accepted defensively) |
+| Bare-text `wa.me` entry | none (synthesized) | **absent** — organic entrant |
+| Ref token collides | `?ref=form.ABC.ad_id.injected` | fly's resolved value, or **absent** — never `'injected'` |
+
 ---
 
 ## WhatsApp Entry Point Mechanics
@@ -475,32 +506,50 @@ WhatsApp differs fundamentally from Messenger in referral delivery:
 
 ### 1. CTWA Referral Object (Click-to-WhatsApp Ads)
 
-Meta sends WhatsApp CTWA ads with a referral object on the inbound message:
+Meta sends WhatsApp CTWA ads with a referral object on the inbound message. The
+shape below is a **real production arrival**, taken verbatim from the `messages`
+table (2026-08-16; ids and URLs abbreviated):
 
 ```json
 {
   "messages": [{
-    "from": "27123456789",
+    "from": "15419799714",
     "type": "text",
-    "text": { "body": "Hi" },
+    "text": { "body": "ctwaprobe.alpha.creative.Ad1H.form.probetest" },
     "referral": {
-      "ref": "form.ABC123",
-      "source": "ads",
-      "source_id": "campaign_123",
-      "ctwa_clid": "click_id",
-      "headline": "ad headline",
-      "body": "ad copy"
+      "source_url": "https://fb.me/9nJxtZGUu",
+      "source_id": "120254866237980150",
+      "source_type": "ad",
+      "headline": "Virtual Lab survey",
+      "body": "Ga iyaye & Masu kula da yara...",
+      "media_type": "image",
+      "image_url": "https://scontent-bos5-1.xx.fbcdn.net/...",
+      "ctwa_clid": "AfiIcrJAS9EeBfiF9otcaepBuFmP...",
+      "welcome_message": { "text": "Welcome! Tap below to start the survey." }
     }
   }]
 }
 ```
 
+Two corrections, because earlier revisions of this document got both wrong:
+
+- **The key is `source_type` and the ad value is `"ad"`** — singular key,
+  singular value. Earlier revisions of this document (and `replybot/README.md`)
+  showed `"source": "ads"`. No production payload, hermes type, or test fixture
+  in this repo has ever carried that spelling; it looks like a transcription of
+  *Messenger's* referral `source` field (`"ADS"`, `"SHORTLINK"`,
+  `"CUSTOMER_CHAT_PLUGIN"`) — a different platform's different field. Code that
+  reads the source type accepts both spellings defensively, but `source_type` is
+  the one that actually arrives.
+- **There is no `ref`.** Every field on the object is Meta-assigned. The form
+  shortcode came from the autofill text on `text.body`.
+
 **Flow:**
 1. Hermes receives webhook, stamps with `source: "whatsapp"` and `phone_number_id` (hermes/event.rs:73-97), publishes to Kafka unchanged
 2. Replybot's `categorizeWhatsAppEvent()` (event-normalizer.js:257-265) checks `if (data.referral)` — matches
 3. Emits `event_type: 'conversation_started'`, `payload.referral: data.referral` (preserves entire object)
-4. `getMetadata(event)` (utils.js:75-105) extracts `form` from `payload.referral.ref` only
-5. Extra fields (`source_id`, `ctwa_clid`, `headline`, `body`) are **not extracted or mapped to state metadata**
+4. `getMetadata(event)` (utils.js) extracts `form` from `payload.referral.ref` (falling back to the autofill text), and `ad_id` from `source_id` when `source_type` says the arrival came from an ad — see [Ad identity](#ad-identity-mdad_id)
+5. The remaining fields (`ctwa_clid`, `headline`, `body`, `media_type`, `source_url`, `image_url`, `welcome_message`) are preserved on the raw event but **not** mapped into state metadata
 
 **A CTWA referral usually has no `ref` at all.** Every documented field on the
 object (`source_url`, `source_id`, `source_type`, `headline`, `body`,
@@ -533,7 +582,7 @@ where one ad backs unlimited `m.me?ref=` variants.
 ### 2. Bare-Text Entry Fallback (wa.me links, manual typing)
 
 WhatsApp users can start a survey by typing plain text matching
-`/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i`
+`/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i`
 (case-insensitive, full-match):
 
 ```
@@ -549,6 +598,47 @@ capability as `m.me?ref=`. The pattern stays anchored/full-match, so a mid-surve
 free-text answer still cannot re-trigger entry. An odd token count
 (`form.ABC.creative`) matches deliberately and leaves the dangling key
 `undefined` rather than throwing.
+
+#### Percent-encoded metadata values
+
+Real targeting values contain spaces — `Static English - Girls`, `Bauchi State`,
+`South East`. They travel **percent-encoded**:
+
+```
+form.ABC123.creative.Static%20English%20-%20Girls.state.Bauchi%20State
+  → { form: 'ABC123', creative: 'Static English - Girls', state: 'Bauchi State' }
+```
+
+`getMetadata` has always decoded (`_group(pairs.map(...))` over
+`decodeURIComponent`); what was missing was the **entry gate** — `%` was not in
+the character class, so an encoded autofill message failed to match, no
+`conversation_started` was derived, and the arrival landed on `FALLBACK_FORM`.
+This matters most on CTWA, where there is no advertiser-settable `ref` and the
+autofill text is the only carrier.
+
+The gate accepts only **well-formed** escapes (`%[0-9A-Fa-f]{2}`), never a bare
+`%`. A bare `%` would admit `%zz`, a trailing `%`, or a truncated `%2` — each of
+which makes `decodeURIComponent` throw. `getMetadata` swallows that throw
+(`catch (e) { md = {} }`), so the whole `md` would come back empty and the user
+would land on `FALLBACK_FORM` anyway: the same silent misroute, in a
+harder-to-spot form. Malformed escapes are therefore rejected at the gate and
+simply never start a conversation.
+
+**Well-formed hex is necessary but not sufficient.** `%FF`, `%C3`, `%80` and
+`%E2%82` are all valid `%XX` octets that `decodeURIComponent` still throws on,
+because they are not valid UTF-8 — and UTF-8 well-formedness is not practically
+expressible as a regex. That residual is absorbed in `getMetadata` instead: it
+decodes **per token** via `_decodeToken`, which returns the raw token when
+decoding fails. So one malformed value can no longer discard the entire `md`
+(including `form`) and cost the user their survey — the form still resolves and
+the bad value survives verbatim (`k: '%FF'`), visible and debuggable rather than
+vanished. This also covers the Messenger path, which had the identical exposure.
+
+**For link and ad authors:** Python's `quote()` never encodes `.`, `-`, `_` or
+`~`. A `.` in a value will **corrupt the pair structure** (it reads as a
+separator), and `~` is not in the gate's alphabet and will fail the match
+outright. Encode or strip both before building the ref. The older caveat about
+raw `&` and `#` truncating a `wa.me?text=` link still applies.
 
 **Flow:**
 1. Hermes receives webhook, stamps and publishes to Kafka
@@ -568,7 +658,7 @@ free-text answer still cannot re-trigger entry. An odd token count
 - Allows underscore/hyphen in shortcode
 - Rejects mid-sentence refs
 
-### 3. Metadata Constraints (getMetadata, utils.js:75-105)
+### 3. Metadata Constraints (`getMetadata`, utils.js)
 
 All platforms converge at `getMetadata()`:
 
@@ -584,15 +674,206 @@ if (r && r.ref) {
 - Output: `{ form: "ABC", creative: "x", gender: "men" }`
 - Arbitrary key-value pairs can ride along
 
-**WhatsApp CTWA capability:**
-- Input: `form.ABC123` (only the ref field is mapped; extra CTWA fields ignored)
-- Output: `{ form: "ABC123" }`
-- No targeted metadata transport
+**WhatsApp CTWA capability** (since `replybot-v0.0.217`):
+- Input: the ad's **autofill message**, e.g. `form.ABC123.creative.x.gender.men`,
+  arriving on `text.body` — the referral object itself normally carries no `ref`
+- Output: `{ form: "ABC123", creative: "x", gender: "men" }`
+- **Targeted metadata does transport**, through exactly the same `_group` pairing
+  as Messenger. The constraint is *authorship*, not capability: the token is
+  written per ad **creative**, not per click, so N targeting cells means N
+  creatives — unlike Messenger, where one ad backs unlimited `m.me?ref=`
+  variants. See [The autofill message is the actual carrier](#1-ctwa-referral-object-click-to-whatsapp-ads) above.
+- Additionally: `ad_id` from `referral.source_id` when ad-sourced (see below)
 
-**WhatsApp bare-text capability:**
-- Input: `form.ABC123` (synthesized by normalizer)
-- Output: `{ form: "ABC123" }`
-- No targeted metadata transport
+**WhatsApp bare-text capability** (since `replybot-v0.0.217`):
+- Input: `form.ABC123.creative.x.gender.men` typed, or prefilled by
+  `wa.me/<number>?text=` (synthesized into a referral by the normalizer)
+- Output: `{ form: "ABC123", creative: "x", gender: "men" }`
+- **Targeted metadata does transport** — full parity with `m.me?ref=`. Note the
+  encoding caveat: raw `&` and `#` inside a `wa.me?text=` value silently truncate
+  the prefilled message, so percent-encode them (`%26`, `%23`).
+- No `ad_id`: there is no referral object and therefore no ad to attribute to.
+  A bare-text arrival is an organic entrant.
+
+> **Historical note.** Until this revision, both WhatsApp rows above read "No
+> targeted metadata transport". That was already false when written — it
+> contradicted this document's own v0.0.217 section a few dozen lines earlier,
+> which describes the autofill/prefill carrier in detail. The claim is
+> retired; do not reintroduce it.
+
+---
+
+## The encoded ref (`md.r` → `md.form` + `md.vt`)
+
+A second ref format, opt-in per study, alongside the dotted one. Where the
+dotted ref spells the whole stratum vocabulary out
+(`creative.Static English.Age.Age.State.Bauchi.form.mnchweek`), the encoded ref
+carries just a shortcode and an opaque token:
+
+```
+r.<base64url(v1 | len(shortcode) | shortcode | token)>
+```
+
+- `base64url` unpadded — alphabet `[A-Za-z0-9_-]`, so it contains no `.` and
+  cannot collide with the dotted key/value grammar, and it passes fly's
+  WhatsApp entry gate unencoded.
+- **Length-prefixed, not delimited.** A delimiter is a character a shortcode
+  might contain, and that failure would be a silent mis-route. The length is in
+  *bytes*, not characters, because UTF-8 is variable width.
+- The token is vlab's attribution join key, minted deterministically by adopt
+  from `(study_id, stratum_id, creative_name, destination_name)`.
+
+**fly decodes it locally** — `decodeRecruitmentRef` in
+`replybot/lib/typewheels/utils.js`. No lookup, no shared state, no call to
+vlab. The WhatsApp entry gate accepts a second anchor `r.<base64url>`
+(`WHATSAPP_ENTRY_REF_ENCODED` in `replybot/lib/event-normalizer.js`) alongside
+`form.<shortcode>`.
+
+### A decode failure is loud, not swallowed
+
+The decode branch sits **outside** `getMetadata`'s `try`/`catch`, and the
+inversion is the point. That catch exists so one malformed metadata token does
+not cost a respondent their survey: it discards `md` and lets `form` fall
+through to `FALLBACK_FORM`. Here the reasoning reverses — the encoded ref is
+the *only* carrier of the shortcode, so a ref that will not decode means fly
+does not know which survey the person wanted. Falling through would put them in
+a real but wrong survey, which is the exact silent misroute the format exists
+to prevent.
+
+So it throws `RefDecodeError` (tag `REF_DECODE`) and the respondent lands in a
+**visible ERROR state**. The `RecruitmentRefDecodeErrors` alert watches it; see
+`documentation/recruitment-arrival-health.md`.
+
+### Ownership: fly owns `vt`, same as `ad_id`
+
+`getMetadata` deletes `md.vt` **unconditionally and before** the decode branch.
+
+The unconditional part is what matters, because of the case where the branch
+does *not* run. A dotted ref like
+`creative.Smiling.vt.injected.gender.women.form.mnchweek` parses through the
+ordinary `_group` dot-pairing into `md.vt = "injected"` — and since there is no
+`md.r`, the decode branch never fires to overwrite it. That author-set value
+would then be the join key vlab attributes the respondent by: a silent mis-join
+onto whichever attribution row happens to carry the token `injected`.
+
+Only the decode branch may set `vt`. Same defence-in-depth `ad_id` gets below.
+``owns `vt`: a dotted ref cannot inject a join key`` in `utils.test.js` is the
+test that fails if anyone removes the delete.
+
+`r` is fly-owned on the way out too: it is consumed into `form` and `vt` and
+never left in the metadata, so nothing downstream sees a half-parsed ref.
+
+### What vlab does with the token
+
+vlab joins it against `ad_attributions.ref_token` to recover the respondent's
+stratum. An extraction conf declaring `mapping: "ad_table_lookup"` names the
+metadata key the token arrives under — `vt`, by this convention, though the key
+is conf-declared rather than hardcoded on either side. See
+`documentation/ad-attributions.md` in the vlab repo.
+
+The token supersedes `ad_id` as the join key: `ad_id` rides Meta's referral
+webhook, which Meta sends for only ~31% of Messenger ad entrants, while the
+token rides a carrier vlab authors and so reaches everyone. `md.ad_id` below is
+still captured, and still feeds arrival-health alerting — it is just no longer
+what attribution joins on.
+
+---
+
+## Ad identity (`md.ad_id`)
+
+vlab owns an `(network, ad_id) -> stratum metadata` mapping and fly's role is to
+capture and expose the identifier. **Note that this is no longer what
+attribution joins on** — the encoded ref's `vt` token superseded it, because
+Meta sends the referral carrying `ad_id` for only ~31% of Messenger ad entrants
+(see "The encoded ref" above). `md.ad_id` is still captured, still exported, and
+still what the recruitment-health alerting gates on; it is simply not the join
+key any more. Everything below still describes how it is resolved and owned.
+
+This is purely additive. The legacy dotted-ref path above
+(`creative.Static English.Age.Age.State.Bauchi.form.mnchweek` → dot-parsed into
+`state.md`) is unchanged and **stays permanently** — existing Messenger studies
+depend on it and will never migrate. Nothing is gated, removed, or deprecated.
+
+### Resolution rule
+
+`getMetadata` (`replybot/lib/typewheels/utils.js`) resolves `md.ad_id` from the
+referral via the pure helper `adIdFromReferral(referral, platform)`:
+
+| Platform | Source field | Gate |
+|---|---|---|
+| Messenger | `referral.ad_id` | none — Messenger only sets it for ad-sourced referrals, so the field is self-identifying. Older events simply lack it. |
+| WhatsApp | `referral.source_id` | **only when `source_type` (or legacy `source`) is `ad`/`ads`**, case-insensitive |
+
+**The WhatsApp gate is the critical correctness detail.** `source_id` is not an
+ad-specific field. On an organic reshare of a page post the source is a *post*,
+and `source_id` is then a **post id**. Capturing it unconditionally would write
+post ids into the ad_id field, where they can never match vlab's mapping and
+would pile up forever in the "unmapped" bucket that exists to catch real bugs. A
+post-sourced arrival is an organic entrant and falls through with **no `ad_id`
+key at all**.
+
+When nothing resolves, the key is **absent** — not `null`, not `undefined`, not
+the string `"undefined"`.
+
+### Ownership and collisions
+
+`ad_id` is a **fly-owned synthetic key**, in the same family as `md.form`,
+`md.startTime`, `md.pageid` and `md.platform`: assigned *after* `_group`, so
+fly's value wins any collision with a ref token. That ordering must be
+preserved.
+
+Ownership is total, including the negative case. A ref token literally named
+`ad_id` (`?ref=form.ABC.ad_id.injected`) is **deleted** before fly stamps its own
+value, so it can never leak into `md.ad_id` even when fly resolves nothing. The
+column feeds vlab's join and has to be trustworthy — a study author who could
+write into it would pollute the very unmapped bucket the gate protects.
+
+### Notes
+
+- **No `ad_network` key.** `md.platform` already holds `messenger`/`whatsapp`
+  and vlab derives the network from it.
+- **Captured once.** `getMetadata` runs at `conversation_started` and persists in
+  `state.md`, so a single capture stamps every subsequent response.
+- **`getMetadata` stays pure.** The resolution rule is unit-testable in
+  isolation; `adIdFromReferral` is exported for exactly that.
+- **`ctwa_clid` is deliberately NOT stamped.** It was considered and **deferred**
+  to a separate stream — it is per-click rather than per-ad and belongs to
+  Conversions API attribution, a different concern. Leaving it out keeps this
+  change reviewable. It remains preserved on the raw event either way.
+
+### Where it surfaces
+
+| Surface | How |
+|---|---|
+| `state.md.ad_id` | stamped at conversation start |
+| `responses.metadata->>'ad_id'` | `state.md` is persisted as the responses metadata blob |
+| `GET /api/v1/responses` | projected as a first-class `ad_id` column (`dashboard-server/queries/responses/response.queries.js`) |
+| Responses CSV download | same projection, same file |
+| Responses export (`exporter/`) | always-on column via `ALWAYS_EXPORTED_METADATA` in `exporter/exporter/exporter.py` — not opt-in, so every export carries the join key |
+
+The dashboard-server surfaces use a query-level projection
+(`responses.metadata->>'ad_id' AS ad_id`) rather than a `STORED` computed column
+like `responses.clusterid`. That needs no migration, works retroactively on
+every existing row, and avoids a backfill on a very large production table. The
+pagination cursors are untouched: `_all` encodes its token from
+`(timestamp, userid, question_ref)` and `responsesQuery` from
+`(userid, timestamp, question_ref)`; `ad_id` collides with neither.
+
+### Test coverage
+
+| File | Layer |
+|---|---|
+| `replybot/lib/typewheels/utils.test.js` | `adIdFromReferral` as a pure function — exhaustive: both platforms, both source spellings, post-sourced rejection, trimming/case, numeric ids, empty ids, cross-platform shapes |
+| `replybot/lib/typewheels/machine.test.js` | end-to-end from a **raw** webhook through `parseEvent` → `getState` → `state.md`, covering every row of the scenarios table above plus persistence across a later reply |
+| `replybot/lib/event-normalizer.test.js` | boundary pins that `ad_id` / `source_type` survive normalization onto `payload.referral` |
+| `exporter/exporter/tests/test_exporter.py` | `ad_id` column present without opt-in, alongside requested keys, de-duplicated, null-safe, row-aligned |
+| `dashboard-server/queries/responses/response.test.js` | the `metadata->>'ad_id'` projection against a real database |
+
+Note that `replybot/lib/typewheels/events.test.js` is a **fixtures module**, not
+a test suite, and its events are already normalized. Referral behaviour must be
+exercised by building raw webhook shapes and running them through `parseEvent`,
+as `machine.test.js` does — otherwise normalization is skipped and the test
+proves less than it appears to.
 
 ---
 
@@ -607,13 +888,19 @@ if (r && r.ref) {
 - **Hermes webhook handler**: `hermes/src/handlers.rs:handle_whatsapp()` (line 124)
 - **Hermes event stamping**: `hermes/src/event.rs:stamp_whatsapp_event()` (line 73-97)
 - **Event normalization**: `replybot/lib/event-normalizer.js:categorizeWhatsAppEvent()` (line 254-395)
-- **Bare-text pattern**: `/^(?:start\s+)?form\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/i` (event-normalizer.js)
+- **Bare-text pattern**: `/^(?:start\s+)?form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+(?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i` (event-normalizer.js)
 - **Pattern tests**: `replybot/lib/event-normalizer.test.js:567-651`
+
+**Ad identity:**
+- **Resolution rule (pure)**: `replybot/lib/typewheels/utils.js:adIdFromReferral()` — exported for unit testing; the accepted source keys/values live beside it in `AD_SOURCE_KEYS` / `AD_SOURCE_VALUES`
+- **Stamping**: `replybot/lib/typewheels/utils.js:getMetadata()`
+- **Responses projection**: `dashboard-server/queries/responses/response.queries.js` (`_all` and `responsesQuery`)
+- **Export column**: `exporter/exporter/exporter.py` (`ALWAYS_EXPORTED_METADATA`, consumed in `format_data`)
 
 **Cross-platform:**
 - **Event categorization**: `replybot/lib/typewheels/machine.js:categorizeEvent()`
 - **REFERRAL handler**: `replybot/lib/typewheels/machine.js:285-310`
 - **Blank start**: `replybot/lib/typewheels/machine.js:_blankStart()`
-- **Metadata extraction**: `replybot/lib/typewheels/utils.js:getMetadata()` (line 75-105)
+- **Metadata extraction**: `replybot/lib/typewheels/utils.js:getMetadata()`
 - **Field lookup**: `replybot/lib/typewheels/form.js:getField()`
-- **Tests**: `replybot/lib/event-normalizer.test.js`, `machine.test.js`
+- **Tests**: `replybot/lib/typewheels/utils.test.js` (`adIdFromReferral` — pure resolver, exhaustive), `replybot/lib/event-normalizer.test.js` (normalizer preserves `ad_id`/`source_type` unmodified), `replybot/lib/typewheels/machine.test.js` (`md.ad_id — ad attribution identity captured from the referral` — end-to-end raw webhook -> `parseEvent` -> `state.md`, including the post-vs-ad regression and the `ad_id` ref-token collision)

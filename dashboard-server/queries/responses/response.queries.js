@@ -9,6 +9,19 @@ const {
 
 class RequestError extends Error {}
 
+// `ad_id` is projected out of the `metadata` JSONB rather than left buried in
+// the blob: it is the key researchers join vlab's (network, ad_id) -> stratum
+// mapping on, so it belongs in the curated column list next to `pageid`, the
+// same way `clusterid` is promoted out of metadata at the schema level
+// (devops/migrations/01-init.sql). Done as a query-level projection, not a
+// STORED computed column — it needs no migration, works retroactively on every
+// existing row, and avoids a backfill on a very large production table.
+//
+// Adding it does not disturb the pagination cursors: `_all` encodes its token
+// from (timestamp, userid, question_ref) and `responsesQuery` builds its cursor
+// from (userid, timestamp, question_ref). Neither the ORDER BY tuple nor the
+// WHERE tuple changes, and `ad_id` collides with no cursor key.
+
 async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool) {
   const query = `SELECT parent_surveyid,
   parent_shortcode,
@@ -22,6 +35,7 @@ async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool) {
   response,
   timestamp::string,
   responses.metadata,
+  responses.metadata->>'ad_id' AS ad_id,
   pageid,
   translated_response
   FROM responses
@@ -119,6 +133,7 @@ async function responsesQuery(pool, email, name, time, lim) {
                         response,
                         timestamp::string,
                         responses.metadata,
+                        responses.metadata->>'ad_id' AS ad_id,
                         pageid,
                         translated_response
                  FROM responses

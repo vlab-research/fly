@@ -1,0 +1,35 @@
+-- 25-states-ad-id.sql: expose the recruiting ad's id on states.
+--
+-- Replybot stamps md.ad_id at conversation start (typewheels/utils.js,
+-- adIdFromReferral): Messenger from referral.ad_id, WhatsApp from
+-- referral.source_id and only when the referral says the source is an ad. The
+-- full state — including md — is what scribble writes to state_json, so no
+-- writer changes are needed. Exactly the shape of the platform column in
+-- 21-states-platform.sql.
+--
+-- WHY states AND NOT JUST responses. responses already carries ad_id inside its
+-- metadata JSONB and the dashboard projects it (response.queries.js), which
+-- serves the analysis-time (network, ad_id) -> stratum join. That is the wrong
+-- table for monitoring: responses grows without bound and is expensive to
+-- window, while states is small, already scanned once a minute by sql_exporter,
+-- and is where a conversation is visible even when it produced no responses at
+-- all. An arrival that routes to the wrong survey and answers nothing is
+-- precisely the case worth alerting on, and it never reaches responses.
+--
+-- NULL for three genuinely different reasons, and consumers must not conflate
+-- them:
+--   1. rows predating the md.ad_id stamp;
+--   2. organic (non-ad) entrants — no referral, or a post-sourced WhatsApp
+--      referral that the source_type gate deliberately refuses to trust;
+--   3. ad entrants Meta sent no referral webhook for. On Messenger this is the
+--      MAJORITY: measured over 30 days to 2026-08-18, only ~2,475 of ~12,804
+--      Messenger users with an ad-shaped arrival had a resolvable ad id at all.
+--      Those users arrive through the welcome message's quick-reply payload,
+--      which carries the dotted ref but no ad id, so there is nothing to
+--      capture. That is Meta's behaviour and no code change recovers it.
+--
+-- (3) is why attribution coverage is a metric to LOOK AT rather than page on,
+-- and why a study that thins its ref cannot rely on the ad-id join alone on
+-- Messenger. See documentation/recruitment-arrival-health.md.
+ALTER TABLE chatroach.states ADD COLUMN IF NOT EXISTS ad_id VARCHAR
+  AS (state_json->'md'->>'ad_id') STORED;
