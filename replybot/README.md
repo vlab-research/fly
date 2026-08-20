@@ -167,9 +167,10 @@ conversation does not live on (on a legacy hand-authored `webview`, `linksniffer
 `moviehouse` read the account out of a query string the *researcher* wrote — routinely a page
 id copied from another survey; the `link_tracking` and `moviehouse` field types remove that by
 building the query string here instead). Neither is a reason to enter a survey, and entering
-one is severe rather than untidy: `FALLBACK_FORM` is production `305`, a real live survey
-belonging to another researcher, whose misrouted participants finish in one message and
-therefore look like completions.
+one is severe rather than untidy: `FALLBACK_FORM` is production `305`, a real live survey in
+the same account — but not the survey the participant should be on, so their answers are
+misattributed to it, and misrouted participants finish in one message and therefore look like
+completions.
 
 So `_handleExternalEvent` returns `{ action: 'DEFER' }` when `_isSynthetic(nxt)`:
 
@@ -189,8 +190,8 @@ row is what every recovery sweep selects on. Leaving it alone *is* the retry pat
 `Timeouts()` re-fires every 10 minutes for up to 72 hours while
 `current_state = 'WAIT_EXTERNAL_EVENT'`; dean's `Payments()` re-issues `repeat_payment` after
 2 hours; moviehouse heartbeats again within 30 s. A linksniffer click has no re-send and is
-genuinely lost — named rather than hidden, and still far better than sending the participant
-another researcher's survey.
+genuinely lost — named rather than hidden, and still far better than misattributing the
+participant's answers to the wrong survey.
 
 An `ERROR` state with a new retryable tag was considered and rejected: it clobbers that row, a
 new tag is not in `DEAN_ERROR_TAGS`, and even inside the tag set the redo re-reads the same
@@ -261,7 +262,8 @@ not be demoted in the normalizer. All 450 replayed entries happened on the first
 machine acted on, i.e. with `forms: []`, which is why this guard cannot touch them.
 
 **Named behavioural change:** a participant at `END` who taps Get Started again now receives
-nothing, where they used to be entered on another researcher's live survey. That is half the
+nothing, where they used to be entered on a live survey in the account and have their answers
+misattributed to it. That is half the
 affected population. The documented restart mechanism is `REPLYBOT_RESET_SHORTCODE` via an
 explicit `form.reset` ref, and every other post-`END` interaction already declines to start a
 new survey. A re-engagement affordance is now a deliberate gap rather than an accident.

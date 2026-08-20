@@ -729,8 +729,9 @@ describe('categorizeWhatsAppEvent', () => {
   // routinely written form-last — Messenger's own production refs look like
   // `creative.3b.gender.men.form.hpvintrotriple`. Anchoring the WhatsApp entry
   // pattern on a leading `form.` rejected those and dropped the arrival to
-  // FALLBACK_FORM (a live survey belonging to another researcher, so the
-  // misroute looks like a completion — the VIR-19 failure shape).
+  // FALLBACK_FORM (a live survey in the same account, so the misroute
+  // misattributes the participant's answers and looks like a completion —
+  // the VIR-19 failure shape).
   describe('bare-text form ref entry — form pair in any position (order-independent)', () => {
     it('resolves a form pair at the START of the token list (regression guard)', () => {
       const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.ABC' } })

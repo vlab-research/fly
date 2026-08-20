@@ -189,12 +189,14 @@ function _handleExternalEvent(state, nxt, includeMetadata = false) {
   //     researcher-authored `pageid` out of a webview URL; see plan §8.4).
   //
   // Neither of those is a reason to enter a survey, and entering one is not
-  // untidy but severe: FALLBACK_FORM is a real, live survey belonging to another
-  // researcher whose misrouted participants look like completions, which is the
-  // exact failure signature of VIR-19 and of the CTWA defect in the plan's
-  // Appendix A. So we DEFER instead: fold to nothing, publish nothing, cache
-  // nothing, and let the producer's own sweep re-deliver the event once the log
-  // is whole. See planning/conversation-identity.md §7.1 (CORRECTED).
+  // untidy but severe: FALLBACK_FORM is a real, live survey in the same
+  // account -- but not the survey the participant should be on, so their
+  // answers are misattributed to it and misrouted participants look like
+  // completions, which is the exact failure signature of VIR-19 and of the
+  // CTWA defect in the plan's Appendix A. So we DEFER instead: fold to
+  // nothing, publish nothing, cache nothing, and let the producer's own sweep
+  // re-deliver the event once the log is whole. See
+  // planning/conversation-identity.md §7.1 (CORRECTED).
   if (state.state === 'START') {
     if (_isSynthetic(nxt)) {
       return {
@@ -426,8 +428,9 @@ function exec(state, nxt) {
       // this machine puts them, at the moment of the append, in END (50%), QOUT
       // (22%), RESPONDING (14%), WAIT_EXTERNAL_EVENT (7%), BLOCKED (6%) and ERROR
       // -- 44% mid-survey. 96% were appended by a bare `get_started`. `305` is a
-      // real live survey belonging to another researcher, so the participants
-      // whose answers land on it look like completions rather than errors: on the
+      // real live survey in the same account -- but not the survey these
+      // participants should be on, so their answers land on it and are
+      // misattributed, looking like completions rather than errors: on the
       // `ecd` page a language answer was recorded as `shortcode:'305',
       // question_ref:'end'` and the participant was told "Sorry, I can't accept
       // any responses now."
@@ -454,13 +457,13 @@ function exec(state, nxt) {
       // `get_started` outright would have broken organic Messenger entry; this
       // guard cannot, because every one of those entries has `forms: []`.
       //
-      // WHY DEFER RATHER THAN _noop(). `_noop` returns `newState`, so lib/index.js
-      // publishes it and `scribble/state.go` UPSERTs it over the conversation's
-      // real `states` row -- the row every recovery sweep selects on -- and bumps
-      // `updated`, by which dean and the dashboard age conversations. Nothing
-      // happened here, so nothing should be written: DEFER returns without
-      // `newState` and writes neither `states` nor the cache. Same mechanism, and
-      // the same reasoning, as the synthetic deferral above.
+      // WHY DEFER RATHER THAN _noop(). This event is a real webhook, always
+      // account-correct, so `_noop()` would UPSERT `states` with content
+      // byte-identical to what's already there -- `apply`'s default branch
+      // returns `state` unchanged, so only `updated` would move, and nothing
+      // reads `updated` for correctness (dean's Timeouts/Payments key off
+      // `current_state`/`calculated_timeout_date`, not it). DEFER's only real
+      // win here is skipping that pointless write. Hygiene, not safety.
       //
       // NOT DONE, deliberately: a `get_started` at QOUT could re-send the pending
       // question, which is what the `_hasForm` branch above already does and would

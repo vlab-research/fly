@@ -616,12 +616,11 @@ describe('Machine integrated', () => {
   // conversation that already has a form. The machine refuses it (machine.js's
   // REFERRAL case) and the shell must write NOTHING.
   //
-  // Withholding `newState` is the whole mechanism, and it is why this is a DEFER
-  // rather than the `_noop()` the other REFERRAL guards use. `_noop` returns
-  // `newState`, lib/index.js publishes it, and `scribble/state.go` UPSERTs it over
-  // the live conversation's real `states` row -- the row every recovery sweep
-  // selects on -- while bumping `updated`, by which dean and the dashboard age
-  // conversations. Nothing happened here, so nothing may be written.
+  // This is a real webhook, always account-correct, so `_noop()` would UPSERT
+  // `states` with content byte-identical to what's already there (only
+  // `updated` would move, and nothing reads `updated` for correctness). DEFER
+  // over `_noop()` is hygiene here -- skipping a pointless write -- not
+  // preventing a destructive one.
   describe('DEFER (form-less entry on a live conversation)', () => {
     const rawGetStarted = {
       source: 'messenger',
@@ -631,7 +630,7 @@ describe('Machine integrated', () => {
       postback: { title: 'Get Started', payload: 'get_started' }
     }
 
-    // A live conversation on another researcher's form, awaiting an answer.
+    // A live conversation on a different form in the same account, awaiting an answer.
     const live = { ..._initialState(), state: 'QOUT', forms: ['mnchweeklanguage'], question: 'foo' }
 
     const deferred = async () => {

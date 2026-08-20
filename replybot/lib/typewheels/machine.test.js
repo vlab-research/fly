@@ -3266,7 +3266,8 @@ describe('md must always carry startTime', () => {
 
 // A SYNTHETIC event on a conversation that reconstructs as START is
 // self-contradictory, and blank-starting FALLBACK_FORM there is a silent
-// re-entry onto another researcher's live survey.
+// re-entry onto a different live survey in the same account, misattributing
+// the participant's answers to it.
 //
 // Why it is self-contradictory: every synthetic external event exists only
 // BECAUSE a conversation already exists. A dean `timeout` is selected from a
@@ -3497,8 +3498,8 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
   // carries no `ref`; with no matching autofill text there is nothing to resolve,
   // so it lands on FALLBACK_FORM. Accepted cost, stated: on WhatsApp the refused
   // event IS the participant's message, so dropping it drops that message. Still
-  // strictly better than moving them to another researcher's survey, and they
-  // recover by sending anything else.
+  // strictly better than misattributing their answers to a different survey, and
+  // they recover by sending anything else.
   it('refuses a CTWA referral that carries no ref, on a live WhatsApp conversation', () => {
     const ctwa = {
       source: 'whatsapp',

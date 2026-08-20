@@ -165,50 +165,36 @@ class Machine {
       page = t.page
       platform = t.platform
 
-      // DEFER: the machine refused to interpret this event (a synthetic event
-      // against a conversation that replayed as START -- machine.js
-      // `_handleExternalEvent`). Return WITHOUT `newState`, which is the whole
-      // mechanism: lib/index.js publishes state and writes the Redis key only
-      // `if (report.newState)`, so omitting it means
+      // DEFER: refuse a synthetic event whose conversation replayed as START
+      // (machine.js `_handleExternalEvent`). Return WITHOUT `newState` --
+      // lib/index.js only UPSERTs `states` and writes the cache
+      // `if (report.newState)` -- so nothing is written.
       //
-      //   - nothing is UPSERTed into `chatroach.states`, and
-      //   - nothing is written to the state cache.
+      // dean `timeout` and dinersclub payments read the account off the very
+      // `states` row they're re-firing for, so it's provably correct and a
+      // START replay here can only be a stale retry (Redis TTL 24h vs.
+      // DEAN_TIMEOUT_MAX_PAST=72h). Publishing it would flip `current_state`
+      // off `WAIT_EXTERNAL_EVENT` on the REAL row -- exactly what
+      // `Timeouts()`/`Payments()` gate on -- destroying the retry, not just
+      // this event. moviehouse and linksniffer read a researcher-authored
+      // `pageid` off a webview URL, so the account may be wrong; the UPSERT
+      // key is `(userid, pageid)`, so a wrong page hits a different row and
+      // can't clobber the real one -- there the only cost is a spurious row.
       //
-      // Both matter. `scribble/state.go` writes with a bare UPSERT, so ANY state
-      // we publish here overwrites the conversation's real row -- and that row is
-      // the substrate every recovery sweep reads. Dean's `Timeouts()` re-fires
-      // only while `current_state = 'WAIT_EXTERNAL_EVENT'` and `Payments()` only
-      // while the same holds, so writing a START row (or an ERROR row) in place of
-      // it does not merely lose this event, it destroys the retry that would have
-      // re-delivered it. Leaving `states` alone IS the retry path:
+      //   | Producer | Account | Recovery after DEFER |
+      //   |---|---|---|
+      //   | dean timeout | correct | `Timeouts()` re-fires (10min cron, 72h window) |
+      //   | dinersclub payment | correct | `Payments()` re-issues after 2h |
+      //   | moviehouse video | may be wrong | heartbeats again within 30s |
+      //   | linksniffer click | may be wrong | lost, no retry -- but no misroute either |
       //
-      //   | Producer | Recovery after a DEFER |
-      //   |---|---|
-      //   | dean `timeout`  | `Timeouts()` re-fires; cron */10min, window DEAN_TIMEOUT_MAX_PAST=72h, attempt cap counts only externalEvents entries actually recorded -- a DEFER records none |
-      //   | dinersclub payment result | dean `Payments()` re-issues `repeat_payment` after DEAN_PAYMENT_GRACE=2h; cron every 6h, cap 30 |
-      //   | moviehouse video | the webview heartbeats again within HEARTBEAT_INTERVAL_MS (30s) |
-      //   | linksniffer click | NO retry -- the click analytic is lost. Still strictly better than switching the participant onto FALLBACK_FORM |
+      // Not an ERROR+retryable-tag: an untagged state isn't swept at all, and
+      // even a tagged one has dean's redo re-read the same cached corrupt
+      // state and re-fail (FIELD_NOT_FOUND, devops/values/production.yaml).
       //
-      // Deliberately NOT an ERROR state with a retryable tag. That was the
-      // obvious-looking design and it is worse three ways: it clobbers the row
-      // above; a new tag is not in DEAN_ERROR_TAGS so nothing sweeps it (the
-      // FIELD_NOT_FOUND lesson, devops/values/production.yaml); and even in the
-      // tag set, dean's redo re-reads a CACHED corrupt state and re-fails forever
-      // (the same file records a sweep of 40 participants recovering exactly
-      // zero). See planning/conversation-identity.md §7.1 (CORRECTED).
-      //
-      // `publish: false` keeps this off the machine_report path too -- a report
-      // would be posted back through /synthetic as another synthetic event, and
-      // publishing one for an event we just declined to interpret is a loop with
-      // nothing at the end of it.
-      //
-      // TWO REASONS, TWO TAGS. Both are the same refusal and take the same exit,
-      // but they are separate failure modes with separate rates -- and the
-      // synthetic one is the entire instrument for the §7.1 canary ("watch 24h,
-      // expect zero"), so it must not be inflated by a defect that is expected to
-      // register non-zero. The lines are emitted separately rather than through a
-      // shared formatter so the synthetic line stays byte-identical to what
-      // documentation/states-debugging.md documents.
+      // `publish: false` too, so this can't loop back through machine_report
+      // as another synthetic event. Two tags below, logged separately, so
+      // SYNTHETIC_NO_CONVERSATION_TAG stays the exact §7.1 canary signal.
       if (output.action === 'DEFER') {
         if (output.reason === FALLBACK_ENTRY_ON_LIVE_CONVERSATION_TAG) {
           console.warn(FALLBACK_ENTRY_ON_LIVE_CONVERSATION_TAG,

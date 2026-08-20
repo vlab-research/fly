@@ -167,13 +167,27 @@ Files present on this branch (23): `01-init`, `02-export-status`, `03-survey-set
 `20-messaging-account-unique`, `21-states-platform`, `22-account-id-rename`,
 `22-surveys-shortcode-covering-index`, `23-states-errored-at`, `24-media-assets`.
 
+**Note (2026-08-19/20): this list is a point-in-time recon, not a live inventory** — it
+predates migrations 25 through 28 entirely and is already stale on its own terms, before any
+of the registry-removal edits below. The current set, from 20 onward, is: `20`, `21`, `22`
+(×2, the duplicate is pre-existing and unrelated to this branch), `23`, `24`, `26`, `27`,
+`28`. There is a deliberate gap at `25` — `devops/migrations/25-messaging-accounts.sql` was
+removed in `5c4cab3e` along with the feature it migrated for (see §0.9-2's amendment and the
+now-deleted §B11). Migrations apply lexically with no dependency on `25`: confirmed by
+grepping `26-messages-account.sql`, `27-chat-log-account-scoped-key.sql` and
+`28-responses-account-scoped-key.sql` for any reference to it — none exists. The gap is inert,
+exactly as `5c4cab3e`'s message states.
+
 Three things follow:
 
-1. **New migrations are picked up automatically.** `25-messaging-accounts.sql` (§5.2) and
-   `26-messages-account.sql` (§7.4) will be applied by the harness with no `stack.ts`
-   change, and by every Go service's test DB too — `devops/Makefile:79-91 test-db`
-   (`cat ./migrations/*.sql | cockroach sql`), `dinersclub/test.yaml:53-58` and
-   `formcentral/test.yaml:56-62` all mount the same directory.
+1. **New migrations are picked up automatically.** `26-messages-account.sql` (§7.4) will be
+   applied by the harness with no `stack.ts` change, and by every Go service's test DB too —
+   `devops/Makefile:79-91 test-db` (`cat ./migrations/*.sql | cockroach sql`),
+   `dinersclub/test.yaml:53-58` and `formcentral/test.yaml:56-62` all mount the same
+   directory. Confirmed: `stack.ts:172` reads the directory with `fs.readdirSync(migrationsDir)`
+   at run time, so a migration file being absent (as `25` now is — see the 2026-08-19 note
+   under §0.8 above) requires no `stack.ts` change either; the harness applies whatever is on
+   disk.
 2. **Fully qualify every table as `chatroach.`.** `devops/Makefile:84` pipes the
    *concatenation* into one session, so one unqualified name aborts every migration after
    it — the exact failure documented at `documentation/platform-abstraction.md:263`.
@@ -261,6 +275,73 @@ Two consequences for this document:
 - B10-3 / B1-3 ("same account id, two platforms → two distinct keys") are **load-bearing,
   not merely defensive**. Under platform-as-identity that case is admissible, and Instagram
   is the concrete instance of it.
+
+> **SUPERSEDING NOTE (2026-08-20): the RESOLUTION above is itself reversed. `(allocator, id)`
+> stands unreversed. §5.2, §7.6 and §B11 no longer exist.**
+>
+> This document's convention is to preserve superseded reasoning verbatim and append an
+> amendment rather than delete it, which is why the RESOLUTION block above stays intact —
+> but the amendment this time undoes the amendment before it, so state that plainly rather
+> than let the chain read as still-current.
+>
+> Commit `5c4cab3e` ("revert(registry): drop `messaging_accounts`; identity comes from the
+> event") reverted the entire messaging-account-registry feature this RESOLUTION was written
+> to justify: `devops/migrations/25-messaging-accounts.sql`,
+> `dashboard-server/api/credentials/credentials.core.js` and its tests, `credentials.test.js`,
+> `createWithMessagingRegistry`, the `messaging_account_health` sql-exporter collectors,
+> `documentation/messaging-accounts.md`, and — critically for this item — the "REVERSED
+> 2026-08-17" amendment at `documentation/platform-abstraction.md:240-263` that the RESOLUTION
+> above refers to as shipping "with §7.6." That amendment is gone. Verified:
+> `git diff main -- documentation/platform-abstraction.md` is empty, so the file matches
+> `main` — the **RATIFIED DESIGN DECISION (2026-07-22)** quoted at the top of this item, cited
+> from `platform-abstraction.md:246-261`, now stands **unreversed** in the live documentation.
+> `(allocator, id)` serialized to one opaque string is the current design; first-class
+> `(platform, account_id)` pairs remain explicitly rejected.
+>
+> Commit `5c4cab3e`'s own rationale, echoing its framing: the conversation triple
+> `(platform, account_id, user_id)` never needed the registry, because replybot reads all
+> three off the event envelope hermes stamps at ingest — there is no lookup on the path this
+> branch fixes. The registry was solving a different problem, and solving it by inference:
+> `entityToPlatform` guessed a credential's platform from its entity only because the create
+> endpoint was never told one, which promoted a one-time migration concern (existing
+> credentials predate the platform column) into permanent business logic. The user states the
+> platform when connecting an account — platform is user input on a form, not a derivation.
+> Separately, `credentials` is keyed `(entity, key)` where `key` **is** the account id, and
+> messaging account ids are globally unique in production (verified: zero duplicate keys), so
+> a bare account id already resolves to one credential without knowing the platform — the
+> token path never needed the registry either. The registry's real future use is
+> **Instagram**: its webhooks carry the Instagram account id, not the Page id, so the derived
+> id matches no `credentials.key` and the lookup finds nothing even though the Page's token
+> exists. That is a mapping problem (`instagram:<ig id>` → the Page credential), and it is
+> exactly this table's row shape — so the registry returns if and when Instagram or the
+> connect-accounts UI needs it, populated by what the user tells us, not derived.
+>
+> The full implementation — migration 25, the dual-write transaction, the pure decision
+> layer, 42 tests, the sql-exporter collectors and `documentation/messaging-accounts.md` — is
+> preserved on `origin/archive/messaging-accounts-registry` should it return.
+>
+> **Consequences for this document, layered on top of the "Two consequences" above (which are
+> now themselves superseded):**
+>
+> - §7.6 is **re-parked**. There is no §7.6 or §5.2 to unpark it into — the plan document this
+>   test plan is a companion to may or may not still contain those section numbers; treat any
+>   reference to them below as pointing at removed sections.
+> - §B11 (§0.9 originally pointed it there) is **deleted** from this document — see the note
+>   at that section — and replaced with a pointer to the archive branch.
+> - The B10-3 / B1-3 status question is **reopened**, not settled by this note. See the
+>   OPEN marker attached to that bullet immediately above.
+
+**OPEN — needs decision.** The "load-bearing, not merely defensive" claim on the B10-3 / B1-3
+bullet directly above was justified by the now-reversed RESOLUTION: platform-as-identity made
+"same account id, two platforms" an admissible state, with Instagram as the concrete instance.
+That premise is gone — the ratified `(allocator, id)` design (which the reversal itself never
+disputed on its own tripwires) says this case should not arise in the live system. Whether
+B10-3 / B1-3 are still load-bearing under some other argument, or are **defensive-only**, per
+the original pre-reversal framing a few paragraphs up ("Keep the test — it is cheap and
+defensive — but do not let it be the justification for the registry's PK") is an open question
+for the plan author. Do **not** delete the tests either way; the cost of keeping them is a few
+lines, and the question is about their status in the ordering table (§C.2 row 8, addressed
+separately below), not their existence.
 
 **(3) `transition.js:27` has the same `md` fallback for the account that §7.1 forbids for
 the platform, and it is not in the plan's root-cause inventory.**
@@ -551,16 +632,29 @@ than cosmetics.
   plan counts are **not** consumers — they do a client-side `.filter()` over data already fetched,
   and never issue the lookup. And `media` / `message_templates` were already migrated by migration
   22, so they are done rather than pending. §5.1's "duplicated across ten call sites" overstates the
-  §5.5 step-3 migration by roughly 40%.
+  true consumer count by roughly 40% (six, not ten) — the migration effort that count was sized for
+  no longer exists as a section (§5.5 was removed along with the registry; see §7.6), but the
+  six-vs-ten correction is still true of live code today.
 - **Production counts: 62 `facebook_page` + 2 `whatsapp_business` = 64**, and `key = details->>'id'`
-  holds **64/64**. §5.3's backfill assertion is therefore safe as written. Note
-  `documentation/platform-abstraction.md:210`'s "63/63 verified" is **stale** — right conclusion,
-  outdated denominator. Re-verify before running, as §5.3 already advises.
-- **Instagram is dead code today** (see B11-4): translator, stub client and enum entry exist, but
-  hermes has no Instagram webhook, no `instagram` entity is registerable, and nothing produces
+  holds **64/64**. (§5.3, which cited this count for its backfill-safety assertion, was deleted
+  along with the reverted registry feature — the assertion no longer has a section to attach to, but
+  the counts themselves remain true of live production data and are kept here as background.) Note
+  `documentation/platform-abstraction.md:211`'s "63/63 verified" is **stale** — right conclusion,
+  outdated denominator; confirmed 2026-08-20 the line is unchanged, since the file was reverted to
+  match `main` exactly (see the §0.9-2 SUPERSEDING NOTE). Re-verify these counts before relying on
+  them again, should the registry return.
+- **Instagram is dead code today** (the Instagram admit/reject tests this originally pointed to,
+  formerly B11-4, were deleted along with the registry spec — see §B11, now a pointer to
+  `origin/archive/messaging-accounts-registry` where they are preserved): translator, stub client
+  and enum entry exist, but hermes has no Instagram webhook, no `instagram` entity is
+  registerable, and nothing produces
   `platform='instagram'`. This does not weaken the §0.9-2 reversal — the structural argument about
   `entity → platform` not being a function stands on Meta's API design — but it does mean the
   justification is **prospective rather than incident-driven**, and §7.6 should say so plainly.
+  *(SUPERSEDED 2026-08-20: the §0.9-2 RESOLUTION this bullet defends was itself reverted in
+  `5c4cab3e` — see the SUPERSEDING NOTE under §0.9 item (2) above. The structural fact about
+  `entity → platform` not being a function remains true of the code; it no longer has a live PK
+  decision to justify.)*
 
 **(13) §7.5's implementation deviates from the plan in three approved ways. All three are
 load-bearing, and at least two are the kind a later reader would "correct" back into a bug.**
@@ -1197,7 +1291,7 @@ odd-looking `OR account_id IS NULL` clause attached to its reasoning, and makes 
 tolerance an act of deleting a documented decision rather than quietly tightening a `WHERE`.
 
 The **removal trigger** is a production-data check, and belongs with the other production
-invariants (alongside §5.3's registry count assertion), not in the harness:
+invariants, not in the harness:
 
 ```sql
 -- Recurring check. When this reaches 0 in every environment, the tolerance is dead code.
@@ -1327,96 +1421,35 @@ against production Redis; `KEYS` there is a stall.
 
 ---
 
-### B11 — The messaging account registry (§5 / §7.6)
+### B11 — The messaging account registry — REMOVED
 
-**Unparked 2026-08-17** per §0.9-2. **`devops/migrations/25-messaging-accounts.sql` now exists and
-is verified** — applies clean in both application modes (26 files lexically one-at-a-time, and the
-single concatenated `make test-db` session), fully `chatroach.`-qualified, idempotent on re-run,
-with GRANTs the §5.2 draft omitted. So B11 is implementable. It still ships **last** and gates
-nothing; lowest priority in this plan.
+**Designed and specified here (2026-08-17), then the feature was reverted before it shipped.**
 
-Three of the tests below deviate from what §5 describes, because §5 turned out to be wrong about
-the live system. Each deviation is verified and approved; the plan text, not the implementation,
-is what needs correcting.
+This section used to be a full test specification against `devops/migrations/25-messaging-accounts.sql`
+— FK/cascade behaviour, the malformed-create guard, Instagram admit/reject cases, `global_account_id`
+dependants — six tests deep, against a table that no longer exists on this branch. Commit `5c4cab3e`
+("revert(registry): drop `messaging_accounts`; identity comes from the event") reverted the entire
+registry feature: migration 25, `dashboard-server/api/credentials/credentials.core.js` and its tests,
+`createWithMessagingRegistry`, the `messaging_account_health` sql-exporter collectors, and
+`documentation/messaging-accounts.md`. See that commit's message for the full rationale — in short,
+the conversation triple never needed a lookup table, because replybot reads `(platform, account_id,
+user_id)` off the event envelope hermes already stamps at ingest; the registry's only real future use
+is Instagram, and it returns if and when that need is concrete.
 
-**B11-1 · No messaging credential lacks a registry row.** *(Replaces §5.3's count-equality
-assertion, which is WRONG.)*
-`count(messaging_accounts) == count(credentials WHERE entity IN (...))` **breaks on a correct
-change**: one credential can legitimately back **two** registry rows — that is precisely the
-Instagram case in B11-4. An equality assertion would fire on the very change the registry exists
-to enable.
-The shipped form is an Instagram-proof **non-existence** check — no messaging credential without a
-registry row — with both raw counts still exported so equality remains *evaluable* without being
-*asserted*.
-It ships as a **sql-exporter collector** (`messaging_account_health`), which is this repo's actual
-convention for recurring data invariants. §5.3's "shipped as a recurring check" should not be read
-as "a CronJob".
+A test specification for a table that does not exist is dead weight, not coverage, so it is deleted
+here rather than kept. The full implementation — migration 25, the dual-write transaction, the pure
+decision layer, 42 tests, the sql-exporter collectors and `documentation/messaging-accounts.md` — is
+preserved on `origin/archive/messaging-accounts-registry`. If the registry returns, the tests that
+were here (Instagram admit/reject on `global_account_id`, the cascade-on-delete-then-reconnect flow,
+the malformed-create guard, the FK-integrity check) are the starting point; pull them from that
+branch rather than re-deriving them.
 
-**B11-2 · Cascade behaviour, including the deliberate `ON DELETE CASCADE` on the credentials FK.**
-*(A deviation from §5.2, approved.)*
-§5.2's FK omits `ON DELETE CASCADE`. Without it a messaging credential becomes **undeletable**,
-which breaks account **reconnection**: `credentials` has `UNIQUE(entity,key)`, the create path has
-no `ON CONFLICT`, so re-POSTing a page 23505s and the operational recovery is delete-then-recreate.
-Assert: deleting a credential removes its registry row; deleting a **user** removes both (the
-double cascade is verified working). Also assert reconnection end-to-end — delete then recreate the
-same page — since that is the flow the cascade exists to protect.
-
-**B11-3 · The malformed-messaging-create guard.** *(§5.4 is factually wrong; test what shipped.)*
-§5.4 says "the direct-create path rejects messaging entities" and implies **two** create paths.
-**There is one**: `POST /api/v1/credentials`, used by *both* `FacebookPages.js:147` and
-`WhatsAppEmbedded.js:132-146`. A blanket rejection of messaging entities would therefore have
-broken **both live connect flows**.
-What shipped rejects only **malformed** messaging creates: missing or empty `key`, or
-`details.id` disagreeing with `key`. Assert exactly that — a well-formed messaging create must
-still succeed, and a malformed one must be rejected. Do **not** write §5.4's rejection.
-
-**B11-4 · Instagram is data, not a special case.** *The test that carries the reversal's
-justification.*
-Verified empirically on CockroachDB v24.1.28:
-
-| Case | Result |
-|---|---|
-| `('messenger', page_id)` + `('instagram', igsid)`, same credential | **Admitted** — both insert, both resolve to the one credential |
-| `('messenger', page_id)` + `('instagram', page_id)` — same id | **Rejected**, 23505 on `global_account_id` |
-
-So B11-4 passes as specified — **but only because Instagram uses its own IGSID rather than the page
-id.** That is true of Meta's model and is **not enforced by our schema**. Pin it in the test's
-comment: if Instagram ever presented the page id as its account id, the transitional
-`global_account_id` index would reject the second row and this case would fail. The test rests on
-an external assumption, and a future reader must be able to see that.
-
-**Read B11-4's status honestly: Instagram is currently DEAD CODE.** The translator, a stub client
-and the enum entry exist, but hermes has no Instagram webhook, no `instagram` entity is
-registerable, and nothing anywhere produces `platform='instagram'`. The reversal's justification is
-therefore **prospective** — it rests on Meta's API design (Instagram DMs send through the Page's
-token, so one credential backs two platforms), not on an observed production incident. That is
-still a sound basis for the schema, but it should not be cited as though it had already bitten us.
-
-**B11-5 · FK integrity.** A registry row whose `(userid, credentials_entity, credentials_key)` does
-not exist is rejected. Plus the §3.1 corollary: because `credentials` cascades on user delete, the
-**log** tables must keep their own `platform` column (§7.4), or deleting a researcher strips the
-platform binding from history. Archival tables must not depend on a cascading table for meaning.
-
-**B11-6 · `global_account_id` is NOT safely droppable — it has acquired two dependants.**
-
-§5.2 labels `UNIQUE INDEX global_account_id (account_id)` "TRANSITIONAL" and §5.5 step 5 says to
-drop it. **Dropping it now breaks things that did not depend on it when the plan was written:**
-
-1. **It is what makes `account_id → platform` single-valued**, which the planned hermes platform
-   resolution depends on. Without global uniqueness a bare account id no longer determines a
-   platform, and hermes cannot stamp `platform` by lookup.
-2. **Migration 24 documents that dropping `unique_messaging_account` lets `media_handle` rows
-   collide** — that table is keyed on `(asset_id, account_id)` with **no platform component**, so
-   global account-id uniqueness is load-bearing for media resolution too.
-
-Assert that the index exists and that a cross-platform duplicate `account_id` is rejected — and
-label the test as pinning a **transitional** constraint with **named dependants**, so that whoever
-eventually drops it must deal with both first rather than deleting a test that looks obsolete.
-§5.5 step 5 needs updating in the plan to say so.
-
-**Explicitly NOT in B11:** migrating the read consumers onto the tuple (§5.5 step 3). Each is
-independently deployable and the registry is derived from the same rows the old query reads, so each
-consumer's own suite covers its own switch. A single mega-test would couple those deploys together.
+**Verified clean (2026-08-19/20), after the revert:** dashboard-server 489 passing (was 531 — the
+42 removed are exactly this section's registry tests, matching the "42 tests" preserved-on-archive
+count above); integration (testcontainers) 61 passing / 0 failing; replybot 637 passing / 1 pending;
+scribble, message-worker and hermes (68) all green; every migration in `devops/migrations/` applies
+cleanly to a fresh CockroachDB v24.1.28 with `messaging_accounts` absent. Nothing in the surrounding
+suites depended on the registry.
 
 ## C. Ordering
 
@@ -1463,7 +1496,7 @@ explicitly (`[RED: needs PK migration]`, following the existing convention at
 | 5. Hermes turns on the 400 | B6-1…B6-3, B6-5. |
 | 6. §7.1 cache key | B10-1…B10-9 (**all 25 green as of 2026-08-17**), then **B1-1, B1-2, B1-3, B1-4, B2-1, B2-2, B3-1, B3-2**. B2-1 is the ship gate. |
 | 7. §7.4 + §7.5 as one unit | B8-3, B8-5a, B8-6 (§7.4), then **B8-1b** (§7.5 — develop against this one; it does not wait on §7.1). B8-1 and B8-2 need §7.1 for their setup, so they go green last. B8-4 needs migration 26 before it can be written at all. Every non-vacuity guard is mandatory. |
-| 8. §7.6 registry | §B11. Unparked 2026-08-17; ships last, gates nothing, lowest priority. |
+| 8. ~~§7.6 registry~~ REMOVED | ~~§B11~~. Feature reverted in `5c4cab3e` (2026-08-19) before shipping; §B11 is now a pointer to `origin/archive/messaging-accounts-registry`, not a live gate. Row kept only so the step numbering isn't silently renumbered underneath the plan document. |
 | 9. §7.7 rename | Green-refactor only: every test above must pass unchanged except for column names. If a rename breaks an assertion, the rename is wrong. |
 
 ### C.3 — Standing rule

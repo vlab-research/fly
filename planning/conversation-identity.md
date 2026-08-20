@@ -2,9 +2,12 @@
 
 **Status:** **implemented.** Written as a proposal 2026-08-16; consolidated against the
 shipped work 2026-08-17. §7.1, §7.2, §7.3, §7.4, §7.5, Appendix A and **Appendix B** are built
-and verified on branch `feature/conversation-identity`; §7.6's migration and dual-write have landed but
-nothing reads the registry yet; §7.7 is untouched by design. **Nothing is deployed to
-production.** The remaining work — including two items that are regressions rather than
+and verified on branch `feature/conversation-identity`; §7.6 (the messaging account registry)
+was designed, built and then **deliberately reverted** in `5c4cab3e` — the conversation triple
+never needed it, and the create endpoint that would have populated it correctly does not exist
+yet — see §7.6. The full implementation is archived on
+`origin/archive/messaging-accounts-registry`. §7.7 is untouched by design. **Nothing is deployed
+to production.** The remaining work — including two items that are regressions rather than
 enhancements — is enumerated in **§8**.
 **Severity:** kills live conversations permanently; leaks data across researchers.
 **Verified against:** live `chatroach` production, replybot `v0.0.218`, hermes, scribble,
@@ -21,10 +24,12 @@ another researcher's account scope.
 > It is no longer a proposal. It is the record of a completed piece of work plus the open
 > items that remain. Several of its original claims turned out to be **false**, and in each
 > case the original reasoning is **preserved verbatim** with a `CORRECTED` amendment beside
-> it rather than deleted. That is deliberate, and it follows the pattern of the reversal
-> amendment in `documentation/platform-abstraction.md`: a reader needs to see that a claim
-> was made, tested and revised, because that is what stops the same wrong conclusion being
-> re-derived from first principles six months from now.
+> it rather than deleted. That is deliberate: a reader needs to see that a claim was made,
+> tested and revised, because that is what stops the same wrong conclusion being re-derived
+> from first principles six months from now. (§5's own registry section does not follow this
+> convention — it describes a table that was built and then removed outright, so it is
+> deleted-and-pointed-at-the-archive rather than preserved-with-a-correction; see §5 and §7.6
+> for why.)
 >
 > The corrections register that drove this pass is
 > `planning/conversation-identity-test-plan.md` §0.9. Where a number here came from a
@@ -32,9 +37,10 @@ another researcher's account scope.
 
 **Companion documents.** `planning/conversation-identity-test-plan.md` (the test contract and
 the corrections register), `planning/whatsapp-webview-exposure.md` (production measurement of
-the linksniffer/webview exposure), `documentation/event-envelope.md`,
-`documentation/messaging-accounts.md`, `documentation/chat-message-logging.md`, and the
-reversal amendment in `documentation/platform-abstraction.md`.
+the linksniffer/webview exposure), `documentation/event-envelope.md`, and
+`documentation/chat-message-logging.md`. (`documentation/messaging-accounts.md` and the
+reversal amendment it drove in `documentation/platform-abstraction.md` were removed along with
+the registry in `5c4cab3e`; see §7.6.)
 
 ---
 
@@ -374,7 +380,6 @@ subset and re-derives the rest.
 | Redis state cache | `state:{platform}:{account_id}:{user}` | §7.1 |
 | `messages`, `responses`, `chat_log` | `platform`, `account_id` columns | §7.4 |
 | replay (`chatbase.get`) | `(platform, account_id, userid)` | §7.5 |
-| account registry | `PRIMARY KEY (platform, account_id)` | §5.2 |
 | `states` | `(userid, pageid)` + `platform` | already correct |
 | commands, payments | `Platform`, `PlatformAccountID`, `UserID` | already correct |
 
@@ -388,11 +393,14 @@ platform to find the state, and the platform is in the state.
 §7.3 removes that by making `platform` mandatory on every event. **§7.3 is therefore a hard
 prerequisite for §7.1**, and the order of work reflects it.
 
-`platform` is *also* a property of the account, which is what makes the registry (§5) the
-enforcement point: `PRIMARY KEY (platform, account_id)` means the envelope's `platform` is
-checkable against the account rather than trusted blindly. And it is stored on the log
-tables (§7.4) because those are archival — `credentials` cascades on user delete, so a
-deleted researcher would otherwise strip the platform binding from history.
+`platform` is *also* a property of the account the researcher connected, but there is no
+registry to check it against: the messaging account registry that would have been that
+enforcement point (§5) was built and then deliberately reverted — see §7.6. Today the
+envelope's `platform` is trusted as sent, not derived: each of §7.3.1's posters already knows
+which platform it runs on and sends it as a plain field, the same way it sends `account_id`.
+`platform` is also stored on the log tables (§7.4) because those are archival —
+`credentials` cascades on user delete, so a deleted researcher would otherwise strip the
+platform binding from history.
 
 `source` and `platform` are different fields and both stay. `source` says where the event
 came in from (`messenger` | `whatsapp` | `synthetic`); `platform` says what transport the
@@ -651,7 +659,25 @@ mis-keying.
 
 ---
 
-## 5. The messaging account registry
+## 5. The messaging account registry — designed, built, reverted
+
+A registry table (§5.2 as originally proposed) was designed, migrated, dual-written and then
+**deliberately reverted** in `5c4cab3e`, before any consumer read from it. See §7.6 for the
+full status and the reasoning; in short, the conversation triple `(platform, account_id,
+user_id)` this document is about never needed the registry — replybot reads all three off the
+event envelope hermes stamps at ingest, and there is no lookup on that path. The registry was
+solving a different, narrower problem (`entity → platform` is not a function, so a credential's
+platform cannot always be inferred from its `entity`) by inference, when the actual fix is to
+have the user tell us the platform when they connect an account. The full implementation —
+migration 25, the dual-write, the pure decision layer, 42 tests, the sql-exporter collectors and
+`documentation/messaging-accounts.md` — is preserved on
+`origin/archive/messaging-accounts-registry` and returns when Instagram (whose webhooks carry
+the Instagram account id rather than the Page id — a mapping problem the registry's row shape
+solves) or a connect-accounts UI needs it.
+
+What remains below (§5.1) is a consumer inventory that is still true of live code today — it
+motivated the registry but does not depend on it, and is kept as background for anyone revisiting
+this.
 
 ### 5.1 What enforces account identity today
 
@@ -694,9 +720,10 @@ Two problems with where that lives:
 `facebook_ad_user`); how a subsystem uses a credential is that subsystem's business. The
 messaging invariant belongs in a messaging-owned table that *points at* a credential.
 
-> #### CORRECTED 2026-08-17 — there are SIX consumers, not ten. §5.5 step 3 is ~40% smaller than this says.
+> #### CORRECTED 2026-08-17 — there are SIX consumers, not ten
 >
-> Verified with `file:line`; the authoritative list is in `documentation/messaging-accounts.md` §5.
+> Verified with `file:line` (this table was the authoritative list; the fuller writeup lived in
+> `documentation/messaging-accounts.md`, removed with the registry — see §7.6).
 >
 > | # | Site |
 > |---|---|
@@ -717,232 +744,10 @@ messaging invariant belongs in a messaging-owned table that *points at* a creden
 >
 > **Item 2 above — `entity → platform` is not a function — is unaffected and is what carried
 > the design.** Item 1's "ten call sites" was the weaker of the two arguments and it is the
-> one that shrank. An additional non-query dependant exists and must be counted when
-> planning §5.5 step 5: `chatroach.media_handle` is keyed on `account_id` **alone**, and
-> `24-media-assets.sql` documents that dropping `unique_messaging_account` lets handles
+> one that shrank. An additional non-query dependant exists, relevant background if this
+> constraint is ever revisited: `chatroach.media_handle` is keyed on `account_id` **alone**,
+> and `24-media-assets.sql` documents that dropping `unique_messaging_account` lets handles
 > collide across platforms.
-
-### 5.2 The registry
-
-`campaigns` is the pattern, live in production —
-`FOREIGN KEY (userid, credentials_entity, credentials_key) REFERENCES credentials`.
-
-```sql
--- devops/migrations/25-messaging-accounts.sql
-CREATE TABLE IF NOT EXISTS chatroach.messaging_accounts(
-  platform    VARCHAR NOT NULL,        -- 'messenger' | 'whatsapp' | 'instagram' | ...
-  account_id  VARCHAR NOT NULL,        -- page_id | phone_number_id
-  userid      UUID NOT NULL REFERENCES chatroach.users(id) ON DELETE CASCADE,
-  credentials_entity VARCHAR NOT NULL,
-  credentials_key    VARCHAR NOT NULL,
-  created     TIMESTAMPTZ NOT NULL DEFAULT current_timestamp(),
-
-  PRIMARY KEY (platform, account_id),
-
-  CONSTRAINT credentials_exist
-    FOREIGN KEY (userid, credentials_entity, credentials_key)
-    REFERENCES chatroach.credentials (userid, entity, key),
-
-  -- TRANSITIONAL. Ten consumers currently route on the bare account id and rely
-  -- on its global uniqueness. Keep until they route on the tuple, then drop it
-  -- from here, without touching credentials.
-  UNIQUE INDEX global_account_id (account_id),
-
-  INDEX by_owner (userid, platform)
-);
-```
-
-The FK works as-is: `unique_entity_key_per_user (userid, entity, key)` is live and provides
-the required unique index on the referenced columns.
-
-What it buys:
-
-- `PRIMARY KEY (platform, account_id)` is correct by construction; a new platform needs no
-  migration and no eleventh allowlist.
-- Global account-id uniqueness becomes a transitional line in a domain table, droppable
-  later, instead of a constraint welded into the generic credential store.
-- Instagram becomes data: two rows, `('messenger', page_id)` and `('instagram', igsid)`,
-  both FK'd to the same `facebook_page` credential.
-- `platformToEntity` in `tokenstore.go` and `provider.go` is replaced by a column.
-
-> #### AMENDED 2026-08-17 — this PK REVERSES A RATIFIED DECISION, and the reversal is a judgment call, not an incident response
->
-> `PRIMARY KEY (platform, account_id)` shipped in `devops/migrations/25-messaging-accounts.sql`
-> and the reversal is recorded in `documentation/platform-abstraction.md` (which preserves the
-> superseded decision verbatim above it) and worked through in
-> `documentation/messaging-accounts.md`. **The section above proposed it without noting that
-> it overturned a decision this repo had already ratified**, and a reader deciding whether to
-> keep it needs the full ledger:
->
-> **What it overturns.** `documentation/platform-abstraction.md` records a **RATIFIED DESIGN
-> DECISION (2026-07-22)**: account identity is `(allocator, id)` serialized to one string,
-> and first-class `(platform, account_id)` pairs were *considered and decided against*, on
-> the grounds that "platform is an attribute of an account, never part of its identity," Meta
-> being one allocator issuing page ids and `phone_number_id`s from a single graph-id space.
->
-> **None of the three tripwires that decision named has fired.** It listed exactly three
-> conditions that would reopen it — an allocator whose ids cannot be prefix-encoded; a need
-> to shard or segregate by platform; any observed failure of an allocator's id-space
-> uniqueness. Re-verified in production 2026-08-17: **zero** duplicate `key` values across
-> both messaging entities; no collision has ever been observed. **And its id-uniqueness
-> reasoning remains correct on its own terms** — a bare Meta id really is unambiguous across
-> both Meta platforms. The reversal does not rest on that being wrong.
->
-> **What carried is a different, structural objection: `entity → platform` is not a
-> function**, so platform cannot be modelled as an attribute *of* an account. Instagram is
-> the case: Instagram DMs are delivered through the connected Facebook **Page's** token, so
-> `platform='instagram'` and `platform='messenger'` are two platforms sharing **one**
-> credential and **one** `credentials.entity`. An attribute is single-valued per entity;
-> this is not. The live symptom is the `platformToEntity` map duplicated in
-> `message-worker/tokenstore.go:29` and `dinersclub/provider.go:74`, each with a load-bearing
-> "absent or unmapped" fallback — a map that exists precisely because the relation it encodes
-> is not a function.
->
-> **Sourcing, precisely, because it matters here:** our own code records only the weaker half
-> — `message-worker/translator_instagram.go:10`, *"Instagram uses the same API structure as
-> Messenger."* The Page-token fact is **Meta's** documented model, not a claim made anywhere
-> in this repo.
->
-> **And Instagram is currently DEAD CODE.** A translator and a stub client exist
-> (`message-worker/translator_instagram.go`; `main.go:118` logs *"registered Instagram client
-> (stub)"*) and `PlatformInstagram` is in the enum (`message-worker/types/command.go:13`), but
-> hermes has no Instagram webhook, no `instagram` credential entity can be registered, and
-> **nothing anywhere produces `platform='instagram'`**. So the justification is
-> **prospective** — an argument about Meta's API design, which is external and stable — **not
-> an incident report**. Anyone re-examining this should weigh it as a model argument.
->
-> **A counter-argument had already shipped, and is not overruled.**
-> `devops/migrations/24-media-assets.sql` keys `media_handle` on `account_id` **alone** and
-> argues explicitly against a `(platform, account_id)` key: this codebase spells the platform
-> two ways (`messenger`/`whatsapp` in `SendMessageCommand` versus
-> `facebook_page`/`whatsapp_business` in `credentials.entity`), so a two-part key "invites the
-> writer and the reader to disagree" — and there the failure is invisible, because a handle
-> miss is the designed URL fallback rather than an error. That objection is about **derived**
-> tables keyed by a tuple each writer must reconstruct. The registry answers it by being the
-> **single authority** that fixes the spelling once, so derived tables can look the platform
-> up instead of guessing. `media_handle`'s key is unaffected and is not being changed.
->
-> **Verdict to record honestly: this is a judgment call made against a standing decision, on
-> a prospective argument, with a shipped counter-argument in the tree.** It is defensible and
-> it shipped. It is not "a tripwire fired."
->
-> **Two consequences elsewhere in this document.** The §7.1 unit test "same account id, two
-> platforms → two distinct keys" is **load-bearing rather than merely defensive** — under
-> platform-as-identity that case is admissible, and Instagram is its concrete instance. And
-> the `TRANSITIONAL` comment on `global_account_id` above is now wrong; see §5.5 step 5.
-
-### 5.3 Backfill
-
-64 rows. Small enough to verify by eye.
-
-```sql
-INSERT INTO chatroach.messaging_accounts
-  (platform, account_id, userid, credentials_entity, credentials_key, created)
-SELECT 'messenger', key, userid, entity, key, created
-FROM chatroach.credentials WHERE entity = 'facebook_page'
-UNION ALL
-SELECT 'whatsapp',  key, userid, entity, key, created
-FROM chatroach.credentials WHERE entity = 'whatsapp_business';
-```
-
-`key` is the account id for both — `platform-abstraction.md:210` verified 63/63 prod
-`facebook_page` rows have `key = details->>'id'`. Re-verify before running; current count is
-62 `facebook_page` + 2 `whatsapp_business`.
-
-Assertion, shipped as a recurring check:
-
-```sql
-SELECT (SELECT count(*) FROM chatroach.messaging_accounts) =
-       (SELECT count(*) FROM chatroach.credentials
-        WHERE entity IN ('facebook_page','whatsapp_business'));
-```
-
-> #### CORRECTED 2026-08-17 — the counts, and the assertion
->
-> **Counts (production, 2026-08-17).** 62 `facebook_page` + 2 `whatsapp_business` = **64**,
-> and `key = details->>'id'` holds **64/64** — for the WhatsApp rows as well as the Facebook
-> ones, which the citation above did not cover. So the backfill's premise is safe exactly as
-> written. **`platform-abstraction.md:210`'s "63/63 verified" was stale** — right conclusion,
-> outdated denominator. The advice to re-verify before running was correct and is why this
-> was caught.
->
-> **The count-equality assertion is WRONG and was not shipped.** It **breaks on a correct
-> change**: one credential can legitimately back **two** registry rows — that is precisely
-> the Instagram case the registry exists to enable — so equality would fire on the very
-> change it is meant to permit. What shipped is an Instagram-proof **non-existence** check —
-> *no messaging credential without a registry row* — with both raw counts still exported so
-> equality remains *evaluable* without being *asserted*.
->
-> It ships as a **sql-exporter collector** (`messaging_account_health`,
-> `devops/sql-exporter/templates/configmap.yaml`, `min_interval` 60s, scraped by Prometheus),
-> which is this repo's convention for recurring data invariants. "Shipped as a recurring
-> check" above should not be read as "a CronJob."
-
-### 5.4 The write path
-
-`dashboard-client/src/containers/Accounts/Accounts.js:21` and `WhatsAppEmbedded.js:133` POST
-credentials directly today. **A messaging credential without a registry row is an invisible
-account** — messages arrive and route nowhere. So:
-
-- `dashboard-server` credential creation for `entity IN ('facebook_page',
-  'whatsapp_business')` writes both rows **in one transaction**.
-- The direct-create path rejects messaging entities rather than silently allowing them.
-- The §5.3 assertion runs as a recurring check.
-
-> #### CORRECTED 2026-08-17 — there is ONE create path, not two, and the rejection above would have broken both live connect flows
->
-> The second bullet presupposes a "direct-create path" distinct from the dual-writing one.
-> There is no such distinction: **`POST /api/v1/credentials` is the only create path**, and
-> it is used by *both* `FacebookPages.js:147` and `WhatsAppEmbedded.js:132-146`. A blanket
-> rejection of messaging entities on it would have rejected every real page and number
-> connection.
->
-> What shipped instead rejects only **malformed** messaging creates: missing or empty `key`,
-> or `details.id` disagreeing with `key`. A well-formed messaging create still succeeds and
-> dual-writes. The first bullet is correct and shipped as written; the third is corrected in
-> §5.3's amendment (non-existence check, sql-exporter collector).
->
-> Also note the FK as shipped carries **`ON DELETE CASCADE`** on the credentials reference,
-> which §5.2's DDL above omits. Without it a messaging credential becomes **undeletable**,
-> which breaks account **reconnection**: `credentials` has `UNIQUE(entity,key)` and the
-> create path has no `ON CONFLICT`, so re-POSTing a page raises 23505 and the operational
-> recovery is delete-then-recreate.
-
-### 5.5 Consumer migration order
-
-1. Table + backfill + dual-write. Nothing reads it yet.
-2. Verify the §5.3 assertion holds across a week of real account connects.
-3. Migrate read consumers one service at a time — each independently deployable, since the
-   registry is derived from the same rows the old query reads.
-4. Delete `platformToEntity` from `tokenstore.go` and `provider.go`.
-5. Drop `unique_messaging_account` from `credentials`, then `unique_facebook_page` and the
-   `facebook_page_id` computed column.
-
-> #### AMENDED 2026-08-17 — step 5 has acquired two named dependants. `global_account_id` is no longer safely droppable.
->
-> §5.2 labels `UNIQUE INDEX global_account_id (account_id)` **TRANSITIONAL** and step 5 says
-> to drop it. Between the plan being written and the work landing, two things came to depend
-> on it that did not before:
->
-> 1. **It is what makes `account_id → platform` single-valued.** The planned hermes
->    account→platform resolution (§8, `documentation/messaging-accounts.md` §9) is an
->    in-memory `account_id -> (platform, userid)` map, and it is a *function* **only because
->    that index exists**. Without global uniqueness a bare account id no longer determines a
->    platform, and hermes cannot stamp `platform` by lookup at all. This dependency runs
->    **opposite** to the direction step 5 assumes.
-> 2. **`chatroach.media_handle` is keyed on `(asset_id, account_id)` with no platform
->    component**, and `24-media-assets.sql` documents the consequence explicitly: dropping
->    `unique_messaging_account` lets handle rows **collide across platforms**. A handle miss
->    is the designed URL fallback rather than an error, so that collision is **invisible** —
->    the worst kind. Dropping both indexes in the same step is how it would happen.
->
-> **Step 5 is therefore amended:** before either index is dropped, resolve both dependants
-> explicitly — either every poster carries the platform itself so resolution is unnecessary,
-> or resolution moves to something that tolerates multiple platforms per account id; and
-> `media_handle` gains a platform component or an equivalent guarantee. The test pinning
-> `global_account_id` is labelled as pinning a **transitional constraint with named
-> dependants**, so whoever eventually drops it must deal with both rather than deleting a
-> test that looks obsolete.
 
 ---
 
@@ -1028,8 +833,12 @@ Cost is a replay — the same thing a cache miss already does.
 > `machine.js`'s `_handleExternalEvent` took `if (state.state === 'START') return
 > _blankStart(nxt)`; `getMetadata()` found no referral ref and fell through to
 > `FALLBACK_FORM`. **The participant was silently switched onto survey `305`** — a real, live
-> survey belonging to another researcher whose misrouted participants look like *completions*,
-> which is the exact failure signature of VIR-19 and of Appendix A. `state.forms` also keeps
+> survey, still scoped to the account this conversation already lives on (`formcentral/db.go`
+> resolves a shortcode within the owner of the arriving `pageid`; it cannot cross researchers —
+> see the correction at Appendix B). So the misroute here lands the participant on a *different*
+> survey owned by the *same* researcher, not another one's, and their answers are misattributed
+> to it. Misrouted participants still look like *completions*, which is the exact failure
+> signature of VIR-19 and of Appendix A. `state.forms` also keeps
 > the `305` entry permanently, so the participant looks like they touched that survey even
 > after the referral repairs the form.
 >
@@ -1048,7 +857,12 @@ Cost is a replay — the same thing a cache miss already does.
 > is *"lost click analytics, not a hung conversation."* **That conclusion was reached before
 > this hazard was understood and is too optimistic:** on the §7.1 + §7.5 read path a misrouted
 > click does not merely fail to record, it blank-starts a spurious `305` conversation on
-> another researcher's account and sends that survey's first message to the participant.
+> another researcher's account and sends that survey's first message to the participant. Here
+> "another researcher's account" is not the shortcode lookup crossing a boundary — it is the
+> stale, researcher-authored webview query string naming a `pageid` that genuinely can belong
+> to a different account than the one the participant is actually on. `305` itself never
+> resolves cross-account; it is always scoped to whichever account that (possibly wrong)
+> `pageid` names.
 >
 > **3. A cache miss costs one replay per 24 hours. The degraded path costs one replay per
 > event, forever.** There is no memoization on it by construction — the write is refused too.
@@ -1115,8 +929,11 @@ Cost is a replay — the same thing a cache miss already does.
 > | `linksniffer` | `external` (click) | **none.** The click analytic is lost | §8.4 |
 >
 > Losing a linksniffer click is a real cost and is named rather than hidden. It is still
-> strictly better than the alternative it replaces, which was: send another researcher's survey
-> to the participant, overwrite their `states` row with it, and attribute their answers to it.
+> strictly better than the alternative it replaces, which was: send the participant onto survey
+> `305` in place of the survey they were actually on — the same researcher's account in the
+> archive-lag case (point 1 above), possibly a different researcher's account in the
+> webview-pageid case (point 2 above) — overwrite their `states` row with it, and attribute
+> their answers to it.
 >
 > **`_blankStart` on a HANDOVER is legitimate and must not be swept up in this.** This is the
 > one place the "external events cannot mean first contact" argument breaks. `_handleExternalEvent`
@@ -1353,10 +1170,17 @@ with `MATCH state:*:*:<userid>`, **not** `KEYS` — this runs against production
 - Either component null → neither `redis.get` nor `redis.setex` is called, and state is
   computed from the log.
 
-> **Note on the second bullet:** as written it reads as defensive. Under the reversal in
-> §5.2's amendment it is **load-bearing** — platform is part of account identity, and
-> Instagram is the concrete case of one account id on two platforms. Do not delete it as
-> unreachable.
+> **Note on the second bullet:** as written it reads as defensive. It was previously argued to
+> be **load-bearing** on the grounds that the registry's `PRIMARY KEY (platform, account_id)`
+> reversed the ratified `(allocator, id)` account-identity decision and made platform part of
+> account identity — with Instagram (one account id, two platforms) as the concrete case.
+>
+> **OPEN — needs decision:** that reversal is itself reverted (`5c4cab3e`; see §7.6), and
+> `documentation/platform-abstraction.md`'s ratified 2026-07-22 decision — account identity is
+> `(allocator, id)`, first-class `(platform, account_id)` pairs explicitly rejected — now
+> stands unreversed. So the premise that made this test load-bearing is gone. Is "same account
+> id, two platforms → two distinct keys" still load-bearing, merely defensive, or should it be
+> dropped/reframed? This needs a human call, not a re-derivation of the old justification.
 >
 > **Note on the third:** the shipped tests assert the *arguments* `db.get` receives, not
 > merely that it was called. Asserting `.called` alone would pass against a completely
@@ -1868,24 +1692,40 @@ conversation as empty.
 > **Finally: "§7.4 and §7.5 are one unit" is right, but its ordering claim is reversed** —
 > see §7.4's amendment. Schema, then read path, then backfill.
 
-### 7.6 The messaging account registry
+### 7.6 The messaging account registry — removed
 
-§5, including `documentation/messaging-accounts.md` (what the registry owns, why it is not
-in `credentials`, how a new platform onboards) and the revision to
-`documentation/platform-abstraction.md:210,222`, whose account-identity section this
-replaces.
+§5's registry (table, backfill, dual-write, `documentation/messaging-accounts.md`, and the
+revision to `documentation/platform-abstraction.md`) was built and then **deliberately
+reverted** in `5c4cab3e`, before any consumer read from it.
 
-Independent of §7.1–§7.5; does not block them.
+**Why, in the commit's own framing.** The conversation triple `(platform, account_id,
+user_id)` never needed the registry — replybot reads all three off the event envelope hermes
+stamps at ingest; there is no lookup on the path this branch fixes. `entityToPlatform` guessed
+a credential's platform from its `entity` because the create endpoint was never told one — a
+one-time migration concern (existing credentials predate the platform column) promoted into
+permanent business logic. Platform is user input, not a derivation: the user picks the platform
+when connecting an account. And `credentials` is keyed `(entity, key)` where `key` *is* the
+account id, and messaging account ids are globally unique in production, so a bare account id
+already resolves to exactly one credential without knowing the platform — which is what
+`message-worker/tokenstore.go`'s fallback already does. The registry's genuine future use is
+**Instagram**, whose webhooks carry the Instagram account id rather than the Page id, so the
+derived id matches no `credentials.key` — a mapping problem the registry's row shape solves. It
+returns when Instagram or a connect-accounts UI needs it.
 
-> **Status:** migration 25 and the dashboard-server dual-write have landed;
-> `documentation/messaging-accounts.md` is written and is now the authority on account
-> identity; `documentation/platform-abstraction.md` carries the reversal amendment with the
-> superseded decision preserved verbatim beneath it. **Nothing reads the registry yet.**
-> §5.5 steps 3–5 are not started, and step 5 is amended — see §5.5.
->
-> The reversal itself is a judgment call rather than a tripwire firing, and §5.2's amendment
-> is where that is argued out. §7.6 should say so plainly rather than presenting the PK as
-> forced.
+**Consequence for this document.** Because the reversal amendment in
+`documentation/platform-abstraction.md` is also gone, the **ratified 2026-07-22 decision** —
+account identity is `(allocator, id)` serialized to one opaque string, with first-class
+`(platform, account_id)` pairs explicitly **rejected** — now **stands unreversed**
+(`git diff main -- documentation/platform-abstraction.md` is empty). Anywhere in this document
+that treated the reversal as settled ground is flagged **OPEN — needs decision** rather than
+silently corrected; see §7.1's "Note on the second bullet" and the interim-exposure paragraph
+after the order-of-work table.
+
+**Status:** removed. The full implementation — migration 25, the dual-write transaction, the
+pure decision layer, 42 tests, the sql-exporter collectors and
+`documentation/messaging-accounts.md` — is preserved on
+`origin/archive/messaging-accounts-registry`. §5.1's consumer inventory (still true of live
+code) is kept in §5 as background. Independent of §7.1–§7.5; its removal does not block them.
 
 ### 7.7 Rename `pageid` → `account_id`
 
@@ -1989,9 +1829,9 @@ production no longer serves.
 |---|---|
 | **Migration 29** — drop the superseded `messages_userid_timestamp_idx` after a clean soak | Deliberately not written. Migration 26 made the index NOT VISIBLE instead, following migration 18's pattern on this exact table; writing 29 now would invite dropping before the soak. |
 | **`platform` on `responses` and `chat_log`** | Columns exist (migration 26); **no writer**. `scribble/response.go` and `scribble/chatlog.go` read no platform from their message shapes, and `chat_log` has no producer at all. The columns landed early because adding them is free and because the chat-log restoration should not also have to carry a migration. |
-| **hermes account→platform resolution** | Designed, not built. `documentation/messaging-accounts.md` §9 works it through: an in-memory `account_id -> (platform, userid)` map over the ~64 registry rows, refreshed, never a hot-path read. **Two modes, and only one is useful today** — *fill* (platform absent → resolve and stamp; additive, but a **no-op** now that all six posters send a platform) and *verify* (platform present → check it against the registry; a **tightening**, so it must sit behind `SYNTHETIC_REQUIRE_CONVERSATION`). Verify is the one that matters, because the live risk is a platform that is **present but assumed** (linksniffer's legacy links, exodus's `COALESCE`) and fill mode cannot see those. Every part of this is a first for hermes: it currently has no database access of any kind, no background tasks and no metrics. Note also that the map is single-valued **only because `global_account_id` exists** — see §5.5. |
+| **hermes account→platform resolution** | Designed, not built, and now **blocked on the registry's return** (§7.6) — the design was an in-memory `account_id -> (platform, userid)` map read from the registry's rows, and the registry no longer exists. **Two modes were envisioned, and only one would have been useful today** — *fill* (platform absent → resolve and stamp; additive, but a **no-op** now that all six posters send a platform) and *verify* (platform present → check it against the registry; a **tightening**, so it would have sat behind `SYNTHETIC_REQUIRE_CONVERSATION`). Verify is the one that would have mattered, because the live risk is a platform that is **present but assumed** (linksniffer's legacy links, exodus's `COALESCE`) and fill mode cannot see those. Every part of this is a first for hermes: it currently has no database access of any kind, no background tasks and no metrics. This item has no path forward until the registry (or an equivalent) exists again. |
 | **§7.7's rename** | Untouched. See §7.7's note for the two aliases it would remove. |
-| **§5.5 steps 3–5** | Not started. Step 5 is amended (§5.5). |
+| **The registry's consumer migration** (formerly §5.5 steps 3–5) | Moot — the registry was reverted before any consumer was migrated. See §7.6. |
 
 ### 8.4 The linksniffer platform assumption, and when it stops being safe
 
@@ -2196,9 +2036,11 @@ branch, and this appendix is its record. **Fixed on this branch** —
 
 **Independent of everything else in this document.** It needs no archive lag, no cache miss, no
 empty replay and no cross-account event. It is the same *outcome* as §7.1 and Appendix A —
-a participant silently switched onto `FALLBACK_FORM=305`, a real live survey belonging to
-another researcher, whose misrouted participants finish in one message and therefore look like
-completions — reached from a fourth cause.
+a participant silently switched onto `FALLBACK_FORM=305`, a real live survey belonging to the
+same researcher who owns the account the conversation is already on (this mechanism has no
+cross-account step, so it cannot land on another researcher's survey — the shortcode lookup
+never crosses that boundary), whose misrouted participants finish in one message and therefore
+look like completions — reached from a fourth cause.
 
 **The mechanism.** `categorizeMessengerEvent` maps Messenger's bare `get_started` postback to
 `conversation_started` with `referral: undefined`, so it routes to `REFERRAL`, `getForm` finds no
@@ -2278,8 +2120,8 @@ return _blankStart(nxt)
 ### Named behavioural change
 
 **A participant at `END` who taps Get Started again now receives nothing at all**, where they
-used to be entered on another researcher's live survey and have their answers recorded there.
-Half the affected population. Justified because the documented restart mechanism is
+used to be entered on the same researcher's `305` survey — a different survey than the one
+they finished — and have their answers recorded against it. Half the affected population. Justified because the documented restart mechanism is
 `REPLYBOT_RESET_SHORTCODE` via an explicit `form.reset` ref — not a bare `get_started` — and
 because every other post-`END` interaction already declines to start a new survey. **A
 re-engagement affordance is now a deliberate gap** rather than an accident of an unguarded path.
@@ -2319,7 +2161,7 @@ independent and fill that time.
 | 5 | **§7.3.1 step 4** — hermes turns on the 400 once the canary reads zero. | not done. Now a config flip. |
 | 6 | **§7.1** cache key + tests + `clear-state-cache.sh` + dead-code deletion + docs. | **done in code**; staging and production verification not run. |
 | 7 | **§7.4 + §7.5** as one unit. | **done in code**, ordering **reversed**: schema → read path → backfill at leisure, not backfill-first. Blocked on §8.1 for the published client. |
-| 8 | **§7.6** registry — table, backfill, dual-write, then consumers one service at a time. | migration 25 + dual-write **done**; nothing reads it. §5.5 steps 3–5 not started; step 5 amended. |
+| 8 | **§7.6** registry. | **removed in `5c4cab3e`**; archived on `origin/archive/messaging-accounts-registry`. Returns when Instagram or a connect-accounts UI needs it. |
 | 9 | **§7.7** rename, one service at a time. | not started. |
 
 **Interim exposure.** Steps 1–5 leave the cache bug live for as long as the envelope work
@@ -2332,6 +2174,16 @@ turns out to be longer than expected, §7.1 can ship early on the double and be 
 > **That trade was taken, deliberately, and is worth naming as a decision rather than a
 > default.** The Redis key is the full triple `state:{platform}:{account_id}:{user}`; an
 > account-only key was considered — sufficient *if* account ids are globally unique, and it
-> would have removed §7.3 from §7.1's critical path entirely — and rejected, because §5.2's
-> reversal makes platform part of account identity. So §7.3 remained a hard prerequisite and
-> the interim exposure above was accepted rather than overlooked.
+> would have removed §7.3 from §7.1's critical path entirely — and rejected, on the grounds
+> that the registry's reversal (§5.2 as originally proposed) made platform part of account
+> identity, so a bare account id could no longer be trusted to determine a platform.
+>
+> **OPEN — needs decision:** that registry reversal is itself reverted (`5c4cab3e`; see §7.6),
+> and `documentation/platform-abstraction.md`'s ratified 2026-07-22 decision — account identity
+> is `(allocator, id)`, `(platform, account_id)` pairs explicitly rejected — now stands
+> unreversed. Account ids are also globally unique in production (re-verified 2026-08-17, zero
+> collisions). So the premise that made §7.3 a hard prerequisite for §7.1 no longer holds as
+> stated. This needs a human call: keep §7.3 as a hard prerequisite anyway (e.g. because
+> Instagram will reintroduce the same-account-id-two-platforms case once the registry returns),
+> or revisit whether an account-only key could have shipped §7.1 sooner. Do not silently
+> re-derive a justification either way.

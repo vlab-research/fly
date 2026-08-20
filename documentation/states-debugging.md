@@ -219,11 +219,11 @@ operation as a regression.
 
 **The symptom to recognise: a `305` conversation that appeared out of nowhere.** An empty replay
 reconstructs as `START`. Until 2026-08-17, a synthetic external event arriving in that state
-blank-started `FALLBACK_FORM` — production `305`, a **real, live survey belonging to another
-researcher** whose misrouted participants complete in one message and therefore look like
-completions rather than errors. The participant's real conversation was overwritten in `states`
-and their answers attributed to `305`. Same signature as VIR-19 and as the CTWA defect in
-`planning/conversation-identity.md` Appendix A.
+blank-started `FALLBACK_FORM` — production `305`, a **real, live survey in the same account**,
+but not the survey the participant should be on, so misrouted participants complete in one
+message and therefore look like completions rather than errors. The participant's real
+conversation was overwritten in `states` and their answers attributed to `305`. Same signature
+as VIR-19 and as the CTWA defect in `planning/conversation-identity.md` Appendix A.
 
 ```sql
 -- participants switched onto the fallback survey on top of an existing conversation.

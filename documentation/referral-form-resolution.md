@@ -275,11 +275,12 @@ event named an account the conversation does not live on (`linksniffer` and
 `moviehouse` read their `pageid` from a researcher-authored webview query string).
 
 Falling through to `FALLBACK_FORM` there is the **third** instance of the same
-failure shape as VIR-19 and the CTWA order-dependence bug below: `305` is a real
-live survey belonging to another researcher whose misrouted participants finish
-in one message and look like completions. Unlike the handover race it is not
-recoverable by a following referral, because there is no following referral —
-nobody is arriving.
+failure shape as VIR-19 and the CTWA order-dependence bug below: `305` is a real,
+live survey in the same account, but not the survey the participant should be
+on — their answers are misattributed to it, and because it finishes in one
+message the misroute looks like a completion rather than an error. Unlike the
+handover race it is not recoverable by a following referral, because there is
+no following referral — nobody is arriving.
 
 **The discriminator is `source.type === 'synthetic'`, not "arrived through
 `_handleExternalEvent`".** A guard written the second way would have broken every
@@ -580,9 +581,10 @@ that is *expected* to register 10–90/month.
 ### Behavioural change, named rather than slipped in
 
 **A participant at `END` who taps Get Started again now receives nothing at all.**
-Previously they were entered on `FALLBACK_FORM` — another researcher's live survey,
-where their subsequent answers were recorded under shortcode `305`. That is half
-the affected population, so this is a real change and not a corner.
+Previously they were entered on `FALLBACK_FORM` — production `305`, a live survey
+in the same account but not the one they were on — where their subsequent answers
+were recorded under that shortcode instead. That is half the affected population,
+so this is a real change and not a corner.
 
 It is the right change for three reasons: the documented restart mechanism is
 `REPLYBOT_RESET_SHORTCODE` (`"reset"` in staging and production), reached through
@@ -602,7 +604,7 @@ Two further consequences, accepted:
 - **On WhatsApp the refused event is the participant's own message.** A CTWA
   arrival with no resolvable `ref` on a live conversation is dropped, message and
   all, where Messenger's `get_started` carries no content. Still strictly better
-  than moving them to another researcher's survey, and they recover by sending
+  than silently misrouting them onto `FALLBACK_FORM`, and they recover by sending
   anything else. The alternative — re-interpreting the entry as a survey answer —
   is the VIR-19 failure mode and was rejected.
 
@@ -977,9 +979,9 @@ ctwaprobe.alpha.creative.Ad1H.form.probetest
 failed the pattern outright. Because a CTWA referral carries no usable `ref` of
 its own, the autofill text is the **only** recovery path, so the arrival kept no
 ref at all and `getMetadata` fell through to `FALLBACK_FORM=305` — a real, live
-survey belonging to another researcher, whose misrouted users look like
-completions rather than errors. Exactly the VIR-19 failure shape, from a
-different cause.
+survey in the same account, but not the one the participant should be on, so
+their misrouted answers look like completions rather than errors. Exactly the
+VIR-19 failure shape, from a different cause.
 
 The pattern now accepts a `form` pair in any position and hands the **whole**
 matched body to `getMetadata()`/`_group` (it must not re-prefix `form.`, which
