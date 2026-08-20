@@ -149,6 +149,11 @@ only application service in this repo that Prometheus scrapes.
 `recovery != "permanent"` is precisely the set of failures the respondent was
 not told about. Alerts and runbooks: `documentation/alerting.md` §12.
 
+Metrics carry a `namespace` label, because Prometheus is a singleton across
+`vprod` and `vstag` and dinersclub runs in both. Every alert is scoped to
+`vprod` for that reason — otherwise a staging deployment would satisfy
+`absent(dinersclub_up)` and mask a production scrape that had stopped.
+
 ## 7. Timeout budget
 
 `spine` hardcodes `max.poll.interval.ms = 300000` with

@@ -22,6 +22,19 @@
 # dinersclub/chart/templates/servicemonitor.yaml. If that ServiceMonitor is
 # removed or metrics.enabled is set false, these rules go silent rather than
 # firing -- which is why DinersClubMetricsMissing exists below and pages.
+#
+# EVERY ALERT IS SCOPED TO ONE NAMESPACE, and it is not decoration. Prometheus
+# is a singleton shared by vprod and vstag, and a ServiceMonitor scrape carries
+# a `namespace` label, so dinersclub in BOTH environments reports into the same
+# series. Unscoped, these rules break in both directions at once: staging's
+# sandbox wallet running dry would page the platform owner, and -- far worse --
+# a staging deployment would satisfy absent(dinersclub_up) and thereby MASK a
+# production scrape that had stopped. The alert designed to catch silence would
+# itself be silenced by an unrelated environment.
+#
+# The recording rules deliberately keep `namespace` in their `by()` clause
+# instead: they exist to be looked at, and seeing both environments there is
+# useful. Nothing alerts on them.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -44,13 +57,13 @@ spec:
         # on this recording directly.
         - record: payment:withheld:rate5m
           expr: |
-            sum by (provider, recovery) (
+            sum by (namespace, provider, recovery) (
               rate(dinersclub_payment_results_total{outcome="failure", recovery!="permanent"}[5m])
             )
 
         - record: payment:results:rate5m
           expr: |
-            sum by (provider, outcome) (rate(dinersclub_payment_results_total[5m]))
+            sum by (namespace, provider, outcome) (rate(dinersclub_payment_results_total[5m]))
 
     - name: payment-health-alerts
       interval: 1m
@@ -84,7 +97,7 @@ spec:
         - alert: PaymentWalletEmpty
           expr: |
             sum by (provider) (
-              increase(dinersclub_payment_results_total{code="INSUFFICIENT_BALANCE"}[1h])
+              increase(dinersclub_payment_results_total{code="INSUFFICIENT_BALANCE", namespace="{{ $p.namespace }}"}[1h])
             ) > {{ $p.walletEmptyThreshold }}
           for: {{ $p.walletEmptyFor }}
           labels:
@@ -124,7 +137,7 @@ spec:
         - alert: PaymentsDeferredByProvider
           expr: |
             sum by (provider) (
-              increase(dinersclub_payment_results_total{outcome="failure", recovery="transient"}[15m])
+              increase(dinersclub_payment_results_total{outcome="failure", recovery="transient", namespace="{{ $p.namespace }}"}[15m])
             ) > {{ $p.transientThreshold }}
           for: {{ $p.transientFor }}
           labels:
@@ -154,7 +167,7 @@ spec:
         - alert: PaymentUnclassifiedErrorCode
           expr: |
             sum by (provider, code) (
-              increase(dinersclub_unclassified_error_codes_total[6h])
+              increase(dinersclub_unclassified_error_codes_total{namespace="{{ $p.namespace }}"}[6h])
             ) > {{ $p.unclassifiedThreshold }}
           for: {{ $p.unclassifiedFor }}
           labels:
@@ -185,7 +198,9 @@ spec:
         # the restart, and it is the only thing that notices.
         - alert: DinersClubProcessingFaults
           expr: |
-            sum by (stage) (increase(dinersclub_processing_faults_total[30m])) > {{ $p.faultThreshold }}
+            sum by (stage) (
+              increase(dinersclub_processing_faults_total{namespace="{{ $p.namespace }}"}[30m])
+            ) > {{ $p.faultThreshold }}
           for: {{ $p.faultFor }}
           labels:
             severity: warning
@@ -222,7 +237,7 @@ spec:
         # absence means one thing only: nobody is scraping.
         - alert: DinersClubMetricsMissing
           expr: |
-            absent(dinersclub_up) == 1
+            absent(dinersclub_up{namespace="{{ $p.namespace }}"}) == 1
           for: {{ $p.metricsMissingFor }}
           labels:
             severity: critical
@@ -230,8 +245,8 @@ spec:
           annotations:
             summary: "dinersclub payment metrics have disappeared"
             description: >-
-              Prometheus has had no dinersclub_up for
-              {{ $p.metricsMissingFor }}. Every payment alert depends on it, and the
+              Prometheus has had no dinersclub_up from namespace
+              {{ $p.namespace }} for {{ $p.metricsMissingFor }}. Every payment alert depends on it, and the
               failures they watch (empty wallets above all) send no event and write
               no state — so while this is firing, payments can be failing with
               nothing at all to show for it. Check the pod, the Service and the

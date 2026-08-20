@@ -315,6 +315,19 @@ mediaHandles:
 payments:
   enabled: true
 
+  # Namespace whose dinersclub these alerts describe. NOT optional detail:
+  # Prometheus is a singleton across vprod and vstag, and a ServiceMonitor
+  # scrape carries a `namespace` label, so both environments report into the
+  # same series. Without this scope staging's sandbox wallet would page the
+  # platform owner, AND a staging deployment would satisfy
+  # absent(dinersclub_up) and mask a production scrape that had stopped --
+  # silencing the very alert whose job is to notice silence.
+  #
+  # Pointing this at vstag would not "also cover staging", it would MOVE the
+  # alerts there. Covering both needs a second release of this chart, which is
+  # deliberately not done: nothing in staging is worth waking someone for.
+  namespace: vprod
+
   # PaymentWalletEmpty — the alert this workstream exists to produce. PAGES.
   #
   # 0 is not a tuned threshold, it is the invariant: one INSUFFICIENT_BALANCE is

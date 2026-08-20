@@ -844,6 +844,18 @@ wallet — the single largest payment failure mode on this platform, 34% of all
 recorded failures — now produces no row, no error state, and no respondent
 complaint.** These alerts are the only thing that notices.
 
+**Every rule here is scoped to `namespace="vprod"`** (`payments.namespace` in
+`devops/alerts/values.yaml`). Prometheus is a singleton across `vprod` and
+`vstag` and a ServiceMonitor scrape carries a `namespace` label, so both
+environments report into the same series. Unscoped, these rules would break in
+both directions at once: staging's sandbox wallet running dry would page the
+platform owner, and — far worse — **a staging deployment would satisfy
+`absent(dinersclub_up)` and mask a production scrape that had stopped**, which
+is the one failure this section exists to catch.
+
+The recording rules keep `namespace` in their `by()` clause instead: they exist
+to be looked at, and seeing both environments there is useful.
+
 Two consequences worth internalising before triaging anything here:
 
 - **A missing metric is a failure, not a gap.** `DinersClubMetricsMissing` pages
@@ -983,7 +995,7 @@ to Kubernetes.** Nothing else notices.
    horizon.
 
 ### DinersClubMetricsMissing
-`absent(dinersclub_up) == 1` for **30m** — **critical**.
+`absent(dinersclub_up{namespace="vprod"}) == 1` for **30m** — **critical**.
 
 **Prometheus is no longer scraping dinersclub.** It pages, and the reasoning is
 the entire design of this section: every alert above reads this endpoint, and
@@ -1008,3 +1020,6 @@ ordinary hour, and `absent()` on the payment counter would page for quiet.
    `devops/values/<env>.yaml`. That is a supported switch and it silently
    disables every alert in this section — which is why it is called out in the
    values file itself.
+5. If `dinersclub_up` exists but only for `vstag`, this alert is doing its job:
+   the namespace scope is what stops a staging pod from standing in for the
+   production one.
