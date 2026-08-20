@@ -167,14 +167,9 @@ dinersclub:
     # out of the message-worker deploy (rev 644) to keep a payments change off
     # an unrelated rollout.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "45s"
+      value: "2m"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "45s"
-    # Hard ceiling on ONE outbound provider HTTP call. RETRY_PROVIDER cannot do
-    # this job: backoff only checks elapsed time between attempts, so a single
-    # hung call is unbounded without this.
-    - name: DINERSCLUB_PROVIDER_TIMEOUT
-      value: "30s"
+      value: "2m"
     - name: DINERSCLUB_POOL_SIZE
       value: "2"
     - name: DINERSCLUB_PROVIDERS
@@ -828,23 +823,30 @@ exodus:
 message-worker:
   # replybot v0.0.210-wa has NO send path of its own — it publishes commands
   # here — so a worker at 0 replicas means production sends nothing at all,
-  # silently.
+  # silently. That is why this is 2 and not 1: the second pod is REDUNDANCY,
+  # not throughput. A node failure, eviction or crashloop must never leave
+  # production with zero senders. Do not lower this to save a pod.
   #
-  # 6 replicas == the partition count of vlab-prod-commands. One pod per
-  # partition is the maximum useful parallelism; going higher just leaves pods
-  # idle, and going higher usefully requires adding partitions first.
+  # Throughput comes from NUM_WORKERS (8, see below), not from replicas.
+  # Sending is IO-bound — the pod waits on graph.facebook.com, it does not
+  # compute — so capacity is concurrent in-flight HTTP calls. 2 x 8 = 16,
+  # against a 7-day peak command rate of 6.3/sec. Observed CPU is ~6m of a
+  # 500m limit. Raising NUM_WORKERS is the cheap lever if that ever changes;
+  # more pods buy availability, not speed.
   #
-  # Scale HERE, not via NUM_WORKERS (which stays 1 — see the note on that env
-  # var below). Commands are keyed by user_id (replybot/lib/index.js), so a
-  # user's messages sit on one partition, owned by one pod, processed by one
-  # worker: order is preserved end to end. Replicas keep that property;
-  # in-process workers do not.
+  # Both levers preserve ordering as of burrow v0.1.5. Commands are keyed by
+  # user_id (replybot/lib/index.js), so a user sits on one partition, owned by
+  # one pod; key-affinity dispatch then pins that user to one worker inside it.
+  #
+  # The useful ceiling is 6 (the partition count of vlab-prod-commands) — a 7th
+  # pod would idle. This ran at 6 for three days after the incident below and
+  # never used it.
   #
   # Background: planning/message-worker-command-lag.md (2026-08-17) — a bulk
   # utility-message campaign drove ~520 commands of lag and multi-minute
-  # delivery delays for live surveys in other studies, because one serial
-  # consumer drained a six-partition topic.
-  replicaCount: 6
+  # delivery delays for live surveys in other studies, because ONE serial
+  # consumer (1 pod x 1 worker) drained a six-partition topic.
+  replicaCount: 2
   image:
     repository: ghcr.io/vlab-research/message-worker
     tag: *vmessageworker
