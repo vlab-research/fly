@@ -82,6 +82,12 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"INVALID_RESPONSE", 0, RecoveryPermanent},
 		{"PAYMENT_FAILED", 0, RecoveryPermanent},
 		{"DUPLICATE_REFERENCE", 0, RecoveryPermanent},
+
+		// The fake provider's fixture code (facebot/testrunner,
+		// forms/gk3gt9ag.json). Not production data -- it is here so the
+		// integration test's payment-failure flow rests on a decision rather
+		// than on the unknown-code default.
+		{"FAKE", 0, RecoveryPermanent},
 	}
 
 	for _, c := range cases {

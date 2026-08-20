@@ -172,6 +172,14 @@ var recoveryByCode = map[string]Recovery{
 	"UNMAPPED_PROVIDER_ERROR_CODE": RecoveryPermanent, // 47
 	"PAYMENT_FAILED":               RecoveryPermanent, // dingconnect, no code
 
+	// The fake provider's fixture code, used by the payment-failure flow in
+	// facebot/testrunner (forms/gk3gt9ag.json). Pinned rather than left to
+	// the unknown-code default so that integration test depends on an
+	// explicit decision: if the default is ever flipped to transient, this
+	// row is what keeps the test failing loudly on an assertion instead of
+	// hanging until the harness times out.
+	"FAKE": RecoveryPermanent,
+
 	// Reloadly's dedup rejecting a duplicate submission. NOT REALLY A
 	// FAILURE: on production, 1483 of the 2393 states carrying this code also
 	// record success=true, so most of these respondents were in fact paid.
