@@ -46,8 +46,8 @@ function _group(pairs) {
 // throwing.
 //
 // This is a containment rule, not a convenience. getMetadata's whole ref parse
-// sits inside one try/catch, so a SINGLE undecodable token used to discard the
-// entire md — including `form` — and the conversation fell through to
+// sits inside one try/catch, so a throw from a SINGLE undecodable token would
+// discard the entire md — including `form` — and drop the conversation into
 // FALLBACK_FORM, a real survey whose misrouted users look like completions
 // (the VIR-19 shape). One malformed targeting value must not cost a user their
 // survey.

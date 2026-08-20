@@ -148,21 +148,16 @@ class Machine {
       }
 
     } catch (e) {
-      // Same rule the actions catch below already states: an error carrying its
-      // own tag routes itself. The two were inconsistent — that one honours
-      // `e.tag`, this one hard-coded STATE_TRANSITION and then dropped the whole
-      // report with publish:false. A tagged failure raised during the transition
-      // therefore produced NO error state, and so no metric, no alert, no ticket.
+      // An error carrying its own tag routes itself, the same rule the actions
+      // catch below follows. Publishing is what creates the error state: the
+      // report goes back through Kafka and machine.js turns `report.error` into
+      // action ERROR, which fills states.error_tag and feeds survey_error_states
+      // — the metric the arrival-health alerts read. A tagged failure that is
+      // not published is recorded nowhere.
       //
-      // publish is what creates the error state. The report goes back through
-      // Kafka and machine.js turns `report.error` into action ERROR, which is
-      // what fills states.error_tag and feeds survey_error_states. Withhold it
-      // and the user is stuck with nothing recorded anywhere.
-      //
-      // UNTAGGED ERRORS ARE UNCHANGED, deliberately: still STATE_TRANSITION,
-      // still publish:false. Whatever that behaviour is for, it is not this
-      // change's to revisit — only errors that opt in by carrying a tag take the
-      // new path.
+      // An untagged error is an unclassified crash: it takes the generic
+      // STATE_TRANSITION tag and is not published, carrying the state and event
+      // that produced it for debugging instead.
       if (e.tag) {
         return {
           publish: true,

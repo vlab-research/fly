@@ -832,9 +832,9 @@ describe('categorizeWhatsAppEvent', () => {
   // WhatsApp CTWA has no advertiser-settable `ref`, so vlab's targeting
   // metadata (which contains spaces and punctuation, e.g. "Static English -
   // Girls", "Bauchi State") arrives percent-encoded in the ad's autofill
-  // message text. Before this widening, `%` was not in the token character
-  // class, so any such text failed the gate entirely and the arrival
-  // silently fell to FALLBACK_FORM.
+  // message text. `%` is therefore part of the token character class: without
+  // it such text fails the gate entirely and the arrival silently lands in
+  // FALLBACK_FORM.
   describe('percent-encoded metadata values', () => {
     it('accepts a percent-encoded value with spaces and a literal hyphen', () => {
       const { event_type, payload } = categorizeWhatsAppEvent({ type: 'text', text: { body: 'form.abc.creative.Static%20English%20-%20Girls' } })
