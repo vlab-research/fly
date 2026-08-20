@@ -8,6 +8,72 @@
 > This plan supersedes the framing of commit `19692c1b`. See "Disposition of the
 > existing commit" at the end.
 
+
+---
+
+## 0. DECIDED (2026-08-20) — read this first
+
+The sections below record how we got here and remain accurate as analysis, but
+the plan itself is settled. Short term:
+
+### 0.1 Send permanent failures, stay silent on the rest
+
+dinersclub keeps `WAIT_EXTERNAL_EVENT` as the only state it can leave someone
+in, because that is the only thing the state machine actually supports (see
+`planning/external-event-taxonomy.md` §1: the wait matcher is a subset check
+over `type` + `id`, so ANY Result fulfils the wait -- "send" and "release" are
+the same act, and not sending is the only way to keep someone parked).
+
+| recovery class | dinersclub does | why |
+|---|---|---|
+| `transient` — provider 5xx, operator down | retry in-process, then fall through to silence | a blip; dean re-drives if it outlives our budget |
+| `precondition` — `INSUFFICIENT_BALANCE`, `AUTH_ERROR` | **send nothing** | the payment is still coming. The researcher tops up, dean's next sweep pays everyone parked. Telling them it failed forecloses exactly that recovery |
+| `permanent` — bad number, `IMPOSSIBLE_AMOUNT`, refused | **send the failure Result**, as today | dean will never succeed; releasing them to the form is better than a silent 14-day park, and surveys already handle this path |
+
+This is deliberately a hybrid. Roughly 8,700 of 22,802 recorded failures are
+`precondition` (7687 reloadly + 834 giftcard `INSUFFICIENT_BALANCE`, 219
+`AUTH_ERROR`) and stop being told a falsehood. Everything else behaves exactly
+as it does today -- no new wire fields, no replybot change, no survey change.
+
+### 0.2 Metrics close the tracking gap
+
+Not sending an event means the failure leaves no trace in state. That is
+acceptable *because we instrument it*, not in spite of it:
+
+- `prometheus/client_golang` is already in `dinersclub/go.sum` (transitive), and
+  the repo has ServiceMonitor precedent (`devops/minio/servicemonitor.yaml`).
+- Export payment outcomes by `provider`, `code`, and recovery class.
+- A long-parked respondent is independently visible: `WAIT_EXTERNAL_EVENT` on a
+  `payment:*` wait, aging. That is the cross-check on the silent path.
+
+### 0.3 The alert that started all of this
+
+**An `INSUFFICIENT_BALANCE` rule in AlertManager, paging the platform owner.**
+It is the top failure code for both reloadly (7687) and giftcard (834), it never
+self-heals, and dean's 14-day runway only helps if a human is told inside it.
+For now the platform owner acts on it directly; routing it to the survey creator
+is a study-health concern and comes later.
+
+### 0.4 Retry budget lined up with the Kafka poll interval
+
+Unchanged from §1.4 below: bound every provider call, and size the retry budget
+so a batch cannot outrun spine's 300s `max.poll.interval.ms`. This is what stops
+the crash loop from the incident recurring.
+
+### 0.5 Long term: redefine the event contract, with the external responders
+
+The two-axis design in `planning/external-event-taxonomy.md` (subject axis local
+to each service; shared recovery axis `transient | precondition | permanent`)
+is **not** being retrofitted onto the current contract. It lands together with
+the external responder / LLM service work in
+`planning/external-responder-design.md`, which is defining a new interface for
+external services talking to the machine anyway. Designing one contract for both
+beats bolting a field onto `PaymentError` now and redoing it in six months.
+
+`error` / `blocked` stay as they are for the main state machine: `error` is
+something that broke inside the machine, `blocked` something outside it. That
+taxonomy is workable and is not changing.
+
 ---
 
 ## 1. The decision

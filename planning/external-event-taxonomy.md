@@ -4,6 +4,24 @@
 > 2026-08-17 dinersclub incident exposed that we have no consistent contract for
 > how an external service reports what happened to it.
 >
+> **STATUS (2026-08-20):** the two-axis design here is **deferred, not dropped**.
+> It lands with the external responder / LLM service work
+> (`planning/external-responder-design.md`), which is defining a new
+> service-to-machine interface anyway -- one contract designed for both beats
+> bolting a field onto `PaymentError` now and redoing it in six months. The
+> short-term payment fix is recorded in `planning/payment-failure-handling.md`
+> §0 and needs none of this.
+>
+> Settled along the way: the shared axis is **recovery**
+> (`transient | precondition | permanent`), a property of the failure itself --
+> it does not encode who retries, because that is a deployment fact, not a fact
+> about the error. The **subject** axis stays local to each service: the machine
+> keeps `error` (broke inside the machine) / `blocked` (broke outside it), and
+> dinersclub already has its own in `Result.Type` (`payment:reloadly` etc).
+> `pending` was cut -- nothing can produce it (no webhook, no polling; every
+> provider is synchronous) and it reads as "working as intended" when it means
+> "stuck".
+>
 > Scope is deliberately wider than payments: `dinersclub` (3 payment providers),
 > `linksniffer`, `moviehouse`, and anything added later all use the same
 > mechanism and all have the same gap.
