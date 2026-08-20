@@ -38,7 +38,11 @@ versionReplybot: &vreplybot v0.0.218
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.45
+# v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
+# /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
+# timeout work -- so the image and these values move together, never separately:
+# on the old image the metrics Service would point at a port nothing binds.
+versionDinersclub: &vdinersclub v0.0.46
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
