@@ -1,0 +1,240 @@
+{{- if .Values.payments.enabled }}
+{{- $p := .Values.payments }}
+{{- $runbook := .Values.runbookUrl }}
+# Payment health — is dinersclub paying people, and if not, does anyone know?
+#
+# THE ONLY ALERTS IN THIS CHART FED BY AN APPLICATION'S OWN /metrics ENDPOINT.
+# Everything else here reads sql_exporter, i.e. rows CockroachDB already holds.
+# That works for any failure that leaves a trace in state, and payment failures
+# stopped leaving one: since dinersclub/classify.go, a `transient` or
+# `precondition` failure sends no external event at all, deliberately, so the
+# respondent stays parked in WAIT_EXTERNAL_EVENT and dean can re-drive the
+# payment for up to 14 days (planning/payment-failure-handling.md §0.1).
+#
+# That silence is the feature and it is also the risk. An empty researcher
+# wallet -- the single largest payment failure mode on this platform, 34% of all
+# recorded failures -- now produces NO row, NO error state, and NO respondent
+# complaint. It is invisible to every other rule in this chart. These alerts are
+# the only thing standing between "dean will fix it" and "nobody topped up the
+# account and 14 days quietly elapsed".
+#
+# Metrics come from dinersclub/metrics.go via
+# dinersclub/chart/templates/servicemonitor.yaml. If that ServiceMonitor is
+# removed or metrics.enabled is set false, these rules go silent rather than
+# firing -- which is why DinersClubMetricsMissing exists below and pages.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: payment-health
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: vlab-alerts
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  groups:
+    - name: payment-health-recordings
+      interval: 1m
+      rules:
+        # Failures the respondent was NOT told about, by class. `permanent` is
+        # excluded because that is precisely the set that WAS delivered -- the
+        # wait matcher ignores `success`, so any Result released the
+        # respondent (planning/external-event-taxonomy.md §1).
+        #
+        # Read next to payment:results:rate to size a problem. Nothing alerts
+        # on this recording directly.
+        - record: payment:withheld:rate5m
+          expr: |
+            sum by (provider, recovery) (
+              rate(dinersclub_payment_results_total{outcome="failure", recovery!="permanent"}[5m])
+            )
+
+        - record: payment:results:rate5m
+          expr: |
+            sum by (provider, outcome) (rate(dinersclub_payment_results_total[5m]))
+
+    - name: payment-health-alerts
+      interval: 1m
+      rules:
+        # ---- The alert this whole workstream started from ------------------
+        #
+        # A researcher's provider wallet is empty. THIS IS THE ONE THAT PAGES.
+        #
+        # Threshold is effectively zero-as-invariant, not a tuned rate: one
+        # INSUFFICIENT_BALANCE means at least one respondent who finished a
+        # survey is now parked waiting on money that is not there. It never
+        # self-heals -- no retry, no backoff and no amount of dean patience
+        # refills an account -- so the ONLY thing that resolves it is a human
+        # being told, which makes "was a human told" the entire question.
+        #
+        # dean's 14-day runway is generous and is exactly what makes this
+        # recoverable: top the wallet up inside it and every parked respondent
+        # is paid on the next sweep, having never been told anything failed.
+        # Miss the window and those payments are gone silently.
+        #
+        # WHY 1h AND NOT A SHORT WINDOW. The signal is not urgent-by-the-minute;
+        # it is urgent-by-the-day. A 1h lookback keeps the alert firing for an
+        # hour after the last failure, so it stays visible while someone
+        # actually goes and tops the account up, instead of resolving the
+        # moment traffic pauses overnight.
+        #
+        # WHAT IT CANNOT TELL YOU YET: which researcher. The counter carries
+        # `provider`, not the credential key -- adding `key` would name the
+        # account directly and is the obvious next improvement, weighed against
+        # putting researcher identifiers in metric labels.
+        - alert: PaymentWalletEmpty
+          expr: |
+            sum by (provider) (
+              increase(dinersclub_payment_results_total{code="INSUFFICIENT_BALANCE"}[1h])
+            ) > {{ $p.walletEmptyThreshold }}
+          for: {{ $p.walletEmptyFor }}
+          labels:
+            severity: critical
+            component: payments
+          annotations:
+            summary: "{{`{{ $labels.provider }}`}} wallet is empty ({{`{{ $value | printf \"%.0f\" }}`}} payments blocked in the last hour)"
+            description: >-
+              A researcher's {{`{{ $labels.provider }}`}} account has insufficient
+              balance, so respondents who completed a survey are NOT being paid.
+              They have not been told: dinersclub withholds this failure on
+              purpose so they stay in WAIT_EXTERNAL_EVENT and dean re-drives the
+              payment once the account is funded. Everyone parked gets paid on the
+              next sweep IF the wallet is topped up within dean's 14-day retry
+              window; after that the payments are lost silently. Find the account
+              (`SELECT userid, key FROM credentials WHERE entity='reloadly'`) and
+              get it funded.
+            runbook_url: "{{ $runbook }}#paymentwalletempty"
+
+        # ---- A provider is down --------------------------------------------
+        #
+        # Sustained transient failures. Distinct from the wallet: nobody has to
+        # do anything, and it usually resolves on its own -- which is why this
+        # is a warning and the wallet is a page.
+        #
+        # It matters anyway because dinersclub's in-process retry budget is 60s
+        # and dean's grace is 2h. Between those two numbers sits a window where
+        # payments are silently deferred and everything looks healthy: no error
+        # states, no failed sends, no respondent complaints. This is the only
+        # signal that window is open.
+        #
+        # THRESHOLD IS v1 AND WILL NEED TUNING. There is no measured background
+        # to calibrate against -- these counters did not exist until now. It is
+        # derived instead: an outage bad enough to matter fails payments
+        # continuously, and the `for:` is what separates that from a blip. Tune
+        # by watching payment:withheld:rate5m for a week.
+        - alert: PaymentsDeferredByProvider
+          expr: |
+            sum by (provider) (
+              increase(dinersclub_payment_results_total{outcome="failure", recovery="transient"}[15m])
+            ) > {{ $p.transientThreshold }}
+          for: {{ $p.transientFor }}
+          labels:
+            severity: warning
+            component: payments
+          annotations:
+            summary: "{{`{{ $labels.provider }}`}} is failing payments transiently ({{`{{ $value | printf \"%.0f\" }}`}} in 15m)"
+            description: >-
+              {{`{{ $labels.provider }}`}} has been returning retryable errors for
+              {{ $p.transientFor }}. Respondents are NOT being told — they stay
+              parked and dean re-drives from 2h onward, so this is not yet an
+              incident. It becomes one if it lasts: check whether the provider is
+              actually down before assuming the classifier is wrong.
+            runbook_url: "{{ $runbook }}#paymentsdeferredbyprovider"
+
+        # ---- The classifier has a gap --------------------------------------
+        #
+        # An error code that dinersclub/classify.go does not recognise. It
+        # defaulted to `permanent`, so the respondent WAS told the payment
+        # failed — which is the old behaviour and may well be wrong for this
+        # code. If it is really transient or a precondition, someone was told a
+        # falsehood and lost a payment dean could have recovered.
+        #
+        # Low threshold on purpose: this is not measuring a fault rate, it is
+        # asking someone to add a row to recoveryByCode. It should be rare, and
+        # if it is not, that itself is the finding.
+        - alert: PaymentUnclassifiedErrorCode
+          expr: |
+            sum by (provider, code) (
+              increase(dinersclub_unclassified_error_codes_total[6h])
+            ) > {{ $p.unclassifiedThreshold }}
+          for: {{ $p.unclassifiedFor }}
+          labels:
+            severity: warning
+            component: payments
+          annotations:
+            summary: "Unclassified payment error code {{`{{ $labels.code }}`}} from {{`{{ $labels.provider }}`}}"
+            description: >-
+              dinersclub saw {{`{{ $value | printf "%.0f" }}`}} payment failures with
+              error code {{`{{ $labels.code }}`}}, which is not in recoveryByCode
+              (dinersclub/classify.go). It was treated as permanent, so those
+              respondents were told their payment failed. Decide whether that is
+              right and add the code to the table — if it is actually transient or
+              a precondition, those payments were recoverable and are now lost.
+            runbook_url: "{{ $runbook }}#paymentunclassifiederrorcode"
+
+        # ---- dinersclub is broken, rather than the payments ----------------
+        #
+        # Faults in dinersclub itself: a malformed Kafka message, a database
+        # that will not answer, a botserver that never accepted a Result.
+        #
+        # Every one of these used to be log.Fatalf, so the signal was "the pod
+        # is restarting" and a poison message was an unbounded crash loop
+        # (2026-08-17). checkError now commits and carries on, which is right —
+        # nothing was sent, so respondents stay parked and dean re-drives — but
+        # it means dinersclub can be quietly failing every message while looking
+        # perfectly healthy to Kubernetes. This counter is the replacement for
+        # the restart, and it is the only thing that notices.
+        - alert: DinersClubProcessingFaults
+          expr: |
+            sum by (stage) (increase(dinersclub_processing_faults_total[30m])) > {{ $p.faultThreshold }}
+          for: {{ $p.faultFor }}
+          labels:
+            severity: warning
+            component: payments
+          annotations:
+            summary: "dinersclub is faulting at stage {{`{{ $labels.stage }}`}} ({{`{{ $value | printf \"%.0f\" }}`}} in 30m)"
+            description: >-
+              dinersclub failed {{`{{ $value | printf "%.0f" }}`}} times at stage
+              {{`{{ $labels.stage }}`}} in the last 30 minutes. These are faults in
+              dinersclub, not payment rejections. The batch is committed and dean
+              will re-drive, so payments are not lost — but the pod will NOT
+              restart and nothing else reports this. Check the logs.
+            runbook_url: "{{ $runbook }}#dinersclubprocessingfaults"
+
+        # ---- The instrumentation itself is gone -----------------------------
+        #
+        # PAGES, and the reason is the whole design: every alert above reads
+        # dinersclub's own /metrics, and the failures they watch leave no other
+        # trace anywhere. If the scrape stops, PaymentWalletEmpty does not fire
+        # loudly, it stops existing — an empty wallet then drains its way
+        # through dean's 14-day window in complete silence.
+        #
+        # A missing signal that guards a silent failure has to be treated as the
+        # failure. `absent()` rather than `up == 0` so that a ServiceMonitor
+        # deleted, a Service renamed, or metrics.enabled flipped to false all
+        # trip it, not only a pod that is down.
+        #
+        # KEYED ON dinersclub_up, NOT ON THE PAYMENT COUNTER, and the reason is
+        # not stylistic: a Prometheus CounterVec with no observations exports no
+        # series whatsoever, so a healthy dinersclub that has simply had no
+        # payments to make publishes no dinersclub_payment_results_total at all.
+        # At ~8 active users/hr platform-wide that is an ordinary hour, and this
+        # alert would page for quiet. dinersclub_up is unconditional, so its
+        # absence means one thing only: nobody is scraping.
+        - alert: DinersClubMetricsMissing
+          expr: |
+            absent(dinersclub_up) == 1
+          for: {{ $p.metricsMissingFor }}
+          labels:
+            severity: critical
+            component: payments
+          annotations:
+            summary: "dinersclub payment metrics have disappeared"
+            description: >-
+              Prometheus has had no dinersclub_up for
+              {{ $p.metricsMissingFor }}. Every payment alert depends on it, and the
+              failures they watch (empty wallets above all) send no event and write
+              no state — so while this is firing, payments can be failing with
+              nothing at all to show for it. Check the pod, the Service and the
+              ServiceMonitor (dinersclub/chart/templates/).
+            runbook_url: "{{ $runbook }}#dinersclubmetricsmissing"
+{{- end }}

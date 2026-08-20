@@ -21,7 +21,11 @@ dependencies:
     version: 0.0.1
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   - name: dinersclub
-    version: 0.0.1
+    # 0.0.2 adds the metrics Service + ServiceMonitor. dinersclub is the first
+    # application service in this repo Prometheus scrapes; without it the
+    # transient/precondition failures classify.go withholds leave no record
+    # anywhere. See planning/payment-failure-handling.md §0.2.
+    version: 0.0.2
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
     tags:
       - payments

@@ -36,6 +36,12 @@ type Config struct {
 	// provider call wedges the whole consumer (see README, "Why provider calls
 	// have a hard timeout").
 	ProviderTimeout time.Duration `env:"DINERSCLUB_PROVIDER_TIMEOUT" envDefault:"30s"`
+
+	// Port for the /metrics endpoint. Defaulted rather than required because
+	// the test binary and local runs should not have to know about it, and a
+	// service that refuses to start over a metrics port would be a worse
+	// trade than one that cannot be scraped.
+	MetricsPort int `env:"DINERSCLUB_METRICS_PORT" envDefault:"9090"`
 }
 
 func getConfig() *Config {

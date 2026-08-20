@@ -298,3 +298,76 @@ mediaHandles:
   # have consciously decided to live with, not a first response.
   missingThreshold: 0
   missingFor: "6h"
+
+# ---- Payment health ---------------------------------------------------------
+# planning/payment-failure-handling.md §0. Metrics come from dinersclub's OWN
+# /metrics endpoint (dinersclub/metrics.go, scraped via
+# dinersclub/chart/templates/servicemonitor.yaml) — the first application
+# service in this repo Prometheus scrapes. Every other block in this file reads
+# sql_exporter.
+#
+# WHY IT CANNOT READ SQL. Since dinersclub/classify.go, a payment failure that
+# is `transient` or `precondition` sends NO external event, on purpose: the
+# respondent stays parked in WAIT_EXTERNAL_EVENT so dean can re-drive the
+# payment for up to 14 days. Nothing is written, so there is nothing to query.
+# The largest failure mode on the platform — an empty researcher wallet, 34% of
+# all recorded payment failures — is now visible ONLY here.
+payments:
+  enabled: true
+
+  # PaymentWalletEmpty — the alert this workstream exists to produce. PAGES.
+  #
+  # 0 is not a tuned threshold, it is the invariant: one INSUFFICIENT_BALANCE is
+  # one respondent who finished a survey and is not being paid. It never
+  # self-heals — only a human topping up the account resolves it — so the alert
+  # is really asking "has a human been told", and any non-zero answer is yes.
+  #
+  # The `for:` carries the noise control, and 10m against a 1h lookback means
+  # the alert must persist rather than fire on a single scrape. There is no
+  # urgency cost to that delay: the thing it guards against unfolds over dean's
+  # 14-day window, not over minutes.
+  walletEmptyThreshold: 0
+  walletEmptyFor: "10m"
+
+  # PaymentsDeferredByProvider — sustained transient failures. Warning, not a
+  # page: nobody has to act and it usually resolves itself. It exists because
+  # between dinersclub's 60s retry budget and dean's 2h grace there is a window
+  # where payments are silently deferred and every other signal looks healthy.
+  #
+  # THRESHOLD IS v1 WITH NO MEASURED BACKGROUND — these counters did not exist
+  # before this change, so unlike most thresholds here it is not calibrated
+  # against anything. Watch payment:withheld:rate5m for a week and retune.
+  # Prefer lengthening `for:` over raising the count: a provider outage that
+  # matters is sustained, and a burst that clears in ten minutes is exactly what
+  # the retry budget and dean are for.
+  transientThreshold: 5
+  transientFor: "30m"
+
+  # PaymentUnclassifiedErrorCode — a code missing from recoveryByCode in
+  # dinersclub/classify.go. It defaulted to `permanent`, so the respondent WAS
+  # told the payment failed; if the code is really transient or a precondition,
+  # that was a falsehood and a recoverable payment was thrown away.
+  #
+  # Deliberately low. This is not measuring a fault rate, it is asking someone
+  # to add a row to a table. If it fires often, that frequency is the finding.
+  unclassifiedThreshold: 0
+  unclassifiedFor: "15m"
+
+  # DinersClubProcessingFaults — faults in dinersclub itself (bad Kafka message,
+  # database down, botserver refusing results), not payment rejections.
+  #
+  # These used to be log.Fatalf, so the signal was "the pod restarts" and a
+  # poison message crash-looped forever (2026-08-17). checkError now commits and
+  # continues, which is correct — nothing was sent, so dean re-drives — but it
+  # means dinersclub can fail every message while looking perfectly healthy to
+  # Kubernetes. This is what replaces the restart.
+  faultThreshold: 10
+  faultFor: "15m"
+
+  # DinersClubMetricsMissing — PAGES, because a missing signal here IS the
+  # failure. Every rule above reads dinersclub's /metrics, and the failures they
+  # watch write nothing anywhere else; if the scrape stops, an empty wallet
+  # drains dean's 14-day window in total silence.
+  #
+  # 30m tolerates a rollout, a node drain and a slow reschedule without firing.
+  metricsMissingFor: "30m"

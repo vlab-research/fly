@@ -27,6 +27,15 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.metrics.enabled }}
+          # Named so service.yaml can target it by name rather than by number.
+          # DINERSCLUB_METRICS_PORT must agree with .Values.metrics.port; it is
+          # set from the same value in devops/values/<env>.yaml.
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          {{- end }}
           envFrom:
           - secretRef:
               name: "{{ .Values.envFrom }}"
