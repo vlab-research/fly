@@ -16,7 +16,7 @@ dependencies:
   version: 0.0.1
 - name: dinersclub
   repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
-  version: 0.0.1
+  version: 0.0.2
 - name: dean
   repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
   version: 0.0.3
@@ -53,5 +53,8 @@ dependencies:
 - name: hermes
   repository: file://../../hermes/chart
   version: 0.1.0
-digest: sha256:a1f4a212218c7e5b5df762ec38e1af5a5b07d6c9d5bb1aeb51dfc27b6bcf3999
-generated: "2026-07-21T20:05:55.836772035-04:00"
+- name: media-proxy
+  repository: file://../../media-proxy/chart
+  version: 0.1.0
+digest: sha256:3cfda585deab581a326e81700b0d0576735281c3688e73446fa9de868b00953f
+generated: "2026-08-20T17:29:06.936241808-04:00"
