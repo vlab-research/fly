@@ -44,7 +44,17 @@ versionReplybot: &vreplybot v0.0.218
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.45
+# v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
+# /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
+# timeout work -- so the image and the env block below move together, never
+# separately: on the old image the metrics Service points at a port nothing
+# binds, and DINERSCLUB_PROVIDER_TIMEOUT is an unknown variable it ignores.
+#
+# The v0.0.45..v0.0.46 range is payment-recovery work only (classify.go,
+# metrics.go, the bounded provider client). dingconnect.go is untouched, so the
+# Generic Secrets concern that held dinersclub at v0.0.43-wa in PR #147 does
+# not apply here -- and dingconnect is not in DINERSCLUB_PROVIDERS anyway.
+versionDinersclub: &vdinersclub v0.0.46
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
