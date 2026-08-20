@@ -34,7 +34,12 @@ versionHermes: &vhermes v0.0.3-wa
 # built before the lockfile landed, so its image came from `npm install` against
 # floating ^ ranges and cannot be reproduced from source. v0.0.215 is the first
 # replybot image built with `npm ci` against a committed package-lock.json.
-versionReplybot: &vreplybot v0.0.218
+#
+# v0.0.219 is v0.0.218 plus the arrival-health work (#150): ad-id capture, the
+# widened WhatsApp entry gate, the encoded-ref decoder, and `getMetadata` owning
+# `vt`. adopt v0.1.78 already percent-encodes every ref token in production, so
+# this is the reader catching up to a writer that has already shipped.
+versionReplybot: &vreplybot v0.0.219
 versionLinksniffer: &vlinksniffer v0.0.6
 versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
