@@ -855,7 +855,10 @@ describe('categorizeWhatsAppEvent', () => {
       // The exact shape that failed live on 2026-08-16: a real ad whose
       // autofill_message is written form-last was rejected by the old
       // leading-`form.` anchor, so the referral kept no ref and the arrival
-      // resolved to FALLBACK_FORM (305), a live survey owned by someone else.
+      // resolved to FALLBACK_FORM (305) -- the account owner's own survey with
+      // that shortcode, not another account's. Shortcodes are user-scoped
+      // (formcentral/db.go:82); the harm is landing on the wrong survey inside
+      // the right account, not crossing an account boundary.
       const { event_type, payload } = categorizeWhatsAppEvent({
         type: 'text',
         text: { body: 'ctwaprobe.alpha.creative.Ad1H.form.probetest' },

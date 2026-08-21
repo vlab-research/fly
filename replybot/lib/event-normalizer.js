@@ -274,8 +274,17 @@ function parseSyntheticEvent(data, timestamp) {
 // (`creative.3b.gender.men.form.hpvintrotriple`) and a real CTWA ad's
 // autofill_message reads the same way — `ctwaprobe.alpha.creative.Ad1H.form.
 // probetest`. Anchoring on a leading `form.` rejected those outright and
-// dropped the arrival to FALLBACK_FORM, which is a live survey belonging to
-// someone else: the VIR-19 failure shape, reproduced live on 2026-08-16.
+// dropped the arrival to FALLBACK_FORM: the VIR-19 failure shape, reproduced
+// live on 2026-08-16.
+//
+// FALLBACK_FORM is NOT another account's survey, and nothing here crosses an
+// account boundary. Shortcodes are user-scoped: formcentral resolves one by
+// `s.userid = (SELECT userid FROM credentials WHERE key = <pageid>)`
+// (formcentral/db.go:82), so FALLBACK_FORM always names a survey owned by
+// whoever owns the account the conversation is already on. The harm is
+// misattribution WITHIN that account -- the participant lands on the owner's
+// fallback survey instead of the survey the ref named, and then counts as
+// activity there.
 //
 // The pair must still begin on an EVEN token boundary, which is what the
 // leading `(?:key\.value\.)*` group enforces. getMetadata()/_group
