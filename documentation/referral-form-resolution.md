@@ -263,7 +263,7 @@ them is a real platform event**, and the difference turned out to matter:
 | Caller | `source.type` | At `START` |
 |---|---|---|
 | `HANDOVER_EVENT` — Messenger `pass_thread_control` | `messenger` | **still blank-starts** `FALLBACK_FORM` — this is the ad-click race described above, and it is the designed behaviour |
-| `EXTERNAL_EVENT` — dean `timeout`, dinersclub payment result, linksniffer click, moviehouse video event | `synthetic` | **`DEFER`** — the event is dropped, nothing is published and nothing is cached |
+| `EXTERNAL_EVENT` — dean `timeout`, dinersclub payment result, linksniffer click, moviehouse video event | `synthetic` | **`_noop()`** — the event is dropped; no message, no form, state unchanged |
 
 **Why synthetic is different.** Each of those synthetic events exists *only
 because a conversation already exists*: dean selects a `states` row sitting in
@@ -310,7 +310,7 @@ pages and months, the full sequence is:
 |---|---|---|---|---|
 | 1 | `pass_thread_control` handover | ~1.5 s **before** the referral | **blank-starts** `FALLBACK_FORM` — designed | `UPDATE_STATE` / wait fulfilment; harmless |
 | 2 | the referral (top-level, or inside a quick_reply/postback payload) | the click | starts the **referred** form | **switches** to the referred form — designed |
-| 3 | bare `get_started` postback | 1–4 s **after** the referral | **blank-starts** `FALLBACK_FORM` — this is organic entry, and must keep working | **`DEFER`** since 2026-08-17; previously appended `FALLBACK_FORM` to the live stack |
+| 3 | bare `get_started` postback | 1–4 s **after** the referral | **blank-starts** `FALLBACK_FORM` — this is organic entry, and must keep working | **`_noop()`** since 2026-08-17; previously appended `FALLBACK_FORM` to the live stack |
 
 Webhook 3 is the one that had no guard. Note that in the *handover-first*
 ordering it was already harmless — the handover has by then put `FALLBACK_FORM` on
@@ -406,9 +406,9 @@ longest-running instance of this failure family, and the third after VIR-19 and 
 CTWA order-dependence below: a ref that fails to resolve silently becomes survey
 `305`.
 
-The fix is in `machine.js`'s `REFERRAL` case (`_refNamesForm` + a `DEFER`); the
-greppable tag is **`FALLBACK_ENTRY_ON_LIVE_CONVERSATION`**; the detector query and
-the behavioural change are at the end of this section.
+The fix is in `machine.js`'s `REFERRAL` case (`_refNamesForm` + a `_noop()`). It is
+**not logged**, so there is no tag to count; the detector query and the behavioural
+change are at the end of this section.
 
 `categorizeMessengerEvent` (`event-normalizer.js:37`) maps Messenger's bare
 "Get Started" postback to a conversation entry:
@@ -544,13 +544,11 @@ so: all 450 entries happened on the **first event the machine acted on**, so
 `USER_BLOCKED` / `_hasForm` / self-referrer guards:
 
 ```js
-if (!_refNamesForm(nxt) && state.forms.length) {
-  return { action: 'DEFER', reason: DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION, event_type: nxt.event_type }
-}
+if (!_refNamesForm(nxt) && state.forms.length) return _noop()
 return _blankStart(nxt)
 ```
 
-Three choices in there are load-bearing:
+Two choices in there are load-bearing:
 
 1. **The discriminator is the REF, not the resolved form.**
    `getForm(nxt) === process.env.FALLBACK_FORM` reads as the obvious equivalent and
@@ -565,18 +563,17 @@ Three choices in there are load-bearing:
    where they diverge: a `machine_report` error arriving before entry leaves the
    conversation in `ERROR` with an empty stack, and refusing entry there would
    strand a participant who has no conversation at all.
-3. **`DEFER`, not `_noop()`.** `_noop` returns `newState`, `lib/index.js` publishes
-   it and `scribble/state.go` UPSERTs it over the live conversation's real `states`
-   row — the row every recovery sweep selects on — while bumping `updated`, by
-   which dean and the dashboard age conversations. Nothing happened, so nothing is
-   written: `DEFER` returns without `newState`, so neither `states` nor the Redis
-   cache is touched. Same mechanism and same reasoning as the synthetic deferral in
-   §6b's first amendment.
+**`_noop()`, not a bespoke refusal action.** `_noop` returns `newState`, so
+`lib/index.js` publishes it and `scribble/state.go` UPSERTs it back over the live
+conversation's own `states` row. The content is byte-identical — `apply`'s default
+branch returns `state` unchanged — so only `updated` moves, and nothing reads
+`updated` for correctness (dean's `Timeouts()`/`Payments()` key off `current_state`
+and `calculated_timeout_date`). Skipping that write was the only thing a separate
+action bought, and it did not justify a second vocabulary for "nothing happened".
+Same treatment as the synthetic refusal in §6b's first amendment.
 
-`DEFER` now carries a `reason`, and `transition.js` turns each reason into its own
-greppable tag. This matters: `SYNTHETIC_EVENT_NO_CONVERSATION` is the instrument
-for §7.1's "watch 24 h, expect zero" canary and must not be inflated by a defect
-that is *expected* to register 10–90/month.
+**Nothing is logged.** Neither refusal emits a greppable tag, so neither rate is
+measurable from pod logs. Use the `states` detector queries below instead.
 
 ### Behavioural change, named rather than slipped in
 
@@ -632,18 +629,13 @@ SELECT userid, pageid, current_state, state_json->'forms' AS forms, form_start_t
 -- the 3 deliberate `?ref=form.305.country.iraq` referrals.
 ```
 
-Post-deploy, the live rate is the **log tag**, not the table — the fix writes
-nothing, so a refused event leaves no row to count:
-
-```
-kubectl logs -n vprod -l app=gbv-replybot --since=24h | grep -c FALLBACK_ENTRY_ON_LIVE_CONVERSATION
-```
-
-The line carries `state` and `form`, which splits the count into the ad-click race
-(`"state":"RESPONDING"`, arriving 1–4 s after a referral) and re-engagement
-(`"state":"END"`). Expect it to be non-zero and roughly to track the historical
-10–90/month; a **zero** count means the guard is not being reached and something is
-wrong, and new rows matching the SQL above mean it has been bypassed.
+Post-deploy the live rate is **not directly measurable**. The refusal is a
+`_noop()` and emits no log line, and it appends nothing to `forms`, so a refused
+event leaves neither a row nor a tag to count. What the SQL above still gives you is
+the *absence* of new appends: run it periodically, and new rows matching it mean the
+guard has been bypassed. There is no positive signal that the guard is being reached
+at all — that was the cost of dropping the greppable tag, and it was accepted
+deliberately.
 
 ### Regression coverage
 
@@ -655,7 +647,7 @@ wrong, and new rows matching the SQL above mean it has been bypassed.
   every preserved behaviour: first-event entry, entry on a non-`START` formless
   state, the explicit `form.<fallback>` referral, the `_hasForm` QOUT repeat,
   `USER_BLOCKED`, the reset shortcode, and the handover-then-referral ordering.
-- `replybot/lib/typewheels/transition.test.js` — describe **"DEFER (form-less entry
+- `replybot/lib/typewheels/transition.test.js` — describe **"form-less entry
   on a live conversation)"** (5 tests). The shell half: no `newState`, so no
   `states` UPSERT and no cache write; no report, no command, no response; and the
   contrast case, where the same webhook on an empty conversation still enters and
@@ -798,13 +790,13 @@ To support per-page default forms:
 | **WhatsApp text**, mid-survey free-text answer | `text: "tell me about form.abc please"` | No entry — stays `user_text` (anchored full-match) |
 | Handover arrives before the referral | — | Referral's form — the handover blank-starts `FALLBACK_FORM`, then the referral switches to the referred form. `state.forms` retains the transient fallback entry |
 | **Bare `get_started` postback, first event** (organic Messenger entry) | `payload: "get_started"` | `FALLBACK_FORM` — 35% of production's fallback entries arrive this way |
-| **Bare `get_started` postback, conversation already has a form** | `payload: "get_started"` | **No form.** `DEFER` — nothing published, nothing cached (fixed 2026-08-17; previously appended `FALLBACK_FORM` to the live stack) |
+| **Bare `get_started` postback, conversation already has a form** | `payload: "get_started"` | **No form.** `_noop()` — no message, no form, state unchanged (fixed 2026-08-17; previously appended `FALLBACK_FORM` to the live stack) |
 | **Referral whose ref names no form**, first event | `?ref=clickToMessengerAds` | `FALLBACK_FORM` |
-| **Referral whose ref names no form**, conversation already has a form | `?ref=clickToMessengerAds` | **No form.** `DEFER` (fixed 2026-08-17) |
+| **Referral whose ref names no form**, conversation already has a form | `?ref=clickToMessengerAds` | **No form.** `_noop()` (fixed 2026-08-17) |
 | **Referral naming the fallback shortcode explicitly**, live conversation | `?ref=form.305.country.iraq` | `305` — an explicit ref is an explicit ref; still switches. Three live production rows depend on this |
 | Bare `get_started` when the live form **is** `FALLBACK_FORM`, at `QOUT` | `payload: "get_started"` | Pending question repeated (`_hasForm`, unchanged) |
-| **Synthetic external event on an empty conversation** (dean `timeout`, dinersclub payment result, linksniffer click, moviehouse video) | — | **No form.** `DEFER` — the event is dropped, nothing published, nothing cached (fixed 2026-08-17; previously `FALLBACK_FORM`). See §6b's amendment |
-| Exodus `bailout` on an empty conversation | — | The bail's own named form — deliberately not deferred |
+| **Synthetic external event on an empty conversation** (dean `timeout`, dinersclub payment result, linksniffer click, moviehouse video) | — | **No form.** `_noop()` — the event is dropped; no message, no form, state unchanged (fixed 2026-08-17; previously `FALLBACK_FORM`). See §6b's amendment |
+| Exodus `bailout` on an empty conversation | — | The bail's own named form — deliberately not refused |
 | No form, page has default | (no form param) | Page's default |
 | No form, no page default | (no form param) | `FALLBACK_FORM` env var |
 | Empty ref | `?ref=blah` | Fallback (parsing fails) |
@@ -1058,10 +1050,9 @@ if (r && r.ref) {
 - **"Did the ref name a form?"**: `replybot/lib/typewheels/machine.js:_refNamesForm()` —
   the discriminator that lets a form-less entry start a conversation but never
   re-enter one; re-uses `_group` from `utils.js`
-- **DEFER reasons / greppable tags**: `machine.js` exports
-  `DEFER_SYNTHETIC_NO_CONVERSATION` and `DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION`;
-  `transition.js` turns each into its own `console.warn` line and exports
-  `SYNTHETIC_NO_CONVERSATION_TAG` / `FALLBACK_ENTRY_ON_LIVE_CONVERSATION_TAG`
+- **Refusals**: both are plain `_noop()` returns from `machine.js` — the synthetic
+  one in `_handleExternalEvent`, the form-less-entry one in the `REFERRAL` case.
+  Neither is logged and neither has a distinct action or tag
 - **Metadata extraction**: `replybot/lib/typewheels/utils.js:getMetadata()` / `_group()`
 - **Field lookup**: `replybot/lib/typewheels/form.js:getField()`
 - **Tests**: `replybot/lib/event-normalizer.test.js`, `machine.test.js`

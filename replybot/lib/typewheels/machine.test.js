@@ -5,7 +5,7 @@ const fs = require('fs')
 const _ = require('lodash')
 const { parseLogJSON } = require('./utils')
 const { followUpMessage, offMessage } = require('../generic-validator')
-const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata, categorizeEvent, DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION } = require('./machine')
+const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata, categorizeEvent } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 const { parseEvent } = require('../event-normalizer')
@@ -3102,7 +3102,7 @@ describe('Thread passback functionality', () => {
   it('should fulfill wait condition when new_owner_app_id is a number matching our string app id', () => {
     // Regression: real Messenger webhooks deliver new_owner_app_id as a JSON
     // *number*, while FACEBOOK_APP_ID is a string env var. A strict !== between
-    // them is always true, which previously dropped every handover that included
+    // them is always true, which would drop every handover that includes
     // the field (observed in production: AI-chatbot handovers silently ignored,
     // surveys never resuming). The comparison must be type-agnostic.
     const wait = {
@@ -3247,14 +3247,13 @@ describe('md must always carry startTime', () => {
   it('blank-starts a form when an external event arrives for a user with no conversation', () => {
     // A Messenger thread-control handover is a REAL PLATFORM EVENT, not a
     // synthetic one, and blank-starting on it is deliberate: in prod the
-    // handover races the user's own first message by a second or two, so
-    // starting the form is the right outcome and the referral that follows
-    // switches them onto the referred form (see the handover-race test below
-    // and documentation/referral-form-resolution.md §6b).
+    // handover races the user's own first message by a second or two, so starting
+    // the form is the right outcome and the referral that follows switches them
+    // onto the referred form (see the handover-race test below).
     //
     // This is the case that makes "an external event must never blank-start"
     // wrong as a rule. The discriminator is `source.type === 'synthetic'`, not
-    // "arrived via _handleExternalEvent" -- see the DEFER describe below.
+    // "arrived via _handleExternalEvent" -- see the no-op describe below.
     const next = step(_initialState(), handover({ metadata: 'new message' }))
 
     next.forms.should.eql(['fallback'])
@@ -3279,8 +3278,7 @@ describe('md must always carry startTime', () => {
 // scribble messages sink has not archived it yet, or because the account the
 // event named is not the account the conversation lives on.
 //
-// Neither of those is a reason to enter a survey. See planning/conversation-identity.md
-// §7.1 (CORRECTED) and documentation/states-debugging.md.
+// Neither is a reason to enter a survey. See documentation/states-debugging.md.
 describe('a synthetic event must not blank-start a conversation', () => {
 
   const step = (state, event) => apply(state, exec(state, event))
@@ -3295,21 +3293,16 @@ describe('a synthetic event must not blank-start a conversation', () => {
     value: { type: 'moviehouse:play', id: 'vid1' }
   })
 
-  it('DEFERs a dean timeout that arrives on an empty conversation', () => {
-    exec(_initialState(), timeout).action.should.equal('DEFER')
+  it('no-ops a dean timeout that arrives on an empty conversation', () => {
+    exec(_initialState(), timeout).action.should.equal('NONE')
   })
 
-  it('DEFERs a linksniffer click that arrives on an empty conversation', () => {
-    exec(_initialState(), click).action.should.equal('DEFER')
+  it('no-ops a linksniffer click that arrives on an empty conversation', () => {
+    exec(_initialState(), click).action.should.equal('NONE')
   })
 
-  it('DEFERs a moviehouse video event that arrives on an empty conversation', () => {
-    exec(_initialState(), video).action.should.equal('DEFER')
-  })
-
-  it('names the offending event on the output, for the log line', () => {
-    const output = exec(_initialState(), click)
-    output.event_type.should.equal('synthetic_external')
+  it('no-ops a moviehouse video event that arrives on an empty conversation', () => {
+    exec(_initialState(), video).action.should.equal('NONE')
   })
 
   // The whole point: no FALLBACK_FORM, no md, no forms entry, no message.
@@ -3330,7 +3323,7 @@ describe('a synthetic event must not blank-start a conversation', () => {
     }
   })
 
-  // DEFER must be a pure no-op in the FOLD, not a throw. `exec` runs during
+  // The refusal must be a pure no-op in the FOLD, not a throw. `exec` runs during
   // replay as well as live (machine.getState folds the archived log with it), so
   // a throw here would make any log whose first archived event is a synthetic
   // one permanently unreplayable -- turning a transient archive lag into a
@@ -3368,7 +3361,7 @@ describe('a synthetic event must not blank-start a conversation', () => {
     exec(blocked, timeout).action.should.equal('NONE')
   })
 
-  // DELIBERATELY NOT DEFERRED. An exodus bailout names the form it wants the
+  // DELIBERATELY NOT REFUSED. An exodus bailout names the form it wants the
   // participant switched onto, so it does not resolve through FALLBACK_FORM and
   // honouring it on a short replay still does the thing it was asked to do --
   // degraded (no seed, no md.pageid) but not wrong. Dropping it would silently
@@ -3456,12 +3449,8 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
     after.md.State.should.equal('Bauchi State')
   })
 
-  it('DEFERs, naming the reason that becomes the greppable tag', () => {
-    const output = exec(getState(liveLog), parseEvent(getStartedPostback))
-
-    output.action.should.equal('DEFER')
-    output.reason.should.equal(DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION)
-    output.event_type.should.equal('conversation_started')
+  it('no-ops rather than re-entering the live conversation', () => {
+    exec(getState(liveLog), parseEvent(getStartedPostback)).action.should.equal('NONE')
   })
 
   // 44% of the measured population. A bare Get Started arriving here is a race
@@ -3471,13 +3460,13 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
       const live = { ...getState(liveLog), state: s }
       const output = exec(live, parseEvent(getStartedPostback))
 
-      output.action.should.equal('DEFER')
+      output.action.should.equal('NONE')
       step(live, parseEvent(getStartedPostback)).should.eql(live)
     }
   })
 
   // NAMED BEHAVIOUR CHANGE, half the population. Someone who finished a survey
-  // and taps Get Started again used to be entered on FALLBACK_FORM -- another
+  // and taps Get Started again must not be entered on FALLBACK_FORM -- another
   // researcher's live survey, where their answers were recorded. They now get
   // nothing at all. The documented restart mechanism is REPLYBOT_RESET_SHORTCODE,
   // not a bare Get Started, so this is a refusal to guess rather than a lost
@@ -3491,7 +3480,7 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
   })
 
   it('refuses a referral whose ref carries no form pair', () => {
-    exec(getState(liveLog), parseEvent(refWithoutForm)).action.should.equal('DEFER')
+    exec(getState(liveLog), parseEvent(refWithoutForm)).action.should.equal('NONE')
   })
 
   // The WhatsApp shape of the same defect. A CTWA referral object routinely
@@ -3513,7 +3502,7 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
     const live = getState([whatsappReferral, echo])
     live.forms.should.eql(['FOO'])
 
-    exec(live, parseEvent(ctwa)).action.should.equal('DEFER')
+    exec(live, parseEvent(ctwa)).action.should.equal('NONE')
   })
 
   // ---- everything that must keep working -------------------------------------
@@ -3572,7 +3561,7 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
     output.validation.valid.should.be.false
   })
 
-  it('still no-ops rather than DEFERs for a USER_BLOCKED participant', () => {
+  it('no-ops for a USER_BLOCKED participant', () => {
     const blocked = { ...getState(liveLog), state: 'USER_BLOCKED' }
 
     exec(blocked, parseEvent(getStartedPostback)).action.should.equal('NONE')
@@ -3600,7 +3589,7 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
     state.forms.should.eql([process.env.FALLBACK_FORM, 'mnchweeklanguage'])
   })
 
-  // DEFER must stay a pure no-op in the FOLD. `exec` runs during replay as well
+  // The refusal must stay a pure no-op in the FOLD. `exec` runs during replay as well
   // as live, and these logs are historical: every one of the 3,732 rows replays
   // through this branch on every cache miss.
   it('replays a log containing refused entries without throwing', () => {

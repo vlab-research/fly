@@ -295,13 +295,10 @@ describe('Machine integrated', () => {
   // platform has to come from somewhere else, or WhatsApp conversations get
   // 'messenger' send commands and message-worker rejects them.
   //
-  // UPDATED with §7.1: it comes from THE EVENT (source.platform, surfaced by the
-  // event-normalizer from the top-level `platform` field that hermes now stamps
-  // on every event — §7.3), not from the persisted state.md.platform. The state
-  // is the wrong place to read it: before §7.1 keyed the cache by conversation,
-  // a participant messaging two accounts shared one state blob, so md.platform
-  // could name the *other* conversation's platform. The md on the state below is
-  // deliberately left in place and is deliberately NOT what makes this pass.
+  // It comes from THE EVENT, not from the persisted state.md.platform: a
+  // participant messaging two accounts can hold a state blob whose md names the
+  // OTHER conversation's platform. The md below is deliberately left in place and
+  // is deliberately not what makes this pass.
   it('produces whatsapp commands for a synthetic timeout on a whatsapp conversation', async () => {
     const m = new Machine()
 
@@ -534,47 +531,38 @@ describe('Machine integrated', () => {
 
 
   // A synthetic event on a conversation that replayed as START. The machine
-  // DEFERs (machine.js `_handleExternalEvent`) and the shell must publish and
-  // cache NOTHING -- lib/index.js gates both `publishState` and
-  // `stateStore.updateState` on `report.newState`, and `scribble/state.go`
-  // UPSERTs unconditionally, so any state published here would overwrite the
-  // conversation's real `states` row. That row is what dean's `Timeouts()` and
-  // `Payments()` sweeps select on, so leaving it alone is the retry path.
-  //
-  // These assert the ABSENCE of newState, not merely that no command was sent:
-  // asserting only on `commands` would pass against a build that happily
-  // clobbered `states` with a START row.
-  describe('DEFER (synthetic event, no conversation)', () => {
+  // no-ops, so the state that reaches `states` and the cache must be the one it
+  // came in with -- unchanged, still START, still empty.
+  describe('synthetic event, no conversation', () => {
     const timeout = synthetic({ type: 'timeout', value: 1000 })
     const click = synthetic({
       type: 'external',
       value: { type: 'linksniffer:click', url: 'https://example.com' }
     })
 
-    const deferred = async event => {
+    const refused = async event => {
       const m = new Machine()
-      // Would throw if it were ever reached; a DEFER must short-circuit before
+      // Would throw if it were ever reached; the no-op must short-circuit before
       // actionsResponses, which is where the 305 lookup and the send would happen.
       m.getForm = () => Promise.reject(new Error('getForm must not be reached'))
       return m.run(_initialState(), 'bar', event)
     }
 
-    it('publishes no state, so `states` is not clobbered', async () => {
-      const report = await deferred(timeout)
+    it('leaves the state untouched, so `states` is not advanced', async () => {
+      const report = await refused(timeout)
 
-      should.not.exist(report.newState)
+      report.newState.should.eql(_initialState())
     })
 
-    it('writes nothing to the state cache', async () => {
-      // Same property, stated as the cache contract: updateState is called only
-      // when newState exists, so no newState means no poisoned Redis key either.
-      const report = await deferred(click)
+    it('caches nothing but the state it started from', async () => {
+      const report = await refused(click)
 
-      should.not.exist(report.newState)
+      report.newState.state.should.equal('START')
+      report.newState.forms.should.eql([])
     })
 
     it('publishes no machine_report and sends no message', async () => {
-      const report = await deferred(timeout)
+      const report = await refused(timeout)
 
       report.publish.should.be.false
       should.not.exist(report.commands)
@@ -582,11 +570,11 @@ describe('Machine integrated', () => {
       should.not.exist(report.error)
     })
 
-    it('still reports the conversation it could not name', async () => {
+    it('still reports the conversation the event named', async () => {
       const event = synthetic({ type: 'timeout', value: 1000 }, {
         source: { type: 'synthetic', account_id: PAGE_ID, platform: 'whatsapp' }
       })
-      const report = await deferred(event)
+      const report = await refused(event)
 
       report.user.should.equal('bar')
       report.timestamp.should.equal(event.timestamp)
@@ -595,10 +583,10 @@ describe('Machine integrated', () => {
     })
 
     // The contrast case: a Messenger handover on the same empty state is NOT
-    // deferred, so the shell publishes normally. If this ever starts failing,
+    // refused, so the shell publishes normally. If this ever starts failing,
     // the guard has been widened from "synthetic" to "external" and the
     // documented handover race is broken.
-    it('does not defer a Messenger handover on the same empty state', async () => {
+    it('does not refuse a Messenger handover on the same empty state', async () => {
       const m = new Machine()
       m.getForm = () => Promise.resolve([{ logic: [], fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }] }, 'surveyid'])
 
@@ -611,17 +599,11 @@ describe('Machine integrated', () => {
   })
 
 
-  // The second DEFER reason: a form-less entry event (Messenger's bare
-  // `get_started`, or a referral whose ref names no form) arriving on a
-  // conversation that already has a form. The machine refuses it (machine.js's
-  // REFERRAL case) and the shell must write NOTHING.
-  //
-  // This is a real webhook, always account-correct, so `_noop()` would UPSERT
-  // `states` with content byte-identical to what's already there (only
-  // `updated` would move, and nothing reads `updated` for correctness). DEFER
-  // over `_noop()` is hygiene here -- skipping a pointless write -- not
-  // preventing a destructive one.
-  describe('DEFER (form-less entry on a live conversation)', () => {
+  // A form-less entry event (Messenger's bare `get_started`, or a referral whose
+  // ref names no form) arriving on a conversation that already has a form. The
+  // machine no-ops it (machine.js's REFERRAL case), so the live conversation
+  // must come back out of the shell exactly as it went in.
+  describe('form-less entry on a live conversation', () => {
     const rawGetStarted = {
       source: 'messenger',
       sender: { id: USER_ID },
@@ -633,30 +615,29 @@ describe('Machine integrated', () => {
     // A live conversation on a different form in the same account, awaiting an answer.
     const live = { ..._initialState(), state: 'QOUT', forms: ['mnchweeklanguage'], question: 'foo' }
 
-    const deferred = async () => {
+    const refused = async () => {
       const m = new Machine()
-      // Would throw if reached: a DEFER must short-circuit before the
+      // Would throw if reached: the no-op must short-circuit before the
       // FALLBACK_FORM lookup and the send.
       m.getForm = () => Promise.reject(new Error('getForm must not be reached'))
       return m.run(live, USER_ID, rawGetStarted)
     }
 
-    it('publishes no state, so the live conversation is not clobbered', async () => {
-      const report = await deferred()
+    it('leaves the live conversation exactly as it was', async () => {
+      const report = await refused()
 
-      should.not.exist(report.newState)
+      report.newState.should.eql(live)
     })
 
-    it('writes nothing to the state cache', async () => {
-      // Same property as the cache contract: updateState is called only when
-      // newState exists, so no newState means no poisoned Redis key either.
-      const report = await deferred()
+    it('does not switch the participant onto FALLBACK_FORM', async () => {
+      const report = await refused()
 
-      should.not.exist(report.newState)
+      report.newState.state.should.equal('QOUT')
+      report.newState.forms.should.eql(['mnchweeklanguage'])
     })
 
     it('publishes no machine_report, sends no message, records no response', async () => {
-      const report = await deferred()
+      const report = await refused()
 
       report.publish.should.be.false
       should.not.exist(report.commands)
@@ -665,7 +646,7 @@ describe('Machine integrated', () => {
     })
 
     it('still reports the conversation the event was refused for', async () => {
-      const report = await deferred()
+      const report = await refused()
 
       report.user.should.equal(USER_ID)
       report.timestamp.should.equal(rawGetStarted.timestamp)

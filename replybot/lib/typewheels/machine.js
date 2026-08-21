@@ -110,22 +110,6 @@ function _isSynthetic(event) {
 }
 
 
-// WHY a DEFER happened.
-//
-// To the FOLD both reasons mean one thing -- "this event cannot be interpreted
-// against this state" -- and `apply` treats them identically. To whoever is
-// watching production they are different failures with different rates and
-// different owners, so `transition.js` turns each into its own greppable tag and
-// its own log line. They are string constants rather than free text for the same
-// reason the tags themselves are: each one is the entire instrument for a failure
-// mode that is otherwise silent, so nothing else in the codebase may use these
-// strings.
-//
-// They live here, not in transition.js, because `exec` is what decides them, and
-// transition.js already imports from this module (the reverse would be a cycle).
-const DEFER_SYNTHETIC_NO_CONVERSATION = 'SYNTHETIC_EVENT_NO_CONVERSATION'
-const DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION = 'FALLBACK_ENTRY_ON_LIVE_CONVERSATION'
-
 
 // Pure, total. Did this entry event NAME a form, or is its form about to come
 // from FALLBACK_FORM?
@@ -160,51 +144,11 @@ function _refNamesForm(event) {
 }
 
 function _handleExternalEvent(state, nxt, includeMetadata = false) {
-  // In START there is no conversation to attach this to, and no md. Start a
-  // form, as TEXT/MEDIA do -- otherwise makeEventMetadata() gets merged into a
-  // missing md ({ ...undefined, ...{...} }), producing a truthy husk with no
-  // startTime that passes transition.js's `!md` guard and then throws in
-  // getForm.
-  //
-  // ...but ONLY for a real platform event. The two callers are not equivalent:
-  //
-  //   HANDOVER_EVENT  -- a Messenger thread-control passback. A genuine
-  //     first-contact event: an ad click emits the handover ~1.5s BEFORE the
-  //     quick_reply carrying the referral, so blank-starting FALLBACK_FORM here
-  //     and letting the referral switch forms afterwards is the designed
-  //     behaviour (documentation/referral-form-resolution.md §6b).
-  //
-  //   EXTERNAL_EVENT  -- a SYNTHETIC event: a dean `timeout`, a dinersclub
-  //     payment result, a linksniffer click, a moviehouse video event. Every one
-  //     of these exists only BECAUSE a conversation already exists -- dean
-  //     selects from a `states` row in WAIT_EXTERNAL_EVENT, a payment result
-  //     requires an issued payment, a click or a video event requires a field to
-  //     have been rendered and sent. So `state === 'START'` here is
-  //     self-contradictory. It does not mean "new participant"; it means the log
-  //     we just replayed is not this conversation's log -- either the scribble
-  //     messages sink has not archived it yet (replybot and scribble consume
-  //     `chat-events` in parallel, so scribble is systematically behind for a
-  //     brand-new conversation), or the account the event named is not the
-  //     account the conversation lives on (linksniffer and moviehouse read a
-  //     researcher-authored `pageid` out of a webview URL; see plan §8.4).
-  //
-  // Neither of those is a reason to enter a survey, and entering one is not
-  // untidy but severe: FALLBACK_FORM is a real, live survey in the same
-  // account -- but not the survey the participant should be on, so their
-  // answers are misattributed to it and misrouted participants look like
-  // completions, which is the exact failure signature of VIR-19 and of the
-  // CTWA defect in the plan's Appendix A. So we DEFER instead: fold to
-  // nothing, publish nothing, cache nothing, and let the producer's own sweep
-  // re-deliver the event once the log is whole. See
-  // planning/conversation-identity.md §7.1 (CORRECTED).
+  // A synthetic event cannot be a first contact -- every producer requires the
+  // conversation to already exist -- so there is nothing to start. A handover can
+  // be: an ad click emits it ~1.5s before the quick_reply carrying the referral.
   if (state.state === 'START') {
-    if (_isSynthetic(nxt)) {
-      return {
-        action: 'DEFER',
-        reason: DEFER_SYNTHETIC_NO_CONVERSATION,
-        event_type: nxt.event_type
-      }
-    }
+    if (_isSynthetic(nxt)) return _noop()
     return _blankStart(nxt)
   }
 
@@ -407,76 +351,26 @@ function exec(state, nxt) {
 
       // FALLBACK_FORM MAY START A CONVERSATION. IT MAY NEVER RE-ENTER ONE.
       //
-      // An entry event that names no form resolves to FALLBACK_FORM (§6 of
-      // documentation/referral-form-resolution.md). Two shapes reach here:
-      // Messenger's bare `get_started` postback, which the normalizer maps to
-      // `conversation_started` with `referral: undefined`, and a referral whose
-      // ref carries no `form` pair (`clickToMessengerAds`, `homescreenpwa`, a
-      // CTWA referral object with no `ref` at all).
+      // An entry event naming no form resolves to FALLBACK_FORM. Two shapes reach
+      // here: Messenger's bare `get_started`, and a referral whose ref carries no
+      // `form` pair. Blank-starting either onto a conversation that already has a
+      // form pushes FALLBACK_FORM onto its stack and replaces `md` wholesale, so
+      // the participant's answers land on the wrong survey and look like
+      // completions.
       //
-      // Until now this case blank-started at ANY state -- alone among the entry
-      // paths, because TEXT/MEDIA/QUICK_REPLY/POSTBACK all guard on
-      // `state.state === 'START'`. The REFERRAL case does not, deliberately: a
-      // referral naming a form is SUPPOSED to switch a live participant onto it.
-      // That rule is right for a ref that names a form and catastrophic for an
-      // entry that names none, because `_blankStart` then pushes FALLBACK_FORM
-      // onto a live conversation's stack and replaces `md` wholesale.
+      // The discriminator is `state.forms.length`, NOT `state.state !== 'START'`.
+      // They agree on every measured row, and forms.length is safer where they
+      // diverge: a machine_report error arriving before entry leaves `ERROR` with
+      // an empty stack, and refusing entry there would strand a participant who has
+      // no conversation at all.
       //
-      // Measured in production 2026-08-17, and it is not a corner: 3,732 `states`
-      // rows have FALLBACK_FORM appended to an existing stack, continuously from
-      // 2020-06 to now at 10-90/month. Replaying 561 of their real logs through
-      // this machine puts them, at the moment of the append, in END (50%), QOUT
-      // (22%), RESPONDING (14%), WAIT_EXTERNAL_EVENT (7%), BLOCKED (6%) and ERROR
-      // -- 44% mid-survey. 96% were appended by a bare `get_started`. `305` is a
-      // real live survey in the same account -- but not the survey these
-      // participants should be on, so their answers land on it and are
-      // misattributed, looking like completions rather than errors: on the
-      // `ecd` page a language answer was recorded as `shortcode:'305',
-      // question_ref:'end'` and the participant was told "Sorry, I can't accept
-      // any responses now."
+      // A referral that DOES name a form still switches a live participant onto it.
+      // That is the intended behaviour and is why this case is narrow.
       //
-      // THE DISCRIMINATOR IS "THE CONVERSATION ALREADY HAS A FORM", not
-      // `state.state !== 'START'`. The two agree on every row measured -- all
-      // 3,732 appends were onto a non-empty stack, and all 450 replayed genuine
-      // fallback entries happened on the first event the machine acted on, so
-      // `forms: []` and `state: 'START'` coincided there -- and `forms.length` is
-      // the safer of the two in the states where they can diverge. A conversation
-      // can sit in a non-START state with an empty stack (a machine_report error
-      // arriving before entry leaves `ERROR` with `forms: []`), and refusing entry
-      // there would strand a participant who has no conversation at all. The
-      // converse divergence, `START` with a non-empty stack, is reachable through
-      // RESTORE_STATE, and that participant genuinely does have a conversation.
-      //
-      // ENTRY IS PRESERVED, AND THAT IS THE POINT. 162,148 `states` rows are
-      // FALLBACK_FORM conversations with a length-1 stack; replaying a
-      // 452-conversation sample shows what enters them: plain text 42%,
-      // `get_started` 35%, media 18%, referral-without-a-form 3%, quick_reply,
-      // handover. So `get_started` is not the sole organic entry signal but it is
-      // roughly a third of them -- some 57,000 conversations -- and 158 of those
-      // 159 `get_started` entries had no referral anywhere in their log. Ignoring
-      // `get_started` outright would have broken organic Messenger entry; this
-      // guard cannot, because every one of those entries has `forms: []`.
-      //
-      // WHY DEFER RATHER THAN _noop(). This event is a real webhook, always
-      // account-correct, so `_noop()` would UPSERT `states` with content
-      // byte-identical to what's already there -- `apply`'s default branch
-      // returns `state` unchanged, so only `updated` would move, and nothing
-      // reads `updated` for correctness (dean's Timeouts/Payments key off
-      // `current_state`/`calculated_timeout_date`, not it). DEFER's only real
-      // win here is skipping that pointless write. Hygiene, not safety.
-      //
-      // NOT DONE, deliberately: a `get_started` at QOUT could re-send the pending
-      // question, which is what the `_hasForm` branch above already does and would
-      // serve the 22% who tap Get Started mid-question. That is a product decision
-      // with its own state write, so it is recorded as a choice rather than taken
-      // in a bug fix. Doing nothing is the safe half of it.
-      if (!_refNamesForm(nxt) && state.forms.length) {
-        return {
-          action: 'DEFER',
-          reason: DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION,
-          event_type: nxt.event_type
-        }
-      }
+      // Not done deliberately: a `get_started` at QOUT could re-send the pending
+      // question, which is what the `_hasForm` branch above already does. That is a
+      // product decision with its own state write, not a bug fix.
+      if (!_refNamesForm(nxt) && state.forms.length) return _noop()
 
       return _blankStart(nxt)
     }
@@ -779,19 +673,6 @@ function exec(state, nxt) {
 function apply(state, output) {
   switch (output.action) {
 
-    // "This event cannot be interpreted against this state; do not interpret it."
-    //
-    // Explicit rather than left to the default branch, because DEFER must be a
-    // pure no-op IN THE FOLD and that is load-bearing. `exec` runs during replay
-    // as well as live -- getState() folds the archived log with it -- so making
-    // DEFER throw, or making it record anything, would either make a log that
-    // opens with a synthetic event permanently unreplayable or make the replayed
-    // state diverge from the live one. The refusal is enacted by the SHELL
-    // (transition.js `run`), which declines to publish or cache anything; the
-    // core just declines to move.
-    case 'DEFER':
-      return state
-
     case 'WATERMARK':
       return { ...state, ...output.update }
 
@@ -1011,12 +892,9 @@ function _wrapSideEffect(ctx, data) {
 }
 
 // Payment events are published off-pipeline (VLAB_PAYMENT_TOPIC, consumed by
-// dinersclub) and carry the conversation's platform so downstream consumers
-// can route/report by platform. ctx.platform is threaded from
-// actionsResponses (transition.js), which now receives it from transition() --
-// i.e. derived from THE EVENT. It used to read the persisted md.platform, one of
-// the two fields that bled between a participant's conversations before the state
-// cache was keyed by the conversation (§7.1).
+// dinersclub) and carry the conversation's platform so consumers can route by it.
+// ctx.platform is threaded from transition() -- derived from THE EVENT, never from
+// the persisted md.
 function _wrapPayment(ctx, payment) {
   if (!payment) return
   return {
@@ -1159,8 +1037,6 @@ function getMessage(log, form, user, page) {
 }
 
 module.exports = {
-  DEFER_SYNTHETIC_NO_CONVERSATION,
-  DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION,
   categorizeEvent,
   makeEventMetadata,
   getWatermark,

@@ -165,7 +165,7 @@ Two consequences worth knowing while debugging:
   - **Un-backfilled rows are still included.** `get()` matches
     `account_id = $2 OR account_id IS NULL`, so rows archived before migration 26 replay for
     whichever account is asking — exactly as they did before, no better and no worse. This is
-    temporary scaffolding that drains as `devops/backfill-messages-account.sh` runs. So if a
+    temporary scaffolding that drains as `devops/backfill` runs. So if a
     replay looks like it is mixing two conversations, **check whether those rows have a NULL
     `account_id`** before treating it as a regression:
 
@@ -235,47 +235,38 @@ WHERE s.state_json->'md'->>'form' = '305'
   AND jsonb_array_length(s.state_json->'forms') > 1;
 ```
 
-**What happens now instead: `DEFER`.** A synthetic event on a conversation that reconstructs as
-`START` is refused. `machine.js`'s `_handleExternalEvent` returns `{ action: 'DEFER' }`, which
-folds as a pure no-op, and `transition.js`'s `run` returns **without `newState`** — so
-`lib/index.js` publishes no state and writes no cache key, and one line is logged:
+**What happens now instead: nothing.** A synthetic event on a conversation that reconstructs as
+`START` is refused. `machine.js`'s `_handleExternalEvent` returns `_noop()`, so `apply`'s
+default branch leaves the state alone and `transition.js` returns `publish: false` — no message
+is sent and no form is entered. The unchanged state is still published and cached, exactly as
+any other `_noop()`.
 
-```
-SYNTHETIC_EVENT_NO_CONVERSATION refusing to blank-start FALLBACK_FORM from a synthetic event; dropping it {"user":…,"page":…,"platform":…,"event_type":"synthetic_external"}
-```
+Note that `START` here is **not** proof the conversation is missing. `apply`'s `RESET` returns
+`{ ..._initialState(), pointer }`, so a `?ref=form.reset` referral leaves a live conversation in
+`START`, and the `pointer` it sets truncates the replay (`chatbase.get()`'s
+`message_pointer <= m.timestamp`) so the log keeps reconstructing as `START` until the next
+inbound event. 1,623 production rows are in `START`, 461 with a pointer. A stale synthetic
+event landing on one of those is the ordinary case, not a fault.
 
-**Publishing nothing is the point, not a side effect.** `scribble/state.go` writes with a bare
-`UPSERT`, so any state published here would overwrite the conversation's real `states` row —
-and that row is what every recovery sweep selects on. Leaving it alone **is** the retry: dean's
-`Timeouts()` re-fires every 10 minutes for up to `DEAN_TIMEOUT_MAX_PAST=72 hours` while
-`current_state = 'WAIT_EXTERNAL_EVENT'`, dean's `Payments()` re-issues a `repeat_payment` after
-2 hours, and moviehouse heartbeats again in 30 s. A linksniffer click has no re-send and is
-genuinely lost.
+**Nothing is logged.** There is no greppable tag, so this refusal cannot be counted from pod
+logs. To find affected conversations, query `states` directly rather than grepping.
 
-An `ERROR` state with a retryable tag was considered and is **worse**: it clobbers that row, a
-new tag is not in `DEAN_ERROR_TAGS` so nothing sweeps it, and even inside the tag set a redo
-re-reads the same corrupt cached state and re-fails — see the `FIELD_NOT_FOUND` comment at
+An `ERROR` state with a retryable tag was considered and is **worse**: it clobbers the `states`
+row, a new tag is not in `DEAN_ERROR_TAGS` so nothing sweeps it, and even inside the tag set a
+redo re-reads the same corrupt cached state and re-fails — see the `FIELD_NOT_FOUND` comment at
 `devops/values/production.yaml:170-183`, where a sweep of 40 participants recovered exactly
 zero.
 
-**There is a second `DEFER` reason, with its own tag.** A **form-less entry event** — Messenger's
-bare `get_started`, or a referral whose `ref` names no form — arriving on a conversation that
-already has a form is refused the same way, by `machine.js`'s `REFERRAL` case. Same mechanism (no
-`newState`, so no `states` UPSERT and no cache key), different line:
-
-```
-FALLBACK_ENTRY_ON_LIVE_CONVERSATION refusing to re-enter a live conversation on FALLBACK_FORM; dropping the entry event {"user":…,"page":…,"platform":…,"event_type":"conversation_started","state":"QOUT","form":"mnchweeklanguage"}
-```
-
-The tags are separate on purpose: this one is *expected* to be non-zero (10–90/month
-historically), while `SYNTHETIC_EVENT_NO_CONVERSATION` is the canary that should read zero. The
-`state` and `form` fields say which conversation was protected. If a participant reports "I
-tapped Get Started and nothing happened", this is why — and the answer is an explicit
-`form.<shortcode>` ref, not a bare Get Started. Full account, including the detector query:
+**A second refusal works the same way.** A **form-less entry event** — Messenger's bare
+`get_started`, or a referral whose `ref` names no form — arriving on a conversation that already
+has a form is refused by `machine.js`'s `REFERRAL` case, also with `_noop()`. It is *expected* to
+be non-zero (10–90/month historically). If a participant reports "I tapped Get Started and
+nothing happened", this is why — and the answer is an explicit `form.<shortcode>` ref, not a bare
+Get Started. Full account, including the detector query:
 `documentation/referral-form-resolution.md`, "A form-less entry event may not re-enter a live
 conversation".
 
-**Two things `DEFER` deliberately does not cover:**
+**Two things these refusals deliberately do not cover:**
 
 - **A Messenger thread-control handover still blank-starts `FALLBACK_FORM`, and should.** It is
   a real platform event, and on an ad click it lands ~1.5 s *before* the quick_reply carrying
@@ -286,11 +277,18 @@ conversation".
   resolves through `FALLBACK_FORM`, and exodus has no re-sweep — dropping it would silently
   un-bail someone.
 
-**Still open.** `DEFER` closes the `FALLBACK_FORM` door, not the general one. On the degraded
-path any event whose replay comes back short still publishes a truncated state, and the bare
-`UPSERT` makes that a clobber — a no-op `machine_report` at `START` publishes a `START` row over
-a live conversation. Transient rather than terminal (the next event re-replays), but if you see
-a `states` row inexplicably reset to `START`, this is the mechanism.
+**Still open.** The refusal closes the `FALLBACK_FORM` door, not the general one. On the
+degraded path any event whose replay comes back short still publishes a truncated state, and
+the bare `UPSERT` makes that a clobber — a `_noop()` at `START` publishes a `START` row over a
+live conversation. This applies to the synthetic refusal above as well, since `_noop()` returns
+`newState`: if the replay was short because the archive was lagging, the `START` it publishes
+overwrites a real `WAIT_EXTERNAL_EVENT` row, which is what dean's `Timeouts()` selects on
+(`dean/queries.go:199`). That was the one thing a bespoke refusal action bought, and it was
+judged not worth the vocabulary — the same clobber is reachable from every other event type on
+the same degraded path, so guarding one of them was inconsistent rather than safer.
+
+Transient rather than terminal (the next event re-replays), but if you see a `states` row
+inexplicably reset to `START`, this is the mechanism.
 
 ### Blocking a participant destroys `md`: the `getForm`/`INTERNAL` failure
 

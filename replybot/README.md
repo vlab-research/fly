@@ -149,7 +149,7 @@ the pipeline depends on: `startTime` (needed by `getForm` to resolve the form ve
 was a quick_reply or a "Get Started" postback. All five paths then shared the same
 `state.state === 'START'` check.
 
-### A SYNTHETIC event may not blank-start (`DEFER`)
+### A SYNTHETIC event may not blank-start
 
 Sharing that check across all five was one path too many. `_handleExternalEvent` has two
 callers and they are not equivalent:
@@ -157,48 +157,38 @@ callers and they are not equivalent:
 | Caller | `source.type` | At `START` | Why |
 |---|---|---|---|
 | `HANDOVER_EVENT` | `messenger` | **blank-starts** | A Messenger thread-control passback is genuine first contact: on an ad click it lands ~1.5 s *before* the quick_reply carrying the referral, which then switches the participant onto the referred form. See `documentation/referral-form-resolution.md` §6b and the handover-race test in `machine.test.js`. |
-| `EXTERNAL_EVENT` | `synthetic` | **`DEFER`** | A dean `timeout`, a dinersclub payment result, a linksniffer click and a moviehouse video event exist *only because a conversation already exists*. `START` here is self-contradictory. |
+| `EXTERNAL_EVENT` | `synthetic` | **`_noop()`** | A dean `timeout`, a dinersclub payment result, a linksniffer click and a moviehouse video event exist *only because a conversation already exists*, so none of them can be a first contact. |
 
-For a synthetic event, `state === 'START'` does not mean "new participant" — it means the log
-just replayed is not this conversation's log. Either the scribble `messages` sink has not
-archived it yet (replybot and scribble consume `chat-events` in parallel, so scribble is
-systematically behind for a brand-new conversation), or the event named an account the
-conversation does not live on (on a legacy hand-authored `webview`, `linksniffer` and
-`moviehouse` read the account out of a query string the *researcher* wrote — routinely a page
-id copied from another survey; the `link_tracking` and `moviehouse` field types remove that by
-building the query string here instead). Neither is a reason to enter a survey, and entering
-one is severe rather than untidy: `FALLBACK_FORM` is production `305`, a real live survey in
-the same account — but not the survey the participant should be on, so their answers are
-misattributed to it, and misrouted participants finish in one message and therefore look like
-completions.
+`START` is a reachable state of a live conversation, not a contradiction. `apply`'s `RESET`
+returns `{ ..._initialState(), pointer }`, so a `?ref=form.reset` referral leaves the
+conversation in `START` with a `pointer` — and that pointer truncates the replay
+(`chatbase.get()`'s `message_pointer <= m.timestamp`), so even a whole, correctly-scoped log
+replays as `START` afterwards. 1,623 production `states` rows are in `START`, 461 of them
+with a pointer. `USER_BLOCKED` and `RESTORE_STATE` set the pointer too. An empty replay —
+a genuinely new conversation, an archive lag, or an event naming an account the conversation
+does not live on — gets there as well.
 
-So `_handleExternalEvent` returns `{ action: 'DEFER' }` when `_isSynthetic(nxt)`:
+In every one of those cases the event is either stale or uninterpretable, and in none of them
+is entering a survey the right answer. `FALLBACK_FORM` is production `305`; shortcodes are
+user-scoped (`formcentral/db.go:82` resolves by the account owner's `userid`), so this never
+crosses an account — but it does put the participant on the *wrong survey inside their own
+account*, where they finish in one message and look like a completion.
 
-- `apply` treats `DEFER` as a **pure no-op**. That is load-bearing: `exec` runs during replay
-  as well as live (`getState` folds the archived log with it), so throwing here would make any
-  log that *opens* with a synthetic event permanently unreplayable — turning a transient archive
-  lag into a permanently dead conversation.
-- `transition.js`'s `run` returns **without `newState`**, and `lib/index.js` gates both
-  `publishState` and `stateStore.updateState` on `report.newState`. So nothing is UPSERTed into
-  `chatroach.states` and nothing is written to the cache.
-- One line is logged, tagged `SYNTHETIC_EVENT_NO_CONVERSATION` (exported from
-  `lib/typewheels/transition.js`), carrying the user, page, platform and event type.
+So `_handleExternalEvent` returns `_noop()` when `_isSynthetic(nxt)`. `apply`'s default branch
+returns `state` unchanged, and `transition.js` returns `publish: false`, so no message is sent
+and no form is entered. The unchanged state is still published and cached, exactly as any
+other `_noop()` — there is no separate refusal path.
 
-**Publishing nothing is the mechanism, not a detail.** `scribble/state.go` writes with a bare
-`UPSERT`, so any state published here overwrites the conversation's real `states` row — and that
-row is what every recovery sweep selects on. Leaving it alone *is* the retry path: dean's
-`Timeouts()` re-fires every 10 minutes for up to 72 hours while
-`current_state = 'WAIT_EXTERNAL_EVENT'`; dean's `Payments()` re-issues `repeat_payment` after
-2 hours; moviehouse heartbeats again within 30 s. A linksniffer click has no re-send and is
-genuinely lost — named rather than hidden, and still far better than misattributing the
-participant's answers to the wrong survey.
+**Nothing is logged.** There is no greppable tag for this, so the rate is not measurable from
+pod logs; it was considered and deliberately left out rather than adding a bespoke action to
+carry a reason string.
 
-An `ERROR` state with a new retryable tag was considered and rejected: it clobbers that row, a
-new tag is not in `DEAN_ERROR_TAGS`, and even inside the tag set the redo re-reads the same
-cached corrupt state and re-fails. See the `FIELD_NOT_FOUND` comment at
+An `ERROR` state with a new retryable tag was considered and rejected: it clobbers the
+`states` row, a new tag is not in `DEAN_ERROR_TAGS`, and even inside the tag set the redo
+re-reads the same cached corrupt state and re-fails. See the `FIELD_NOT_FOUND` comment at
 `devops/values/production.yaml:170-183`.
 
-An exodus `BAILOUT` at `START` is **not** deferred: it names its own form, so it never resolves
+An exodus `BAILOUT` at `START` is **not** refused: it names its own form, so it never resolves
 through `FALLBACK_FORM`, and exodus has no re-sweep.
 
 Note all of this covers users who arrive without a conversation. A user who *had* one and lost
@@ -206,7 +196,7 @@ their `md` — `block_user` drops it — is damaged rather than new, and is not 
 that would append the fallback form and silently reassign a real participant mid-survey.
 See `planning/blocked-user-durability-handoff.md`.
 
-### A FORM-LESS entry may not re-enter a live conversation (`DEFER`)
+### A FORM-LESS entry may not re-enter a live conversation
 
 The five paths above guard on `state.state === 'START'`. `REFERRAL` did not, and that was the
 last unguarded way into `FALLBACK_FORM`. It blank-started at **any** state, deliberately: a
@@ -231,9 +221,7 @@ existing stack, continuously from **2020-06** at 10–90/month. Replaying 561 of
 So `exec`'s `REFERRAL` case now ends:
 
 ```js
-if (!_refNamesForm(nxt) && state.forms.length) {
-  return { action: 'DEFER', reason: DEFER_FALLBACK_ENTRY_ON_LIVE_CONVERSATION, event_type: nxt.event_type }
-}
+if (!_refNamesForm(nxt) && state.forms.length) return _noop()
 return _blankStart(nxt)
 ```
 
@@ -245,13 +233,13 @@ return _blankStart(nxt)
   measured, and `forms.length` is safer where they diverge — a `machine_report` error before
   entry leaves `ERROR` with an empty stack, and refusing entry there would strand someone who
   has no conversation at all.
-- **`DEFER`, not `_noop()`.** `_noop` returns `newState`, which `lib/index.js` publishes and
-  `scribble/state.go` UPSERTs over the live conversation's real `states` row, bumping `updated`
-  with it. Nothing happened, so nothing is written.
-- `DEFER` now carries a **`reason`**, and `transition.js` gives each reason its own tag:
-  `SYNTHETIC_EVENT_NO_CONVERSATION` (above) and **`FALLBACK_ENTRY_ON_LIVE_CONVERSATION`**. The
-  first is the instrument for §7.1's "watch 24 h, expect zero" canary, so it must not be
-  inflated by a defect expected to register 10–90/month.
+- **`_noop()`, like every other refusal in `exec`.** It returns `newState` unchanged, which
+  `lib/index.js` publishes and `scribble/state.go` UPSERTs back over the live conversation's
+  own `states` row — byte-identical content, only `updated` moves, and nothing reads `updated`
+  for correctness (dean's `Timeouts()`/`Payments()` key off `current_state` and
+  `calculated_timeout_date`). Avoiding that write was the only thing a bespoke refusal action
+  bought, and it was not worth the vocabulary.
+- **Nothing is logged**, so the rate of this refusal is not measurable from pod logs.
 
 **Entry still works, and that is the constraint that shaped the guard.** 162,148 `states` rows
 are `FALLBACK_FORM` conversations with a length-1 stack; a replayed 452-row sample shows plain
@@ -407,7 +395,7 @@ corrected in `planning/conversation-identity.md` §7.1.** A cache miss happens t
 to whatever arrives, including the second event of a brand-new conversation — and replybot and
 scribble consume `chat-events` **in parallel**, so for a new conversation scribble is behind by
 construction. A short or empty replay reconstructs as `START`, which used to blank-start
-`FALLBACK_FORM`; see "A SYNTHETIC event may not blank-start (`DEFER`)" above. Two further
+`FALLBACK_FORM`; see "A SYNTHETIC event may not blank-start" above. Two further
 differences: an empty replay is also reachable with a perfectly current archive if the event
 named the wrong account, and this path has **no memoization at all** (the write is refused too),
 so it re-scans up to `STATE_STORE_LIMIT` rows on *every* event rather than once per TTL.
@@ -496,7 +484,7 @@ talked to — that is the bug this shape exists to prevent.
 The scoped query filters `messages` on `(m.account_id = $2 OR m.account_id IS NULL)` and
 filters the `states` subquery to that one account's `message_pointer`. The `IS NULL`
 branch is **migration scaffolding**: rows predating `devops/migrations/26-messages-account.sql`
-carry no account until `devops/backfill-messages-account.sh` reaches them, and excluding
+carry no account until `devops/backfill` reaches them, and excluding
 them would make every un-backfilled conversation replay as empty. `chatbase.js` carries the
 removal gate for that branch inline.
 
