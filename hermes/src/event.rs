@@ -47,8 +47,8 @@ fn get_non_empty_field(event: &Value, field: &str) -> Option<String> {
         .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
 }
 
-/// Derives account_id for Messenger events per contract §2.
-/// Rule: sender.id if message.is_echo is boolean true, else recipient.id.
+/// The account for a Messenger event: sender.id when message.is_echo is boolean
+/// true (the account sent it), else recipient.id.
 /// Returns None if the account_id is not derivable or is empty.
 /// This function never panics on any input shape.
 pub fn messenger_account_id(event: &Value) -> Option<String> {
@@ -75,14 +75,14 @@ pub fn messenger_account_id(event: &Value) -> Option<String> {
     }
 }
 
-/// Derives account_id for synthetic events per contract §2.
+/// The account for a synthetic event.
 /// Prefers top-level "account_id", falls back to deprecated "page" alias.
 /// Returns None if neither is present or both are empty.
 pub fn synthetic_account_id(event: &Value) -> Option<String> {
     get_non_empty_field(event, "account_id").or_else(|| get_non_empty_field(event, "page"))
 }
 
-/// Derives platform for synthetic events per contract §2.
+/// The platform for a synthetic event.
 /// Returns the top-level "platform" field if present and non-empty.
 pub fn synthetic_platform(event: &Value) -> Option<String> {
     get_non_empty_field(event, "platform")
@@ -309,80 +309,172 @@ mod tests {
         assert_eq!(out.get("account_id"), None);
     }
 
-    // --- Fixture-driven Messenger account_id tests ---
-    // Loads shared test vectors from testdata/event-envelope/messenger-account-derivation.json
-    // per contract §5. Must not drift from the JS side (replybot/lib/event-normalizer.test.js).
+    // --- Messenger account_id: the shared derivation vectors ---
+    //
+    // testdata/event-envelope/messenger-account-derivation.json is the single
+    // specification for "which id is the account, and which is the participant".
+    // scribble (Go) and replybot (JS) assert the same file, so the three
+    // implementations cannot drift apart.
+    //
+    // One test per vector, named for the rule it pins. `every_vector_is_covered`
+    // fails if a vector is added to the fixture without a test here.
+
+    const FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../testdata/event-envelope/messenger-account-derivation.json"
+    ));
+
+    const COVERED: &[&str] = &[
+        "inbound_text",
+        "echo_of_bot_message",
+        "explicit_is_echo_false",
+        "quick_reply",
+        "postback_no_message_key",
+        "referral_entry",
+        "optin_one_time_notif",
+        "delivery_receipt",
+        "handover_pass_thread_control",
+        "echo_with_attachment",
+        "missing_recipient",
+        "echo_missing_sender",
+    ];
+
+    struct Vector {
+        event: Value,
+        account_id: Option<String>,
+        user_id: Option<String>,
+    }
+
+    fn vector(name: &str) -> Vector {
+        let fixture: Value = serde_json::from_str(FIXTURE).expect("fixture is valid JSON");
+        let found = fixture["vectors"]
+            .as_array()
+            .expect("fixture has a vectors array")
+            .iter()
+            .find(|v| v["name"] == name)
+            .unwrap_or_else(|| panic!("no vector named '{name}' in the fixture"))
+            .clone();
+
+        Vector {
+            event: found["event"].clone(),
+            account_id: found["expected"]["account_id"].as_str().map(String::from),
+            user_id: found["expected"]["user_id"].as_str().map(String::from),
+        }
+    }
+
+    // Every vector asserts the same three things: the account we derive, the
+    // participant we derive, and that stamping puts the account on the envelope.
+    fn check(name: &str) {
+        let v = vector(name);
+
+        assert_eq!(messenger_account_id(&v.event), v.account_id, "account_id");
+        assert_eq!(get_user_from_event(&v.event).ok(), v.user_id, "user_id");
+
+        let (_, bytes) = stamp_event(v.event.clone(), "messenger").expect("event stamps");
+        let stamped: Value = serde_json::from_slice(&bytes).expect("stamped event is valid JSON");
+
+        assert_eq!(stamped["platform"], "messenger");
+        assert_eq!(stamped["source"], "messenger");
+
+        match v.account_id {
+            Some(account) => assert_eq!(stamped["account_id"], json!(account)),
+            // Not derivable: the field must be absent, not present-and-null.
+            None => assert!(
+                stamped.get("account_id").is_none(),
+                "account_id must be absent when it cannot be derived"
+            ),
+        }
+    }
+
+    // The account is the recipient: the participant sent this to us.
 
     #[test]
-    fn messenger_account_id_from_shared_fixture() {
-        let fixture_json =
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/event-envelope/messenger-account-derivation.json"));
-        let fixture: serde_json::Value = serde_json::from_str(fixture_json)
-            .expect("fixture must be valid JSON");
+    fn inbound_text_takes_the_recipient_as_the_account() {
+        check("inbound_text")
+    }
 
-        let vectors = fixture
-            .get("vectors")
-            .and_then(|v| v.as_array())
-            .expect("fixture must have vectors array");
+    #[test]
+    fn quick_reply_takes_the_recipient_as_the_account() {
+        check("quick_reply")
+    }
 
-        assert!(!vectors.is_empty(), "fixture must contain at least one test vector");
+    #[test]
+    fn postback_without_a_message_key_takes_the_recipient_as_the_account() {
+        check("postback_no_message_key")
+    }
 
-        for vector in vectors {
-            let name = vector.get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("(unnamed)");
-            let event = &vector["event"];
-            let expected = &vector["expected"];
+    #[test]
+    fn referral_entry_takes_the_recipient_as_the_account() {
+        check("referral_entry")
+    }
 
-            // Test messenger_account_id derivation
-            let expected_account_id = expected.get("account_id").and_then(|a| a.as_str());
-            let derived_acct_opt = messenger_account_id(event);
-            let derived_account_id = derived_acct_opt.as_deref();
-            assert_eq!(
-                derived_account_id, expected_account_id,
-                "messenger_account_id mismatch for vector '{}': expected {:?}, got {:?}",
-                name, expected_account_id, derived_account_id
-            );
+    #[test]
+    fn optin_takes_the_recipient_as_the_account() {
+        check("optin_one_time_notif")
+    }
 
-            // Test user_id derivation (inversion check)
-            let expected_user_id = expected.get("user_id").and_then(|u| u.as_str());
-            let derived_user_opt = get_user_from_event(event).ok();
-            let derived_user_id = derived_user_opt.as_deref();
-            assert_eq!(
-                derived_user_id, expected_user_id,
-                "get_user_from_event mismatch for vector '{}': expected {:?}, got {:?}",
-                name, expected_user_id, derived_user_id
-            );
+    #[test]
+    fn delivery_receipt_takes_the_recipient_as_the_account() {
+        check("delivery_receipt")
+    }
 
-            // Test full stamp_event round-trip for Messenger
-            match stamp_event(event.clone(), "messenger") {
-                Ok((_, bytes)) => {
-                    let stamped: Value = serde_json::from_slice(&bytes)
-                        .expect("stamped event must be valid JSON");
-                    assert_eq!(stamped["platform"], "messenger",
-                        "platform not stamped for vector '{}'", name);
-                    assert_eq!(stamped["source"], "messenger",
-                        "source not stamped for vector '{}'", name);
+    #[test]
+    fn handover_takes_the_recipient_as_the_account() {
+        check("handover_pass_thread_control")
+    }
 
-                    if let Some(expected_acct) = expected_account_id {
-                        assert_eq!(
-                            stamped.get("account_id").and_then(|a| a.as_str()),
-                            Some(expected_acct),
-                            "account_id not stamped correctly for vector '{}'", name
-                        );
-                    } else {
-                        // When account_id is null/not derivable, it must not be stamped at all
-                        assert_eq!(
-                            stamped.get("account_id"), None,
-                            "account_id should not be stamped when null for vector '{}'", name
-                        );
-                    }
-                }
-                Err(e) => {
-                    panic!("stamp_event failed for vector '{}': {}", name, e);
-                }
-            }
-        }
+    // The echo inversion: an echo is a message the ACCOUNT sent, so the roles
+    // swap and the account is the sender. 28.8% of the archived table.
+
+    #[test]
+    fn echo_takes_the_sender_as_the_account() {
+        check("echo_of_bot_message")
+    }
+
+    #[test]
+    fn echo_with_an_attachment_takes_the_sender_as_the_account() {
+        check("echo_with_attachment")
+    }
+
+    // Only a boolean true inverts. An explicit false is an ordinary inbound
+    // message and must take the recipient.
+
+    #[test]
+    fn is_echo_false_does_not_invert() {
+        check("explicit_is_echo_false")
+    }
+
+    // Not derivable. The participant is still known, but the account is absent
+    // rather than guessed.
+
+    #[test]
+    fn a_missing_recipient_yields_no_account() {
+        check("missing_recipient")
+    }
+
+    #[test]
+    fn an_echo_with_no_sender_yields_no_account() {
+        check("echo_missing_sender")
+    }
+
+    #[test]
+    fn every_vector_is_covered() {
+        let fixture: Value = serde_json::from_str(FIXTURE).expect("fixture is valid JSON");
+        let mut in_fixture: Vec<String> = fixture["vectors"]
+            .as_array()
+            .expect("fixture has a vectors array")
+            .iter()
+            .map(|v| v["name"].as_str().expect("vector has a name").to_string())
+            .collect();
+        in_fixture.sort();
+
+        let mut covered: Vec<String> = COVERED.iter().map(|s| s.to_string()).collect();
+        covered.sort();
+
+        assert_eq!(
+            in_fixture, covered,
+            "the fixture and the tests above have diverged: add a #[test] for each new vector"
+        );
     }
 
     // --- Synthetic account_id and platform derivation tests ---
