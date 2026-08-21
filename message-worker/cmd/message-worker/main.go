@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/vlab-research/burrow"
 	messageworker "github.com/vlab-research/fly/message-worker"
 	"github.com/vlab-research/fly/message-worker/types"
-	"github.com/vlab-research/burrow"
 	"go.uber.org/zap"
 )
 

@@ -9,9 +9,9 @@ import (
 
 // SyntheticEvent is the payload POSTed to hermes /synthetic endpoint.
 type SyntheticEvent struct {
-	User      string           `json:"user"`
-	AccountID string           `json:"account_id"`
-	Platform  string           `json:"platform"`
+	User      string              `json:"user"`
+	AccountID string              `json:"account_id"`
+	Platform  string              `json:"platform"`
 	Event     *SyntheticEventType `json:"event"`
 }
 
