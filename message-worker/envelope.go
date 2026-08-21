@@ -9,20 +9,12 @@ import (
 
 // The event envelope, producer side.
 //
-// message-worker is a DIRECT PRODUCER to the chat-events topic. That contradicts
-// what `documentation/event-envelope.md` and `planning/conversation-identity.md`
-// §4 asserted until 2026-08-17 -- "chat-events has exactly one producer,
-// hermes" -- and the correction matters, because every claim about the envelope
-// being universally stamped rested on hermes being the only writer. It is not:
-// `emitWhatsAppEcho` publishes straight to KAFKA_EVENT_TOPIC (default
-// `chat-events`) via EventProducer.PublishRawEvent, bypassing hermes and
-// therefore bypassing hermes' derivation entirely.
+// message-worker is a DIRECT PRODUCER to chat-events: emitWhatsAppEcho publishes
+// straight to KAFKA_EVENT_TOPIC, bypassing hermes and its derivation. So the two
+// normalized fields are stamped here, and the guard below exists so the next
+// direct producer cannot repeat the omission silently.
 //
-// So the two normalized fields have to be stamped HERE, and the guard below
-// exists so that the next direct producer cannot repeat the omission silently.
-//
-// This file is the functional core: everything in it is pure and total. The
-// Kafka-side shell (kafka.go) does the IO and the logging.
+// Functional core: everything here is pure and total. kafka.go does the IO.
 
 // EnvelopeAccountIDField and EnvelopePlatformField are the two normalized
 // top-level fields every event body on chat-events carries
@@ -90,62 +82,47 @@ func BuildWhatsAppEcho(cmd types.SendMessageCommand, now time.Time) WhatsAppEcho
 	}
 }
 
-// MissingEnvelopeFields reports which normalized identity fields an
+// MissingEnvelopeFields reports which of the two normalized identity fields an
 // already-serialized chat-events body fails to carry, in a stable order. Pure
-// and total: it returns nil when the envelope is complete, and never panics or
-// errors for any input.
+// and total: nil when the envelope is complete, never panics or errors.
 //
-// It inspects the SERIALIZED BYTES rather than a typed struct on purpose. That
-// is what makes it a chokepoint instead of a convention: it holds for every
-// shape this service publishes -- the replybot-shaped echo, types.UniversalEvent,
-// and anything a future caller invents -- without any of them having to know the
-// guard exists.
+// It inspects the SERIALIZED BYTES rather than a typed command on purpose. That
+// is what makes it a chokepoint instead of a convention: it holds for every shape
+// this service publishes -- and for whatever a future direct producer invents --
+// without any of them having to know the guard exists. Today the only live
+// producer is emitWhatsAppEcho; emitMessageSent's call sites are commented out
+// (worker.go:187, :298) and emitMessageFailed has no caller.
 //
-// A field counts as present only when it is a NON-EMPTY JSON STRING. That is the
-// same rule hermes applies ("a field is stamped only when it derives to a
-// non-empty string") and the same rule replybot's identityComponent applies on
-// the consuming side. Two real shapes fail it in ways a presence check would
-// miss:
+// A field counts as present only when it is a NON-EMPTY JSON STRING -- the rule
+// hermes stamps by and replybot reads by. An empty string is a poisoned cache key
+// downstream rather than a name, and types.UniversalEvent marshals `platform` as
+// an object, which replybot's conversationFromRawEvent rejects: the conversation
+// would go unnamed while looking stamped.
 //
-//   - an empty string, which is a poisoned cache key downstream rather than a name;
-//   - types.UniversalEvent, whose `platform` marshals as the OBJECT
-//     {"type":..., "account_id":...} and which carries no top-level `account_id`
-//     at all. Its two emitters are dead today -- emitMessageSent's only call
-//     sites are commented out (worker.go:187, :301) and emitMessageFailed has no
-//     caller at all -- but they are one uncomment away from producing
-//     envelope-violating events, and an object-valued `platform` is worse than an
-//     absent one: replybot's conversationFromRawEvent rejects a non-string
-//     component, so the conversation would go unnamed while looking stamped.
-//
-// An unparseable or non-object body names neither field, which is the truthful
-// answer and not an error condition: this function's job is to say what the
-// event carries, not to validate JSON.
+// An unparseable or non-object body names both fields, which is the truthful
+// answer and not an error condition.
 func MissingEnvelopeFields(value []byte) []string {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(value, &fields); err != nil {
+	var body struct {
+		AccountID json.RawMessage `json:"account_id"`
+		Platform  json.RawMessage `json:"platform"`
+	}
+	if err := json.Unmarshal(value, &body); err != nil {
 		return []string{EnvelopeAccountIDField, EnvelopePlatformField}
 	}
 
 	var missing []string
-	for _, name := range []string{EnvelopeAccountIDField, EnvelopePlatformField} {
-		if !hasIdentityComponent(fields, name) {
-			missing = append(missing, name)
-		}
+	if !isNonEmptyString(body.AccountID) {
+		missing = append(missing, EnvelopeAccountIDField)
+	}
+	if !isNonEmptyString(body.Platform) {
+		missing = append(missing, EnvelopePlatformField)
 	}
 	return missing
 }
 
-// hasIdentityComponent is pure and total. See MissingEnvelopeFields for why
-// only a non-empty JSON string counts.
-func hasIdentityComponent(fields map[string]json.RawMessage, name string) bool {
-	raw, ok := fields[name]
-	if !ok {
-		return false
-	}
-
+// isNonEmptyString is pure and total. A missing field, a null, a number and an
+// object all answer false -- only a JSON string with content is a name.
+func isNonEmptyString(raw json.RawMessage) bool {
 	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return false
-	}
-	return s != ""
+	return json.Unmarshal(raw, &s) == nil && s != ""
 }
