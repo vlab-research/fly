@@ -761,20 +761,33 @@ message-worker:
     # topic through hermes, this one guards events message-worker writes to it
     # directly.
     #
-    #   "false" (here) -> log CHAT_EVENTS_ENVELOPE_MISSING at Error, publish anyway
-    #   "true"         -> refuse to publish an event lacking account_id/platform
+    #   "false"       -> log CHAT_EVENTS_ENVELOPE_MISSING at Error, publish anyway
+    #   "true" (here) -> refuse to publish an event lacking account_id/platform
     #
-    # STAGING IS WHERE THIS GETS TURNED ON FIRST, and it is the right place for
-    # it: refusing drops the WhatsApp send echo, and on WhatsApp that echo is
-    # the only thing that advances the conversation — so a stall here is a test
+    # STAGING IS WHERE THIS GETS TURNED ON FIRST, and this is the right place for
+    # it: refusing drops the WhatsApp send echo, and on WhatsApp that echo is the
+    # only thing that advances the conversation — so a stall here is a test
     # failure, while the same stall in production is a participant left hanging
-    # mid-survey. Flip to "true" here, confirm CHAT_EVENTS_ENVELOPE_MISSING
-    # reads zero for 24h, then flip production.yaml.
+    # mid-survey.
+    #
+    # NOT YET APPLIED as of this commit. Committing the value is half the change;
+    # it takes effect on
+    #   helm upgrade gbv vlab -f devops/values/staging.yaml -n vstag
+    #   kubectl rollout restart deployment/gbv-message-worker -n vstag
+    #
+    # Turned on deliberately for the account_id migration: a silent envelope
+    # omission that merely logs is one nobody chases, and the whole point of the
+    # migration window is to surface producer bugs immediately, while there is
+    # someone watching. A stalled staging survey is exactly the loud failure we
+    # want.
+    #
+    # PRODUCTION STAYS "false" until CHAT_EVENTS_ENVELOPE_MISSING reads zero here
+    # for 24h. Then flip production.yaml — as its own reviewed diff.
     #
     # Declared explicitly rather than left to config.go's default so turning it
     # on is a reviewable committed diff plus a rollout restart — never a
     # `kubectl set env` against live state.
-    value: "false"
+    value: "true"
   - name: KAFKA_GROUP_ID
     # Env-scoped: the Kafka cluster is shared with production. Mirrors the
     # vlab-<env>-* topic convention. See documentation/kafka-consumer-lag-alerting.md
