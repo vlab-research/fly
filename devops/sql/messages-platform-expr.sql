@@ -14,14 +14,11 @@
 -- /synthetic contract and only dean ever sent it: 84 of 200,000 sampled rows.
 -- The transport of a synthetic event is genuinely unrecorded in history.
 --
--- It is NOT guessed. The account id could be resolved to a platform through the
--- messaging-account registry, but that is a different phase's work (plan §5/§7.6)
--- and it would write an inference into an archival table as though it were
--- observed. `platform` is stored here rather than derived at read time precisely
--- because history must not be re-derived from mutable current state --
--- `credentials` cascades on user delete, so a deleted researcher would otherwise
--- strip the platform binding from history (plan §3.1). Writing a guess would
--- defeat the reason the column exists.
+-- It is NOT guessed. Resolving the account id to a platform would write an
+-- inference into an archival table as though it were observed. `platform` is
+-- stored rather than derived at read time precisely because history must not
+-- depend on mutable current state: `credentials` cascades on user delete, so a
+-- deleted researcher would otherwise strip the binding out of history.
 CASE
   WHEN NOT json_valid(content) THEN NULL
 

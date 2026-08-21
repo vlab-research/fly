@@ -4,7 +4,7 @@
 -- runnable statement on its own; it is substituted into a statement by its two
 -- consumers, which is the point:
 --
---   1. devops/backfill-messages-account.sh  -- the batched UPDATE
+--   1. devops/backfill (Go)                 -- the batched UPDATE
 --   2. scribble/account_test.go             -- TestBackfillSQLMatchesGo, which
 --      evaluates THIS FILE against the shared fixture vectors and asserts it
 --      agrees with ConversationFromHistoricalContent in scribble/account.go

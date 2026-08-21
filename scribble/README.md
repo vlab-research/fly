@@ -165,10 +165,11 @@ Rows archived before hermes stamped the normalized fields carry the account only
 under its per-shape name. The envelope work kept those fields in place precisely
 so the backfill and the forward path read the same source.
 
-- `devops/backfill-messages-account.sh` — batched, idempotent, interruptible, and
-  resumable. It walks the primary key with a cursor rather than filtering on
-  `account_id IS NULL`, because that predicate is not an index prefix and the
-  final batches would otherwise scan the whole table to find nothing.
+- `devops/backfill` (Go) — batched, idempotent, interruptible, and resumable. It
+  walks the primary key with a cursor rather than filtering on `account_id IS
+  NULL`, because that predicate is not an index prefix and the final batches would
+  otherwise scan the whole table to find nothing. The expressions run server-side,
+  so `content` never crosses the wire. Tested in `devops/backfill/integration_test.go`.
 - `devops/sql/messages-account-id-expr.sql` and `messages-platform-expr.sql` — the
   extraction rule, as **one** SQL expression each. The backfill substitutes them,
   and `TestBackfillSQLMatchesGo` evaluates the same two files against the shared

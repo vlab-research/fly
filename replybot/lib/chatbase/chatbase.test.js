@@ -238,7 +238,7 @@ describe('Chatbase Postgres', () => {
       // Historical rows predate migration 26 and carry NULL account_id. They must
       // still replay, or every pre-existing conversation comes back EMPTY. This
       // is the temporary `OR account_id IS NULL` branch; it is expected to be
-      // removed once devops/backfill-messages-account.sh has drained.
+      // removed once devops/backfill has drained.
       const t = Date.now();
       await archive('123', 'LEGACY', null, new Date(t));
       await archive('123', 'A_ONE', ACCT_A, new Date(t + 1000));
@@ -248,9 +248,7 @@ describe('Chatbase Postgres', () => {
     });
 
     it('applies only THIS account\'s message_pointer', async () => {
-      // The §2.2 item 4 leak: a form.reset on one account used to satisfy the
-      // checkpoint for another, because the states subquery was joined on userid
-      // and the pointer check passed if ANY account's pointer allowed it.
+      // A form.reset on one account must not satisfy the checkpoint for another.
       const t = Date.now();
       const later = new Date(t + 10000);
 
@@ -286,8 +284,8 @@ describe('Chatbase Postgres', () => {
     });
 
     it('never returns the same row twice', async () => {
-      // The other half of §2.2 item 4: the unfiltered states subquery returned
-      // one row per account, duplicating every message row N times.
+      // An unfiltered states subquery returns one row per account, duplicating
+      // every message row N times.
       const t = Date.now();
       await archive('123', 'A_ONE', ACCT_A, new Date(t));
       await setPointer('123', ACCT_A, null, new Date(t));
