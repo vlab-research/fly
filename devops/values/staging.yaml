@@ -159,7 +159,7 @@ dinersclub:
     - name: DINERSCLUB_POOL_SIZE
       value: "1"
     - name: DINERSCLUB_PROVIDERS
-      value: "fake,reloadly,giftcard,http"
+      value: "fake,reloadly,giftcard,http,dingconnect"
 
   # Prometheus scrape target. dinersclub is the first application service here
   # that Prometheus scrapes, and these metrics are not optional colour: since
