@@ -73,6 +73,25 @@ this phase must guarantee.
 `OR account_id IS NULL` migration-window branch, and that only *this* account's
 `message_pointer` applies.
 
+> **NULL-ACCOUNT-ID TOLERANCE REMOVAL CONDITION** — the `OR account_id IS NULL` clause in
+> `replybot/lib/chatbase` `get()` may be removed when, and only when, **zero rows in
+> `chatroach.messages` have a NULL `account_id` in every environment**:
+>
+> ```sql
+> SELECT count(*) FROM chatroach.messages WHERE account_id IS NULL;
+> ```
+>
+> At that point: drop the clause, delete B8-5a and B8-6, and tighten B8-5b into the strict
+> contract. The integration test **B8-6** (`facebot/testrunner/test.tc.ts`) greps this document
+> for the marker above and fails if it goes missing, so that whoever finds the odd-looking
+> `OR account_id IS NULL` clause finds the reasoning rather than guessing at it — and so that
+> removing the tolerance means deleting a documented decision on purpose, rather than quietly
+> tightening a `WHERE` clause.
+>
+> Note the count above never reaches zero on its own: ~3,000 rows are synthetic events that
+> carry no account at all and are permanently unattributable. See
+> `planning/messages-account-not-null-todo.md`.
+
 ### The refusals — `replybot/lib/typewheels/`
 
 `machine.test.js` and `transition.test.js`. Both refusals return `_noop()`:
