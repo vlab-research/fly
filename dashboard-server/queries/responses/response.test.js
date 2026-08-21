@@ -150,6 +150,11 @@ describe('Response queries', () => {
           response: 'last',
           timestamp: iso(timestamps[1]),
           metadata: null,
+          // The MOCK_QUERY insert above omits the metadata column entirely,
+          // so it is SQL NULL for every seeded row here — this pins that
+          // `responses.metadata->>'ad_id'` on a NULL metadata column comes
+          // back as null rather than erroring.
+          ad_id: null,
           pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[1]), '127', 'ref']),
@@ -167,6 +172,7 @@ describe('Response queries', () => {
           response: 'first',
           timestamp: iso(timestamps[2]),
           metadata: null,
+          ad_id: null,
           pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[2]), '127', 'ref']),
@@ -184,6 +190,7 @@ describe('Response queries', () => {
           response: 'first',
           timestamp: iso(timestamps[2]),
           metadata: null,
+          ad_id: null,
           pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[2]), '128', 'ref']),
@@ -201,6 +208,7 @@ describe('Response queries', () => {
           response: 'first',
           timestamp: iso(timestamps[3]),
           metadata: null,
+          ad_id: null,
           pageid: 'page1',
           translated_response: null,
           token: token.encoded([dbText(timestamps[3]), '126', 'ref']),
@@ -274,6 +282,10 @@ describe('Response queries', () => {
         const afterParam = token.encoded([timestamps[2], '126', 'ref']);
         const res = await Response.all(email, surveyName, afterParam);
         res.responses.length.should.equal(3);
+        // Adding the ad_id projection must not disturb the pagination
+        // cursor: the token is still built from (timestamp, userid,
+        // question_ref), and every row still carries an ad_id key.
+        res.responses.forEach(r => r.should.have.property('ad_id'));
       });
 
       it('should return no new responses when on the last token', async () => {
@@ -336,6 +348,122 @@ describe('Response queries', () => {
           .expect(401);
 
         response.body.error.message.should.equal('Invalid Token.')
+      });
+    });
+  });
+
+  // Coverage for `responses.metadata->>'ad_id' AS ad_id`, added to both
+  // `_all` (Response.all/GET /responses) and `responsesQuery`
+  // (Response.formResponses, the CSV download path) in response.queries.js.
+  // Uses a dedicated survey/rows so counts asserted elsewhere in this file
+  // (against `survey`/`surveyName`) are untouched.
+  describe('ad_id projection', () => {
+    let adSurvey;
+    const adSurveyName = 'SurveyAdId';
+    const withAdUserid = '200';
+    const withoutAdUserid = '201';
+
+    before(async () => {
+      const user = await User.user({ email });
+
+      adSurvey = await Survey.create({
+        created: new Date(),
+        formid: 'adid1',
+        form: '{"form": "form detail"}',
+        messages: '{"foo": "bar"}',
+        shortcode: 999,
+        userid: user.id,
+        title: 'AdId survey',
+        metadata: '{}',
+        survey_name: adSurveyName,
+        translation_conf: '{}',
+      });
+
+      // Row whose metadata JSONB contains an ad_id key.
+      await vlabPool.query(
+        `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, pageid, question_ref, question_idx, question_text, response, seed, timestamp, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [
+          adSurvey.id, '999', adSurvey.id, '999',
+          200001, withAdUserid, 'page1', 'adref', 10, 'text', 'withad', '6789',
+          timestamps[1], JSON.stringify({ ad_id: 'ad-12345' }),
+        ],
+      );
+
+      // Row whose metadata JSONB exists but has no ad_id key.
+      await vlabPool.query(
+        `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, pageid, question_ref, question_idx, question_text, response, seed, timestamp, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [
+          adSurvey.id, '999', adSurvey.id, '999',
+          200002, withoutAdUserid, 'page1', 'adref', 10, 'text', 'withoutad', '6789',
+          timestamps[1], JSON.stringify({ utm_source: 'fb' }),
+        ],
+      );
+    });
+
+    after(async () => {
+      await vlabPool.query('DELETE FROM responses WHERE surveyid = $1', [adSurvey.id]);
+      await vlabPool.query('DELETE FROM surveys WHERE id = $1', [adSurvey.id]);
+    });
+
+    it('returns the ad_id value for a response whose metadata contains it', async () => {
+      const res = await Response.all(email, adSurveyName, null);
+      const row = res.responses.find(r => r.userid === withAdUserid);
+      row.ad_id.should.equal('ad-12345');
+    });
+
+    it('returns null (and does not error) when metadata has no ad_id key', async () => {
+      const res = await Response.all(email, adSurveyName, null);
+      const row = res.responses.find(r => r.userid === withoutAdUserid);
+      expect(row.ad_id).to.equal(null);
+    });
+
+    it('returns null (and does not error) when metadata itself is SQL NULL', async () => {
+      // `survey`'s four seeded rows (top of this file) all have SQL NULL
+      // metadata, since the MOCK_QUERY insert omits the column entirely.
+      const res = await Response.all(email, surveyName, null);
+      res.responses.forEach(r => {
+        expect(r.ad_id).to.equal(null);
+        expect(r.metadata).to.equal(null);
+      });
+    });
+
+    it('does not disturb the pagination cursor when ad_id is present in the row', async () => {
+      const res = await Response.all(email, adSurveyName, null);
+      res.responses.should.have.length(2);
+
+      const [first] = res.responses;
+      first.userid.should.equal(withAdUserid);
+      first.token.should.equal(
+        token.encoded([dbText(timestamps[1]), withAdUserid, 'adref']),
+      );
+
+      const page2 = await Response.all(email, adSurveyName, first.token);
+      page2.responses.should.have.length(1);
+      page2.responses[0].userid.should.equal(withoutAdUserid);
+      expect(page2.responses[0].ad_id).to.equal(null);
+    });
+
+    describe('formResponses (CSV/stream path)', () => {
+      it('includes ad_id on every streamed row', (done) => {
+        Response.formResponses(email, adSurveyName).then(stream => {
+          const rows = [];
+          stream.on('data', row => rows.push(row));
+          stream.on('error', done);
+          stream.on('end', () => {
+            try {
+              rows.should.have.length(2);
+              const withAd = rows.find(r => r.userid === withAdUserid);
+              const withoutAd = rows.find(r => r.userid === withoutAdUserid);
+              withAd.ad_id.should.equal('ad-12345');
+              expect(withoutAd.ad_id).to.equal(null);
+              done();
+            } catch (e) {
+              done(e);
+            }
+          });
+        }, done);
       });
     });
   });

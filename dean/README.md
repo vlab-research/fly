@@ -37,6 +37,100 @@ See `documentation/event-envelope.md` and `documentation/platform-abstraction.md
 which equals `credentials.key` for messaging entities (globally unique via the
 `unique_messaging_account` partial index).
 
+## `Respondings` and the `redo` event
+
+`Respondings` (`queries.go:108`) selects users sitting in `current_state = 'RESPONDING'`
+and emits a `redo`. The intent is rescue: `RESPONDING` is meant to be transient — the state a
+user occupies between replybot sending a message and the platform echoing it back — so a user
+still there after the grace period probably had a send die mid-flight.
+
+Replybot's `REDO` handler (`replybot/lib/typewheels/machine.js:366`) no-ops for `QOUT` and
+`END`, and otherwise replays `state.previousOutput` as `RESPOND_AGAIN`, appending the event
+timestamp to `state.retries`.
+
+Two consequences worth knowing before changing anything here:
+
+- **`retries` counts dean redo attempts, not send attempts.** `RESPOND` clears the array (the
+  user answered, episode over); `RESPOND_AGAIN` preserves it deliberately.
+- **A redo re-sends a real message.** If the original send actually succeeded and only the echo
+  was lost, the user receives a duplicate. Dean cannot currently tell those two cases apart.
+
+Because `RESPOND_AGAIN` puts the user back into `RESPONDING`, a user who can never produce an
+echo is re-selected on every sweep. With the production schedule (`*/30 * * * *`) and
+`DEAN_RESPONDING_GRACE` of 20 minutes, that is a message every 30–60 minutes until a send fails
+and the user is marked `BLOCKED` — which is what finally removes them from the predicate.
+`DEAN_RETRY_MAX_ATTEMPTS` (60 in production) is high enough that it is not normally what stops
+the loop. See "The RESPONDING/Echo Trap" in `documentation/states-debugging.md`.
+
+## `Payments` and the `repeat_payment` event
+
+`Payments` (`queries.go:151`) selects respondents parked in a **payment** wait
+past `DEAN_PAYMENT_GRACE` and emits `repeat_payment`, which replybot turns into
+`MAKE_PAYMENT` — re-emitting the payment onto `vlab-<env>-payment`.
+
+This is the system's real payment-retry engine. dinersclub only absorbs a
+short blip; anything longer is deferred here (prod: grace `2 hours`, every 6h,
+up to `14 days` / 30 attempts). See `planning/payment-failure-handling.md`.
+
+### It selects payment waits *positively*
+
+A payment wait looks like this — note `type` is `external`, and it is
+`value.type` that makes it a payment:
+
+```json
+"wait": {"type": "external", "value": {"type": "payment:reloadly", "id": "PAYMENT_ID"}}
+```
+
+The predicate must be `wait->>'type' = 'external' AND wait->'value'->>'type'
+LIKE 'payment:%'`. It previously read `wait->>'type' != 'timeout'`, which is a
+different set: `external` waits are just as often `moviehouse:play`,
+`linksniffer:click` or `handover`. Dean was firing `repeat_payment` at all of
+them, driving `MAKE_PAYMENT` against questions carrying no payment config — 199
+of the 200 states it selected in the live retry window were **not** payments.
+
+Composite waits (`wait->'op'` / `'vars'`) have a NULL `wait->>'type'` and are
+excluded by NULL comparison semantics. That was true before the fix and is kept
+deliberately: including them would newly fire payments at ~4k states.
+
+### The retry cap counts payment RESULTS, not Dean's own attempts
+
+`Timeouts` caps retries by counting the `timeout` events Dean itself emitted for
+this wait. **`Payments` cannot do the same**, and this is the trap to know
+before touching the gate:
+
+> replybot handles `REPEAT_PAYMENT` as `MAKE_PAYMENT` with **no state update**
+> (`machine.js` — `REPEAT_PAYMENT` → `MAKE_PAYMENT`). Unlike `timeout`, it never
+> goes through `_handleExternalEvent`, so a `repeat_payment` is **never recorded
+> in `externalEvents`**. Counting `repeat_payment` there would always yield 0 and
+> silently delete the retry cap.
+
+So the gate counts **payment results that came back for this wait and failed to
+resolve it**:
+
+```sql
+e->'event'->>'type' = 'external'
+AND e->'event'->'value'->>'type' LIKE 'payment:%'
+AND (e->>'timestamp')::NUMERIC >= (state_json->>'waitStart')::NUMERIC
+```
+
+A result carrying the awaited id fulfills the wait and the row leaves the
+predicate entirely, so anything counted here is a genuinely stuck retry — e.g.
+the `INVALID_PROVIDER` result that omits the id (the TODO on
+`invalidProviderResult` in `dinersclub/main.go`). Transient provider failures
+that report nothing back deliberately do **not** burn the budget: those are
+precisely the ones worth retrying.
+
+The `timestamp` bound scopes the count to *this* wait. `externalEvents` is a
+shared, never-drained log, so without it a result from an earlier payment
+question in the same survey would spend this wait's budget. Entries lacking a
+`timestamp` compare NULL and go uncounted, erring toward retrying — the safe
+direction for payments.
+
+This gate previously used a blind `jsonb_array_length(externalEvents)`, the same
+bug already fixed in `Timeouts`: unrelated events (moviehouse clips, earlier
+payments) falsely exhausted the budget, biased hardest against respondents
+furthest through a survey. Regression tests: `payment_scoping_test.go`.
+
 ## Testing
 
 ### Running Tests

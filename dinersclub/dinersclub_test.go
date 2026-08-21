@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -109,7 +108,16 @@ func TestDinersClubErrorsOnMessagesWithMissingFields(t *testing.T) {
 
 	err := getDC(ts).Process(msgs)
 	assert.NotNil(t, err)
-	e := err.(validator.ValidationErrors)
+
+	// errors.As, not a bare type assertion. Process now collects every
+	// message's failure and returns errors.Join, so the returned error is a
+	// *errors.joinError wrapping this one -- and a bare assertion panics,
+	// which in Go aborts the whole test binary and hides every test after it
+	// (see README, "A panic in one test hides every later test"). The
+	// contract being asserted is that the chain still carries the concrete
+	// validator.ValidationErrors, and errors.As is how you say that.
+	var e validator.ValidationErrors
+	assert.True(t, errors.As(err, &e))
 	assert.Contains(t, e.Error(), "Provider")
 }
 
@@ -341,55 +349,16 @@ func TestDinersClubCache(t *testing.T) {
 	assert.Equal(t, dc.cache.Metrics.Hits(), uint64(2))
 }
 
-func TestDinersClubAuthError(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, _ := ioutil.ReadAll(r.Body)
-		dat := strings.TrimSpace(string(data))
-		assert.Contains(t, dat, `"code":"AUTH_ERROR"`)
-		assert.Contains(t, dat, "No credentials were found for user: bad-user")
-		assert.Equal(t, "/", r.URL.Path)
-		w.WriteHeader(200)
-	}))
-
-	auth := func(user *User, key string) error {
-		return fmt.Errorf(`No credentials were found for user: %s`, user.Id)
-	}
-	getProvider := func(pool *pgxpool.Pool, event *PaymentEvent) (Provider, error) {
-		getUser := func(event *PaymentEvent) (*User, error) {
-			return &User{Id: "bad-user"}, nil
-		}
-		return NewFakeProvider(getUser, auth)
-	}
-
-	msgs := makeMessages([]string{
-		`{
-			"userid": "bad-user",
-			"pageid": "page",
-			"provider": "fake",
-			"timestamp": 1600558963867,
-			"details": {
-				"result": {
-					"type": "foo",
-					"success": true
-				}
-			}
-		}`,
-	})
-
-	cfg := getConfig()
-	pool := getPool(cfg)
-	poster := NewHTTPPoster(ts.URL)
-	cache, _ := ristretto.NewCache(&ristretto.Config{
-		NumCounters: cfg.CacheNumCounters,
-		MaxCost:     cfg.CacheMaxCost,
-		BufferItems: cfg.CacheBufferItems,
-		Metrics:     true,
-	})
-	cache.Clear()
-	dc := &DC{cfg, pool, poster, cache, getProvider}
-	err := dc.Process(msgs)
-	assert.Nil(t, err)
-}
+// TestDinersClubAuthError was here. It asserted that a failed provider Auth
+// produced a respondent-facing AUTH_ERROR result, which is no longer true:
+// AUTH_ERROR is a precondition, so the Result is withheld and the respondent
+// waits for the researcher to restore the credential.
+//
+// It could not simply be inverted in place, because every one of its
+// assertions lived inside the botserver handler -- once nothing was sent, the
+// handler stopped running and the test passed without asserting anything at
+// all. Its replacement counts requests instead: TestAuthFailureIsWithheld in
+// recovery_test.go.
 
 func TestDinersClubHandlesJSONUnmarshalErrorsGracefully(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

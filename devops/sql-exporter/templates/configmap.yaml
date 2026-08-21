@@ -14,6 +14,7 @@ data:
         - study_health
         - study_traffic
         - media_health
+        - recruitment_health
 
     # ---------------------------------------------------------------------------
     # INDEX DISCIPLINE — read before adding or editing any query here.
@@ -514,6 +515,148 @@ data:
                 a.page AS page,
                 COALESCE(cr.details->>'name', a.page) AS page_name,
                 a.c5m AS "5m",
+                a.c1h AS "1h",
+                a.c24h AS "24h"
+              FROM agg a
+              LEFT JOIN credentials cr ON cr.facebook_page_id = a.page
+              LEFT JOIN users pu ON pu.id = cr.userid
+              LEFT JOIN LATERAL (
+                SELECT s.survey_name
+                FROM surveys s
+                WHERE s.shortcode = a.shortcode
+                  AND s.userid = cr.userid
+                ORDER BY s.created DESC
+                LIMIT 1
+              ) sv ON true;
+
+      # -------------------------------------------------------------------------
+      # RECRUITMENT ARRIVAL HEALTH — documentation/recruitment-arrival-health.md
+      #
+      # Every other collector here measures what happens to a conversation once it
+      # exists. This one measures whether it started in the right place at all.
+      #
+      # The gap it closes has a specific and expensive shape. A recruitment ad
+      # carries a routing token; if that token is missing, mangled, or aimed at a
+      # channel the ad never reaches, getMetadata falls through to FALLBACK_FORM and
+      # the respondent begins a REAL SURVEY belonging to a real researcher. Nothing
+      # errors. The state machine is healthy, the error ratio is flat, and the user
+      # answers questions and reaches END — they look like a completion. Every alert
+      # in study-health.yaml is blind to this by construction, and the fallback form
+      # is deliberately EXCLUDED from the error-ratio baselines there because it is
+      # 100% error by design. It broke for four days and 1,770 users in July 2026,
+      # and what eventually noticed was a person reading response data.
+      #
+      # Three questions, one query:
+      #
+      #   1. Is a study recruiting at all?         arrivals by shortcode
+      #   2. Landing in the right survey?          arrivals whose shortcode IS the
+      #                                            fallback form
+      #   3. Through which channel?                the platform label
+      #
+      # (3) is what makes a multi-destination ad observable at all. Such an ad opens
+      # EITHER Messenger OR WhatsApp with Meta choosing per respondent, so the only
+      # way to know both arms work is to watch arrivals split across platforms for
+      # one shortcode. An arm that never delivers shows as traffic on one platform
+      # and none on the other; an arm whose token does not survive shows as traffic
+      # on that platform landing on the fallback form. Neither is inferable from any
+      # existing metric, and neither can be measured any other way short of asking
+      # Meta, which does not answer.
+      #
+      # WHY states AND NOT responses. `states` is one sticky row per user, ~1.1M
+      # rows, already scanned by every collector above; `responses` grows without
+      # bound. More decisively: a misrouted arrival that answers nothing never
+      # reaches `responses` at all, and that is exactly the case worth catching.
+      #
+      # ACCESS PATH: read the INDEX DISCIPLINE block at the top of this file first.
+      # form_start_time is a computed column in NO index, so filtering on it alone
+      # full scans 1.1M rows (measured: 7s). Pinning current_state and bounding
+      # `updated` first lets CockroachDB build the same tight (current_state,
+      # updated > t) spans the other collectors use, and form_start_time then only
+      # refines rows already fetched. That refinement is sound and not merely cheap:
+      # `updated` is the last write and form_start_time the conversation's start, so
+      # form_start_time > t always implies updated > t — the index bound cannot
+      # exclude a row the query wants.
+      #
+      # CARDINALITY: shortcode x platform x ad_id x page, x2 windows. Measured on
+      # prod 2026-08-18: 45 groups over 24h => ~90 series, on 4,546 arrivals. `page`
+      # costs 4 extra groups and is the axis that separates a channel failure from a
+      # study failure, exactly as on survey_error_states.
+      #
+      # THE platform LABEL IS SAFE HERE, unlike the media_handle.platform trap
+      # documented below. states.platform is computed from
+      # state_json->'md'->>'platform' (migration 21) and replybot's eventPlatform
+      # writes exactly 'messenger' or 'whatsapp' — a vocabulary pinned by code
+      # rather than convention. NULL only for rows predating that stamp, which
+      # COALESCE resolves to 'messenger', exact for all pre-WhatsApp data.
+      # -------------------------------------------------------------------------
+      - collector_name: recruitment_health
+        min_interval: {{ .Values.database.minInterval }}s
+        metrics:
+          # survey_arrivals{shortcode,survey,researcher,platform,ad_id,page}
+          #
+          # A conversation is an arrival in the window if the form it is currently on
+          # STARTED in that window, not if the user was merely active. Re-entrants
+          # and long-running conversations are excluded, which is what makes this a
+          # recruitment signal rather than a traffic one.
+          #
+          # THE ad_id LABEL MEANS ONE NARROW THING: replybot resolved an ad id off
+          # the referral and stamped md.ad_id. It does NOT mean the arrival will join
+          # to a vlab mapping row, and `absent` does NOT mean anything is broken.
+          # Read the baseline before writing any rule against it:
+          #
+          #   - WhatsApp click-to-WhatsApp arrivals carry a referral by construction,
+          #     so `present` should be the overwhelming majority there.
+          #   - Messenger is the opposite, and it is not a defect. Meta sends the
+          #     messaging_referrals webhook for only about a third of ad entrants;
+          #     the rest arrive through the welcome message's quick-reply payload,
+          #     which carries the dotted ref but no ad id. Measured over 30 days to
+          #     2026-08-18: 2,475 of 7,983 Messenger ad entrants (31%) had a
+          #     resolvable ad id — and every ad-sourced referral that DID arrive
+          #     carried one, with zero exceptions. The shortfall is entirely webhooks
+          #     Meta never sent, so no code change recovers it.
+          #   - Organic entrants have no ad id and never will.
+          #
+          # So this is a DENOMINATOR AND AN EXPLANATION — how much of a study's
+          # intake the ad-id join can reach — and a paging rule on it would fire
+          # constantly on perfectly healthy Messenger studies. Alert on the fallback
+          # form, which is unambiguous; look at this one.
+          - metric_name: survey_arrivals
+            type: gauge
+            help: "Conversations whose current form STARTED within the labelled window, by shortcode, platform, ad-id presence and page"
+            key_labels:
+              - shortcode
+              - survey
+              - researcher
+              - platform
+              - ad_id
+              - page
+            value_label: window
+            values:
+              - "1h"
+              - "24h"
+            query: |
+              WITH agg AS (
+                SELECT
+                  COALESCE(current_form, '(none)') AS shortcode,
+                  COALESCE(platform, 'messenger') AS platform,
+                  CASE WHEN ad_id IS NOT NULL THEN 'present' ELSE 'absent' END AS ad_id,
+                  pageid AS page,
+                  COUNT(*) FILTER (WHERE form_start_time > NOW() - INTERVAL '1 hour') AS c1h,
+                  COUNT(*) AS c24h
+                FROM states
+                WHERE current_state = ANY(ARRAY['START','RESPONDING','QOUT','END','BLOCKED',
+                                                'ERROR','WAIT_EXTERNAL_EVENT','USER_BLOCKED','RESET','OFF'])
+                  AND updated > NOW() - INTERVAL '24 hours'
+                  AND form_start_time > NOW() - INTERVAL '24 hours'
+                GROUP BY 1, 2, 3, 4
+              )
+              SELECT
+                a.shortcode AS shortcode,
+                COALESCE(sv.survey_name, 'unknown') AS survey,
+                COALESCE(pu.email, 'unknown') AS researcher,
+                a.platform AS platform,
+                a.ad_id AS ad_id,
+                a.page AS page,
                 a.c1h AS "1h",
                 a.c24h AS "24h"
               FROM agg a

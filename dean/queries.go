@@ -151,10 +151,58 @@ func Payments(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	      SELECT userid, pageid, state_json->>'question' as question, COALESCE(platform, 'messenger')
 	      FROM states
 	      WHERE current_state = 'WAIT_EXTERNAL_EVENT'
-	      AND state_json->'wait'->>'type' != 'timeout'
+              -- Positively select PAYMENT waits. This used to read
+              -- "wait->>'type' != 'timeout'", which is not the same thing: an
+              -- 'external' wait is just as likely to be a moviehouse video, a
+              -- linksniffer click or a handover, and Dean fired repeat_payment
+              -- at all of them (~521 live states when this was found), driving
+              -- replybot's MAKE_PAYMENT to look up a payment field on a
+              -- question that has none.
+              --
+              -- Composite waits (wait->'op'/'vars') have a NULL wait->>'type'
+              -- and were already excluded by NULL comparison semantics; they
+              -- stay excluded. Including them would newly fire payments at
+              -- ~4k states and is a behaviour change, not a bug fix.
+              AND state_json->'wait'->>'type' = 'external'
+              AND state_json->'wait'->'value'->>'type' LIKE 'payment:%'
 	      AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($1)::INTERVAL)) < $4
               AND timezone('UCT', (CEILING((state_json->>'waitStart')::INT/1000)::INT::TIMESTAMP + ($2)::INTERVAL)) > $4
-              AND jsonb_array_length(COALESCE(state_json->'externalEvents','[]'::jsonb)) < $3
+              -- Cap payment RETRIES for this wait. This is the same fix already
+              -- applied to Timeouts: externalEvents is a shared, never-drained
+              -- log, so its total length is the wrong proxy -- a respondent who
+              -- watched a moviehouse clip, or who was paid for an EARLIER
+              -- question in the same survey, was falsely counted as having
+              -- exhausted their payment attempts and silently stopped being
+              -- retried. That bias fell hardest on respondents furthest through
+              -- a survey, who have the most accumulated events.
+              --
+              -- Unlike Timeouts we cannot count Dean's own emissions: replybot
+              -- handles a repeat_payment as MAKE_PAYMENT with NO state update
+              -- (machine.js REPEAT_PAYMENT -> machine.js MAKE_PAYMENT), so it
+              -- never lands in externalEvents. Counting 'repeat_payment' here
+              -- would always yield 0 and silently delete the cap.
+              --
+              -- What we count instead is payment RESULTS that came back for
+              -- this wait and failed to resolve it. A result carrying the
+              -- awaited id fulfills the wait and the row leaves this predicate
+              -- entirely, so anything counted here is a genuine stuck retry --
+              -- e.g. the INVALID_PROVIDER result that omits the id (see the
+              -- TODO on invalidProviderResult in dinersclub/main.go). Transient
+              -- provider failures that report nothing back deliberately do not
+              -- burn the budget: those are exactly the ones worth retrying.
+              --
+              -- Entries with no 'timestamp' compare NULL and go uncounted,
+              -- which errs toward retrying. That is the safe direction here.
+              AND (
+                NOT (state_json ? 'externalEvents')
+                OR (
+                  SELECT count(*)
+                  FROM jsonb_array_elements(state_json->'externalEvents') e
+                  WHERE e->'event'->>'type' = 'external'
+                    AND e->'event'->'value'->>'type' LIKE 'payment:%'
+                    AND (e->>'timestamp')::NUMERIC >= (state_json->>'waitStart')::NUMERIC
+                ) < $3
+              )
         `
 	d := time.Now().UTC()
 

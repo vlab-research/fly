@@ -749,7 +749,7 @@ func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {
                       "forms": ["short1", "short2"],
                       "waitStart": %v,
                       "question": "foo_bar",
-                      "wait": { "type": "external:reloadly", "value": {"type": "foo", "id": "payment_id"}}}`, msA))
+                      "wait": { "type": "external", "value": {"type": "payment:reloadly", "id": "payment_id"}}}`, msA))
 
 	mustExec(t, pool, insertQuery,
 		"baz",
@@ -929,16 +929,21 @@ func TestGetPaymentsIgnoresThoseAtOrAboveCap(t *testing.T) {
 	ts := time.Now().UTC().Add(-10 * time.Hour)
 	ms := ts.Unix() * 1000
 
+	// The cap counts payment RESULTS that came back for this wait, so the
+	// fixtures must be real result events. This test used to use bare
+	// integers ([1, 2, 3]), which only worked while the gate was a blind
+	// jsonb_array_length over the whole shared log.
 	mustExec(t, pool, insertQuery,
 		"foo",
 		"bar",
 		ts,
 		"WAIT_EXTERNAL_EVENT",
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
-                      "waitStart": %v,
+                      "waitStart": %[1]v,
                       "question": "q1",
-                      "externalEvents": [1, 2, 3],
-                      "wait": { "type": "external:reloadly", "value": {}}}`, ms))
+                      "externalEvents": [%[2]s, %[2]s, %[2]s],
+                      "wait": { "type": "external", "value": {"type": "payment:reloadly", "id": "payment_id"}}}`,
+			ms, paymentResultEvent(ms)))
 
 	mustExec(t, pool, insertQuery,
 		"baz",
@@ -946,10 +951,11 @@ func TestGetPaymentsIgnoresThoseAtOrAboveCap(t *testing.T) {
 		ts,
 		"WAIT_EXTERNAL_EVENT",
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
-                      "waitStart": %v,
+                      "waitStart": %[1]v,
                       "question": "q1",
-                      "externalEvents": [1, 2],
-                      "wait": { "type": "external:reloadly", "value": {}}}`, ms))
+                      "externalEvents": [%[2]s, %[2]s],
+                      "wait": { "type": "external", "value": {"type": "payment:reloadly", "id": "payment_id"}}}`,
+			ms, paymentResultEvent(ms)))
 
 	cfg := &Config{
 		PaymentGrace:       "8 hours",
@@ -980,7 +986,7 @@ func TestGetPaymentsIncludesThoseWithNoExternalEvents(t *testing.T) {
 		fmt.Sprintf(`{"state": "WAIT_EXTERNAL_EVENT",
                       "waitStart": %v,
                       "question": "q1",
-                      "wait": { "type": "external:reloadly", "value": {}}}`, ms))
+                      "wait": { "type": "external", "value": {"type": "payment:reloadly", "id": "payment_id"}}}`, ms))
 
 	cfg := &Config{
 		PaymentGrace:       "8 hours",

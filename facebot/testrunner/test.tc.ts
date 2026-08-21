@@ -102,9 +102,10 @@ const get = { text: 'get message' }; // Define get message
 // since it only ever compares data.message) and still drive the conversation.
 //
 // Every message a form produces MUST be consumed this way. The stack runs
-// message-worker with NUM_WORKERS=1, so a single un-acked send blocks the only
-// worker goroutine for facebot's full 10s timeout — which starves every other
-// test in the same mocha.parallel block, not just the one that left the mess.
+// message-worker with NUM_WORKERS=8, so an un-acked send no longer blocks the
+// entire pool — but it still blocks the one worker its user_id hashes to for
+// facebot's full 10s timeout, starving every other user that shares that
+// worker. Leaving a message un-acked is still a bug, just a less total one.
 async function receiveAndEcho(userId: string): Promise<any> {
   const sent = await receiveSent(userId);
   await sendMessage(makeEcho({

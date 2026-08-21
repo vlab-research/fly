@@ -794,35 +794,53 @@ Production path for ad-driven conversions. User clicks a Click-to-WhatsApp ad or
 8. Machine's REFERRAL case resolves survey by shortcode via formcentral
 9. Survey starts with no-retake enforcement
 
-**Referral object structure (from Meta webhook):**
+**Referral object structure (from a real production webhook, 2026-08-16):**
 ```javascript
 {
-  "source": "ads",                      // "ads", "message", "id_matching", etc.
-  "source_id": "ad_campaign_123",       // Campaign or source identifier
-  "ctwa_clid": "click_to_whatsapp_id",  // Click tracking ID
-  "headline": "ad headline text",       // Ad creative headline
-  "body": "ad body text"                // Ad creative body
-  // NOTE: no "ref". Every field above is Meta-assigned. `ref` appears in a
-  // single Meta doc with no explanation of how to set it, and nobody has
-  // confirmed it can be — so in practice CTWA arrivals carry none.
+  // NOTE: no `ref`. Every field here is Meta-assigned; the form shortcode
+  // arrives separately, on the autofill message's text.body.
+  "source_url": "https://fb.me/9nJxtZGUu",
+  "source_id": "120254866237980150",    // ad id when source_type is "ad";
+                                        // a POST id when it is not
+  "source_type": "ad",                  // "ad" | "post" | ...
+  "headline": "Virtual Lab survey",
+  "body": "ad body text",
+  "media_type": "image",
+  "image_url": "https://scontent-....fbcdn.net/...",
+  "ctwa_clid": "AfiIcrJAS9Ee...",       // click tracking ID (Conversions API)
+  "welcome_message": { "text": "..." }
 }
 ```
 
-**Metadata does reach `md`, via the autofill message — not via the referral
-object.** Because the referral carries no `ref`, the ad's `autofill_message`
-(which prefills the user's first message body) is the actual carrier: the same
-dot-separated `key.value` token list the `wa.me` path uses arrives on
-`text.body`, and `_refFromText` recovers it. A real ad reading
-`ctwaprobe.alpha.creative.Ad1H.form.probetest` yields
-`{ form: 'probetest', ctwaprobe: 'alpha', creative: 'Ad1H' }` in `md`.
+Earlier revisions of this README showed `"source": "ads"` here. That spelling
+appears in no production payload, hermes type, or test fixture in this repo — it
+looks like a transcription of *Messenger's* referral `source` field (`"ADS"`,
+`"SHORTLINK"`). The real WhatsApp key is `source_type`, value `"ad"`.
 
-The important caveat is **where the targeting is authored**: per ad *creative*,
-not per click. N targeting cells means N creatives, unlike Messenger where one
-ad backs unlimited `m.me?ref=` variants. The Meta-assigned fields (`source_id`,
-`ctwa_clid`, `headline`, `body`) are still preserved on the raw event but not
-mapped into `md`.
+**What is and is not mapped into `state.md`:**
 
-An explicit `referral.ref`, if one ever arrives, **wins** over the text.
+- **Form + targeting metadata**: `form`, plus arbitrary `key.value` pairs. Since
+  `v0.0.217` these ride in on the ad's **autofill message** (`text.body`), not on
+  the referral, giving CTWA the same targeting transport as
+  `m.me?ref=form.ABC.key.value`. The older claim that WhatsApp had "no mechanism
+  to pass targeted metadata" is retired — the real constraint is that the token
+  is authored per ad *creative* rather than per click.
+- **`ad_id`**: from `source_id`, but **only when `source_type` says the arrival
+  came from an ad**. On an organic reshare of a page post, `source_id` is a post
+  id; capturing it would write post ids into the ad_id field, where they can
+  never match vlab's `(network, ad_id)` mapping. See
+  `documentation/referral-form-resolution.md` § "Ad identity (`md.ad_id`)".
+- **`vt`**: the attribution join token, present only for a study using the
+  **encoded ref** (`r.<base64url>`). `getMetadata` decodes it locally into
+  `md.form` + `md.vt`; a ref that will not decode throws `RefDecodeError` rather
+  than falling through to the fallback survey. `vt` is fly-owned — deleted
+  unconditionally before the decode branch, so a dotted ref cannot inject a join
+  key. This is what vlab actually attributes on now; `ad_id` reaches only ~31% of
+  Messenger ad entrants and is kept for monitoring. See
+  `documentation/referral-form-resolution.md` § "The encoded ref".
+- **Not mapped**: `ctwa_clid`, `headline`, `body`, `media_type`, `source_url`,
+  `image_url`, `welcome_message` are preserved on the raw event but do not reach
+  state metadata. (`ctwa_clid` in particular is deliberately deferred.)
 
 **Key:** The referral object is a Meta-level webhook field; it comes ONLY from CTWA ads or explicit Meta referral links, not from plain wa.me links or manual user typing.
 
@@ -831,16 +849,19 @@ An explicit `referral.ref`, if one ever arrives, **wins** over the text.
 Fallback path for testing and direct wa.me links. Any plain text message matching a specific pattern triggers survey entry.
 
 **Pattern:** Message body (trimmed) must exactly match `WHATSAPP_ENTRY_REF`
-(`lib/event-normalizer.js`), case-insensitive:
+(`lib/event-normalizer.js`), case-insensitive. Each token is unreserved
+characters or a percent escape, and the `form` pair may appear anywhere on an
+even token boundary:
 
 ```js
-/^(?:start\s+)?((?:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.)*)form\.([A-Za-z0-9_-]+)((?:\.[A-Za-z0-9_-]+)*)$/i
+/^(?:start\s+)?((?:(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+\.)*)form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)((?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i
 ```
 
 Capture groups are leading `key.value` pairs / shortcode / trailing tokens.
 `_refFromText()` reassembles them and is the **single shared helper** for both
 WhatsApp text entry paths — this bare-text one and the CTWA autofill recovery in
-Entry Point 1 — so the two cannot drift apart.
+Entry Point 1 — so the two cannot drift apart. An encoded recruitment ref
+(`r.<base64url>`) is matched first, by the disjoint `WHATSAPP_ENTRY_REF_ENCODED`.
 
 - Valid: `form.flysmoke`, `FORM.FLYSMOKE`, `start form.myform`, ` form.flysmoke ` (surrounding whitespace is trimmed before matching)
 - Valid with metadata (since v0.0.217): `form.flysmoke.creative.3b.gender.men` → `md` gets `creative`/`gender`, matching `m.me?ref=` on Messenger
@@ -870,9 +891,28 @@ researcher, so the misroute looked like a completion. Reproduced live on
 2026-08-16 against `replybot-v0.0.218`; see
 `documentation/referral-form-resolution.md` § "CTWA autofill order-independence".
 
-**Encoding caveat for link authors:** raw `&` and `#` inside a `wa.me?text=`
-value silently truncate the prefilled message. Percent-encode them (`%26`, `%23`)
-if a targeting value could ever contain one.
+**Percent-encoded values are supported.** Targeting values with spaces travel
+encoded — `form.ABC.creative.Static%20English%20-%20Girls` →
+`creative: 'Static English - Girls'`. This matters most on CTWA, where there is
+no advertiser-settable `ref` and the autofill text is the only carrier.
+
+The gate accepts only well-formed escapes (`%[0-9A-Fa-f]{2}`), never a bare `%`:
+`%zz`, a trailing `%`, or a truncated `%2` would make `decodeURIComponent`
+throw, `getMetadata` would swallow it (`catch (e) { md = {} }`), and the user
+would silently land on `FALLBACK_FORM`.
+
+Well-formed hex is necessary but not sufficient — `%FF`, `%C3`, `%80` are valid
+octets that still throw, because they are not valid UTF-8. `getMetadata` decodes
+**per token** (`_decodeToken`) and keeps an undecodable token raw, so one bad
+value can no longer discard the whole `md` (including `form`) and cost the user
+their survey.
+
+**Encoding caveats for link and ad authors:**
+- Raw `&` and `#` inside a `wa.me?text=` value silently truncate the prefilled
+  message. Percent-encode them (`%26`, `%23`).
+- Python's `quote()` never encodes `.`, `-`, `_` or `~`. A `.` in a value
+  **corrupts the pair structure** (it reads as a separator), and `~` is not in
+  the gate's alphabet so the match fails outright. Encode or strip both.
 
 **Flow:**
 1. User sends plain text via wa.me link (e.g., `https://wa.me/1023456789?text=form.flysmoke`), manual SMS-like typing, or smoke testing

@@ -18,11 +18,12 @@ namespace and are versioned as Helm charts.
 
 | Source (repo path) | Release / how applied | Alerts |
 |---|---|---|
-| **`devops/alerts/`** | Helm `vlab-alerts` (monitoring) | Kafka **broker health** + **app health** + **study health** + **media storage capacity** + **media handle health** (this doc) |
+| **`devops/alerts/`** | Helm `vlab-alerts` (monitoring) | Kafka **broker health** + **app health** + **study health** + **media storage capacity** + **media handle health** + **payment health** (this doc) |
 | **`devops/kafka-consumer-health/`** | Helm `kafka-consumer-health` (monitoring) | Kafka **consumer-lag** — see the dedicated doc |
 | `devops/kminion/` | Helm `kminion` (default) | *(metrics source for consumer-lag; no alerts)* |
 | `devops/sql-exporter/` | Helm `sql-exporter` (monitoring) | *(metrics source for study health **and media handle health**; no alerts)* |
 | `devops/minio/servicemonitor.yaml` | `kubectl apply -f devops/minio/` | *(metrics source for media storage capacity; no alerts)* |
+| `dinersclub/chart/templates/servicemonitor.yaml` | vlab umbrella (`gbv`) | *(metrics source for **payment health**; no alerts. The **only** application service in this repo Prometheus scrapes — see §12)* |
 | `devops/vlab/charts/redis/templates/prometheusrule.yaml` | vlab umbrella (`gbv`) | Redis health (subchart) |
 | `devops/prometheus/values.yaml` → `defaultRules` | kube-prometheus-stack | Kubernetes/node/Prometheus infra alerts (`Kube*`, `Node*`, `Watchdog`, …) |
 
@@ -813,3 +814,306 @@ several ticks.
    stuck floor here means the reconciler is not writing the dead marker** — fix
    the reconciler. The knob is for a floor you have consciously decided to live
    with.
+
+---
+
+## 12. Payment health — runbooks
+
+> Rules: `devops/alerts/templates/payment-health.yaml`.
+> Thresholds: `devops/alerts/values.yaml` → `payments:`.
+> Metrics: **dinersclub's own `/metrics`** (`dinersclub/metrics.go`), scraped via
+> `dinersclub/chart/templates/servicemonitor.yaml`.
+> Design: `planning/payment-failure-handling.md` §0,
+> `documentation/payment-recovery.md`.
+
+### Why this section is different from every other one here
+
+Every other alert in this document reads a metric derived from something the
+platform **wrote down** — sql_exporter querying CockroachDB, kminion reading
+consumer offsets, MinIO reporting its own bucket sizes. That works because the
+failures they watch leave a trace: an error state, a lagging offset, a full disk.
+
+Payment failures stopped leaving one. Since `dinersclub/classify.go`, a payment
+failure classified `transient` or `precondition` sends **no external event at
+all** — deliberately, so the respondent stays parked in `WAIT_EXTERNAL_EVENT`
+and dean can re-drive the payment for up to 14 days. Nothing is written, so
+there is nothing to query.
+
+That silence is the feature and it is also the risk. **An empty researcher
+wallet — the single largest payment failure mode on this platform, 34% of all
+recorded failures — now produces no row, no error state, and no respondent
+complaint.** These alerts are the only thing that notices.
+
+**Every rule here is scoped to `namespace="vprod"`** (`payments.namespace` in
+`devops/alerts/values.yaml`). Prometheus is a singleton across `vprod` and
+`vstag` and a ServiceMonitor scrape carries a `namespace` label, so both
+environments report into the same series. Unscoped, these rules would break in
+both directions at once: staging's sandbox wallet running dry would page the
+platform owner, and — far worse — **a staging deployment would satisfy
+`absent(dinersclub_up)` and mask a production scrape that had stopped**, which
+is the one failure this section exists to catch.
+
+The recording rules keep `namespace` in their `by()` clause instead: they exist
+to be looked at, and seeing both environments there is useful.
+
+Two consequences worth internalising before triaging anything here:
+
+- **A missing metric is a failure, not a gap.** `DinersClubMetricsMissing` pages
+  for exactly that reason. If the scrape stops, `PaymentWalletEmpty` does not
+  get louder, it stops existing.
+- **Nothing here is respondent-visible when it fires.** Every alert in this
+  section describes money not arriving, quietly. Nobody is going to complain and
+  escalate it for you; that is what makes the time-to-human the whole game.
+
+### PaymentWalletEmpty
+`increase(dinersclub_payment_results_total{code="INSUFFICIENT_BALANCE"}[1h]) > 0`
+by provider, for **10m** — **critical**, routes to `#vlab-alerts-critical`.
+
+**A researcher's provider wallet is empty and respondents who finished a survey
+are not being paid.** This is the alert the whole payment-recovery workstream
+was built to produce.
+
+The threshold is `0` as an **invariant, not a rate**: one occurrence is one
+person owed money that is not there. It never self-heals — no retry, no backoff
+and no amount of dean patience refills an account — so the alert is really
+asking *has a human been told*, and any non-zero answer is yes.
+
+**The respondent has not been told, on purpose.** dinersclub withholds this
+failure so they stay in `WAIT_EXTERNAL_EVENT`; dean re-drives the payment every
+6h for 14 days. Top the account up inside that window and **everyone parked is
+paid automatically**, having never learned anything went wrong. Miss it and
+those payments are lost silently.
+
+1. **Which account.** The counter carries `provider`, not the credential — a
+   deliberate limit, since the alternative is researcher identifiers in metric
+   labels. Find it in the database:
+   ```sql
+   SELECT u.email, c.entity, c.key
+   FROM chatroach.credentials c
+   JOIN chatroach.users u ON u.id = c.userid
+   WHERE c.entity IN ('reloadly', 'dingconnect');
+   ```
+   There are ~13 accounts across ~10 researchers on production, so this is a
+   short list, not a search.
+2. **Size the backlog** — how many people are waiting on this money:
+   ```sql
+   SELECT count(*) FROM chatroach.states
+   WHERE current_state = 'WAIT_EXTERNAL_EVENT'
+     AND state_json->'wait'->'value'->>'type' LIKE 'payment:%';
+   ```
+3. **Get the wallet funded.** It is the researcher's account and their top-up;
+   the platform owner's job here is to make sure they know, quickly.
+4. **Confirm recovery.** After the top-up, dean's next sweep (`0 */6 * * *`)
+   re-drives the parked payments. Watch
+   `payment:results:rate5m{outcome="success"}` climb and the alert resolve an
+   hour after the last failure.
+
+> **Do not "fix" this by reclassifying `INSUFFICIENT_BALANCE` as permanent** so
+> respondents get told. That converts a recoverable delay into a permanent
+> failure for every parked person at once, and it is precisely the behaviour
+> this design replaced.
+
+### PaymentsDeferredByProvider
+`increase(dinersclub_payment_results_total{outcome="failure", recovery="transient"}[15m]) > 5`
+by provider, for **30m** — **warning**.
+
+A payment provider is failing repeatedly with retryable errors. Nobody has to do
+anything and it usually clears on its own, which is why this is a warning and
+the wallet is a page.
+
+It exists because of a specific blind window: dinersclub's in-process retry
+budget is **60s** and dean's grace period is **2h**. Between those two numbers
+payments are silently deferred and every other signal looks healthy — no error
+states, no failed sends, no complaints. This is the only thing that reports the
+window is open.
+
+1. Is the provider actually down? Check their status page before assuming the
+   classifier is wrong.
+2. Size it with `payment:withheld:rate5m` and compare against
+   `payment:results:rate5m` — a provider failing 100% of calls is an outage, one
+   failing 5% is an operator-level problem for particular numbers.
+3. **No respondent action and no manual replay.** Payments deferred here are
+   re-driven by dean from 2h onward. Confirm recovery the same way as above.
+4. If it persists for hours, the question is whether dean's 2h grace is right
+   for this failure mode, not whether dinersclub should retry harder —
+   `planning/payment-failure-handling.md` §5.2.
+
+**THRESHOLD IS v1 WITH NO MEASURED BACKGROUND.** These counters did not exist
+before this change, so unlike most thresholds in this document it is not
+calibrated against observed data. Watch `payment:withheld:rate5m` for a week and
+retune — and prefer lengthening `transientFor` to raising the count.
+
+### PaymentUnclassifiedErrorCode
+`increase(dinersclub_unclassified_error_codes_total[6h]) > 0`
+by provider and code, for **15m** — **warning**.
+
+A provider returned an error code that `recoveryByCode` in
+`dinersclub/classify.go` does not know. It defaulted to `permanent`, so **the
+respondent was told the payment failed** — which is the pre-classification
+behaviour, and may well be wrong for this code.
+
+This alert is not measuring a fault rate. It is asking someone to add a row to a
+table, and the threshold is `0` for that reason. If it fires often, the
+frequency is itself the finding.
+
+1. Read the code and decide what it means. The provider's docs are the source;
+   the log line `DinersClub saw an unclassified <provider> error code ...`
+   carries the message alongside it.
+2. Add it to `recoveryByCode` **and to the table in `classify_test.go`** — the
+   test asserts that every code in the map is pinned there, so an unpinned
+   addition fails the build. That is intentional: a code's class changes what a
+   respondent is told, so it should never move as a side effect.
+3. **If the code turns out to be transient or a precondition, the payments
+   already released are lost** — those respondents were taken out of the wait
+   and dean will not re-drive them. Worth checking how many before deciding the
+   change is routine.
+
+### DinersClubProcessingFaults
+`increase(dinersclub_processing_faults_total[30m]) > 10` by stage, for **15m** —
+**warning**.
+
+Faults in dinersclub itself — a malformed Kafka message (`stage="parse"`), a
+database that will not answer (`stage="user"`), a botserver refusing results
+(`stage="send"`) — as opposed to payments being declined.
+
+**This metric replaces a pod restart.** Every one of these used to call
+`log.Fatalf`, which meant the signal was "dinersclub is crash-looping" and a
+single poison message was an unbounded loop making zero progress (2026-08-17).
+`checkError` now commits the batch and carries on, which is correct — nothing
+was sent, so respondents stay parked and dean re-drives — but the cost is that
+**dinersclub can be failing every single message while looking perfectly healthy
+to Kubernetes.** Nothing else notices.
+
+1. Read the logs; the stage label says where to look.
+2. `stage="parse"` on its own is usually one bad message and is self-limiting —
+   the batch commits past it. Sustained parse faults mean an upstream producer
+   changed shape.
+3. `stage="user"` or `stage="send"` at volume is a dependency being down
+   (CockroachDB, hermes), not a dinersclub bug. Check those first.
+4. Payments are not lost while this fires: respondents stay in the wait and dean
+   re-drives. It becomes urgent when it is still firing near dean's 14-day
+   horizon.
+
+### DinersClubMetricsMissing
+`absent(dinersclub_up{namespace="vprod"}) == 1` for **30m** — **critical**.
+
+**Prometheus is no longer scraping dinersclub.** It pages, and the reasoning is
+the entire design of this section: every alert above reads this endpoint, and
+the failures they watch write nothing anywhere else. While this is firing, an
+empty wallet can drain dean's whole 14-day window with nothing at all to show
+for it. A missing signal that guards a silent failure has to be treated as the
+failure.
+
+It keys on `dinersclub_up` rather than on the payment counter for a specific
+reason: **a Prometheus `CounterVec` with no observations exports no series at
+all**, so a healthy dinersclub that has simply had no payments to make publishes
+no `dinersclub_payment_results_total`. At this platform's traffic that is an
+ordinary hour, and `absent()` on the payment counter would page for quiet.
+`dinersclub_up` is unconditional.
+
+1. Is the pod running? `kubectl -n vprod get pods -l app.kubernetes.io/name=dinersclub`
+2. Is the Service there? `kubectl -n vprod get svc gbv-dinersclub-metrics`
+3. Is the ServiceMonitor there, and is Prometheus using it?
+   `kubectl -n vprod get servicemonitor gbv-dinersclub`, then check the target in
+   Prometheus (§7 for how to reach it as an agent).
+4. **Check whether someone set `dinersclub.metrics.enabled: false`** in
+   `devops/values/<env>.yaml`. That is a supported switch and it silently
+   disables every alert in this section — which is why it is called out in the
+   values file itself.
+5. If `dinersclub_up` exists but only for `vstag`, this alert is doing its job:
+   the namespace scope is what stops a staging pod from standing in for the
+   production one.
+
+---
+
+## 13. Recruitment arrival health — runbooks
+
+Full background: `documentation/recruitment-arrival-health.md`. In short — every
+other alert in this document measures what happens to a conversation once it
+exists. These two measure whether it started in the right place, which nothing
+here could see before.
+
+### Why an arrival alert needs a gate
+
+"People landed on the fallback form" is not a fault on its own. Anyone who
+messages a page organically has no ref, so `md.form` falls through and they land
+on form `305` by design — measured ~1,771 arrivals/24h on prod 2026-08-18. Both
+alerts below therefore key on something that makes the arrival *unambiguously*
+wrong, not on the raw count.
+
+### RecruitmentAdArrivalsInFallback
+
+**Signal:** `sum by (survey, platform) (survey_arrivals{window="1h", shortcode="305", ad_id="present"}) >= 2` for 30m
+
+Someone clicked an ad and was routed into the fallback survey instead of the study
+that paid for them. They are answering another researcher's questions and will
+reach `END` looking like a completion, so nothing downstream will flag them. This
+is the VIR-19 shape.
+
+**Healthy value is zero.** The threshold is 2/30m only so a single hand-edited
+WhatsApp prefill cannot page.
+
+1. **Which study owns the ads on that platform right now?** The `platform` label
+   tells you the channel; the `survey` label is the *fallback's* survey, not the
+   study at fault, so this needs vlab's side: which studies have ACTIVE ad sets
+   with that `destination_type`.
+2. **Read a raw arrival.** Find recent fallback arrivals carrying an ad id:
+   ```sql
+   SELECT userid, pageid, platform, current_form, ad_id, form_start_time
+   FROM states
+   WHERE current_form = '305'
+     AND ad_id IS NOT NULL
+     AND form_start_time > now() - INTERVAL '2 hours'
+   ORDER BY form_start_time DESC;
+   ```
+   Then pull the raw webhook for one of those userids from `messages` and look at
+   what the referral actually carried.
+3. **The three usual causes**, in order of likelihood:
+   - the creative's routing token is missing or malformed for that channel;
+   - the ad set's `destination_type` opens a channel whose creative carries no
+     token — classically a multi-destination ad whose second arm was never
+     configured;
+   - the shortcode in the ref does not exist as a survey (check `surveys`).
+4. **Escalate to vlab.** Every cause above is fixed by republishing the ad, not by
+   anything in fly. Fly is reporting correctly; the ad is wrong.
+
+**Coverage caveat — do not read silence as health.** This only sees arrivals
+carrying an ad id: effectively all WhatsApp CTWA arrivals, but only ~31% of
+Messenger ad entrants (2,475 of 7,983 measured over 30 days to 2026-08-18),
+because Meta sends the referral webhook for only that share. A quiet alert does
+not prove there is no misroute on Messenger.
+
+### RecruitmentRefDecodeErrors
+
+**Signal:** `sum by (form) (survey_error_states{error_tag="REF_DECODE"}) >= 3` for 30m
+
+Respondents arrived with an encoded recruitment ref (`r.<base64url>`) that would
+not decode. Because that ref is the only carrier of the survey shortcode, replybot
+cannot tell which survey they wanted, so it puts them in an ERROR state rather
+than guessing — guessing would mean the fallback survey and the failure above.
+
+**Healthy value is zero.** vlab mints these refs.
+
+1. **Check whether it is one study or many.** The `form` label here is the
+   *fallback* or `(none)`, since decoding is what failed — so group by page
+   instead:
+   ```sql
+   SELECT pageid, platform, count(*)
+   FROM states
+   WHERE error_tag = 'REF_DECODE'
+     AND errored_at > now() - INTERVAL '2 hours'
+   GROUP BY 1, 2;
+   ```
+   One page → one study's ads. Many pages → a bad encoder deploy in vlab.
+2. **Get the ref that failed.** The raw webhook in `messages` for one of those
+   userids carries the token. Decode it by hand to see how far it gets:
+   `node -e "console.log(require('./replybot/lib/typewheels/utils').decodeRecruitmentRef('<token>'))"`
+   The thrown message names which check failed — alphabet, canonical length,
+   version, shortcode length, or empty shortcode.
+3. **Messenger vs WhatsApp matters.** On Messenger the ref is untamperable, so any
+   failure there is *ours* — a broken encoder or a truncated creative, and urgent.
+   On WhatsApp the ref sits in the respondent's compose box and can be edited
+   before sending, so a low single-digit background is expected and benign.
+4. **v1 thresholds, no measured background.** No study used the encoded format
+   when this shipped. If it fires steadily at a low number on WhatsApp only, that
+   is probably the hand-edit floor — recalibrate rather than chase it.

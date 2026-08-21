@@ -267,35 +267,44 @@ function parseSyntheticEvent(data, timestamp) {
 // vocabulary the machine already understands (see categorizeMessengerEvent).
 // Anchored, full-match pattern for a WhatsApp entry token. STRICT by design: a
 // mid-survey free-text answer that merely contains a ref token must not
-// re-trigger entry, so partial matches are rejected outright.
+// re-trigger entry, so partial matches are rejected outright. Neither widening
+// below relaxes that: the pattern stays `^...$` anchored and full-match, which
+// is the property the whole no-accidental-re-entry rule rests on.
 //
-// The `form` pair may sit ANYWHERE in the dot-separated key.value list, not
-// only first. Messenger `m.me?ref=` links have always been written form-last
-// (`creative.3b.gender.men.form.hpvintrotriple`) and a real CTWA ad's
-// autofill_message reads the same way — `ctwaprobe.alpha.creative.Ad1H.form.
-// probetest`. Anchoring on a leading `form.` rejected those outright and
-// dropped the arrival to FALLBACK_FORM: the VIR-19 failure shape, reproduced
-// live on 2026-08-16.
+// Each `.`-separated token accepts unreserved characters OR a percent escape.
+// The escape branch exists because WhatsApp has no advertiser-settable `ref`:
+// on CTWA the shortcode and its targeting metadata reach us through the ad's
+// autofill message text, and vlab's ad metadata values contain spaces
+// ("Static English - Girls", "Bauchi State"). vlab percent-encodes them, so
+// without `%` in the alphabet the text failed this gate, no
+// conversation_started was derived, and the arrival silently landed on
+// FALLBACK_FORM. Note the decoding half already worked: getMetadata does
+// `_group(pairs.map(decodeURIComponent))`.
 //
-// FALLBACK_FORM is NOT another account's survey, and nothing here crosses an
-// account boundary. Shortcodes are user-scoped: formcentral resolves one by
-// `s.userid = (SELECT userid FROM credentials WHERE key = <pageid>)`
-// (formcentral/db.go:82), so FALLBACK_FORM always names a survey owned by
-// whoever owns the account the conversation is already on. The harm is
-// misattribution WITHIN that account -- the participant lands on the owner's
-// fallback survey instead of the survey the ref named, and then counts as
-// activity there.
+// The escape branch is `%[0-9A-Fa-f]{2}` and NOT a bare `%` on purpose. A bare
+// `%` would admit `form.abc.k.%zz`, a trailing `%`, or a truncated `%2` — all
+// of which make decodeURIComponent THROW. getMetadata swallows that throw
+// (`catch (e) { md = {} }`), so md comes back empty and md.form falls to
+// FALLBACK_FORM: the exact failure this widening exists to remove, in a
+// harder-to-spot form.
 //
-// The pair must still begin on an EVEN token boundary, which is what the
-// leading `(?:key\.value\.)*` group enforces. getMetadata()/_group
-// (typewheels/utils.js) pairs tokens two at a time, so a `form` token landing
-// in a value slot resolves to no form at all (`creative.form.ABC` groups to
-// `{ creative: 'form', ABC: undefined }`). Refusing to match those leaves the
-// message an ordinary user_text rather than synthesizing a referral that
-// cannot resolve.
+// Caveat, deliberately not solved here: well-formed hex is necessary but NOT
+// sufficient for decodeURIComponent. `%FF`, `%C3`, `%80` and `%E2%82` are all
+// valid `%XX` octets that still throw, because they are not valid UTF-8. A
+// regex cannot practically encode UTF-8 well-formedness, so the residual is
+// handled where it belongs — see the safe per-token decode in
+// typewheels/utils.js, which keeps one bad token from discarding the whole md.
 //
-// Capture groups: 1 = leading key.value pairs, 2 = shortcode, 3 = trailing tokens.
-const WHATSAPP_ENTRY_REF = /^(?:start\s+)?((?:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.)*)form\.([A-Za-z0-9_-]+)((?:\.[A-Za-z0-9_-]+)*)$/i
+// Both alternation branches are disjoint (`%` is not in the character class)
+// and tokens are split by a literal `.` that neither branch can produce, so
+// the pattern is unambiguous and backtracks linearly — no ReDoS exposure.
+//
+// `form.` NEED NOT LEAD. A CTWA autofill message orders its pairs however the
+// ad was authored (`creative.3b.gender.men.form.hpvintrotriple`), so the
+// shortcode pair is captured wherever it falls. The leading group matches
+// whole PAIRS, which keeps `form` on an even token boundary and stops a value
+// that happens to read `form` from being taken for the key.
+const WHATSAPP_ENTRY_REF = /^(?:start\s+)?((?:(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+\.)*)form\.((?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)((?:\.(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+)*)$/i
 
 // Returns the `[key.value...]form.<shortcode>[.key.value...]` ref carried by a
 // text message, or null. Shared by both WhatsApp entry paths — the wa.me
@@ -308,10 +317,38 @@ const WHATSAPP_ENTRY_REF = /^(?:start\s+)?((?:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.)*
 // The ref is otherwise reassembled exactly as matched — key/value parsing
 // belongs to getMetadata()/_group (typewheels/utils.js) and is not duplicated
 // here.
+//
+// The second entry anchor: an ENCODED recruitment ref, `r.<base64url>`.
+//
+// A separate pattern rather than another branch inside WHATSAPP_ENTRY_REF, on
+// purpose. Sharing the `form.` anchor would mean replybot deciding at runtime
+// whether `form.AbC123` is a literal shortcode or an encoded blob — a heuristic
+// on the routing path, where a wrong guess costs a respondent their survey. Two
+// disjoint anchors make the ref format an explicit property of what the ad
+// shipped rather than something inferred from the shape of a token.
+//
+// The alphabet is exactly base64url's: no `%` branch and no `.`. An encoded ref
+// is a single opaque token by construction, so neither percent escapes nor the
+// dotted key/value grammar apply to it — and because `.` cannot appear, the two
+// patterns are disjoint and can never both match one body. Anchored and
+// full-match like its sibling, which is what stops a mid-survey free-text
+// answer containing a token from re-triggering entry.
+//
+// Case matters here in a way it does not for the dotted form. base64url is
+// case-SIGNIFICANT, and the `i` flag applies only to the literal `r.` prefix —
+// the capture group preserves the body exactly as sent, the same way the
+// shortcode does. Lower-casing it would silently corrupt every encoded ref.
+const WHATSAPP_ENTRY_REF_ENCODED = /^(?:start\s+)?r\.([A-Za-z0-9_-]+)$/i
+
 function _refFromText(data) {
   if (data.type !== 'text') return null
   const body = (data.text && data.text.body) || ''
-  const match = body.trim().match(WHATSAPP_ENTRY_REF)
+  const trimmed = body.trim()
+
+  const encoded = trimmed.match(WHATSAPP_ENTRY_REF_ENCODED)
+  if (encoded) return `r.${encoded[1]}`
+
+  const match = trimmed.match(WHATSAPP_ENTRY_REF)
   if (!match) return null
 
   const [, leading, shortcode, trailing] = match

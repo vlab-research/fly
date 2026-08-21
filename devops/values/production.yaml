@@ -40,15 +40,25 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
-versionReplybot: &vreplybot v0.0.218
+versionReplybot: &vreplybot v0.0.219
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.44-wa
+versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.45
+# v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
+# /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
+# timeout work -- so the image and the env block below move together, never
+# separately: on the old image the metrics Service points at a port nothing
+# binds, and DINERSCLUB_PROVIDER_TIMEOUT is an unknown variable it ignores.
+#
+# The v0.0.45..v0.0.46 range is payment-recovery work only (classify.go,
+# metrics.go, the bounded provider client). dingconnect.go is untouched, so the
+# Generic Secrets concern that held dinersclub at v0.0.43-wa in PR #147 does
+# not apply here -- and dingconnect is not in DINERSCLUB_PROVIDERS anyway.
+versionDinersclub: &vdinersclub v0.0.46
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.18
+versionMessageWorker: &vmessageworker v0.1.19
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
@@ -140,14 +150,75 @@ dinersclub:
       value: "dinersclub"
     - name: DINERSCLUB_BATCH_SIZE
       value: "2"
+    # THESE THREE ARE A BUDGET, NOT INDEPENDENT KNOBS. spine hardcodes
+    # max.poll.interval.ms=300s; if one batch outruns that, Kafka evicts the
+    # group, the uncommitted batch is redelivered, and dinersclub crash-loops
+    # on it forever making zero progress. That happened on 2026-08-17 with the
+    # old 2m/2m values and no provider timeout at all.
+    #
+    # Worst case for a batch (POOL_SIZE == BATCH_SIZE, so messages run
+    # concurrently and the batch costs about what one message costs):
+    #   auth on cache miss     <=  15s  (1 provider call)
+    #   Payout backoff         <=  60s elapsed + 45s last attempt
+    #   sendResult backoff     <=  60s elapsed + one in-cluster hermes call
+    #   -------------------------------------------------------------
+    #   ~180s, leaving headroom under the 300s eviction deadline.
+    #
+    # ONE ATTEMPT IS THREE CALLS, NOT ONE. Reloadly's DoJob makes FindOperator
+    # + Topup, and AutoFallback can add a second Topup on a refusal -- so an
+    # attempt costs up to 3x PROVIDER_TIMEOUT (45s), which is why the per-call
+    # ceiling has to be so much smaller than the budget that contains it.
+    #
+    # The retry budget now applies to declined payments, not just to system
+    # faults: since dinersclub/classify.go, a provider error code classified
+    # `transient` is retried inside this budget instead of being handed
+    # straight to the respondent as a failure. 60s buys ~2 real attempts.
+    #
+    # Raising any of these, or BATCH_SIZE above POOL_SIZE, must be re-checked
+    # against that 300s ceiling.
+    #
+    # CORRECTION to the note this replaces, which had it backwards. That note
+    # said the v0.0.45 image "reads these" and that "the code shipped and its
+    # config did not". The opposite is true: dinersclub-v0.0.45 points at
+    # bc0ec780 (2026-08-01), which PREDATES commit 19692c1b (2026-08-17) --
+    # the tag was cut before the timeout work existed. So neither half shipped.
+    # v0.0.45 has no bounded provider client at all and ignores
+    # DINERSCLUB_PROVIDER_TIMEOUT as an unknown variable.
+    #
+    # That is why the image and these values are ONE deploy, not two. Applying
+    # this file to v0.0.45 would set a per-call ceiling nothing reads, and
+    # point the new metrics Service at a port that binary does not listen on --
+    # which would page DinersClubMetricsMissing for a healthy pod.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "2m"
+      value: "60s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "2m"
+      value: "60s"
+    # Hard ceiling on ONE outbound provider HTTP call. RETRY_PROVIDER cannot do
+    # this job: backoff only checks elapsed time between attempts, so a single
+    # hung call is unbounded without this.
+    - name: DINERSCLUB_PROVIDER_TIMEOUT
+      value: "15s"
     - name: DINERSCLUB_POOL_SIZE
       value: "2"
     - name: DINERSCLUB_PROVIDERS
       value: "fake,reloadly,giftcard,http"
+    # Must match dinersclub.metrics.port below -- the Service targets the
+    # container port by name, but the process binds whatever this says.
+    - name: DINERSCLUB_METRICS_PORT
+      value: "9090"
+
+  # Prometheus scrape target. dinersclub is the first application service here
+  # that Prometheus scrapes, and these metrics are not optional colour: since
+  # dinersclub/classify.go, a transient or precondition payment failure sends
+  # no event and so leaves no row for sql_exporter to find. An empty
+  # researcher wallet is invisible everywhere else. Turning this off makes the
+  # withheld failures unaccountable and blinds the PaymentWalletEmpty alert in
+  # devops/alerts/templates/payment-health.yaml.
+  metrics:
+    enabled: true
+    port: 9090
+    serviceMonitor:
+      enabled: true
 
 dean:
   image:
@@ -851,10 +922,32 @@ exodus:
         memory: 64Mi
 
 message-worker:
-  # Scaled up for the first time in this release. replybot v0.0.210-wa has NO
-  # send path of its own — it publishes commands here — so a worker at 0
-  # replicas means production sends nothing at all, silently.
-  replicaCount: 1
+  # replybot v0.0.210-wa has NO send path of its own — it publishes commands
+  # here — so a worker at 0 replicas means production sends nothing at all,
+  # silently. That is why this is 2 and not 1: the second pod is REDUNDANCY,
+  # not throughput. A node failure, eviction or crashloop must never leave
+  # production with zero senders. Do not lower this to save a pod.
+  #
+  # Throughput comes from NUM_WORKERS (8, see below), not from replicas.
+  # Sending is IO-bound — the pod waits on graph.facebook.com, it does not
+  # compute — so capacity is concurrent in-flight HTTP calls. 2 x 8 = 16,
+  # against a 7-day peak command rate of 6.3/sec. Observed CPU is ~6m of a
+  # 500m limit. Raising NUM_WORKERS is the cheap lever if that ever changes;
+  # more pods buy availability, not speed.
+  #
+  # Both levers preserve ordering as of burrow v0.1.5. Commands are keyed by
+  # user_id (replybot/lib/index.js), so a user sits on one partition, owned by
+  # one pod; key-affinity dispatch then pins that user to one worker inside it.
+  #
+  # The useful ceiling is 6 (the partition count of vlab-prod-commands) — a 7th
+  # pod would idle. This ran at 6 for three days after the incident below and
+  # never used it.
+  #
+  # Background: planning/message-worker-command-lag.md (2026-08-17) — a bulk
+  # utility-message campaign drove ~520 commands of lag and multi-minute
+  # delivery delays for live surveys in other studies, because ONE serial
+  # consumer (1 pod x 1 worker) drained a six-partition topic.
+  replicaCount: 2
   image:
     repository: ghcr.io/vlab-research/message-worker
     tag: *vmessageworker
@@ -927,7 +1020,26 @@ message-worker:
     # means every WhatsApp send fails while Messenger keeps working.
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
-    value: "1"
+    # The burrow pool's goroutine count (code default 100).
+    #
+    # Raising this was UNSAFE before burrow v0.1.5: dispatch went through one
+    # shared channel with no key affinity, so N>1 let two commands for the SAME
+    # user send concurrently and arrive out of order — a survey question before
+    # its own preamble. v0.1.5 routes by hash(user_id) to a fixed worker, so
+    # same-user commands stay FIFO while different users run in parallel, and
+    # message-worker sets KeyAffinity unconditionally.
+    #
+    # 8 as of 2026-08-20, after smoke testing the concurrent path in vstag
+    # (v0.1.19, NUM_WORKERS=8, sends delivered in order on one partition).
+    # With 6 replicas that is 48-way outbound concurrency against a
+    # 6-partition topic — far more headroom than the lag incident needed.
+    #
+    # Not higher, despite the code default of 100: per-worker queues are
+    # JobQueueSize / NumWorkers, and burrow's poll loop is single-threaded, so
+    # a backed-up worker stalls the whole pod's polling — including workers
+    # sitting idle. See KEY_AFFINITY.md in the burrow repo. Raise only against
+    # a measured send rate.
+    value: "8"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"
   - name: INITIAL_BACKOFF_MS

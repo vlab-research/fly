@@ -34,15 +34,24 @@ versionHermes: &vhermes v0.0.3-wa
 # built before the lockfile landed, so its image came from `npm install` against
 # floating ^ ranges and cannot be reproduced from source. v0.0.215 is the first
 # replybot image built with `npm ci` against a committed package-lock.json.
-versionReplybot: &vreplybot v0.0.218
+#
+# v0.0.219 is v0.0.218 plus the arrival-health work (#150): ad-id capture, the
+# widened WhatsApp entry gate, the encoded-ref decoder, and `getMetadata` owning
+# `vt`. adopt v0.1.78 already percent-encodes every ref token in production, so
+# this is the reader catching up to a writer that has already shipped.
+versionReplybot: &vreplybot v0.0.219
 versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.44-wa
+versionDean: &vdean v0.0.45
 versionScribble: &vscribble v0.0.32
-versionDinersclub: &vdinersclub v0.0.45
+# v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
+# /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
+# timeout work -- so the image and these values move together, never separately:
+# on the old image the metrics Service would point at a port nothing binds.
+versionDinersclub: &vdinersclub v0.0.46
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.18
+versionMessageWorker: &vmessageworker v0.1.19
 # REQUIRED BEFORE APPLYING: media-proxy has never been released, so this tag
 # does not exist in ghcr.io yet. It is created by pushing the git tag
 # `media-proxy-v0.0.1`. Applying with a nonexistent tag gives an
@@ -136,15 +145,34 @@ dinersclub:
       value: "dinersclub"
     - name: DINERSCLUB_BATCH_SIZE
       value: "1"
+    # Keep in step with production -- see the budget comment there. spine's
+    # 300s max.poll.interval.ms is the same in both environments.
     - name: DINERSCLUB_RETRY_BOTSERVER
-      value: "2m"
+      value: "60s"
     - name: DINERSCLUB_RETRY_PROVIDER
-      value: "2m"
+      value: "60s"
+    - name: DINERSCLUB_PROVIDER_TIMEOUT
+      value: "15s"
+    # Must match dinersclub.metrics.port below.
+    - name: DINERSCLUB_METRICS_PORT
+      value: "9090"
     - name: DINERSCLUB_POOL_SIZE
       value: "1"
     - name: DINERSCLUB_PROVIDERS
-      value: "fake,reloadly,giftcard,http"
+      value: "fake,reloadly,giftcard,http,dingconnect"
 
+  # Prometheus scrape target. dinersclub is the first application service here
+  # that Prometheus scrapes, and these metrics are not optional colour: since
+  # dinersclub/classify.go, a transient or precondition payment failure sends
+  # no event and so leaves no row for sql_exporter to find. An empty
+  # researcher wallet is invisible everywhere else. Turning this off makes the
+  # withheld failures unaccountable and blinds the PaymentWalletEmpty alert in
+  # devops/alerts/templates/payment-health.yaml.
+  metrics:
+    enabled: true
+    port: 9090
+    serviceMonitor:
+      enabled: true
 
 dean:
   image:
@@ -801,7 +829,12 @@ message-worker:
   - name: FACEBOOK_GRAPH_URL
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
-    value: "1"
+    # 8 exercises burrow v0.1.5 key-affinity dispatch under real concurrency.
+    # Staging runs replicaCount: 1, so in-process workers are the ONLY
+    # parallelism here — which makes staging a sharper test of key affinity
+    # than production, where 6 replicas would mask a dispatch bug. See
+    # documentation/message-worker-deployment.md §Scaling.
+    value: "8"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"
   - name: INITIAL_BACKOFF_MS

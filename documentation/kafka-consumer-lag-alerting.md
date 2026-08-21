@@ -110,6 +110,48 @@ and
 4. Remediate: fix/skip the bad record, or `kubectl -n <ns> rollout restart deploy/<consumer>` to force a clean rejoin.
 5. Confirm the offset advances: watch `kafka:consumergroup_drain_seconds` fall.
 
+> **Check the restart count in step 1.** A consumer restarting on a near-exact
+> 5-minute cycle is a *specific* failure with a specific cause, and a rollout
+> restart will not fix it — it just starts the loop over.
+>
+> Every Go consumer here builds on `spine`, which hardcodes
+> `max.poll.interval.ms = 300000` with `enable.auto.commit = false`. If one
+> batch takes longer than 300s, Kafka evicts the consumer, the in-flight batch
+> is **never committed**, the process dies, and the restarted pod re-reads the
+> identical messages and hangs again — zero progress, forever. The tell in the
+> logs is `MAXPOLL ... leaving group` followed by
+> `Local: Group partition assignment lost`.
+>
+> The cause is almost always an **unbounded outbound call** — a provider or API
+> with no HTTP timeout. Note that a retry/backoff budget does *not* bound this:
+> `backoff.Retry` checks `MaxElapsedTime` only between attempts, so one hung
+> attempt runs as long as it likes. Fix the timeout, not the alert.
+>
+> This is what took `dinersclub` down on 2026-08-17 (Reloadly stopped answering
+> mid-payout-burst; `go-reloadly` ships `http.DefaultClient`, no timeout). See
+> `dinersclub/README.md` → "Provider call hangs / crash loop" for the diagnosis
+> commands, and "These are a budget, not independent knobs" for how the retry
+> and timeout values have to add up to less than 300s.
+>
+> **`dinersclub` should no longer be able to produce this signature**, and the
+> difference is worth knowing before you spend time on it. Two things changed:
+> every outbound provider call is bounded by `DINERSCLUB_PROVIDER_TIMEOUT`
+> (15s), and a *processing* fault no longer calls `log.Fatalf` — `checkError`
+> logs, counts, and lets the batch commit, because nothing was sent to the
+> respondent and dean re-drives the payment for up to 14 days
+> (`documentation/payment-recovery.md`). So a hung call cannot outrun the poll
+> interval and a poison message cannot loop.
+>
+> That removes the 5-minute restart cycle as dinersclub's failure signature —
+> and removes the restart as its failure *signal* too. dinersclub can now fail
+> every message while looking perfectly healthy to Kubernetes, which is what
+> `dinersclub_processing_faults_total` and `documentation/alerting.md` §12
+> exist to catch. **If you are triaging dinersclub, look there first**; this
+> alert is now a backstop for it rather than the primary signal.
+>
+> The other Go consumers on `spine` are unchanged and this runbook applies to
+> them as written.
+
 ### KafkaConsumerDrainSLOBreach
 
 **Means:** estimated time-to-drain exceeds the group's `drainSeconds` SLO —

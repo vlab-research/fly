@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -17,6 +18,11 @@ type GiftCardsProvider struct {
 func NewGiftCardsProvider(pool *pgxpool.Pool) (Provider, error) {
 	cfg := getConfig()
 	svc := reloadly.NewGiftCards()
+
+	// Same unbounded-client trap as the topups provider -- see the comment in
+	// NewReloadlyProvider. NewGiftCards() also returns http.DefaultClient.
+	svc.Client = &http.Client{Timeout: cfg.ProviderTimeout}
+
 	if cfg.Sandbox {
 		svc.Sandbox()
 	}

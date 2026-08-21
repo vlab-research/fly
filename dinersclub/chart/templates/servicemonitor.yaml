@@ -1,0 +1,38 @@
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+# Scrape dinersclub into Prometheus.
+#
+# dinersclub is the FIRST application service in this repo to expose /metrics.
+# Before it, every alert about the platform's own behaviour was built on
+# sql_exporter reading CockroachDB (devops/sql-exporter) -- which works well for
+# anything that leaves a row behind, and not at all for what this endpoint
+# reports. Since classify.go, a transient or precondition payment failure sends
+# no event and therefore writes NO state: an empty researcher wallet is
+# invisible to every SQL-derived metric we have. These counters are the only
+# record it happened. See planning/payment-failure-handling.md §0.2.
+#
+# Prometheus targets ALL ServiceMonitors in all namespaces
+# (serviceMonitorSelector: {} in devops/prometheus/values.yaml), so no release
+# label is required here -- the same note as devops/minio/servicemonitor.yaml.
+#
+# The interval is 30s against counters that move at most a few times a minute.
+# Nothing here is a gauge to be sampled; the alerts read increase() over
+# multi-hour windows, so scrape frequency buys resolution nobody uses.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "dinersclub.fullname" . }}
+  labels:
+    {{- include "dinersclub.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dinersclub.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+{{- end }}

@@ -60,7 +60,7 @@ All metrics are gauges reflecting counts in the last hour:
 
 | Metric | Labels | Meaning |
 |--------|--------|---------|
-| `survey_error_states` | `form`, `error_tag`, `page` | Users in ERROR state by error_tag (INTERNAL, STATE_ACTIONS, NETWORK, FORM_NOT_FOUND, FIELD_NOT_FOUND, INTERPOLATION_ERROR, none) |
+| `survey_error_states` | `form`, `error_tag`, `page` | Users in ERROR state by error_tag (INTERNAL, STATE_ACTIONS, NETWORK, FORM_NOT_FOUND, FIELD_NOT_FOUND, INTERPOLATION_ERROR, REF_DECODE, none) |
 | `survey_blocked_states` | `form`, `category`, `code`, `page` | Users in BLOCKED state by category **and raw provider code** |
 | `survey_stuck_users` | `form` | Users stuck on the same question (validation loop / confusing form) |
 | `survey_expired_waits` | `form` | Users in WAIT_EXTERNAL_EVENT past timeout (Dean not processing) |
@@ -169,6 +169,14 @@ within-survey detector and a deliberately useless cross-survey one.
 - **FORM_NOT_FOUND** — study misconfiguration (no form/study exists for that user). Study-level issue → **ticket**.
 - **FIELD_NOT_FOUND** — the form does not contain a field it refers to (a jump target, or the field the respondent is sitting on after the owner edited the form). Study-level issue → **ticket**.
 - **INTERPOLATION_ERROR** — a question interpolates a value that does not exist: `{{field:ref}}` for an answer the respondent never gave (questions reordered, or the branch that asks it was skipped), or an unknown transform. Study-level issue → **ticket**. Note `{{hidden:key}}` cannot trigger this — a missing metadata key interpolates to `""`.
+- **REF_DECODE** — the ad's encoded recruitment ref (`r.<base64url>`) would not decode, so
+  replybot could not tell which survey the respondent wanted. Study-level issue → **ticket**.
+  vlab mints these refs, so the usual cause is a broken encoder or a creative that shipped
+  truncated; the one benign case is a respondent hand-editing the prefilled text on WhatsApp,
+  where the ref is visible and editable. Deliberately an ERROR rather than a fall-through:
+  the encoded ref is the ONLY carrier of the shortcode, so guessing would put the respondent
+  into the fallback survey, where they answer someone else's questions and look like a
+  completion. See `documentation/recruitment-arrival-health.md`.
 - **none** — ERROR state with no specific tag. Often study logic errors.
 
 `FIELD_NOT_FOUND` and `INTERPOLATION_ERROR` are thrown by `form.js` and carry their

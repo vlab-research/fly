@@ -148,6 +148,26 @@ class Machine {
       }
 
     } catch (e) {
+      // An error carrying its own tag routes itself, the same rule the actions
+      // catch below follows. Publishing is what creates the error state: the
+      // report goes back through Kafka and machine.js turns `report.error` into
+      // action ERROR, which fills states.error_tag and feeds survey_error_states
+      // — the metric the arrival-health alerts read. A tagged failure that is
+      // not published is recorded nowhere.
+      //
+      // An untagged error is an unclassified crash: it takes the generic
+      // STATE_TRANSITION tag and is not published, carrying the state and event
+      // that produced it for debugging instead.
+      if (e.tag) {
+        return {
+          publish: true,
+          timestamp,
+          user,
+          page,
+          error: { ...(e.details || {}), tag: e.tag, message: e.message, stack: e.stack }
+        }
+      }
+
       return {
         publish: false,
         timestamp,
