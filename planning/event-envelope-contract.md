@@ -1,10 +1,16 @@
-# Event envelope — the wire contract (§7.3 of `planning/conversation-identity.md`)
+# Event envelope — the wire contract
 
-**Status:** implementing. This file is the single source of truth handed to every
-implementation stream in this workstream. If an implementation disagrees with this
-file, the implementation is wrong.
+**Status: built on `feature/conversation-identity`, not deployed.** This file stays because it
+is the *what* — the shape every producer must put on the wire — and it is still the reference
+an implementer needs. `documentation/event-envelope.md` is the user-facing version;
+`planning/conversation-identity.md` §2 and §3.1 are the *why*.
 
-Read `planning/conversation-identity.md` §3.1, §4 and §7.3 for *why*. This file is *what*.
+If an implementation disagrees with this file, the implementation is wrong.
+
+**Last pass 2026-08-20**: status updated, the implementation-ownership table removed (the
+streams it assigned work to are finished). The `§n.n` references below point at
+`planning/conversation-identity.md`'s **old** numbering; that document's §9 maps old numbers to
+new. Do not add more of them — cite a file and a line.
 
 ---
 
@@ -210,14 +216,3 @@ The derivation of `{account_id, platform}` from a raw event is a **pure function
 `event.rs` on the Rust side, the poster's payload construction on the Go/JS side. The
 handler and the HTTP client are the shell. Deciding what the envelope says must be
 unit-testable without a server, a broker, or a socket.
-
-## 7. Ownership during implementation
-
-| Area | Owner |
-|---|---|
-| `hermes/**`, `testdata/**`, `devops/values/*.yaml` | envelope stream (this workstream) |
-| `dean/**`, `dinersclub/**`, `message-worker/**` | envelope stream |
-| `replybot/lib/index.js`, `replybot/lib/typewheels/transition.js` | envelope stream |
-| `replybot/lib/event-normalizer.js` | **correctness stream — do not edit.** Additive tests in `event-normalizer.test.js` only. |
-| `scribble/**`, `exodus/**` | correctness stream |
-| `facebot/testrunner/**` | test stream |

@@ -579,7 +579,7 @@ nothing can.
 the normalized fields carry the account only under its per-shape name, which is exactly why
 [nothing was removed](#nothing-was-removed) from the envelope. That rule lives in
 `devops/sql/messages-account-id-expr.sql` and `messages-platform-expr.sql` (used by
-`devops/backfill-messages-account.sh`) and in `ConversationFromHistoricalContent` in
+`devops/backfill`) and in `ConversationFromHistoricalContent` in
 `scribble/account.go`. It is scoped strictly to the backfill — the forward path in the same
 file reads the normalized fields and nothing else, and there is a test asserting each
 per-shape field is ignored on that path.
