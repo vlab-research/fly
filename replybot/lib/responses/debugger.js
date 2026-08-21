@@ -4,9 +4,7 @@
 //   CHATBASE_HOST=... CHATBASE_PORT=... CHATBASE_DATABASE=... \
 //   CHATBASE_USER=... CHATBASE_PASSWORD=... node lib/responses/debugger.js <userid>
 //
-// KEPT DELIBERATELY (§7.1) while `stateman.js`, `scratchbot.js` and `batch.js`
-// were deleted: this is the tool for reproducing a cross-conversation state bug
-// off the durable log, which is the exact class of bug §7.1 fixes.
+// The tool for reproducing a cross-conversation state bug off the durable log.
 //
 // It writes to the SAME Redis keys replybot uses, so point it at a scratch Redis
 // (or accept that you are refreshing the 24h TTL on real conversation state).
@@ -62,10 +60,9 @@ const stream = new DBStream(fn, null)
 stream
   .pipe(new PromiseStream(async ({ userid: userId, content: event }) => {
 
-    // The conversation comes from the event envelope, never from the state --
-    // `messages` is not account-scoped yet (§7.4/§7.5), so replaying a user who
-    // talked to two accounts interleaves both conversations here. Printing the
-    // conversation per event is how you SEE that, which is the point of the tool.
+    // The conversation comes from the event envelope, never from the state. Until
+    // the backfill drains, replaying a user who talked to two accounts interleaves
+    // both here -- printing the conversation per event is how you see that.
     const conv = conversationFromRawEvent(event)
 
     const state = await stateStore.getState(conv, userId, event)

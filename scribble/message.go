@@ -54,25 +54,14 @@ func (s *MessageScribbler) SendBatch(data []Writeable) error {
 	fields := []string{"userid", "timestamp", "content", "account_id", "platform"}
 	query := SertQuery("INSERT", "messages", fields, len(data))
 
-	// The conflict target stays (hsh, userid) -- the primary key -- and is NOT
-	// widened to include account_id. This is a deliberate reversal of the plan's
-	// §7.4, established with evidence and approved 2026-08-17. See the header of
-	// devops/migrations/26-messages-account.sql for the full argument; in short:
+	// The conflict target stays (hsh, userid) and is deliberately NOT widened to
+	// include account_id: hsh is fnv64a(content) and the account is inside content
+	// in every shape, so (hsh, userid) is already transitively account-scoped.
+	// Widening it would mean ALTER PRIMARY KEY on a 384 GiB table. See the header
+	// of devops/migrations/26-messages-account.sql.
 	//
-	//   hsh is a STORED computed column, fnv64a(content) (01-init.sql:22), and
-	//   the account identifier is INSIDE content in every shape. So (hsh, userid)
-	//   is already transitively account-scoped -- two events on two accounts
-	//   cannot collide, because the bytes that distinguish the accounts are among
-	//   the bytes being hashed.
-	//
-	// Widening it would have required ALTER PRIMARY KEY on a 384 GiB table, and
-	// would have narrowed only the CROSS-ACCOUNT subset of fnv64a collisions
-	// while leaving same-account collisions -- the overwhelmingly larger
-	// population -- untouched.
-	//
-	// Because the target is unchanged, this file has no schema/code deploy
-	// ordering hazard: old and new scribble both run against both schemas. That
-	// is the opposite of chatlog.go and response.go, whose new targets raise
+	// Because the target is unchanged there is no schema/code deploy ordering
+	// hazard here -- unlike chatlog.go and response.go, whose new targets raise
 	// 42P10 against the old schema.
 	query += ` ON CONFLICT(hsh, userid) DO NOTHING`
 	_, err := s.pool.Exec(context.Background(), query, values...)

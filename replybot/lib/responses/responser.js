@@ -3,7 +3,7 @@ const { getField } = require('../typewheels/form')
 // This module used to also export a `Responser` class -- a Kafka consumer that
 // wrote the `responses` table -- and two entrypoints that ran it
 // (`scratchbot.js`, `batch.js`), alongside a sibling `Stateman` consumer
-// (`stateman.js`) that wrote `states`. All four are deleted as of §7.1.
+// (`stateman.js`) that wrote `states`. All four are deleted.
 //
 // They could not have worked since Machine.transition's signature changed to
 // (state, parsedEvent): every one of them called
@@ -47,7 +47,7 @@ function responseVals(newState, update, form, surveyid, pageid, user, timestamp,
       // it to the nullable `responses.platform` column (migration 26). It is
       // stored on the archival table because `credentials` cascades on user
       // delete, which would otherwise strip the platform binding from history.
-      // See planning/conversation-identity.md §3.1.
+      // See planning/conversation-identity.md.
       platform,
     }
   }

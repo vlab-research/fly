@@ -326,7 +326,8 @@ async fn process_entry(state: &AppState, entry: &Value) -> Result<(), String> {
 }
 
 /// Mirrors handleSyntheticEvents. Stamps source='synthetic', timestamp=now_ms,
-/// and account_id/platform when derivable. Implements gated 400 per contract §4.
+/// and account_id/platform when derivable. The 400 is gated by
+/// SYNTHETIC_REQUIRE_CONVERSATION.
 ///
 /// Always rejects missing `user` with 400 (malformed POST, not a server error).
 ///

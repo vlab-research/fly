@@ -2,32 +2,14 @@ const { expect } = require('chai')
 const sinon = require('sinon')
 const { StateStore, _resolve } = require('./statestore')
 
-// ---------------------------------------------------------------------------
-// B10 -- conversation-keyed state cache.
+// Conversation-keyed state cache.
 //
-// RED UNTIL §7.1 LANDS. Every assertion in the `_makeKey`, `getState`,
-// `updateState` and `missing tuple` blocks below describes the POST-FIX
-// contract. Against current code they fail, because `_makeKey(user)`
-// (statestore.js:64-66) takes a single argument and returns `state:${user}` --
-// keying a conversation by the participant alone. That is the bug: a
-// conversation is (platform, account_id, user_id), and two of a researcher's
-// accounts messaged by one participant currently share one state blob.
+// A conversation is (platform, account_id, user_id). Keying by the participant
+// alone is the bug these tests exist to prevent: two of a researcher's accounts
+// messaged by one participant would share a single state blob.
 //
-// Observed failure mode before the fix (recorded per §C.3 of
-// planning/conversation-identity-test-plan.md): `_makeKey('whatsapp', acct,
-// user)` ignores arguments 2 and 3 and returns `state:whatsapp`, so BOTH
-// accounts resolve to the same key and the "distinct keys" assertions fail on
-// equality rather than on shape.
-//
-// THE KEY SHAPE IS NOT YET SETTLED -- see the test plan §0.9-2. If account ids
-// are globally unique (which the ratified (allocator, id) model asserts, and
-// which `unique_messaging_account` enforces in production today) then
-// `state:{account}:{user}` is sufficient and §7.3 stops being a hard
-// prerequisite for §7.1. Every assertion below routes through expectedKey(),
-// so a decision either way is a one-line change here and not a sweep through
-// the file.
-// ---------------------------------------------------------------------------
-
+// Every assertion routes through expectedKey(), so changing the key shape is a
+// one-line change here rather than a sweep through the file.
 const KEY_INCLUDES_PLATFORM = true
 
 const expectedKey = (platform, account, user) =>
@@ -35,8 +17,8 @@ const expectedKey = (platform, account, user) =>
     ? `state:${platform}:${account}:${user}`
     : `state:${account}:${user}`
 
-// The conversation handle the processor computes from the event envelope
-// (§7.1's `conversationFromRawEvent`) and hands to the store.
+// The conversation handle the processor computes from the event envelope and
+// hands to the store.
 const conv = (platform, account) => ({ platform, account })
 
 const PAGE_A = '935593143497601'
@@ -119,14 +101,10 @@ describe('StateStore', () => {
       expect(b).to.equal(expectedKey('messenger', PAGE_B, 'user123'))
     })
 
-    // B10-3. DEFENSIVE. Under the ratified (allocator, id) account-identity
-    // model (documentation/platform-abstraction.md:246-261) account ids are
-    // globally unique across platforms, so this case should be unreachable in
-    // the real system. It is asserted anyway because it is free, and because
-    // §5.2's proposed PRIMARY KEY (platform, account_id) would admit it.
-    // If KEY_INCLUDES_PLATFORM is turned off, this test is expected to be
-    // removed along with it -- it is the only assertion that depends on the
-    // platform component actually being in the key.
+    // Account ids are globally unique across platforms today, so this cannot arise
+    // yet. It becomes real if a facebook_page credential also serves Instagram --
+    // one account id carrying both platforms. The only assertion that depends on
+    // the platform actually being in the key.
     it('B10-3: same account id on two platforms => two distinct keys', function () {
       if (!KEY_INCLUDES_PLATFORM) return this.skip()
       const m = stateStore._makeKey('messenger', PAGE_A, 'user123')
@@ -146,14 +124,9 @@ describe('StateStore', () => {
       expect(mockRedis.get.calledWith(expectedKey('messenger', PAGE_A, 'user123'))).to.be.true
     })
 
-    // B10-9a: replay runs for the right user AND is scoped to the right account.
-    //
-    // This assertion used to read `.to.equal('user123')`, pinning the pre-§7.5
-    // POSITIONAL call shape `get(userid, limit)`. §7.5 moved it to
-    // `get({ userid, account }, limit)`. The test's intent -- "the replay ran for
-    // the right user" -- never changed; only the mechanism did. The object form is
-    // strictly stronger, because it also pins the account scoping that §7.5 exists
-    // to provide.
+    // Asserts the object `get({ userid, account }, limit)` receives, not merely
+    // that it was called -- asserting the call alone would pass against a
+    // completely unscoped replay.
     it('should calculate state from events if not cached, scoped to the account', async () => {
       mockRedis.get.resolves(null)
       mockDb.get.resolves(['event1', 'event2'])
@@ -261,7 +234,7 @@ describe('StateStore', () => {
   })
 
   // -------------------------------------------------------------------------
-  // B10-4 .. B10-7 -- the missing-tuple contract (§7.1).
+  // The missing-tuple contract.
   //
   // When either component is absent the store must NEITHER READ NOR WRITE the
   // cache: it computes from the event log and logs once with a greppable tag.
@@ -317,10 +290,8 @@ describe('StateStore', () => {
       expect(mockRedis.setex.called).to.be.false
     })
 
-    // B10-6. This tag is the ENTIRE instrument for the §7.1 pre-step canary
-    // ("ship a log-only build, watch 24h, expect zero"). If it is missing the
-    // canary reads zero for the wrong reason; if it is noisy the canary is
-    // unreadable. Once per event, not once per retry.
+    // This tag is the only instrument for the rollout canary: missing and it reads
+    // zero for the wrong reason, noisy and it is unreadable. Once per event.
     it('B10-6: logs exactly one greppable line, once', async () => {
       const warn = sinon.spy(console, 'warn')
       const error = sinon.spy(console, 'error')

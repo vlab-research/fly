@@ -118,12 +118,10 @@ describe('eventPlatform', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The three-case contract (§7.1). statestore.test.js B10-9a/b/c pins what the
-// STORE does with each of the three shapes; these pin that the extractor can
-// actually PRODUCE all three. Without the middle case here, B10-9b was testing
-// a shape no real event could reach it in -- which is how the strict
-// `if (!platform || !account) return null` gate shipped with a green unit
-// suite and was caught only by an integration run (B10-8).
+// The three-case contract. statestore.test.js pins what the STORE does with each
+// shape; these pin that the extractor can actually PRODUCE all three. Without the
+// middle case, a strict `if (!platform || !account) return null` gate passes the
+// unit suite while silently degrading every partial event to an unscoped replay.
 // ---------------------------------------------------------------------------
 describe('conversationFromRawEvent', () => {
   const { expect } = require('chai')

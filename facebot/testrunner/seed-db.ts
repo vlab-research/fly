@@ -12,13 +12,13 @@ interface Survey {
 
 // --- Conversation identity test fixture: two researchers, four messaging accounts
 //
-// §A1: To test conversation isolation and cross-researcher containment, we seed two
+// To test conversation isolation and cross-researcher containment, we seed two
 // distinct researchers (test@test.com and test2@test.com), each owning two messaging
 // accounts (Messenger page + WhatsApp phone_number_id). The existing 40 tests depend on
 // researcher A's ids and the media fixture's hardcoded page id — so R1's accounts are
 // kept byte-identical. Only R2 is new.
 //
-// §A2: Each account gets a distinct credential token. On Messenger, the token in
+// Each account gets a distinct credential token. On Messenger, the token in
 // Authorization: Bearer is the ONLY account signal on the outbound wire (no page id in
 // URL or body). A distinct token per account is what makes "this send went out on page B"
 // assertable in a two-account test.

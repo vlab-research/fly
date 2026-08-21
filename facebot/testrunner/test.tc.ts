@@ -1176,24 +1176,18 @@ describe('Test Bot flow Survey Integration Testing', () => {
   });
 
   // =========================================================================
-  // CONVERSATION IDENTITY  --  planning/conversation-identity-test-plan.md §B
+  // CONVERSATION IDENTITY
   //
-  // A conversation is (platform, account_id, user_id). Replybot keys it by user
-  // id alone (replybot/lib/typewheels/statestore.js:64-66), so one participant
-  // messaging two of a researcher's accounts SHARES ONE STATE BLOB. That kills
-  // conversations with FIELD_NOT_FOUND and writes one researcher's participant
-  // data into another researcher's account scope.
+  // A conversation is (platform, account_id, user_id). Keying it by user id alone
+  // means one participant messaging two of a researcher's accounts shares one
+  // state blob, which kills conversations with FIELD_NOT_FOUND and writes one
+  // researcher's participant data into another's scope.
   //
-  // SERIAL, NOT mocha.parallel. Every test here drives two conversations for one
-  // user id and asserts on shared Redis and DB state. Under mocha.parallel, with
-  // message-worker pinned to NUM_WORKERS=1, interleaved two-account flows make
-  // failures unattributable -- one un-drained send starves every neighbour for
-  // facebot's full 10s timeout and surfaces as unrelated 45s timeouts.
-  //
-  // ALL OF THESE ARE RED UNTIL §7.1 LANDS (which itself waits on §7.3). That is
-  // the point: per §C.3 of the plan they are regressions on silent data loss, and
-  // a test that was never seen red proves nothing about a bug whose signature is
-  // the ABSENCE of a row. Each test records its observed pre-fix failure.
+  // SERIAL, NOT mocha.parallel. Every test drives two conversations for one user
+  // id and asserts on shared Redis and DB state. Under mocha.parallel, with
+  // message-worker at NUM_WORKERS=1, interleaved flows make failures
+  // unattributable: one un-drained send starves its neighbours for facebot's full
+  // 10s timeout and surfaces as unrelated 45s timeouts.
   // =========================================================================
   describe('Conversation identity: (platform, account_id, user_id)', function () {
     this.timeout(120000);
@@ -1219,8 +1213,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
     });
 
     // Count the cache keys a participant holds, across all accounts. SCAN, not
-    // KEYS -- the same discipline devops/clear-state-cache.sh must adopt after
-    // §7.1, since that script runs against production Redis where KEYS stalls.
+    // KEYS: production Redis has a large keyspace and KEYS blocks the server.
     async function scanKeys(pattern: string): Promise<string[]> {
       const found: string[] = [];
       let cursor = '0';
@@ -1234,15 +1227,8 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
     // Force a cache miss for one conversation, whatever key shape is live.
     //
-    // Deletes BOTH the post-fix tuple key and the pre-fix flat key. That is
-    // deliberate: it makes the §B8 tests exercise REPLAY SCOPING rather than key
-    // shape, which B1 and B10 already cover. If these tests only deleted the
-    // tuple key they would fail pre-fix at the delete (returning 0) and never
-    // reach the replay assertions at all -- red for a trivial reason, and blind
-    // to the bug they exist to catch.
-    //
-    // Pre-fix the flat key is shared, so deleting it evicts both conversations;
-    // that is inherent to the bug, not a flaw in the test.
+    // Deletes both the tuple key and the older flat key, so these tests exercise
+    // REPLAY SCOPING rather than key shape -- which B1 and B10 already cover.
     //
     // Returns keys removed. Callers assert this is > 0: a replay test that never
     // actually forced a miss proves nothing.
@@ -1272,12 +1258,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
     // ---------------------------------------------------------------- B1-1
     // Two Messenger pages, two researchers, one participant, two forms.
-    //
-    // OBSERVED PRE-FIX FAILURE: getAllStates returns 1 row, not 2 -- the second
-    // conversation OVERWRITES the first at the same cache key, and only one
-    // states row is ever written. scanKeys(state:*:*:<user>) returns 0, because
-    // the only key present is the flat legacy `state:<user>`.
-    it('B1-1 [RED until §7.1]: two Messenger pages, same user, progress independently', async () => {
+    it('B1-1: two Messenger pages, same user, progress independently', async () => {
       const userId = uuid();
       const convA = onPageA(userId);
       const convB = onPageB(userId);
@@ -1336,9 +1317,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
     // 100% of the time pre-fix -- whereas the Messenger case (B1-1) depends on
     // PSID reuse across pages. If only one isolation test can be maintained,
     // keep this one.
-    //
-    // OBSERVED PRE-FIX FAILURE: same as B1-1 -- one states row, one flat key.
-    it('B1-2 [RED until §7.1]: two WhatsApp numbers, same wa_id, progress independently', async () => {
+    it('B1-2: two WhatsApp numbers, same wa_id, progress independently', async () => {
       const userId = '1541' + Math.floor(Math.random() * 1e6);
       const convA = onWaA(userId);
       const convB = onWaB(userId);
@@ -1378,7 +1357,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
     // across Messenger and WhatsApp. It is here because it is the ONLY test that
     // proves `platform` is a live component of the cache key rather than dead
     // weight, which is exactly what the settled full-triple key shape asserts.
-    it('B1-3 [RED until §7.1]: same user id on Messenger and WhatsApp are distinct conversations', async () => {
+    it('B1-3: same user id on Messenger and WhatsApp are distinct conversations', async () => {
       const userId = '1' + Math.floor(Math.random() * 1e11);
       const convM = onPageA(userId);
       const convW = onWaB(userId);
@@ -1427,7 +1406,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
     // same key, so they land on one partition and are processed in strict order by
     // one replybot spine. That is WHY the bug is a deterministic
     // last-writer-wins rather than a race, and why the two-account tests above are
-    // reproducible rather than flaky. §7.1 changes the STATE key; if anyone
+    // reproducible rather than flaky. If anyone
     // "helpfully" also changes the PARTITION key, ordering guarantees the rest of
     // the system leans on break silently.
     //
@@ -1441,13 +1420,9 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
       // Bookmark the topic BEFORE driving anything, and read only what follows.
       //
-      // This used to read the OLDEST 500 records of `chat-events`. It passed while
-      // the suite was small and then broke on nothing but growth: the topic reached
-      // a high watermark of 556, this test runs near the end of the suite, and its
-      // own events therefore fell outside the window -- so `mine` was empty and the
-      // test died as a bare 120s mocha timeout naming nothing. A bookmark makes the
-      // read proportional to what THIS test produced, so it stays correct however
-      // large the suite gets. See consumeTopic() in stack.ts.
+      // A bookmark keeps the read proportional to what THIS test produced. Reading
+      // the oldest N records instead breaks on suite growth alone, and fails as a
+      // bare mocha timeout naming nothing. See consumeTopic() in stack.ts.
       const since = await topicEndOffsets(stack, 'chat-events');
 
       await sendMessage(makeReferralFor(convA, 'isoFormA'));
@@ -1467,27 +1442,13 @@ describe('Test Bot flow Survey Integration Testing', () => {
     });
 
     // ---------------------------------------------------------------- B2-1
-    // *** THE REGRESSION TEST FOR THE WHOLE BUG. *** The §1.1 reproduction,
+    // *** THE REGRESSION TEST FOR THE WHOLE BUG. *** The live reproduction,
     // verbatim: entry on account A poisons a LIVE conversation on account B.
-    //
-    // OBSERVED PRE-FIX FAILURE (this is the live 2026-08-16 production failure,
-    // reproduced in the harness): the button press on account B is validated
-    // against the form-A field the cached state left behind, so form.js:185
-    // raises
-    //     FIELD_NOT_FOUND: Could not find the requested field, isoa_*, in our
-    //     form: isoFormB
-    // the conversation goes to ERROR and STAYS there -- FIELD_NOT_FOUND is not in
-    // DEAN_ERROR_TAGS (NETWORK,INTERNAL,STATE_ACTIONS) so no sweep retries it,
-    // and every touch refreshes the 24h TTL so the corrupt state is served
-    // forever. Only devops/clear-state-cache.sh recovers the participant.
-    //
-    // Run in BOTH directions so the test cannot accidentally depend on write
-    // ordering.
     [
       { name: 'A poisons B', live: 'B', entry: 'A' },
       { name: 'B poisons A', live: 'A', entry: 'B' },
     ].forEach(({ name, live, entry }) => {
-      it(`B2-1 [RED until §7.1]: §1.1 reproduction -- ${name}`, async () => {
+      it(`B2-1: the live reproduction -- ${name}`, async () => {
         const userId = uuid();
         const liveConv = live === 'B' ? onPageB(userId) : onPageA(userId);
         const entryConv = entry === 'A' ? onPageA(userId) : onPageB(userId);
@@ -1540,24 +1501,6 @@ describe('Test Bot flow Survey Integration Testing', () => {
         // IMMEDIATELY on processing this answer, whereas every assertion below is
         // downstream of a reply that never arrives -- so later, the test would die
         // on a receive() timeout and the actual signature would never print.
-        //
-        // OBSERVED PRE-FIX (captured 2026-08-17, this test, real stack):
-        //   newState.forms = ["isoFormB","isoFormA"]   <- BOTH researchers' forms
-        //   newState.qa    = [["isoa_q1","Excellent"]] <- form A's field ref holding
-        //                                                 form B's choice label
-        //   newState.md    = { form:"isoFormA", pageid:"935593143497601" }
-        //   ...while the event arrived on 811223344556677, so:
-        //   FORM_NOT_FOUND: Survey with shortcode isoFormA ... for page
-        //   811223344556677 could not be found.   (ourform.js:42)
-        //   -> state ERROR, terminal.
-        //
-        // Note the signature is FORM_NOT_FOUND here, not the FIELD_NOT_FOUND of the
-        // live §1.1 incident. Same mechanism, one step earlier: this fixture puts
-        // the two forms under DIFFERENT researchers (required by B3), so the form
-        // lookup 404s before the machine ever reaches the field lookup. Neither tag
-        // is in DEAN_ERROR_TAGS (NETWORK,INTERNAL,STATE_ACTIONS), so both are
-        // equally terminal -- no sweep retries either, and the cached state
-        // outlives every deploy. Assert on both.
         await snooze(4000);
         const earlyLogs = await replybotLogsSince(marker);
         const hits = earlyLogs
@@ -1566,7 +1509,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
         if (hits.length > 0) {
           throw new Error(
             `Terminal form/field error raised on the ${liveConv.accountId} conversation ` +
-            `after a state write from ${entryConv.accountId} -- this is the §1.1 bug. ` +
+            `after a state write from ${entryConv.accountId} -- this is the bug. ` +
             `First ${Math.min(hits.length, 2)} of ${hits.length} line(s):\n` +
             hits.slice(0, 2).join('\n'),
           );
@@ -1623,7 +1566,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
     // ---------------------------------------------------------------- B2-2
     // The WhatsApp twin of B2-1. Deterministic pre-fix, because wa_id is global.
-    it('B2-2 [RED until §7.1]: §1.1 reproduction on two WhatsApp numbers', async () => {
+    it('B2-2: the live reproduction on two WhatsApp numbers', async () => {
       const userId = '1541' + Math.floor(Math.random() * 1e6);
       const liveConv = onWaB(userId);
       const entryConv = onWaA(userId);
@@ -1646,7 +1589,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       if (hits.length > 0) {
         throw new Error(
           `FIELD_NOT_FOUND raised on the ${WA_B} conversation after a state write ` +
-          `from ${WA_A} -- the §1.1 bug, on WhatsApp:\n${hits.slice(0, 3).join('\n')}`,
+          `from ${WA_A} -- the bug, on WhatsApp:\n${hits.slice(0, 3).join('\n')}`,
         );
       }
 
@@ -1673,11 +1616,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
     // scoping relies on: dashboard-server/queries/states/states.queries.js
     // scopes `states.pageid` to the accounts the requesting owner holds, so a row
     // written under the WRONG account is a row the wrong researcher can read.
-    //
-    // OBSERVED PRE-FIX FAILURE: researcher A's answer text appears in the qa
-    // transcript of the row scoped to researcher B's account, and response rows
-    // carry the other form's question_ref.
-    it('B3-1 [RED until §7.1]: one researcher\'s participant data never lands in the other\'s scope', async () => {
+    it('B3-1: one researcher\'s participant data never lands in the other\'s scope', async () => {
       const userId = uuid();
       const convA = onPageA(userId);
       const convB = onPageB(userId);
@@ -1757,10 +1696,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
     });
 
     // ---------------------------------------------------------------- B3-2
-    // md must not cross either. §2.2 item 2 calls out payment fields
+    // md must not cross either. Payment fields in particular
     // specifically: state.md is what carries e_payment_* results, and md is
     // exactly what a shared cache blob merges.
-    it('B3-2 [RED until §7.1]: md does not cross between accounts', async () => {
+    it('B3-2: md does not cross between accounts', async () => {
       const userId = uuid();
       const convA = onPageA(userId);
       const convB = onPageB(userId);
@@ -1797,29 +1736,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
     describe('B8: replay is scoped to the conversation', function () {
       this.timeout(120000);
 
-      // THE OLD "HARD BLOCKER" IS GONE. Recorded because the note it replaces
-      // survived long after it stopped being true, and three tests carried a
-      // stale `[RED: needs chatbase-postgres@0.2.0 published]` tag because of it.
-      //
-      // The scoped `get()` used to live in the separate package
-      // @vlab-research/chatbase-postgres, which the replybot image installed from
-      // the npm registry -- so these tests could not go green until 0.2.0 was
-      // published AND `replybot/package.json`'s `^0.1.0` was bumped (a caret on a
-      // 0.x pins the MINOR, so publishing alone changed nothing).
-      //
-      // That package no longer exists. It was absorbed into `replybot/lib/chatbase/`,
-      // and stack.ts builds replybot from `repoRoot/replybot`'s Dockerfile, which
-      // copies the tree in. The harness and production now build the scoped client
-      // from the SAME source the assertions live beside -- which is the property
-      // the registry split never had. Nothing here is blocked on a publish.
-      //
-      // B8-5a is no longer vacuous either. It used to pass only because `get()`
-      // was unscoped (every archived row returned to every account), so its green
-      // was evidence that nothing was scoped. Now that scoping is live, B8-5a and
-      // B8-5b together are meaningful: B8-5a proves NULL-account_id rows are still
-      // tolerated, B8-5b proves a populated NON-MATCHING account is excluded --
-      // and B8-5b is the one that distinguishes the tolerant contract from having
-      // no account predicate at all.
+      // B8-5a and B8-5b are meaningful only together: B8-5a proves NULL-account
+      // rows are still tolerated, B8-5b proves a populated NON-MATCHING account is
+      // excluded. B8-5b is the one that distinguishes the tolerant contract from
+      // having no account predicate at all.
 
       // NON-VACUITY GUARD. Asserts a POSITIVE, SPECIFIC archived-row count --
       // not merely non-zero -- before any replay assertion is allowed to run.
@@ -1847,14 +1767,11 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // (userid, timestamp, content, account_id, platform), taking the Kafka key as
       // userid and the raw body as content; `hsh` is a computed fnv64a(content).
       //
-      // THE ACCOUNT COLUMNS ARE LOAD-BEARING HERE AND WERE MISSING. This helper
-      // used to insert (userid, timestamp, content) only -- true to message.go
-      // before migration 26 added the columns, and stale the moment it landed. The
-      // consequence was not a weak test but a CONTRADICTORY one: B8-1b seeded two
-      // NULL-account rows and then demanded they be scoped apart, while B8-5a
-      // asserts NULL-account rows ARE replayed (the deliberate migration-tolerance
-      // clause -- see the DO NOT TIGHTEN note on B8-5a). Both cannot hold. The
-      // decisive control is that B8-1 passes: the end-to-end version, whose log is
+      // THE ACCOUNT COLUMNS ARE LOAD-BEARING. Seeding NULL-account rows and then
+      // demanding they be scoped apart contradicts B8-5a, which asserts NULL-account
+      // rows ARE replayed (the migration-tolerance clause -- see the DO NOT TIGHTEN
+      // note there). Keep this helper in step with scribble/message.go. The decisive
+      // control is that B8-1 passes: the end-to-end version, whose log is
       // built by the real pipeline, proves replay scoping genuinely works. Only the
       // fabricated rows leaked, because they were fabricated wrong.
       //
@@ -1862,18 +1779,8 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // seedHistoricalArchivedEvent below -- explicitly, so a NULL account is
       // always a choice a test made rather than a shape the helper drifted into.
       //
-      // WHY THIS EXISTS. Pre-§7.1 it is IMPOSSIBLE to establish two clean
-      // conversations for one participant by driving the pipeline: the second
-      // entry is contaminated either through the shared cache key or, on a miss,
-      // through the shared replay. So an end-to-end two-conversation setup cannot
-      // be built until §7.1 lands, which would make the whole of §7.5 untestable
-      // until then.
-      //
-      // Seeding the log directly breaks that circular dependency. The replay path
-      // reads `messages`, so a log containing both conversations' events is all
-      // §7.5 needs in order to be exercised -- independent of whether the cache is
-      // yet keyed correctly. This lets §7.4/§7.5 be developed and verified before
-      // or in parallel with §7.1.
+      // Seeding the archived log directly lets the replay path be exercised without
+      // driving the pipeline, since the replay reads `messages` and nothing else.
       const archivedContent = (
         accountId: string,
         platform: 'messenger' | 'whatsapp',
@@ -1902,7 +1809,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
         );
       }
 
-      // A row as it exists BEFORE the §7.4 backfill reaches it: content carries the
+      // A row as it exists BEFORE the backfill reaches it: content carries the
       // account (it always did -- it is inside the event body), but the columns are
       // NULL. `messages.account_id` is nullable precisely so the backfill can be
       // incremental, and scribble/message.go declares AccountID as *string for the
@@ -1938,30 +1845,13 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // then forces a miss and drives a single event on account A. Replay must
       // reconstruct account A's conversation ONLY.
       //
-      // Gated on §7.4+§7.5 alone; deliberately NOT on §7.1, unlike B8-1/B8-2.
+      // RETIREMENT CANDIDATE. What this asserts is a strict subset of B8-1, from
+      // fabricated rows rather than real ones -- and fabricated rows are how it went
+      // wrong before, when the seeder drifted out of step with migration 26.
       //
-      // OBSERVED PRE-FIX: chatbase.get()'s `WHERE userid = $1` returns both
-      // accounts' rows, so the reconstructed state carries researcher B's form and
-      // refs alongside A's.
-      //
-      // ITS ORIGINAL JUSTIFICATION HAS EXPIRED -- RETIREMENT CANDIDATE, flagged and
-      // deliberately NOT acted on unilaterally.
-      //
-      // B8-1b exists solely to break a circular dependency: §7.5 could not be
-      // verified end to end until §7.1 landed, because two clean conversations for
-      // one participant could not even be SET UP while the cache key was shared.
-      // §7.1 has landed and B8-1 -- the end-to-end version, whose log is built by
-      // the real pipeline -- passes. The dependency is gone, and what B8-1b now
-      // asserts is a strict subset of B8-1, from fabricated rows rather than real
-      // ones. Fabricated rows are also how it went wrong: the seeder drifted out of
-      // step with migration 26 and the test silently began demanding the opposite
-      // of B8-5a.
-      //
-      // The counter-argument for keeping it: it is fast, it is the only §B8 test
-      // that isolates the replay query from the whole pipeline, and if §7.1 ever
-      // regresses it is the one replay test that would still localise the fault.
-      // That is a real if narrow value. Recommendation recorded; decision is the
-      // plan owner's.
+      // Kept because it is fast and is the only replay test that isolates the query
+      // from the whole pipeline, so it is the one that would still localise a fault
+      // if the cache key regressed.
       it('B8-1b: replay reads only the conversation\'s own archived events', async () => {
         const userId = uuid();
         const convA = onPageA(userId);
@@ -2002,19 +1892,11 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // -------------------------------------------------------------- B8-1
       // A cache miss must replay ONLY that conversation's events.
       //
-      // OBSERVED PRE-FIX FAILURE: chatbase.get() is `WHERE userid = $1`, so the
-      // replay interleaves BOTH conversations' events (§2.2 item 3), and the
-      // LEFT JOIN on states USING (userid) returns one row per account, so every
-      // message row is duplicated N times (§2.2 item 4).
-      // GATING, stated precisely: this test's SETUP needs §7.1, not just §7.5.
-      // Establishing two live conversations for one participant is impossible while
-      // the cache key is shared -- the second entry stitches onto the first (see
-      // B2-1's captured output). So pre-§7.1 this fails during setup, at the
-      // second flowMaster, with a receive() error rather than at its replay
-      // assertion. B8-1b above tests the same replay property WITHOUT that
-      // dependency, by seeding the archived log directly; keep both, because this
-      // one is the end-to-end proof and B8-1b is the one that can go green first.
-      it('B8-1 [RED until §7.1+§7.4+§7.5]: a cache miss replays only that conversation', async () => {
+      // The end-to-end proof: an unscoped replay would interleave both
+      // conversations' events, and a states join on userid alone would duplicate
+      // every message row once per account. B8-1b above tests the same replay
+      // property from a seeded log; this one drives the real pipeline.
+      it('B8-1: a cache miss replays only that conversation', async () => {
         const userId = uuid();
         const convA = onPageA(userId);
         const convB = onPageB(userId);
@@ -2060,9 +1942,9 @@ describe('Test Bot flow Survey Integration Testing', () => {
         //
         // PRE-FIX this fails because chatbase.get() is `WHERE userid = $1`: the
         // replay pulls BOTH conversations' archived events, interleaved, and the
-        // reconstructed state carries researcher B's form and answers (§2.2 item
-        // 3). The LEFT JOIN on states USING (userid) additionally returns one row
-        // per account, duplicating every message row N times (§2.2 item 4).
+        // reconstructed state carries researcher B's form and answers. A LEFT JOIN
+        // on states USING (userid) additionally returns one row per account,
+        // duplicating every message row N times.
         const qa = JSON.stringify(rowA.state_json.qa);
         qa.should.include('isoa_');
         if (qa.includes('isob_')) {
@@ -2080,20 +1962,8 @@ describe('Test Bot flow Survey Integration Testing', () => {
       });
 
       // -------------------------------------------------------------- B8-2
-      // The message_pointer leak, §2.2 item 4.
-      //
-      // OBSERVED PRE-FIX FAILURE: chatbase.get()'s
-      //   LEFT JOIN (SELECT userid, message_pointer FROM states WHERE userid=$1)
-      //   USING (userid)
-      // returns one row per account the participant holds state on. The pointer
-      // checkpoint therefore passes if ANY account's pointer allows it, so a
-      // form.reset on account A silently stops history truncation on account B,
-      // and message rows are duplicated N times in the replay.
-      // Same setup dependency on §7.1 as B8-1 -- see the note there. This is the
-      // subtlest bug in the plan (§2.2 item 4) and has no isolated variant yet:
-      // the pointer checkpoint is a property of the states/messages JOIN, so it
-      // needs two real states rows with two real pointers.
-      it('B8-2 [RED until §7.1 for setup]: form.reset on one account does not stop truncation on the other', async () => {
+      // The message_pointer leak.
+      it('B8-2: form.reset on one account does not stop truncation on the other', async () => {
         const userId = uuid();
         const convA = onPageA(userId);
         const convB = onPageB(userId);
@@ -2113,9 +1983,8 @@ describe('Test Bot flow Survey Integration Testing', () => {
         // Reset account A, which sets A's message_pointer (04-pointers.sql, a
         // computed column over state_json.pointer).
         //
-        // ROOT CAUSE OF THE ORIGINAL FAILURE (2026-08-17). This step used to
-        // re-send a referral to `isoFormA` and expect the survey to restart. That
-        // is not what a repeat referral does. `machine.js`'s REFERRAL case:
+        // A repeat referral does NOT restart a survey -- do not reach for one here.
+        // `machine.js`'s REFERRAL case:
         //
         //     if (_hasForm(state, form)) {
         //       if (state.state === 'QOUT') return _repeat(state)   // <-- here
@@ -2189,15 +2058,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       });
 
       // -------------------------------------------------------------- B8-3
-      // §7.4: the archived rows must carry the account and the platform. This is
-      // the test that gates the §7.4 backfill being implementable at all -- if
-      // the forward path does not stamp these, there is nothing for §7.5 to key
+      // Archived rows must carry the account and the platform. If the forward path
+      // does not stamp these there is nothing for the replay to key
       // on.
-      //
-      // OBSERVED PRE-FIX FAILURE: `messages` has no account_id column at all
-      // (01-init.sql:17-30), so responses.getMessages() throws the descriptive
-      // "migration 26 has not landed" error by design rather than returning [].
-      it('B8-3 [RED until §7.4]: archived messages carry account_id and platform', async () => {
+      it('B8-3: archived messages carry account_id and platform', async () => {
         const userId = uuid();
         const conv = onPageA(userId);
         const fields = getFields('forms/isoFormA.json');
@@ -2226,7 +2090,8 @@ describe('Test Bot flow Survey Integration Testing', () => {
       //     Drift-verified: inverting `= 'true'` to `!= 'true'` fails exactly the
       //     three echo vectors.
       //   - REAL-SHAPE BEHAVIOUR, poison resilience, idempotency, resumability:
-      //     the §7.4 stream's own suite over devops/backfill-messages-account.sh.
+      //     devops/backfill/integration_test.go, against a real CockroachDB seeded
+      //     with one row per branch of the rule.
       //
       // A version here would have to FABRICATE historical rows, because the harness
       // is a fresh database in which every row is written by current code -- the
@@ -2237,9 +2102,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // The forward/backward consistency question -- does the backfill's derivation
       // agree with what the live pipeline actually writes -- is already B8-3 above,
       // in its only meaningful form. And the forward/backward OVERWRITE seam does
-      // not exist: backfill-messages-account.sh:348's UPDATE carries
-      // `AND account_id IS NULL`, so forward-written rows are excluded by
-      // construction and there is nothing for the backfill to clobber.
+      // not exist: devops/backfill's UpdateQuery carries `AND account_id IS NULL`,
+      // so forward-written rows are excluded by construction and there is nothing
+      // for the backfill to clobber. Asserted directly by that package's
+      // TestBackfillNeverOverwritesAForwardWrittenAccount.
       //
       // If the backfill ever gains a branch that WRITES over a non-NULL
       // account_id, this decision is void and B8-4 must be written.
@@ -2252,7 +2118,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       //
       // An earlier revision of this test pinned the STRICT contract -- that a
       // tuple-keyed get() returns EMPTY for rows whose account_id is NULL -- and
-      // thereby forced "§7.4 fully backfilled before §7.5 ships". That was wrong,
+      // thereby forced "fully backfilled before the read path ships". That was wrong,
       // and the reason is `STATE_STORE_LIMIT=30000` combined with
       // `ORDER BY timestamp ASC`: replay reads the OLDEST 30k events, not the
       // newest. So under the strict contract any conversation whose *old* events
@@ -2300,7 +2166,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
         if (!(await messagesHasAccountColumn(chatbase))) {
           throw new Error(
             'B8-5b cannot run: chatroach.messages has no account_id column yet ' +
-            '(migration 26 / §7.4). This test is the ONLY thing proving the tolerant ' +
+            '(migration 26). This test is the ONLY thing proving the tolerant ' +
             'contract still scopes by account rather than degenerating into no ' +
             'predicate at all, so it must not be skipped silently once 26 lands.',
           );
@@ -2351,7 +2217,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // was a false positive dressed up as a tripwire.
       //
       // The removal trigger therefore belongs with the other production-data
-      // invariants (alongside §5.3's registry count check), and is specified in the
+      // invariants, and is specified in the
       // plan. What THIS test owns is the intent: the decision must stay written down
       // and greppable, so that whoever finds the odd-looking `OR account_id IS NULL`
       // clause finds the reasoning rather than guessing at it -- and so that
@@ -2394,9 +2260,9 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
     // ---------------------------------------------------------------- B10-8
     // A tuple-less event must still advance the conversation -- degraded to a
-    // replay, never an error. This is what makes §7.1's no-fallback rule safe to
+    // replay, never an error. This is what makes the no-fallback rule safe to
     // ship: refusing to touch the cache must not refuse to serve the participant.
-    it('B10-8 [RED until §7.1]: a synthetic event with no platform still advances the conversation', async () => {
+    it('B10-8: a synthetic event with no platform still advances the conversation', async () => {
       const userId = uuid();
       const conv = onPageA(userId);
       const fields = getFields('forms/isoFormA.json');
@@ -2405,10 +2271,10 @@ describe('Test Bot flow Survey Integration Testing', () => {
       await flowMaster(conv, [[ok, fields[0], []]]);
 
       // WAIT FOR THE ARCHIVE FIRST -- this is a non-vacuity guard, in the same
-      // spirit as §B8's, and without it this test measures a race instead of its
+      // spirit as B8's, and without it this test measures a race instead of its
       // subject.
       //
-      // A tuple-less event MUST NOT touch the cache (§7.1, B10-4/B10-5), so it is
+      // A tuple-less event MUST NOT touch the cache (B10-4/B10-5), so it is
       // served by a REPLAY of chatroach.messages. If the scribble messages sink has
       // not archived the referral yet, that replay returns an EMPTY log, the state
       // reconstructs as START, and machine.js's `_handleExternalEvent` takes its
@@ -2421,7 +2287,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // `expected '305' to equal 'isoFormA'`.
       //
       // NOT ONLY A TEST BUG -- see the note in the README. The same window exists
-      // in production: §7.1's "refuse the cache, degrade to a replay" is only as
+      // in production: "refuse the cache, degrade to a replay" is only as
       // safe as the archive is current, and inside the archive lag a tuple-less
       // synthetic silently re-enters the participant on the fallback survey rather
       // than erroring. Making the harness wait keeps THIS test on its own subject;

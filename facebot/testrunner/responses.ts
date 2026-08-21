@@ -154,21 +154,12 @@ export async function getChatLog(
 /**
  * Fetch message rows for a participant, optionally scoped by account.
  *
- * IMPORTANT: `messages` has NO account column today — `devops/migrations/
- * 01-init.sql:17-30` defines only (id, content, userid, timestamp, hsh).
- * Plan §7.4 adds `account_id` and `platform`.
- *
- * The unscoped call therefore always works, and is what the replay tests use
- * before §7.4 lands.
- *
- * The SCOPED call deliberately THROWS a descriptive error until the column
- * exists, rather than filtering in JS and returning []. That choice matters:
- * a silent [] would let an account-isolation assertion of the form "account
- * B's messages must not appear in account A's replay" pass VACUOUSLY, because
- * nothing appears in anything. That is precisely the false-pass mode the whole
- * §B8 section exists to avoid (see the test plan's note on B8-1's non-vacuity
- * guard). Fail fast and loud instead: the error names the migration that is
- * missing, so a red test reads as "not implemented yet" rather than "passing".
+ * The unscoped call always works. The SCOPED call deliberately THROWS if
+ * `messages.account_id` does not exist yet, rather than filtering in JS and
+ * returning []: a silent [] would let "account B's messages must not appear in
+ * account A's replay" pass VACUOUSLY, because nothing appears in anything. The
+ * error names the missing migration, so a red test reads as "not implemented"
+ * rather than "passing".
  *
  * For ergonomic use with a Conversation handle: call as
  *   getMessages(chatbase, conv.userId, conv.accountId)
@@ -188,10 +179,10 @@ export async function getMessages(
   if (!(await messagesHasAccountColumn(chatbase))) {
     throw new Error(
       'getMessages(): account-scoped read requested but chatroach.messages has no ' +
-      'account_id column yet (plan §7.4 / devops/migrations/26-messages-account.sql ' +
-      'has not landed). Refusing to filter in JS and return [], because an empty ' +
-      'result would let an isolation assertion pass vacuously. Either land §7.4 or ' +
-      'call getMessages() unscoped.',
+      'account_id column yet (devops/migrations/26-messages-account.sql has not ' +
+      'landed). Refusing to filter in JS and return [], because an empty result ' +
+      'would let an isolation assertion pass vacuously. Either apply the migration ' +
+      'or call getMessages() unscoped.',
     );
   }
 
@@ -199,8 +190,8 @@ export async function getMessages(
 }
 
 /**
- * Does chatroach.messages carry the §7.4 account column yet? Cached after the
- * first probe — the schema does not change mid-run.
+ * Does chatroach.messages carry the account column yet? Cached after the first
+ * probe — the schema does not change mid-run.
  */
 let _messagesAccountColumn: boolean | undefined;
 export async function messagesHasAccountColumn(chatbase: Chatbase): Promise<boolean> {

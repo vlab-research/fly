@@ -132,26 +132,15 @@ func (kp *KafkaProducer) publish(ctx context.Context, key string, value []byte) 
 // and lives in envelope.go; this is only the shell that logs and, optionally,
 // declines.
 //
-// IT REPORTS BY DEFAULT AND REFUSES ONLY UNDER STRICT_EVENT_ENVELOPE. Two
-// reasons, and the second is the one that decided it:
+// It REPORTS by default and REFUSES only under STRICT_EVENT_ENVELOPE. Refusing
+// cannot break delivery -- the message is sent before the echo is emitted -- but
+// it does drop the echo, and on WhatsApp the echo is the only thing advancing the
+// conversation, so strict mode converts a producer bug into a full stall of every
+// WhatsApp survey. Publishing unstamped instead degrades to an unscoped replay,
+// which still advances. Degraded-but-moving beats stopped.
 //
-//  1. It cannot break message delivery. The only live caller is
-//     emitWhatsAppEcho, whose error is already logged and swallowed at
-//     worker.go:181 -- the message was SENT before the echo is emitted, so a
-//     refusal cannot un-send it or turn a delivered message into a retry.
-//     Refusing is safe for the participant either way.
-//  2. But refusing is NOT free for the conversation. The echo is what advances
-//     the replybot state machine RESPONDING -> QOUT on WhatsApp, which has no
-//     native echo webhook. Dropping it stalls every WhatsApp survey outright.
-//     Publishing an unstamped event instead degrades to the pre-§7.1 behaviour:
-//     replybot cannot key the cache, falls back to an unscoped replay, and the
-//     conversation still advances (test plan B10-8). Degraded-but-moving beats
-//     stopped, for a producer bug that a human has to fix anyway.
-//
-// So the default trades a known-and-counted mis-keying risk for keeping
-// conversations alive, and strict mode is available for staging -- where a
-// stalled survey is a test failure rather than a participant -- and for
-// production once the tag reads zero.
+// Turn it on in staging first, where a stalled survey is a test failure rather
+// than a participant.
 //
 // The log line is deliberately identity-only: key, topic and which fields are
 // missing. It never includes the body, which carries participant message

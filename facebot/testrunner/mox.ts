@@ -128,10 +128,10 @@ export function makeTextResponse(userId: string, text: string, time = Date.now()
   return baseMessage(userId, { message: { text } }, time, pageId);
 }
 
-// Emit a synthetic event with the full account envelope per §7.3.1.
+// Emit a synthetic event with the full account envelope.
 // The platform is derived from the account id; pass explicitly only if the account
 // belongs to an unseen platform (which should not happen in the test suite).
-// Keeps 'page' as a deprecated alias for backward compatibility with §4.2.
+// Keeps 'page' as a deprecated alias.
 export function makeSynthetic(userId: string, event: SyntheticEvent, accountId = PAGE_A, platform?: string): any {
   const plat = platform || ACCOUNT_PLATFORM[accountId];
   if (!plat) {

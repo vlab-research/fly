@@ -13,13 +13,11 @@ const KAFKA_COMMANDS_TOPIC = process.env.KAFKA_COMMANDS_TOPIC || 'commands'
 async function publishReport(report, conv) {
   const url = process.env.BOTSERVER_URL
 
-  // The envelope (§4.2) is the single source for the conversation we are posting
-  // this machine_report back into. `report.page` / `report.platform` remain as a
-  // fallback ONLY here, on the OUTBOUND side: replybot is a synthetic poster and
-  // §7.3.1 makes the triple a required part of the /synthetic contract, so
-  // posting a report with a null component is worse than posting a slightly
-  // less-trusted one. The cache key (getState/updateState) takes no such
-  // fallback -- there, a wrong name is a poisoned conversation.
+  // The envelope is the source for the conversation we post this report back into.
+  // `report.page`/`report.platform` are a fallback ONLY here, on the outbound side:
+  // the /synthetic contract requires the triple, so posting a slightly less-trusted
+  // name beats posting a null one. The cache key takes no such fallback -- there a
+  // wrong name is a poisoned conversation.
   const account_id = (conv && conv.account) || report.page || null
   const platform = (conv && conv.platform) || report.platform || null
 

@@ -15,7 +15,8 @@ import (
 // unattributable event into one fake conversation.
 //
 // That differs deliberately from chat_log and responses, which DO coerce an
-// absent account to '' (see accountOrUnknown in chatlog.go). There the column is
+// absent account to the empty-string sentinel (accountOrUnknown, chatlog.go).
+// There the column is
 // part of the primary key and NULL is illegal, so a sentinel is the only option.
 // messages keeps PRIMARY KEY (hsh, userid) -- see the header of
 // devops/migrations/26-messages-account.sql for why -- so account_id stays

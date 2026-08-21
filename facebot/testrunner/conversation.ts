@@ -53,19 +53,12 @@ export const tokenOf = (conv: Conversation): string => ACCOUNT_TOKENS[conv.accou
 // ---------------------------------------------------------------------------
 // The Redis state-cache key.
 //
-// THE KEY SHAPE IS NOT SETTLED. See planning/conversation-identity-test-plan.md
-// §0.9-2. The plan's §7.1 proposes `state:{platform}:{account}:{user}`, but that
-// is platform-as-identity, which reverses the ratified (allocator, id) decision
-// recorded at documentation/platform-abstraction.md:246-261. If account ids are
-// globally unique -- which that model asserts and which
-// devops/migrations/20-messaging-account-unique.sql enforces in production today
-// -- then `state:{account}:{user}` is sufficient, AND §7.3 (every event carries
-// `platform`) stops being a hard prerequisite for §7.1, which materially
-// shortens the critical path.
+// The key is `state:{platform}:{account}:{user}`. Account ids are globally unique
+// today, so the platform component is not strictly required -- it is there for the
+// case where one account id serves two platforms.
 //
-// That decision is with the user. Until it lands, every assertion in the suite
-// goes through stateKey()/stateKeyGlob() so that flipping it is a one-line
-// change here rather than a sweep through the tests.
+// Every assertion in the suite goes through stateKey()/stateKeyGlob(), so changing
+// the shape is a one-line change here rather than a sweep through the tests.
 // ---------------------------------------------------------------------------
 
 export const KEY_INCLUDES_PLATFORM = true;
@@ -80,8 +73,7 @@ export function stateKey(conv: Conversation): string {
 /**
  * A SCAN pattern matching every conversation key belonging to one participant,
  * across all accounts and platforms. This is the shape
- * devops/clear-state-cache.sh must match on after §7.1 (it currently hardcodes
- * the flat `state:<userid>`), and it is what a test uses to count how many
+ * devops/clear-state-cache.sh must match, and what a test uses to count how many
  * conversations a participant holds.
  */
 export function stateKeyGlob(userId: string): string {

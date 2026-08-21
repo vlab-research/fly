@@ -269,7 +269,7 @@ export async function startStack(): Promise<Stack> {
   // Load scribble env from YAML and apply overrides.
   // A8: Added scribble-messages and scribble-chat-log sinks. Without these, the
   // event log (chatroach.messages) is never populated, so replay tests would pass
-  // vacuously. See planning/conversation-identity-test-plan.md §0.1.
+  // vacuously.
   console.time('[setup] scribble + redis + formcentral');
   const scribbleStatesEnv = loadKubeEnv(
     path.join(repoRoot, 'scribble/kube-dev/states.yaml')
@@ -409,8 +409,8 @@ export async function startStack(): Promise<Stack> {
   // It is the only referral branch that sets `state_json.pointer`
   // (machine.js, REFERRAL -> action RESET), and therefore the only way to make
   // `states.message_pointer` non-NULL (a computed column, migrations/04-pointers.sql).
-  // `message_pointer` is the truncation checkpoint that §7.5's replay JOIN reads,
-  // so with the var unset the whole pointer half of §7.5 -- B8-2's subject -- could
+  // `message_pointer` is the truncation checkpoint the replay JOIN reads, so with
+  // the var unset the whole pointer half of it -- B8-2's subject -- could
   // not be exercised at all. See RESET_SHORTCODE in test.tc.ts.
   if (!replybotEnv.REPLYBOT_RESET_SHORTCODE) {
     replybotEnv.REPLYBOT_RESET_SHORTCODE = 'reset';

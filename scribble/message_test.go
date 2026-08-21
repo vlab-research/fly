@@ -46,8 +46,7 @@ func TestMessageWriterDoesNotThrowOnDuplicateMessage(t *testing.T) {
 	assert.Equal(t, len(res), 1)
 }
 
-// TestMessageWriterStampsAccountAndPlatform is the §7.4 forward path: archived
-// rows must carry the conversation the event belonged to, read from the
+// Archived rows must carry the conversation the event belonged to, read from the
 // envelope's normalized top-level fields.
 func TestMessageWriterStampsAccountAndPlatform(t *testing.T) {
 	pool := testPool()
@@ -76,10 +75,9 @@ func TestMessageWriterStampsAccountAndPlatform(t *testing.T) {
 	assert.Equal(t, []string{"messenger", "whatsapp"}, colValues(getCol(pool, "messages", "platform")))
 }
 
-// TestMessageWriterKeepsBothConversationsOfOneParticipant is the regression test
-// for the bug §7.4 exists to fix, stated as the property that actually matters:
-// one participant's events on TWO accounts must both survive archival and be
-// distinguishable afterwards.
+// The regression test, stated as the property that matters: one participant's
+// events on TWO accounts must both survive archival and be distinguishable
+// afterwards.
 //
 // It also demonstrates why the primary key did not need widening. Both rows share
 // a userid and differ only in the account -- which is INSIDE content, so

@@ -17,12 +17,9 @@ type Event struct {
 type ExternalEvent struct {
 	User      string `json:"user"`
 	AccountID string `json:"account_id"`
-	// Platform is the messaging platform of the conversation
-	// ('messenger' | 'whatsapp'), read as COALESCE(states.platform,
-	// 'messenger') — legacy state rows without md.platform report
-	// 'messenger'. Required by the event envelope contract §7.3;
-	// hermes requires it and will reject a missing platform with 400
-	// when the gate is enabled.
+	// Messaging platform of the conversation ('messenger' | 'whatsapp'), read as
+	// COALESCE(states.platform, 'messenger') — legacy rows report 'messenger'.
+	// hermes rejects a synthetic post with a missing platform once its gate is on.
 	Platform string `json:"platform"`
 	Event    *Event `json:"event"`
 }
