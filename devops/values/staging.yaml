@@ -22,40 +22,38 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 
 versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
-versionHermes: &vhermes v0.0.3-wa
-# replybot leaves the -wa line here (was v0.0.211-wa, which trailed prod's
-# v0.0.213). v0.0.215 is a clean tag, so staging catches up by v0.0.212
-# (quick-reply referral) and v0.0.213 (utility_message repeat) — both already
-# prod-validated — plus the md-durability fix. Per
-# documentation/staging-tagging-and-deploy.md, swap each remaining -wa service
-# to a clean tag as it next changes.
+# Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
+# suffix guards WhatsApp work from reaching production, and WhatsApp is in
+# production now, so the guard had become noise on this service.
+versionHermes: &vhermes v0.0.5
+# THE CONVERSATION-IDENTITY ROLLOUT. Every bump in this block is the same commit
+# (ad112fa0, PR #149 merged into `staging`) and they deploy TOGETHER -- a
+# conversation is (platform, account_id, user_id), and the services disagree about
+# what a conversation IS until all of them are on it.
 #
-# v0.0.215 carries no code change over v0.0.214. It exists because v0.0.214 was
-# built before the lockfile landed, so its image came from `npm install` against
-# floating ^ ranges and cannot be reproduced from source. v0.0.215 is the first
-# replybot image built with `npm ci` against a committed package-lock.json.
+# v0.0.221 is v0.0.219 plus conversation-identity: the state cache keyed by the
+# triple, the account-scoped replay, and the merged WhatsApp entry gate -- main's
+# percent-escape alphabet AND the branch's position-independent `form.` pair, both
+# of which are needed to stop a CTWA arrival misrouting to FALLBACK_FORM.
 #
-# v0.0.219 is v0.0.218 plus the arrival-health work (#150): ad-id capture, the
-# widened WhatsApp entry gate, the encoded-ref decoder, and `getMetadata` owning
-# `vt`. adopt v0.1.78 already percent-encodes every ref token in production, so
-# this is the reader catching up to a writer that has already shipped.
-versionReplybot: &vreplybot v0.0.219
-versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.45
-versionScribble: &vscribble v0.0.32
+# Production stays on v0.0.219 until this soaks 24h. See
+# planning/conversation-identity.md §5.
+versionReplybot: &vreplybot v0.0.221
+versionLinksniffer: &vlinksniffer v0.0.8
+versionDean: &vdean v0.0.47
+versionScribble: &vscribble v0.0.34
 # v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
 # /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
 # timeout work -- so the image and these values move together, never separately:
 # on the old image the metrics Service would point at a port nothing binds.
-versionDinersclub: &vdinersclub v0.0.46
+versionDinersclub: &vdinersclub v0.0.48
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.6.10
-versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.19
-# REQUIRED BEFORE APPLYING: media-proxy has never been released, so this tag
-# does not exist in ghcr.io yet. It is created by pushing the git tag
-# `media-proxy-v0.0.1`. Applying with a nonexistent tag gives an
-# ImagePullBackOff on a service that is on the media send path (§13).
+versionExporter: &vexporter v0.6.12
+versionExodus: &vexodus v0.2.5
+versionMessageWorker: &vmessageworker v0.1.21
+# Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
+# gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
+# does not exist in ghcr.io yet") is retired.
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here — it lives at the
