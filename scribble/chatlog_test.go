@@ -245,7 +245,9 @@ func TestChatLogGetRowReturnsCorrectOrder(t *testing.T) {
 	assert.Equal(t, 11, len(row))
 
 	assert.Equal(t, "user123", row[0])
-	assert.Equal(t, &pageid, row[1])
+	// pageid is part of the primary key (migration 27), so the row carries the
+	// account as a plain value rather than a nullable pointer.
+	assert.Equal(t, pageid, row[1])
 	assert.Equal(t, ts.Time, row[2])
 	assert.Equal(t, "outgoing", row[3])
 	assert.Equal(t, "Hello", row[4])
@@ -272,7 +274,10 @@ func TestChatLogGetRowWithNilOptionalFields(t *testing.T) {
 	assert.Equal(t, 11, len(row))
 
 	assert.Equal(t, "user123", row[0])
-	assert.Nil(t, row[1])  // pageid
+	// pageid cannot be NULL now that it is part of the primary key: an absent
+	// account is written as the empty-string "account unknown" sentinel rather
+	// than dropping the row. See scribble/chatlog.go accountOrUnknown.
+	assert.Equal(t, "", row[1])
 	assert.Equal(t, ts.Time, row[2])
 	assert.Equal(t, "incoming", row[3])
 	assert.Equal(t, "Hello", row[4])
@@ -415,6 +420,96 @@ func TestChatLogWriterAllowsSameUserDifferentTimestamps(t *testing.T) {
 
 	res := getCol(pool, "chat_log", "content")
 	assert.Equal(t, 2, len(res))
+}
+
+// A conversation is (platform, account_id, user_id). chat_log's conflict target
+// omitted the account, and its timestamp is at second granularity, so two bot
+// messages sent to the same participant in the same second on two of our
+// messaging accounts collided -- and a collision here is not an error, it is a
+// silent DO NOTHING. One researcher's message simply vanished. This is the most
+// exposed of the three conflict keys, and this test fails against the old target.
+func TestChatLogWriterKeepsBothAccountsInTheSameSecond(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	msgs := makeMessages([]string{
+		`{"userid": "user1",
+		  "pageid": "page1",
+		  "timestamp": 1598706047838,
+		  "direction": "outgoing",
+		  "content": "Question from the study on page1"}`,
+		`{"userid": "user1",
+		  "pageid": "page2",
+		  "timestamp": 1598706047838,
+		  "direction": "outgoing",
+		  "content": "Question from the study on page2"}`,
+	})
+
+	writer := GetWriter(NewChatLogScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	assert.Equal(t, []string{"page1", "page2"}, colValues(getCol(pool, "chat_log", "pageid")))
+	assert.Equal(t,
+		[]string{"Question from the study on page1", "Question from the study on page2"},
+		colValues(getCol(pool, "chat_log", "content")))
+}
+
+// The account joins the key; it does not replace it. A genuine repeat within one
+// conversation must still collapse.
+func TestChatLogWriterStillIgnoresDuplicatesWithinOneAccount(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	msgs := makeMessages([]string{
+		`{"userid": "user1",
+		  "pageid": "page1",
+		  "timestamp": 1598706047838,
+		  "direction": "incoming",
+		  "content": "Hello bot"}`,
+		`{"userid": "user1",
+		  "pageid": "page1",
+		  "timestamp": 1598706047838,
+		  "direction": "incoming",
+		  "content": "Different content, same conversation key"}`,
+	})
+
+	writer := GetWriter(NewChatLogScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	assert.Equal(t, []string{"Hello bot"}, colValues(getCol(pool, "chat_log", "content")))
+}
+
+// Replybot published chat log entries with no account at all on ~0.9% of writes
+// (14,834 rows in production). pageid is NOT NULL now that it is part of the
+// primary key, so those entries must land under the empty-string "account unknown"
+// sentinel rather than failing the batch. scribble treats a write error as fatal
+// (scribble.go:36-39), so getting this wrong is a crash loop.
+//
+// The producer is currently deleted (675c31bd; no chat_log writes since
+// 2026-07-27), so this contract is unexercised in production -- which is precisely
+// why the test matters. It is the only thing holding the contract until the
+// producer is restored.
+func TestChatLogWriterWritesUnknownAccountSentinelWhenPageidAbsent(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	msgs := makeMessages([]string{
+		`{"userid": "user1",
+		  "timestamp": 1598706047838,
+		  "direction": "incoming",
+		  "content": "Hello bot"}`,
+	})
+
+	writer := GetWriter(NewChatLogScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	assert.Equal(t, []string{""}, colValues(getCol(pool, "chat_log", "pageid")))
 }
 
 func TestChatLogWriterFailsOnInvalidJSON(t *testing.T) {

@@ -135,6 +135,86 @@ describe('eventPlatform', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// The three-case contract. statestore.test.js pins what the STORE does with each
+// shape; these pin that the extractor can actually PRODUCE all three. Without the
+// middle case, a strict `if (!platform || !account) return null` gate passes the
+// unit suite while silently degrading every partial event to an unscoped replay.
+// ---------------------------------------------------------------------------
+describe('conversationFromRawEvent', () => {
+  const { expect } = require('chai')
+  const conv = raw => u.conversationFromRawEvent(raw)
+
+  it('platform + account => the full conversation', () => {
+    expect(conv({ platform: 'whatsapp', account_id: '106540352242922' }))
+      .to.eql({ platform: 'whatsapp', account: '106540352242922' })
+  })
+
+  it('reads a JSON string exactly as it reads an object', () => {
+    expect(conv(JSON.stringify({ platform: 'messenger', account_id: '935593143497601' })))
+      .to.eql({ platform: 'messenger', account: '935593143497601' })
+  })
+
+  it('account, NO platform => the account SURVIVES (replay stays account-scoped)', () => {
+    // The regression this test exists for. Returning null here throws away an
+    // account the event carried and silently degrades the replay to every
+    // account this participant has -- oldest-first, so it can truncate before
+    // it ever reaches this conversation. See the contract table in utils.js.
+    expect(conv({ account_id: '935593143497601' }))
+      .to.eql({ platform: null, account: '935593143497601' })
+  })
+
+  it('platform, NO account => the platform survives, the account is null', () => {
+    // Both gates downstream already fail on a null account; keeping the
+    // platform is what lets CONVERSATION_TUPLE_MISSING name the missing half.
+    expect(conv({ platform: 'whatsapp' }))
+      .to.eql({ platform: 'whatsapp', account: null })
+  })
+
+  it('neither component => null', () => {
+    expect(conv({})).to.equal(null)
+    expect(conv({ source: 'whatsapp', from: '1541347160' })).to.equal(null)
+  })
+
+  it('an empty string is not a name', () => {
+    // hermes stamps a field only when it derives to a non-empty string; an
+    // empty one would be a poisoned cache key rather than a name.
+    expect(conv({ platform: '', account_id: '' })).to.equal(null)
+    expect(conv({ platform: '', account_id: '935593143497601' }))
+      .to.eql({ platform: null, account: '935593143497601' })
+  })
+
+  it('a non-string component is not a name', () => {
+    expect(conv({ platform: 12, account_id: '935593143497601' }))
+      .to.eql({ platform: null, account: '935593143497601' })
+    expect(conv({ platform: 'whatsapp', account_id: { id: 'x' } }))
+      .to.eql({ platform: 'whatsapp', account: null })
+  })
+
+  it('is TOTAL -- never throws, for any input', () => {
+    const junk = [
+      undefined, null, '', 'not json', '{', '[]', '"a string"', '42',
+      0, 42, true, false, [], [1, 2], () => { }, Symbol('s'), Buffer.from('{}')
+    ]
+    junk.forEach(x => {
+      expect(() => u.conversationFromRawEvent(x)).to.not.throw()
+    })
+  })
+
+  it('takes NO fallback to md, to source, or to per-shape fields', () => {
+    // A fallback would silently paper over a producer that stopped stamping the
+    // envelope -- precisely the failure the conversation key exists to make
+    // impossible.
+    expect(conv({
+      source: 'whatsapp',
+      phone_number_id: '106540352242922',
+      recipient: { id: '935593143497601' },
+      page: '935593143497601',
+      md: { pageid: '935593143497601', platform: 'messenger' }
+    })).to.equal(null)
+  })
+})
+
 // md.ad_id — see the "Ad identity" block comment in utils.js for the full
 // rationale. adIdFromReferral is pure, so this is the cheap exhaustive layer;
 // machine.test.js separately proves the same rules survive a real raw webhook

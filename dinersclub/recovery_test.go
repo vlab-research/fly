@@ -12,7 +12,6 @@ import (
 	"github.com/dgraph-io/ristretto"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/stretchr/testify/assert"
-	"github.com/vlab-research/botparty"
 )
 
 // Behaviour of the recovery classes end to end, through Process.
@@ -205,7 +204,7 @@ func TestAuthFailureIsWithheld(t *testing.T) {
 	dc := &DC{
 		cfg,
 		getPool(cfg),
-		&botparty.BotParty{Client: http.DefaultClient, Botserver: ts.URL},
+		NewHTTPPoster(ts.URL),
 		cache,
 		getProvider,
 	}

@@ -16,8 +16,64 @@ const (
                 INSERT INTO users(id, email) VALUES ('e49cbb6b-45e1-4b9d-9516-094c63cc6ca3', 'test@test.com');
 
                 INSERT INTO credentials(entity, key, userid, details) VALUES ('facebook_page', 'foo', 'e49cbb6b-45e1-4b9d-9516-094c63cc6ca3', '{"id": "foo"}');
+
+                INSERT INTO credentials(entity, key, userid, details) VALUES ('facebook_page', 'foo2', 'e49cbb6b-45e1-4b9d-9516-094c63cc6ca3', '{"id": "foo2"}');
 `
 )
+
+// A conversation is (platform, account_id, user_id). DedupStates keyed on the
+// user id alone, so a batch holding one participant's state on two of our
+// messaging accounts silently kept ONE and dropped the other -- data lost before
+// the write ever reached the database. The three tests below are the regression
+// guard; the first and third fail against a UserID-only key.
+
+func TestDedupStatesKeepsOneRowPerConversationNotPerParticipant(t *testing.T) {
+	onFoo := &State{UserID: "bar", PageID: "foo", CurrentState: "QOUT"}
+	onFoo2 := &State{UserID: "bar", PageID: "foo2", CurrentState: "RESPONDING"}
+
+	deduped := DedupStates([]Writeable{onFoo, onFoo2})
+
+	assert.Equal(t, 2, len(deduped))
+	assert.Contains(t, deduped, Writeable(onFoo))
+	assert.Contains(t, deduped, Writeable(onFoo2))
+}
+
+func TestDedupStatesStillCollapsesRepeatsWithinOneConversation(t *testing.T) {
+	first := &State{UserID: "bar", PageID: "foo", CurrentState: "QOUT"}
+	second := &State{UserID: "bar", PageID: "foo", CurrentState: "RESPONDING"}
+
+	deduped := DedupStates([]Writeable{first, second})
+
+	assert.Equal(t, 1, len(deduped))
+	assert.Equal(t, "RESPONDING", deduped[0].(*State).CurrentState)
+}
+
+func TestStateWriterKeepsBothAccountsForOneParticipant(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, stateSql)
+
+	msgs := makeMessages([]string{
+		`{"userid": "bar",
+          "pageid": "foo",
+          "updated": 1598706047838,
+          "current_state": "QOUT",
+          "state_json": { "token": "bar", "state": "QOUT", "tokens": ["foo"]}}`,
+		`{"userid": "bar",
+          "pageid": "foo2",
+          "updated": 1598706047838,
+          "current_state": "RESPONDING",
+          "state_json": { "token": "bar", "state": "QOUT", "tokens": ["foo"]}}`,
+	})
+
+	writer := GetWriter(NewStateScribbler(pool), &Config{})
+	err := writer.Write(msgs)
+	assert.Nil(t, err)
+
+	assert.Equal(t, []string{"foo", "foo2"}, colValues(getCol(pool, "states", "pageid")))
+}
 
 func TestStateWriterWritesGoodData(t *testing.T) {
 	pool := testPool()

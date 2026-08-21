@@ -9,7 +9,7 @@ import (
 )
 
 type Event struct {
-	Type string `json:"type"` // forwarder:click
+	Type string `json:"type"` // linksniffer:click
 	Url  string `json:"url"`
 }
 
@@ -19,9 +19,11 @@ type LinkClickEvent struct {
 }
 
 type ExternalEvent struct {
-	User  string         `json:"user"`
-	Page  string         `json:"page"`
-	Event LinkClickEvent `json:"event"`
+	User      string         `json:"user"`
+	AccountID string         `json:"account_id"`
+	Page      string         `json:"page"`
+	Platform  string         `json:"platform"`
+	Event     LinkClickEvent `json:"event"`
 }
 
 type Eventer struct {
@@ -29,10 +31,10 @@ type Eventer struct {
 	botserver string
 }
 
-func (e *Eventer) Send(user, page, url string) error {
+func (e *Eventer) Send(user, accountID, platform, url string) error {
 	event := Event{"linksniffer:click", url}
 	lc := LinkClickEvent{"external", event}
-	ee := ExternalEvent{user, page, lc}
+	ee := ExternalEvent{user, accountID, accountID, platform, lc}
 
 	body, err := json.Marshal(ee)
 	if err != nil {

@@ -3,7 +3,7 @@ const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
 const { _initialState } = require('./machine')
-const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
+const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 
 process.env.FALLBACK_FORM = 'fallback'
 process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
@@ -291,10 +291,15 @@ describe('Machine integrated', () => {
   })
 
   // Regression test for the wrong-platform bug: synthetic re-entry events
-  // (dean timeouts / follow-ups) carry source.type 'synthetic', so the
-  // outbound platform must come from the persisted md.platform — before that
-  // was persisted, WhatsApp conversations got 'messenger' send commands.
-  it('produces whatsapp commands for a synthetic timeout on a state with md.platform whatsapp', async () => {
+  // (dean timeouts / follow-ups) carry source.type 'synthetic', so the outbound
+  // platform has to come from somewhere else, or WhatsApp conversations get
+  // 'messenger' send commands and message-worker rejects them.
+  //
+  // It comes from THE EVENT, not from the persisted state.md.platform: a
+  // participant messaging two accounts can hold a state blob whose md names the
+  // OTHER conversation's platform. The md below is deliberately left in place and
+  // is deliberately not what makes this pass.
+  it('produces whatsapp commands for a synthetic timeout on a whatsapp conversation', async () => {
     const m = new Machine()
 
     m.getForm = () => Promise.resolve([{
@@ -320,7 +325,7 @@ describe('Machine integrated', () => {
       event_id: 'evt_test_wa_timeout',
       user_id: WA_USER_ID,
       timestamp: now,
-      source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID },
+      source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID, platform: 'whatsapp' },
       event_type: 'synthetic_timeout',
       payload: now
     }
@@ -372,6 +377,28 @@ describe('Machine integrated', () => {
       details: { foo: 'bar' },
       platform: 'whatsapp'
     })
+  })
+
+  // The response row archived into chatroach.responses must carry the
+  // conversation's platform. It is threaded from the event through transition()
+  // into actionsResponses() -> responseVals(), and scribble writes it to the
+  // nullable `platform` column (migration 26). Nothing else populates it.
+  it('includes the conversation platform on the response row', async () => {
+    const m = new Machine()
+
+    m.getForm = () => Promise.resolve([{
+      logic: [],
+      fields: [
+        { type: 'short_text', title: 'foo', ref: 'foo' },
+        { type: 'short_text', title: 'bar', ref: 'bar' }
+      ]
+    }, 'foo'])
+
+    const report = await m.run({ state: 'QOUT', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', text)
+
+    should.not.exist(report.error)
+    should.exist(report.responses)
+    report.responses.platform.should.equal('messenger')
   })
 
   it('returns no payment when the message is a repeat', async () => {
@@ -500,6 +527,146 @@ describe('Machine integrated', () => {
     report.publish.should.be.false
     report.newState.should.eql(state)
     should.not.exist(report.commands)
+  })
+
+
+  // A synthetic event on a conversation that replayed as START. The machine
+  // no-ops, so the state that reaches `states` and the cache must be the one it
+  // came in with -- unchanged, still START, still empty.
+  describe('synthetic event, no conversation', () => {
+    const timeout = synthetic({ type: 'timeout', value: 1000 })
+    const click = synthetic({
+      type: 'external',
+      value: { type: 'linksniffer:click', url: 'https://example.com' }
+    })
+
+    const refused = async event => {
+      const m = new Machine()
+      // Would throw if it were ever reached; the no-op must short-circuit before
+      // actionsResponses, which is where the 305 lookup and the send would happen.
+      m.getForm = () => Promise.reject(new Error('getForm must not be reached'))
+      return m.run(_initialState(), 'bar', event)
+    }
+
+    it('leaves the state untouched, so `states` is not advanced', async () => {
+      const report = await refused(timeout)
+
+      report.newState.should.eql(_initialState())
+    })
+
+    it('caches nothing but the state it started from', async () => {
+      const report = await refused(click)
+
+      report.newState.state.should.equal('START')
+      report.newState.forms.should.eql([])
+    })
+
+    it('publishes no machine_report and sends no message', async () => {
+      const report = await refused(timeout)
+
+      report.publish.should.be.false
+      should.not.exist(report.commands)
+      should.not.exist(report.responses)
+      should.not.exist(report.error)
+    })
+
+    it('still reports the conversation the event named', async () => {
+      const event = synthetic({ type: 'timeout', value: 1000 }, {
+        source: { type: 'synthetic', account_id: PAGE_ID, platform: 'whatsapp' }
+      })
+      const report = await refused(event)
+
+      report.user.should.equal('bar')
+      report.timestamp.should.equal(event.timestamp)
+      report.page.should.equal(PAGE_ID)
+      report.platform.should.equal('whatsapp')
+    })
+
+    // The contrast case: a Messenger handover on the same empty state is NOT
+    // refused, so the shell publishes normally. If this ever starts failing,
+    // the guard has been widened from "synthetic" to "external" and the
+    // documented handover race is broken.
+    it('does not refuse a Messenger handover on the same empty state', async () => {
+      const m = new Machine()
+      m.getForm = () => Promise.resolve([{ logic: [], fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }] }, 'surveyid'])
+
+      const report = await m.run(_initialState(), 'bar', handover({ metadata: 'new message' }))
+
+      report.publish.should.be.true
+      should.exist(report.newState)
+      report.newState.forms.should.eql(['fallback'])
+    })
+  })
+
+
+  // A form-less entry event (Messenger's bare `get_started`, or a referral whose
+  // ref names no form) arriving on a conversation that already has a form. The
+  // machine no-ops it (machine.js's REFERRAL case), so the live conversation
+  // must come back out of the shell exactly as it went in.
+  describe('form-less entry on a live conversation', () => {
+    const rawGetStarted = {
+      source: 'messenger',
+      sender: { id: USER_ID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1755000001653,
+      postback: { title: 'Get Started', payload: 'get_started' }
+    }
+
+    // A live conversation on a different form in the same account, awaiting an answer.
+    const live = { ..._initialState(), state: 'QOUT', forms: ['mnchweeklanguage'], question: 'foo' }
+
+    const refused = async () => {
+      const m = new Machine()
+      // Would throw if reached: the no-op must short-circuit before the
+      // FALLBACK_FORM lookup and the send.
+      m.getForm = () => Promise.reject(new Error('getForm must not be reached'))
+      return m.run(live, USER_ID, rawGetStarted)
+    }
+
+    it('leaves the live conversation exactly as it was', async () => {
+      const report = await refused()
+
+      report.newState.should.eql(live)
+    })
+
+    it('does not switch the participant onto FALLBACK_FORM', async () => {
+      const report = await refused()
+
+      report.newState.state.should.equal('QOUT')
+      report.newState.forms.should.eql(['mnchweeklanguage'])
+    })
+
+    it('publishes no machine_report, sends no message, records no response', async () => {
+      const report = await refused()
+
+      report.publish.should.be.false
+      should.not.exist(report.commands)
+      should.not.exist(report.responses)
+      should.not.exist(report.error)
+    })
+
+    it('still reports the conversation the event was refused for', async () => {
+      const report = await refused()
+
+      report.user.should.equal(USER_ID)
+      report.timestamp.should.equal(rawGetStarted.timestamp)
+      report.page.should.equal(PAGE_ID)
+      report.platform.should.equal('messenger')
+    })
+
+    // The contrast case, and the 162,148-row half of the behaviour: the same
+    // webhook on an empty conversation is an ENTRY and must still be served.
+    it('does not defer the same postback on an empty conversation', async () => {
+      const m = new Machine()
+      m.getForm = () => Promise.resolve([{ logic: [], fields: [{ type: 'short_text', title: 'foo', ref: 'foo' }] }, 'surveyid'])
+
+      const report = await m.run(_initialState(), USER_ID, rawGetStarted)
+
+      report.publish.should.be.true
+      should.exist(report.newState)
+      report.newState.forms.should.eql(['fallback'])
+      report.commands.length.should.equal(1)
+    })
   })
 
 

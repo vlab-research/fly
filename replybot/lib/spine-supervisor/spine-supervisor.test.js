@@ -54,14 +54,13 @@ describe('SpineSupervisor', () => {
     mockBotSpineCtor = sinon.stub().returns(mockSpine)
 
     // Mock process.env
-    process.env.CHATBASE_BACKEND = './mock-chatbase'
+    //
+    // No CHATBASE_BACKEND here any more, and no `mock-chatbase` module in the
+    // require cache: every test below passes `mockChatbase` as the constructor's
+    // 4th argument, so the fallback branch was never exercised by this suite
+    // even when it was an env-var lookup. The injection seam is the argument.
     process.env.REPLYBOT_STATESTORE_TTL = '24h'
     process.env.REPLYBOT_MACHINE_TTL = '60m'
-
-    // Ensure the mock module is in the require cache
-    require.cache[require.resolve('./mock-chatbase')] = {
-      exports: require('./mock-chatbase')
-    }
 
     // Setup fake timer
     clock = sinon.useFakeTimers()
@@ -69,10 +68,8 @@ describe('SpineSupervisor', () => {
 
   afterEach(() => {
     clock.restore()
-    delete process.env.CHATBASE_BACKEND
     delete process.env.REPLYBOT_STATESTORE_TTL
     delete process.env.REPLYBOT_MACHINE_TTL
-    delete require.cache[require.resolve('./mock-chatbase')]
     sinon.restore()
   })
 

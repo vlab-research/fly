@@ -4,19 +4,33 @@ Dean is a service that monitors the chatbase database and sends events to the bo
 
 ## Event Shape & Platform Threading
 
-Dean POSTs `ExternalEvent` JSON to botserver's `/synthetic` endpoint:
+Dean POSTs `ExternalEvent` JSON to hermes' `/synthetic` endpoint:
 
 ```json
-{ "user": "<userid>", "page": "<pageid>", "platform": "whatsapp", "event": { "type": "...", "value": null } }
+{ "user": "<userid>", "account_id": "<account_id>", "platform": "whatsapp", "event": { "type": "...", "value": null } }
 ```
+
+All three of `user`, `account_id` and `platform` are **required** — a synthetic event
+without them cannot be attributed to a conversation, and hermes rejects an incomplete POST
+with 400 once `SYNTHETIC_REQUIRE_CONVERSATION` is enabled. `documentation/event-envelope.md`
+is the contract; dean is one of six posters bound by it.
+
+The request carries `X-Vlab-Poster: dean` so hermes can name dean in a rejection log.
+
+**The field is `account_id`, not `page`.** It was renamed to match the rest of the system
+(`media_handle`, `message_templates`, migration 22); hermes still accepts `page` as a
+deprecated alias for posters that have not migrated. The value is unchanged — it is
+`states.pageid`, which holds the platform account id.
 
 Every query (`Respondings`, `Errored`, `Blocked`, `Payments`, `Timeouts`, `FollowUps`, `Spammers`)
 selects `COALESCE(states.platform, 'messenger')` and threads it into the emitted event.
 `states.platform` is a stored computed column over `state_json->'md'->>'platform'`; legacy rows
-without `md.platform` are NULL and report `messenger`. Botserver passes unknown fields through to
-Kafka untouched, so replybot receives the platform on synthetic events and can route re-entries
-(timeouts, follow-ups, repeat payments) to the correct platform instead of defaulting to Messenger.
-See `documentation/platform-abstraction.md` ("Account ID Routing").
+without `md.platform` are NULL and report `messenger` — exact for every conversation predating
+WhatsApp support, and the reason `platform` is never empty on a dean event. Replybot receives
+the platform on synthetic events and routes re-entries (timeouts, follow-ups, repeat payments)
+to the correct platform instead of defaulting to Messenger.
+See `documentation/event-envelope.md` and `documentation/platform-abstraction.md`
+("Account ID Routing").
 
 `FollowUps` joins states to credentials via `pageid = credentials.key` with
 `entity IN ('facebook_page', 'whatsapp_business')` — `states.pageid` holds the platform account id,

@@ -23,16 +23,21 @@ STATE_STORE_LIMIT=1000       # Limit for state store events (optional)
 
 ```javascript
 const { StateStore } = require('./lib/typewheels/statestore')
-const Chatbase = require('@vlab-research/chatbase-postgres')
+const Chatbase = require('./lib/chatbase/chatbase')
 
 const chatbase = new Chatbase()
 const stateStore = new StateStore(chatbase, '24h') // TTL of 24 hours
 
-// Get state for a user
-const state = await stateStore.getState('user123', event)
+// State is keyed by the CONVERSATION, not by the participant: `conv` is
+// `{ platform, account }`, read off the event envelope by
+// `conversationFromRawEvent`. See README.md, "Conversation state cache".
+const conv = conversationFromRawEvent(event)
 
-// Update state for a user
-await stateStore.updateState('user123', newState)
+// Get state for a conversation
+const state = await stateStore.getState(conv, 'user123', event)
+
+// Update state for a conversation
+await stateStore.updateState(conv, 'user123', newState)
 
 // Close Redis connection when done
 await stateStore.close()

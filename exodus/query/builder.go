@@ -10,12 +10,12 @@ import (
 
 // QueryBuilder tracks state while building SQL queries from bail conditions
 type QueryBuilder struct {
-	params       []interface{}      // Parameters for parameterized query ($1, $2, etc.)
-	paramIndex   int                // Current parameter index
-	ctes         []string           // Common Table Expressions (CTEs) to be prepended
-	cteJoins     []string           // JOIN clauses for CTEs
-	cteIndex     int                // Counter for unique CTE names
-	queryLimit   int                // Maximum number of results to return
+	params     []interface{} // Parameters for parameterized query ($1, $2, etc.)
+	paramIndex int           // Current parameter index
+	ctes       []string      // Common Table Expressions (CTEs) to be prepended
+	cteJoins   []string      // JOIN clauses for CTEs
+	cteIndex   int           // Counter for unique CTE names
+	queryLimit int           // Maximum number of results to return
 }
 
 // NewQueryBuilder creates a new QueryBuilder with default settings
@@ -51,8 +51,35 @@ func BuildQuery(def *types.BailDefinition) (string, []interface{}, error) {
 		query.WriteString("\n")
 	}
 
-	// Main SELECT statement
-	query.WriteString("SELECT DISTINCT s.userid, s.pageid\nFROM states s")
+	// Main SELECT statement.
+	//
+	// A conversation is (platform, account, user), so the bail event has to carry
+	// all three. Selecting only (userid, pageid) left conditions-based bails
+	// posting an empty platform, while user_list bails -- whose platform comes
+	// from the caller's definition -- carried one. Half a contract.
+	//
+	// Three things about this expression are load-bearing:
+	//
+	//   1. `AS platform` is required, not cosmetic. executor.go looks the value up
+	//      as row["platform"]; an unaliased COALESCE lands under the key
+	//      "coalesce", the lookup misses, and the platform silently stays empty --
+	//      the fix would appear to ship and do nothing.
+	//   2. COALESCE, not a bare s.platform. states.platform is a computed column
+	//      over state_json->'md'->>'platform' and is NULL for every row predating
+	//      that persistence -- 1,068,371 of 1,092,078 rows in production (97.8%).
+	//      A bare column would leave those targets with an empty platform AND log
+	//      "Invalid platform type in query result: <nil>" once per target, because
+	//      executor.go type-asserts to string. Defaulting to 'messenger' is the
+	//      consumer contract migration 21 documents, and it is exact: every
+	//      states row on a whatsapp_business account carries platform='whatsapp'
+	//      (verified in production), so all NULLs are Messenger.
+	//   3. Adding a column to a SELECT DISTINCT normally risks splitting groups
+	//      and bailing a participant twice. It cannot here: states is
+	//      PRIMARY KEY (userid, pageid) -- verified in production, 1,092,078 rows
+	//      and 1,092,078 distinct pairs -- so platform is functionally dependent
+	//      on the DISTINCT key and cannot subdivide it. Safe by construction, not
+	//      by the data happening to be clean.
+	query.WriteString("SELECT DISTINCT s.userid, s.pageid, COALESCE(s.platform, 'messenger') AS platform\nFROM states s")
 
 	// Add CTE joins if any
 	if len(builder.cteJoins) > 0 {
@@ -179,19 +206,24 @@ func (qb *QueryBuilder) buildElapsedTimeCondition(cond *types.SimpleCondition) (
 	questionParam := qb.addParam(cond.Since.Details.QuestionRef)
 	durationParam := qb.addParam(*cond.Duration)
 
-	// Build the CTE for response times
+	// Build the CTE for response times, aggregated per conversation.
+	// A conversation is (platform, account, user) — `pageid` is the legacy column
+	// name for the account — so response times must be grouped per account, never
+	// across all of them. Grouping by userid alone would let a response on one
+	// messaging account set the elapsed-time clock for a different account.
 	cte := fmt.Sprintf(`%s AS (
-    SELECT userid, MIN(timestamp) as response_time
+    SELECT userid, pageid, MIN(timestamp) as response_time
     FROM responses
     WHERE shortcode = $%d AND question_ref = $%d
-    GROUP BY userid
+    GROUP BY userid, pageid
 )`, cteName, formParam, questionParam)
 
 	qb.ctes = append(qb.ctes, cte)
 
-	// Add JOIN clause for this CTE (LEFT JOIN so OR conditions work correctly)
-	joinClause := fmt.Sprintf("LEFT JOIN %s rt%d ON s.userid = rt%d.userid",
-		cteName, qb.cteIndex-1, qb.cteIndex-1)
+	// Add JOIN clause for this CTE (LEFT JOIN so OR conditions work correctly).
+	// Joined on the full conversation identity (userid, pageid), not userid alone.
+	joinClause := fmt.Sprintf("LEFT JOIN %s rt%d ON s.userid = rt%d.userid AND s.pageid = rt%d.pageid",
+		cteName, qb.cteIndex-1, qb.cteIndex-1, qb.cteIndex-1)
 	qb.cteJoins = append(qb.cteJoins, joinClause)
 
 	// Return the WHERE condition using this CTE
@@ -219,24 +251,28 @@ func (qb *QueryBuilder) buildQuestionResponseCondition(cond *types.SimpleConditi
 	formParam := qb.addParam(*cond.Form)
 	questionParam := qb.addParam(*cond.QuestionRef)
 
+	// The CTE projects (userid, pageid) so answers stay bound to the account they
+	// were given on. A conversation is (platform, account, user) — `pageid` is the
+	// legacy column name for the account — so a user id alone is not an identity.
 	var cte string
 	if cond.Response != nil {
 		responseParam := qb.addParam(*cond.Response)
 		cte = fmt.Sprintf(`%s AS (
-    SELECT DISTINCT userid
+    SELECT DISTINCT userid, pageid
     FROM responses
     WHERE shortcode = $%d AND question_ref = $%d AND response = $%d
 )`, cteName, formParam, questionParam, responseParam)
 	} else {
 		cte = fmt.Sprintf(`%s AS (
-    SELECT DISTINCT userid
+    SELECT DISTINCT userid, pageid
     FROM responses
     WHERE shortcode = $%d AND question_ref = $%d
 )`, cteName, formParam, questionParam)
 	}
 
 	qb.ctes = append(qb.ctes, cte)
-	qb.cteJoins = append(qb.cteJoins, fmt.Sprintf("LEFT JOIN %s %s ON s.userid = %s.userid", cteName, alias, alias))
+	// Joined on the full conversation identity (userid, pageid), not userid alone.
+	qb.cteJoins = append(qb.cteJoins, fmt.Sprintf("LEFT JOIN %s %s ON s.userid = %s.userid AND s.pageid = %s.pageid", cteName, alias, alias, alias))
 
 	return fmt.Sprintf("%s.userid IS NOT NULL", alias), nil
 }

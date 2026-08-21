@@ -1,0 +1,91 @@
+{
+  "id": "isoFormB",
+  "title": "Isolation Form B - Researcher B Only",
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/WA44hg"
+  },
+  "theme": {
+    "href": "https://api.typeform.com/themes/qHWOQ7"
+  },
+  "settings": {
+    "language": "en",
+    "progress_bar": "proportion",
+    "meta": {
+      "allow_indexing": false
+    },
+    "is_public": true,
+    "is_trial": false,
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "are_uploads_public": false
+  },
+  "thankyou_screens": [
+    {
+      "id": "DefaultTyScreen",
+      "ref": "default_tys",
+      "title": "Thank you for completing the form!",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "isoBQuestion1",
+      "title": "Which best describes your experience?",
+      "ref": "isob_q1",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "isoBChoice1",
+            "ref": "excellent",
+            "label": "Excellent"
+          },
+          {
+            "id": "isoBChoice2",
+            "ref": "good",
+            "label": "Good"
+          },
+          {
+            "id": "isoBChoice3",
+            "ref": "average",
+            "label": "Average"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "isoBQuestion2",
+      "title": "Tell us more about your feedback",
+      "ref": "isob_q2",
+      "properties": {},
+      "validations": {
+        "required": false
+      },
+      "type": "long_text"
+    },
+    {
+      "id": "DefaultTyScreen",
+      "ref": "default_tys",
+      "title": "Thank you for completing the form!",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      },
+      "type": "thankyou_screen"
+    }
+  ],
+  "_links": {
+    "display": "https://nandanrao.typeform.com/to/isoFormB"
+  },
+  "custom_messages": {}
+}

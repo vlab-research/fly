@@ -17,6 +17,19 @@ type Config struct {
 	KafkaEventTopic      string
 	KafkaAutoOffsetReset string
 
+	// StrictEventEnvelope makes the producer REFUSE to publish an event to the
+	// event topic without top-level `account_id` and `platform`, instead of
+	// reporting it as CHAT_EVENTS_ENVELOPE_MISSING and publishing anyway.
+	//
+	// OFF BY DEFAULT, on purpose: message-worker is a direct producer to
+	// chat-events (kafka.go), and the WhatsApp echo it publishes is what
+	// advances the state machine on a platform with no native echo webhook.
+	// Refusing to publish stalls the conversation; publishing unstamped only
+	// degrades it to an unscoped replay. Flip this on in a committed values
+	// file once CHAT_EVENTS_ENVELOPE_MISSING reads zero -- staging first. See
+	// kafka.go guardEnvelope.
+	StrictEventEnvelope bool
+
 	// Worker
 	NumWorkers int
 
@@ -59,6 +72,9 @@ func LoadConfigFromEnv() (*Config, error) {
 		KafkaCommandTopic:    getEnvOrDefault("KAFKA_COMMAND_TOPIC", "commands"),
 		KafkaEventTopic:      getEnvOrDefault("KAFKA_EVENT_TOPIC", "chat-events"),
 		KafkaAutoOffsetReset: getEnvOrDefault("KAFKA_AUTO_OFFSET_RESET", "earliest"),
+
+		// Envelope guard -- REPORT by default, never refuse. See the field doc.
+		StrictEventEnvelope: getEnvAsBool("STRICT_EVENT_ENVELOPE", false),
 
 		// Worker defaults
 		NumWorkers: getEnvAsInt("NUM_WORKERS", 100),

@@ -84,14 +84,14 @@ rows, err := db.Query(sql, params...)
    Generates a CTE and JOIN:
    ```sql
    WITH response_times_0 AS (
-       SELECT userid, MIN(timestamp) as response_time
+       SELECT userid, pageid, MIN(timestamp) as response_time
        FROM responses
        WHERE shortcode = $N AND question_ref = $M
-       GROUP BY userid
+       GROUP BY userid, pageid
    )
    SELECT DISTINCT s.userid, s.pageid
    FROM states s
-   JOIN response_times_0 rt0 ON s.userid = rt0.userid
+   LEFT JOIN response_times_0 rt0 ON s.userid = rt0.userid AND s.pageid = rt0.pageid
    WHERE rt0.response_time + $K::INTERVAL < NOW()
    ```
 
@@ -163,14 +163,14 @@ For this condition:
 The builder generates:
 ```sql
 WITH response_times_0 AS (
-    SELECT userid, MIN(timestamp) as response_time
+    SELECT userid, pageid, MIN(timestamp) as response_time
     FROM responses
     WHERE shortcode = $3 AND question_ref = $4
-    GROUP BY userid
+    GROUP BY userid, pageid
 )
 SELECT DISTINCT s.userid, s.pageid
 FROM states s
-JOIN response_times_0 rt0 ON s.userid = rt0.userid
+LEFT JOIN response_times_0 rt0 ON s.userid = rt0.userid AND s.pageid = rt0.pageid
 WHERE (s.current_form = $1 AND s.current_state = $2 AND rt0.response_time + $5::INTERVAL < NOW())
 LIMIT 100000
 ```
@@ -210,9 +210,14 @@ The query builder expects the following tables:
 
 ### responses
 - `userid` - User identifier
+- `pageid` - Messaging account identifier (nullable; the account the answer was given on)
 - `shortcode` - Form shortcode
 - `question_ref` - Question reference
+- `response` - The answer value
 - `timestamp` - Response timestamp
+
+Response-derived CTEs project `pageid` and join `states` on `(userid, pageid)`, because a
+conversation is `(platform, account, user)` — see "Account scoping" below.
 
 ## Testing
 
@@ -258,10 +263,26 @@ All generated queries follow this structure:
 [WITH cte1 AS (...), cte2 AS (...)]  -- Optional CTEs
 SELECT DISTINCT s.userid, s.pageid
 FROM states s
-[JOIN cte1 ON ...]                    -- Optional CTE joins
+[LEFT JOIN cte1 ON s.userid = ... AND s.pageid = ...]  -- Optional CTE joins
 WHERE <conditions>
 LIMIT N
 ```
+
+CTE joins are `LEFT JOIN`: an inner join would force AND semantics on every CTE-backed
+condition regardless of the combining operator. The `IS NOT NULL` test in the WHERE clause
+enforces the actual match.
+
+### Account scoping
+A conversation is the tuple `(platform, account, user)`; `pageid` is the legacy column name
+for the account, and `states` is keyed `PRIMARY KEY (userid, pageid)`. A user id alone is not
+an identity — the same participant id can hold independent conversations on two messaging
+accounts owned by two different researchers.
+
+Every response-derived CTE therefore projects `pageid` and joins on `(userid, pageid)`.
+Joining on `userid` alone lets a participant's answers on account A qualify them for a bail
+targeted at account B — a mis-targeting bug and a cross-researcher data leak. Regression
+tests: `TestBuildQuery_*AccountScoped` (SQL shape) and `TestIntegration_*_AccountScoped`
+(behaviour against a real database).
 
 ## Future Enhancements
 

@@ -30,8 +30,6 @@ spec:
           value: "http://fly-botserver"
         - name: KAFKA_BROKERS
           value: "kafka:9092"
-        - name: CHATBASE_BACKEND
-          value: "@vlab-research/chatbase-postgres"
         - name: CHATBASE_DATABASE
           value: "chatroach"
         - name: CHATBASE_USER

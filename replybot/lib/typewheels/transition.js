@@ -20,28 +20,27 @@ class Machine {
   }
 
   transition(state, parsedEvent) {
-    // Synthetic/external events (payment results, bailouts, moviehouse events)
-    // may not carry the page on the event itself. The conversation's page is
-    // authoritative and stable, so fall back to the persisted state metadata —
-    // otherwise getForm() is called with an undefined pageid and the flow errors.
-    const page = parsedEvent.source.account_id || (state && state.md && state.md.pageid)
-    // A synthetic/external event's source.type is 'synthetic', not a real
-    // platform. Outbound commands must target the conversation's actual platform
-    // or message-worker rejects them as "unsupported platform". md.platform is
-    // persisted at conversation start (utils.js getMetadata), so the state is
-    // authoritative. For states predating that persistence, fall back to the
-    // event's own platform hint when present (source.platform, sent by dean and
-    // surfaced by the event-normalizer), else 'messenger' — exact for all
-    // conversations predating WhatsApp support.
-    const platform = parsedEvent.source.type === 'synthetic'
-      ? ((state && state.md && state.md.platform) || eventPlatform(parsedEvent))
-      : parsedEvent.source.type
+    // The account and the platform come from THE EVENT, never from state.md.
+    // `page` is what getForm() and every outbound command are built from, so a
+    // state.md fallback routes a conversation's outbound messages to whichever
+    // account the cached state came from.
+    const page = parsedEvent.source.account_id
+    if (!page) {
+      // Greppable twin of EVENT_PLATFORM_GUESSED. Without this the symptom is a
+      // confusing formcentral 404 for `undefined`, several layers away from the
+      // producer that failed to stamp the account.
+      console.warn('EVENT_ACCOUNT_MISSING', 'no account_id on event:', parsedEvent.event_type, parsedEvent.source.type)
+    }
+    // eventPlatform never returns 'synthetic': it reads source.type for real
+    // platform events and source.platform for synthetic ones (see utils.js,
+    // which is also where the missing-platform guess is logged).
+    const platform = eventPlatform(parsedEvent)
     const output = exec(state, parsedEvent)
     const newState = apply(state, output)
     return { newState, output, page, platform }
   }
 
-  async actionsResponses(state, userId, timestamp, pageId, newState, output) {
+  async actionsResponses(state, userId, timestamp, pageId, newState, output, platform) {
     const upd = output && update(output)
     const shortcode = newState.forms.slice(-1)[0]
 
@@ -56,13 +55,12 @@ class Machine {
     const user = { id: userId }
 
     // Payment events are consumed off-pipeline (dinersclub) and carry the
-    // conversation's platform. newState.md.platform is persisted at
-    // conversation start; 'messenger' is exact for states predating that.
-    const platform = (newState.md && newState.md.platform) || 'messenger'
-
+    // conversation's platform. It arrives as an argument, derived from the
+    // event by transition() -- the same rule as `page`. Never from newState.md, which
+    // bleeds between a participant's conversations.
     const { messages, payment, handoff } = act({ form, user, page: { id: pageId }, timestamp, platform }, state, output)
 
-    const responses = responseVals(newState, upd, form, surveyId, pageId, user, timestamp)
+    const responses = responseVals(newState, upd, form, surveyId, pageId, user, timestamp, platform)
 
     return { actions: messages, responses, timestamp, payment, handoff }
   }
@@ -133,6 +131,7 @@ class Machine {
           timestamp,
           user,
           page,
+          platform,
           newState
         }
       }
@@ -143,6 +142,7 @@ class Machine {
           timestamp,
           user,
           page,
+          platform,
           newState
         }
       }
@@ -173,12 +173,13 @@ class Machine {
         timestamp,
         user,
         page,
+        platform,
         error: { tag: 'STATE_TRANSITION', message: e.message, stack: e.stack, state, event }
       }
     }
     try {
 
-      const { actions, responses, payment, handoff } = await this.actionsResponses(state, user, timestamp, page, newState, output)
+      const { actions, responses, payment, handoff } = await this.actionsResponses(state, user, timestamp, page, newState, output, platform)
 
       const messages = this.act(actions)
 
@@ -189,6 +190,7 @@ class Machine {
         timestamp,
         user,
         page,
+        platform,
         responses,
         payment,
         commands,
@@ -210,6 +212,7 @@ class Machine {
         timestamp,
         user,
         page,
+        platform,
         newState,
         error: { ...details, tag, message: e.message, stack: e.stack }
       }

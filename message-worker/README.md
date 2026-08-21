@@ -340,8 +340,123 @@ echo that advances the state machine did. Legacy `native` commands and unknown
 command types return plain errors: nothing was sent and nothing was reported, so
 they are genuine processing failures.
 
+### The `machine_report` envelope
+
+`reportError` POSTs to hermes' `/synthetic` endpoint. Because it fires on **every** send
+failure, message-worker is one of the two highest-volume synthetic producers in the system.
+
+```jsonc
+{
+  "user":       "<cmd.UserID>",
+  "account_id": "<cmd.PlatformAccountID>",
+  "platform":   "<cmd.Platform>",          // "messenger" | "whatsapp"
+  "event":      { "type": "machine_report", "value": { /* MachineReportValue */ } }
+}
+```
+
+All three of `user`, `account_id` and `platform` are **required** by the event envelope
+contract (`documentation/event-envelope.md`). Hermes rejects an incomplete POST with 400
+once `SYNTHETIC_REQUIRE_CONVERSATION` is enabled, so a poster that drops one loses the
+report — and the report is what drives the conversation to `FB` / `STATE_ACTIONS` → `ERROR`
+where dean's sweep can retry it. The request carries `X-Vlab-Poster: message-worker` so
+hermes can name message-worker in a rejection log.
+
+**`MachineReportValue` is a different thing from the envelope.** It has its own `User` and
+`Page` fields *inside* `event.value` — that is the payload the state machine reads, and it
+is deliberately untouched. Only the envelope gained fields.
+
+**Not botparty.** `message-worker/synthetic.go` declares a local `SyntheticEvent` struct and
+a local `SyntheticPoster`, because `botparty.ExternalEvent` lives in a separate repo and has
+no `Platform` field. `dean` established this pattern; hermes passes unknown fields through
+untouched. The non-200 error text is preserved verbatim from `botparty.Send`
+(`"Non 200 response from Botserver: %v"`) because log greps depend on it.
+
+**Residual risk:** `cmd.Platform` is populated on every live path — replybot's
+`buildCommands` always sets it, defaulting to `messenger` — but the backward-compat
+`parseLegacyPassThreadControl` path builds a `SendMessageCommand` from a legacy wire shape
+whose `platform` may be absent, which would post an empty platform. Replybot no longer emits
+that shape. It is deliberately **not** defaulted here: silently substituting a platform is
+how the cross-account bug happened, so an empty value is left to fail loudly at the gate.
+
 See `documentation/message-worker-deployment.md` ("Error Handling Flow") for how
 this interacts with offset commits and consumer lag.
+
+## message-worker is a direct producer to `chat-events`
+
+**This service writes to the event topic itself, bypassing hermes.** That is easy to miss —
+message-worker looks like a *poster* (it POSTs `machine_report` to `/synthetic`, above), and
+`documentation/event-envelope.md` said for a while that `chat-events` had exactly one
+producer. It does not. Two of message-worker's paths lead to the topic:
+
+| Path | Live? | Shape |
+|---|---|---|
+| `emitWhatsAppEcho` → `PublishRawEvent` | **yes** | replybot-shaped `bot_echo` |
+| `emitMessageSent` / `emitMessageFailed` → `PublishEvent` | no — call sites commented out (`worker.go:187`, `:301`); `emitMessageFailed` has no caller at all | `types.UniversalEvent` |
+
+The topic is `KAFKA_EVENT_TOPIC` (`config.go`, default `chat-events`), wired to the
+`chatTopic` anchor in every values file — the same topic hermes ingests into and replybot
+consumes.
+
+### Therefore: anything published here must stamp the envelope itself
+
+Every event body on `chat-events` carries top-level `account_id` and `platform`
+(`documentation/event-envelope.md`). Nothing upstream will add them to an event this service
+publishes.
+
+`emitWhatsAppEcho` exists because WhatsApp has no native echo webhook (unlike Messenger's
+`is_echo`), and the echo is what advances replybot's state machine `RESPONDING → QOUT`. It
+stamps both fields from `cmd.PlatformAccountID` and the WhatsApp branch it is already inside —
+nothing is derived or inferred — and retains `phone_number_id` alongside them, because the
+`messages` backfill reads the account out of historical `content` under the per-shape name.
+
+The body is built by `BuildWhatsAppEcho` (`envelope.go`), which is pure and takes the clock
+as a parameter so the wire shape is assertable byte-for-byte.
+
+> **Why this is called out so heavily.** Until 2026-08-17 the echo carried six fields and
+> neither identity field. Every WhatsApp send archived a `messages` row with a NULL
+> `account_id`, and the replay query's temporary `OR account_id IS NULL` clause — there so
+> un-backfilled *historical* rows keep replaying — matched those NULL rows for **every**
+> account, leaking a participant's echoes across all of their conversations. Production
+> exposure was zero (the echo is not deployed), but it reproduced, deterministically, the
+> exact bug `planning/conversation-identity.md` exists to fix.
+
+### The envelope guard
+
+`kafka.go` funnels **both** `PublishEvent` and `PublishRawEvent` through one `publish()`,
+which calls `guardEnvelope` before anything reaches the topic. One chokepoint, both doors:
+a new direct producer in this service is checked whether or not its author knows the guard
+is there.
+
+The decision is pure and lives in `envelope.go`:
+
+```go
+MissingEnvelopeFields(value []byte) []string   // nil when complete; total, never panics
+```
+
+It inspects the **serialized bytes** rather than a typed struct, so it holds for every shape
+this service publishes — including ones not yet written. A field counts as present only when
+it is a **non-empty JSON string**, the same rule hermes applies when stamping and replybot's
+`identityComponent` applies when reading. `types.UniversalEvent` fails it on both counts: its
+`platform` marshals as the object `{"type":…,"account_id":…}` and it has no top-level
+`account_id`. That is pinned by `TestUniversalEvent_DoesNotSatisfyTheEnvelope`, so whoever
+revives those emitters is told before they deploy.
+
+| `STRICT_EVENT_ENVELOPE` | Behaviour |
+|---|---|
+| absent / false (**default**) | log `CHAT_EVENTS_ENVELOPE_MISSING` at `Error`, publish anyway |
+| true | log, then refuse to publish |
+
+**Reporting is the default deliberately.** Refusing cannot break message *delivery* — the
+message is sent before the echo is emitted, and the echo's error is already logged and
+swallowed at `worker.go:181` — but it does drop the echo, and on WhatsApp the echo is the
+only thing that advances the conversation. Refusing stalls every WhatsApp survey; publishing
+unstamped degrades replybot to an unscoped replay, which still advances it. Degraded-but-
+moving beats stopped for a producer bug a human has to fix anyway. Turn strict on in
+staging, and in production once `CHAT_EVENTS_ENVELOPE_MISSING` reads zero — via a committed
+values file, like `SYNTHETIC_REQUIRE_CONVERSATION` and `STRICT_EVENT_PLATFORM`.
+
+The guard logs identity only — Kafka key, topic, missing fields. Never the body, which
+carries participant message content.
 
 ## Testing
 
@@ -594,7 +709,8 @@ during `make dev`). Message-worker reads from `commands`; replybot publishes to
 |----------|-------|-------|
 | `KAFKA_BROKERS` | `kafka:9092` | Dev cluster Kafka service |
 | `KAFKA_COMMAND_TOPIC` | `commands` | Input topic from replybot |
-| `KAFKA_EVENT_TOPIC` | `chat-events` | Output topic for message_sent/failed events |
+| `KAFKA_EVENT_TOPIC` | `chat-events` | Output topic. This service produces to it **directly** — see "message-worker is a direct producer to `chat-events`" |
+| `STRICT_EVENT_ENVELOPE` | unset (= false) | `true` makes the producer refuse an event lacking `account_id`/`platform` instead of logging `CHAT_EVENTS_ENVELOPE_MISSING` and publishing |
 | `DATABASE_URL` | `postgresql://chatroach@db-cockroachdb-public:26257/chatroach?sslmode=disable` | Token lookup |
 | `BOTSERVER_URL` | `http://fly-botserver` | Error reporting via `/synthetic` |
 | `FACEBOOK_GRAPH_URL` | `http://gbv-facebot` | Points to facebot mock in dev |

@@ -1,5 +1,32 @@
 #!/bin/sh
 set -e
+###############################################################################
+# Local/kind bootstrap. Applies devops/values/integrations/fly.yaml, which is
+# UNDEPLOYED CONFIG — no CI workflow uses it, and the live cluster has only the
+# `vprod` and `vstag` namespaces.
+#
+# READ THIS BEFORE USING THE RESULT TO TEST CONVERSATION IDENTITY.
+#
+# This bootstrap brings up `botserver`, NOT `hermes` (fly.yaml has no hermes
+# block, and the umbrella chart defaults botserver on). **botserver does not
+# stamp the normalized `account_id` / `platform` envelope, and never has** —
+# closing that gap is why hermes exists. So in a cluster built by this script,
+# no event on `chat-events` carries a conversation identity: replybot bypasses
+# its state cache on every event and falls back to an UNSCOPED replay across
+# all of a participant's accounts, and a two-account participant will appear
+# to bleed between conversations.
+#
+# That is the PRE-FIX behaviour, and it is a property of this bootstrap rather
+# than a defect in the conversation-identity work. Do not conclude the fix is
+# broken from what you see here.
+#
+# To make this environment representative, swap fly.yaml's `botserver:` block
+# for a `hermes:` block copied from devops/values/staging.yaml and set
+# `botserver.enabled: false`. Hermes is a drop-in replacement on the same
+# service alias and the same paths, so the `http://fly-botserver/*` URLs need
+# no change. See the header of devops/values/integrations/fly.yaml and
+# documentation/event-envelope.md ("Producers").
+###############################################################################
 ######################
 # add third party charts
 ######################

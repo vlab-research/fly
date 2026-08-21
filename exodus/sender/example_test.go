@@ -17,8 +17,8 @@ func Example() {
 
 	// Define users to bail out
 	users := []sender.UserTarget{
-		{UserID: "user123", PageID: "page456", DestinationForm: "exit-form"},
-		{UserID: "user789", PageID: "page101", DestinationForm: "exit-form"},
+		{UserID: "user123", PageID: "page456", Platform: "whatsapp", DestinationForm: "exit-form"},
+		{UserID: "user789", PageID: "page101", Platform: "messenger", DestinationForm: "exit-form"},
 	}
 
 	// Define metadata for the bailout
@@ -44,7 +44,7 @@ func Example_dryRun() {
 	ctx := context.Background()
 
 	users := []sender.UserTarget{
-		{UserID: "user123", PageID: "page456", DestinationForm: "test-form"},
+		{UserID: "user123", PageID: "page456", Platform: "whatsapp", DestinationForm: "test-form"},
 	}
 
 	// This will log what would be sent without actually sending
@@ -63,7 +63,13 @@ func Example_singleBailout() {
 	ctx := context.Background()
 
 	// Send a single bailout
-	err := s.SendBailout(ctx, "user123", "page456", "exit-form", map[string]interface{}{
+	target := sender.UserTarget{
+		UserID:   "user123",
+		PageID:   "page456",
+		Platform: "whatsapp",
+	}
+
+	err := s.SendBailout(ctx, target, "exit-form", map[string]interface{}{
 		"reason": "user_requested",
 	})
 	if err != nil {

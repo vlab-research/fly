@@ -231,9 +231,24 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 			continue
 		}
 
+		// BuildQuery always projects COALESCE(s.platform, 'messenger') AS platform, so
+		// this should always find a non-NULL string. The tolerant form is kept as a
+		// backstop for any caller assembling its own SQL. If the warning below ever
+		// fires with <nil>, the SELECT lost either its COALESCE or its `AS platform`
+		// alias, and every conditions-based bail is going out with an empty platform.
+		platform := ""
+		if p, exists := row["platform"]; exists {
+			if platformStr, ok := p.(string); ok {
+				platform = platformStr
+			} else {
+				log.Printf("Warning: Invalid platform type in query result: %T", p)
+			}
+		}
+
 		users = append(users, sender.UserTarget{
 			UserID:          userID,
 			PageID:          pageID,
+			Platform:        platform,
 			DestinationForm: bailDef.Action.DestinationForm,
 		})
 	}
@@ -249,6 +264,7 @@ func userListToTargets(ul *types.UserList) []sender.UserTarget {
 		targets[i] = sender.UserTarget{
 			UserID:          entry.UserID,
 			PageID:          entry.PageID,
+			Platform:        entry.Platform,
 			DestinationForm: entry.Shortcode,
 		}
 	}
