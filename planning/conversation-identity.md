@@ -184,6 +184,7 @@ runs the real `UPDATE` in a transaction and rolls it back.
 | **`pageid` → `account_id` rename** | Untouched, cosmetic, last. Two aliases would go: `chatbase.js`'s `states.pageid AS ...` and dean's join. |
 | **hermes account→platform resolution** | Designed, not built, **no path forward.** It was to read an in-memory map from the messaging-account registry, and the registry was reverted (`5c4cab3e`). hermes has no database access, no background tasks and no metrics today. |
 | **Restore the `chat_log` producer** | Blocked — see §6. |
+| **CI for the Go suites** | **Nothing runs them.** This repo has no Go job at all — `scribble`, `dean`, `message-worker` and now `devops/backfill` have never run in CI, so this is not a regression, but "passes locally" was the whole argument for moving the backfill off bash. The pattern to copy is `.github/workflows/replybot-test.yml`, which already does `make -C ../devops test-db`; a Go job is roughly 15 lines. |
 
 ---
 
@@ -336,9 +337,10 @@ Detail in `documentation/referral-form-resolution.md`.
 
 ## 9. Old section numbers
 
-Roughly forty code comments cite this document's previous numbering (`§7.1`, `§7.4`, `§4.2`…).
-Rewriting them would churn a PR under review for no behavioural gain, so the numbers are mapped
-here instead. **Do not add new `§n.n` references** — cite a file and a line, or a heading.
+No code cites this document's numbering any more — `3ec2e27a` removed roughly forty such
+references, and `grep -rn '§[0-9]'` over the source tree now returns nothing. The map below is
+kept for reading the branch's own history and any external notes that still use the old numbers.
+**Do not add new `§n.n` references from code** — cite a file and a line, or a heading.
 
 | Old | Was | Now |
 |---|---|---|
