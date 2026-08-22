@@ -954,18 +954,19 @@ cockroachdb:
       maxUnavailable: 0
   conf:
     cache: 256MiB
-    # RAISED 2026-08-22, from 250MiB. The index backfiller materializes index
-    # entries A RANGE AT A TIME across several workers, so the pool must exceed
-    # `concurrency x range_size`. chatroach.messages rows average 34.8 KB
-    # (max 351 KB), so its ranges ran 288-467 MB against a 250MiB pool -- larger
-    # than the pool itself. Migration 26's CREATE INDEX could therefore never
-    # succeed, and failed in the worst possible way: SHOW JOBS reported `running`
-    # with fraction_completed = 0 and NO sql-visible error, retrying with
-    # exponential backoff that reached 17-hour gaps. The error existed only in the
-    # cockroach pod log.
+    # RAISED 2026-08-22, from 250MiB.
     #
-    # Production already runs 3000Mi (see production.yaml), which is why this only
-    # ever bit staging. 1GiB here is ~16x the 64MiB range cap set by migration 30.
+    # NOT because it fixed migration 26 -- it did not. That failure was
+    # `bulkio.index_backfill.batch_size` (50000 rows x 35 KB of `content`) and
+    # recurred unchanged at 1GiB, the allocation growing to fill whatever pool it
+    # was given. See 26-messages-account.sql. This comment previously claimed
+    # otherwise and was wrong.
+    #
+    # Raised because the old configuration was incoherent on its own terms:
+    # cache 250MiB + max-sql-memory 250MiB was EXACTLY the 500Mi request, leaving
+    # nothing for the Go runtime or Pebble. That is an OOMKill waiting for load,
+    # independent of any migration. Production runs 3000Mi (production.yaml);
+    # staging was the outlier.
     max-sql-memory: 1GiB
     max-disk-temp-storage: 4GiB
   tls:

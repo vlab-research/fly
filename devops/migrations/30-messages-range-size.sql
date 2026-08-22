@@ -2,41 +2,31 @@
 --
 -- APPLY: bash devops/run-migration.sh <namespace> migrations/30-messages-range-size.sql
 --
--- WHY THIS EXISTS. The index backfiller materializes index entries A RANGE AT A
--- TIME, across several workers, inside the SQL memory pool (--max-sql-memory).
--- So a backfill needs roughly `concurrency x range_size` of pool to succeed.
+-- WHY THIS EXISTS -- AND WHAT IT IS *NOT*.
 --
--- `messages` is not a normal table. Its rows carry the raw event JSON in
--- `content`: 34.8 KB on average and up to 351 KB, measured on vstag 2026-08-22.
--- At the 512 MiB CockroachDB default for range_max_bytes, its ranges ran 288-467
--- MB. Against staging's 250MiB pool that was structurally impossible -- one range
--- was larger than the entire pool -- and migration 26's CREATE INDEX could never
--- complete.
+-- CORRECTED 2026-08-22. An earlier version of this header claimed the range size
+-- was why migration 26's CREATE INDEX could not complete, on the theory that the
+-- backfiller materializes a range at a time and a 288-467 MB range could not fit
+-- a 250MiB SQL pool. THAT WAS WRONG, and it was wrong in a way worth recording:
+-- the same failure recurred unchanged after the pool was raised to 1GiB, with the
+-- allocation simply growing to fill the larger pool. Range size was never the
+-- binding constraint.
 --
--- IT FAILED SILENTLY, which is the part worth remembering:
---   * SHOW JOBS reported status = 'running'
---   * fraction_completed stayed at 0
---   * the `error` column stayed EMPTY
---   * retries backed off exponentially, reaching 17-hour gaps
--- The actual message ("memory budget exceeded ... 262144000 bytes in budget")
--- appeared ONLY in the cockroach pod log. A stuck backfill is indistinguishable
--- from a slow one unless you read that log.
+-- The real cause was `bulkio.index_backfill.batch_size` (stock 50000) against
+-- 35 KB rows -- ~1.75 GB of index entries per batch, which overflows any pool --
+-- combined with the declarative schema changer ignoring that setting. See the
+-- apply instructions at the head of 26-messages-account.sql.
 --
--- 64 MiB is chosen to leave a wide margin: with staging's raised 1GiB pool it is
--- ~16x headroom, and it stays safe if backfill concurrency rises. The cost is
--- more ranges (5.5 GB logical -> ~557 ranges rather than 62), which is normal and
--- what CockroachDB is designed for.
+-- SO WHY KEEP THIS FILE? Because 512 MiB ranges are still wrong for this table on
+-- their own terms. `messages` rows average 34.8 KB and reach 351 KB, so stock
+-- settings produced ranges of 288-467 MB -- large enough that any single-range
+-- operation is a memory spike, and large enough to make rebalancing coarse. 64
+-- MiB is the appropriate size for a table this shaped. It is a sound change
+-- being kept for a sound reason, not the fix it was originally written up as.
 --
--- This is deliberately a MIGRATION and not a helm value: zone configuration is
--- SQL-level state, so the repo is its only reviewable home. It was originally set
--- by hand while debugging, which is exactly the invisible live state this file
--- exists to eliminate.
+-- It was first set BY HAND while debugging. This file exists so it stops being
+-- invisible live state.
 --
--- PRODUCTION: apply this there too, BEFORE migration 26. Production runs a 3000Mi
--- pool and so may tolerate 512 MiB ranges, but that is a margin nobody has
--- measured and the failure mode is silent. Verify first:
---   SELECT count(*), max(range_size)/1024/1024 AS max_mb
---     FROM [SHOW RANGES FROM TABLE chatroach.messages WITH DETAILS];
 ALTER TABLE chatroach.messages
   CONFIGURE ZONE USING range_max_bytes = 67108864, range_min_bytes = 16777216;
 

@@ -3,7 +3,45 @@
 -- A conversation is (platform, account_id, user_id). `messages` had no account
 -- column, so replay could not tell one participant's two conversations apart.
 --
--- APPLY: bash devops/run-migration.sh <namespace> migrations/26-messages-account.sql
+-- APPLY -- READ THIS, the defaults do not work on this table:
+--
+--   kubectl exec -i -n <ns> gbv-cockroachdb-0 -- ./cockroach sql --insecure \
+--     --database=chatroach <<'SQL'
+--   SET use_declarative_schema_changer = 'off';
+--   SET CLUSTER SETTING bulkio.index_backfill.batch_size = 200;
+--   <this file>
+--   SQL
+--   -- then: RESET CLUSTER SETTING bulkio.index_backfill.batch_size;
+--
+-- WHY BOTH SETTINGS ARE REQUIRED. The CREATE INDEX below stores `content`, and
+-- `messages` rows carry raw event JSON: 34.8 KB average, 351 KB max (vstag,
+-- 2026-08-22). The index backfiller buffers `bulkio.index_backfill.batch_size`
+-- rows of index entries in the SQL memory pool. At the stock 50000 that is
+-- 50000 x 35 KB ~= 1.75 GB, which overflows ANY pool -- it failed identically at
+-- 250MiB and at 1GiB, the allocation simply growing to fill whatever was given.
+-- 200 rows is ~7 MB per batch.
+--
+-- The declarative schema changer (the default) appears to IGNORE that setting:
+-- lowering it changed nothing until `use_declarative_schema_changer = 'off'`
+-- routed the build through the legacy backfiller. Both together, or neither
+-- works. This cost hours to find because testing the batch size alone, against
+-- the declarative changer, looks exactly like the setting being irrelevant.
+--
+-- HOW IT FAILS IF YOU SKIP THIS -- silently, which is the dangerous part:
+--   * SHOW JOBS reports status = 'running'
+--   * fraction_completed stays at 0
+--   * the `error` column stays EMPTY
+--   * retries back off exponentially, reaching 17-hour gaps
+-- The real message ("memory budget exceeded ... bytes in budget") exists ONLY in
+-- the cockroach pod log. A wedged backfill and a slow one look identical in SQL.
+--
+-- Production has the same 35 KB rows and the same 50000 default, so it WILL hit
+-- this. Its larger SQL pool does not save it: the batch is sized by row count,
+-- not by pool.
+--
+-- Also: do NOT use `CREATE INDEX IF NOT EXISTS` to retry after a cancelled
+-- build. It no-ops against the cancelled index's lingering descriptor and prints
+-- `CREATE INDEX` having done nothing.
 --
 -- Ordering vs migrations 27 and 28: independent, either order. Adding a nullable
 -- defaultless column is metadata-only in CockroachDB. Every name is
