@@ -1,12 +1,17 @@
 # Conversation identity: a conversation is (platform, account_id, user_id)
 
-**Status: built on `feature/conversation-identity` (PR #149). Nothing is deployed. No
-migration is applied to any production database.**
+**Status, 2026-08-22: FULLY ROLLED OUT ON STAGING. Nothing is deployed to production and no
+migration is applied to a production database.** Branch `feature/conversation-identity`
+(PR #149), merged into `staging`.
 
-**Last full pass: 2026-08-20.** This document was rewritten on that date to remove superseded
-designs, reverted work and correction archaeology. It describes only what is true and what is
-next. For the history — the messaging-account registry, the `DEFER` action, the §0.9
-corrections chain — read this file's git history; it is not coming back into the text.
+**If you are picking this up: go straight to §5.2, which is the runbook.** §5.1b–d are the
+diagnostic record of what went wrong getting to staging; read them when something breaks, not
+before. §5.1 is still the highest-value five minutes in this document.
+
+**Last full pass: 2026-08-20**, rewritten then to remove superseded designs, reverted work and
+correction archaeology; §5 was substantially extended 2026-08-22 with the staging rollout and
+production measurements. For the history — the messaging-account registry, the `DEFER` action,
+the §0.9 corrections chain — read this file's git history; it is not coming back into the text.
 
 **Who this is for:** whoever picks the work up, and whoever rolls it out. Read §5 before
 touching a cluster.
@@ -177,9 +182,9 @@ runs the real `UPDATE` in a transaction and rolls it back.
 
 | Item | State |
 |---|---|
-| **Run the backfill** | Written and tested, never executed anywhere. §5.2 step 5. |
+| **Run the backfill** | Written and tested, never executed anywhere. §5.2 steps S2 / P6. |
 | **`messages.account_id` → NOT NULL** | Needs a sentinel pass first. Full plan: **`planning/messages-account-not-null-todo.md`**. Do not start without reading it. |
-| **Migration 29** — drop the superseded `messages_userid_timestamp_idx` | Deliberately unwritten. Migration 26 makes it NOT VISIBLE; 29 comes after a clean soak, following migration 18's pattern on this table. |
+| **Migration 29** — drop the superseded `messages_userid_timestamp_idx` | Still unwritten; now wanted on staging for disk (§5.2 S3). Migration 26 makes it NOT VISIBLE; 29 comes after a clean soak, following migration 18's pattern on this table. |
 | **`platform` on `responses` / `chat_log`** | Columns land in migration 26; **nothing writes them.** `scribble/response.go` and `chatlog.go` read no platform from their shapes. |
 | **`pageid` → `account_id` rename** | Untouched, cosmetic, last. Two aliases would go: `chatbase.js`'s `states.pageid AS ...` and dean's join. |
 | **hermes account→platform resolution** | Designed, not built, **no path forward.** It was to read an in-memory map from the messaging-account registry, and the registry was reverted (`5c4cab3e`). hermes has no database access, no background tasks and no metrics today. |
@@ -289,35 +294,31 @@ the next schema change will wedge the same way — silently, for 19 hours. 16 Gi
 rounding error against the cost of that. This is not a substitute for the index cleanup; it is
 the headroom that makes the cleanup safe to attempt.
 
-### 5.1c Current half-applied state of `vstag`
+### 5.1c Staging is DONE (2026-08-22)
 
-Migration 26 ran twice (the `kubectl run` client lost its attach both times; the SQL still
-executed). What landed:
+Superseded the "half-applied" note that was here. `vstag` is fully rolled out.
 
-| Statement | State |
+| | |
 |---|---|
-| `messages.account_id`, `messages.platform` | **applied** |
-| `responses.platform`, `chat_log.platform` | **applied** |
-| `CREATE INDEX messages_userid_account_timestamp_idx` | **stuck backfill**, index absent |
-| `ALTER INDEX messages_userid_timestamp_idx NOT VISIBLE` | **not run** |
-| the primary-key assertion at the foot of the file | **not run** |
-| migrations 27 and 28 | **not run** |
+| services | 9 on new images, all `Running 1/1` |
+| migrations applied | **18, 26, 27, 28, 30** |
+| `messages` indexes | `primary` + `messages_userid_account_timestamp_idx` visible; `messages_userid_idx` and `messages_userid_timestamp_idx` NOT VISIBLE |
+| account-scoped replay | plans onto the new index (EXPLAIN verified) |
+| `responses` / `chat_log` PK | 4-column, account-scoped |
+| `CONVERSATION_TUPLE_MISSING`, `EVENT_ACCOUNT_MISSING`, `EVENT_PLATFORM_GUESSED` | 0 |
+| `CHAT_EVENTS_ENVELOPE_MISSING` | 0 |
+| scribble restarts | 0 across all four sinks |
+| `STRICT_EVENT_ENVELOPE` | `"true"`, live, reading zero |
 
-The added columns are nullable and unread by the deployed build, so this half-state is inert —
-staging behaves exactly as it did before. Nothing needs undoing.
+Versions on staging: replybot v0.0.221, hermes v0.0.5, message-worker v0.1.21,
+scribble v0.0.34, dean v0.0.47, dinersclub v0.0.48, linksniffer v0.0.8, exodus
+v0.2.5, exporter v0.6.12. Production remains on the previous tags throughout.
 
-Two things need clearing before a retry, and both are live-state mutations:
+**Not yet run on staging:** migration 19 (see §5.1d), migration 29, and the
+`devops/backfill` account_id backfill.
 
-- an **idle zombie SQL session** (`10.24.4.150`, idle 18h+) left by the killed migration pod,
-  which a second schema change has been blocked behind for 18h23m;
-- the **stuck job** itself (`SHOW JOBS`, `NEW SCHEMA CHANGE`, `CREATE INDEX IF NOT EXISTS
-  messages_userid_account_timestamp...`) — cancel it rather than waiting out the backoff.
-
-**Use `kubectl exec` into `gbv-cockroachdb-0`, not `devops/run-migration.sh`, until the attach
-flakiness is fixed.** The script's `kubectl run -i --rm` client lost its websocket both times and
-reported `ERROR: Migration failed` while the SQL had in fact committed — the most dangerous
-possible failure mode for a migration runner, because it invites a re-run that assumes nothing
-happened.
+**Staging disk is tight**: 87% used. The two NOT VISIBLE canaries hold ~1.14 GB
+and are reclaimed by 19 and 29. 5 Gi is small for this data; consider growing it.
 
 ### 5.1d Production, measured 2026-08-22 (read-only)
 
@@ -391,21 +392,64 @@ The new index costs about what `messages_userid_timestamp_idx` costs -- 75.7 GB
 cluster-wide, ~19 GB/node against 127-133 GB free. Afterwards 19 and 29 reclaim
 93.5 GB and 75.7 GB. Net strongly negative, as §5.2 always said.
 
-### 5.2 Order
+### 5.2 Order — START HERE
 
-1. **Migrations 26, 27, 28 → staging.** `bash devops/run-migration.sh vstag migrations/NN-*.sql`
-2. **Deploy the branch to staging** — hermes, message-worker, replybot, scribble, dean,
-   dinersclub, exodus, linksniffer. Scribble and the migrations land close together (§5.1).
-3. **Watch staging 24h.** Gates in §5.3.
-4. **Production: migrations 26, 27, 28, then the same deploy**, in a quiet window.
-5. **Backfill** — staging to completion first, then production. `--dry-run`, then
-   `--rehearse --max-batches 3`, then for real. Procedure in `devops/backfill/README.md`.
-6. **Then** the NOT NULL work, as its own effort.
+Staging is done (§5.1c). Everything below is production, plus two staging
+leftovers. Steps are in dependency order; nothing here is optional-but-nice.
 
-**Apply migration 19 first if you can.** `messages_userid_idx` is still on disk in production at
-`visible = f` — ~128 GiB replicated of dead index, armed as a canary 2026-07-22 and never
-phase-2'd. Dropping it before migration 26 makes the whole change net disk-negative. The file is
-**not on this branch**; it exists untracked in the primary worktree.
+**Read §5.1 first** — the scribble/`responses` key mismatch is still the thing
+most likely to bite, and it applies to production exactly as it did to staging.
+
+#### Remaining on staging
+
+- **S1. Soak.** 24h against the §5.3 gates. Started 2026-08-22 ~19:00 UTC.
+- **S2. Run the account_id backfill.** `devops/backfill/README.md`: `--dry-run`,
+  then `--rehearse --max-batches 3`, then for real. Never run anywhere yet.
+- **S3. Migration 29** (drop `messages_userid_timestamp_idx`) once the new index
+  is proven. Reclaims ~566 MB, which staging needs at 87% disk. Not yet written.
+
+#### Production
+
+- **P1. Backfill `responses.pageid` FIRST.** `bash devops/backfill-responses-pageid.sh vprod`.
+  1,818,162 NULL rows, all from 2020, ~91 batches at the default 20,000.
+  **Migration 28 force-errors until this returns zero.** Verify:
+  `SELECT count(*) FROM chatroach.responses WHERE pageid IS NULL;`
+- **P2. Migrations 26, 27, 28.** Migration 30 is a near no-op there (production
+  already has 64 MiB ranges) — apply it or skip it, but do not "fix" its absence.
+  Re-measure row width before 26 and size `bulkio.index_backfill.batch_size`
+  accordingly; see §5.1d and 26's own header. Do NOT copy staging's 200.
+- **P3. Deploy the branch to production**, in a quiet window, scribble close
+  behind the migrations (§5.1). Same nine services as staging.
+- **P4. Watch 24h** against §5.3.
+- **P5. Flip production `STRICT_EVENT_ENVELOPE` to `"true"`** — only after
+  `CHAT_EVENTS_ENVELOPE_MISSING` reads zero for 24h. Its own reviewed diff.
+- **P6. Run the account_id backfill on production.** After staging completes.
+- **P7. Migration 19.** ONLY after P3 — its precondition 1 requires the
+  `SELECT *` -> `SELECT content` change, which ships in replybot v0.0.221.
+  Production is on v0.0.219 using the external `@vlab-research/chatbase-postgres`,
+  which still does `SELECT *`. Precondition 2 (CRDB replica co-location) is now
+  SATISFIED: all 4 pods sit on 4 distinct GKE nodes (verified 2026-08-22).
+  Also identify the ~5,700/day reader of the hidden index first (§5.1d).
+- **P8. `account_id` NOT NULL.** `planning/messages-account-not-null-todo.md`.
+  Its own effort; do not fold it in.
+
+#### Known traps, all hit for real
+
+- `devops/run-migration.sh` prints `ERROR: Migration failed` over SQL that
+  COMMITTED — its `kubectl run -i --rm` client loses its websocket. **Use
+  `kubectl exec -i -n <ns> gbv-cockroachdb-0 -- ./cockroach sql --insecure
+  --database=chatroach < <file>` instead**, and always verify against the schema
+  rather than trusting the exit code.
+- A `CREATE INDEX` client timeout says NOTHING about the server. Check
+  `SHOW JOBS`; never re-run on a timeout.
+- `CREATE INDEX IF NOT EXISTS` silently no-ops against a cancelled build's
+  lingering descriptor and prints success. Drop `IF NOT EXISTS` when retrying.
+- A wedged index backfill looks identical to a slow one in SQL: `status=running`,
+  `fraction_completed=0`, empty `error`. The real cause is only in the cockroach
+  pod log.
+- Production values still point **scribble and linksniffer at docker.io**, where
+  CI does not publish. Not broken today (pinned to tags that exist) but it breaks
+  on their next release. Staging is already fixed; production is a separate diff.
 
 ### 5.3 Gates
 
