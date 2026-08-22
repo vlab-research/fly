@@ -218,6 +218,81 @@ producer returns. That is why restoring the producer is what detonates it.
 
 `messages` is safe in both directions — migration 26 deliberately left the key alone.
 
+### 5.1b THE BLOCKER FOUND ON 2026-08-22: migration 26's index does not fit
+
+**Migration 26 cannot complete in staging, and on these numbers it cannot complete in
+production either.** This is not a code problem; it is a disk problem, and it was not known
+when §5 was written.
+
+The index migration 26 creates stores `content`:
+
+```sql
+CREATE INDEX messages_userid_account_timestamp_idx
+  ON chatroach.messages (userid, account_id, timestamp ASC)
+  STORING (content, platform);
+```
+
+`STORING (content)` **duplicates the largest column in the database.** Measured in `vstag` on
+2026-08-22:
+
+| | |
+|---|---|
+| `sum(length(content))` in `messages` | **5,517 MB** (162,567 rows) |
+| store used / available | **3.40 GB / 0.52 GB** (PVC is 5 Gi, 90% full) |
+
+The index needs roughly as much space as the entire store currently holds, and there is half a
+gigabyte free. The backfill job has been retrying since 2026-08-21 21:29 UTC: `num_runs = 11`,
+`fraction_completed = 0`, backed off to `next_run` 2026-08-23 07:33.
+
+**Production is the same shape, worse.** `messages.content` there is ~384 GiB, so this index
+adds ~384 GiB. §5.2 says applying migration 19 first (freeing ~128 GiB) makes the change "net
+disk-negative" — **that arithmetic does not work**: 128 GiB freed against ~384 GiB added leaves
+~256 GiB still needed, and §5.2's own note records the tightest node as having 127 GiB free.
+Verify against `crdb_internal.kv_store_status` before believing either number, but do not apply
+migration 26 to production on the assumption that migration 19 pays for it.
+
+**Options, none of them free:**
+
+1. **Grow the volumes.** `vstag` needs ≳16 Gi to hold the index with headroom; production needs
+   a real capacity plan, not a bump.
+2. **Drop `STORING (content)`.** The index becomes small, and the covering property is lost —
+   `get()` selects `content`, so an account-scoped read costs an index join per row. That is a
+   performance decision, and the migration's own comment argues for the covering form.
+3. **Store only `platform`.** A middle option: keeps the index cheap, still avoids an index join
+   for the platform column, but not for `content`.
+
+Until one is chosen, the rollout stops here.
+
+### 5.1c Current half-applied state of `vstag`
+
+Migration 26 ran twice (the `kubectl run` client lost its attach both times; the SQL still
+executed). What landed:
+
+| Statement | State |
+|---|---|
+| `messages.account_id`, `messages.platform` | **applied** |
+| `responses.platform`, `chat_log.platform` | **applied** |
+| `CREATE INDEX messages_userid_account_timestamp_idx` | **stuck backfill**, index absent |
+| `ALTER INDEX messages_userid_timestamp_idx NOT VISIBLE` | **not run** |
+| the primary-key assertion at the foot of the file | **not run** |
+| migrations 27 and 28 | **not run** |
+
+The added columns are nullable and unread by the deployed build, so this half-state is inert —
+staging behaves exactly as it did before. Nothing needs undoing.
+
+Two things need clearing before a retry, and both are live-state mutations:
+
+- an **idle zombie SQL session** (`10.24.4.150`, idle 18h+) left by the killed migration pod,
+  which a second schema change has been blocked behind for 18h23m;
+- the **stuck job** itself (`SHOW JOBS`, `NEW SCHEMA CHANGE`, `CREATE INDEX IF NOT EXISTS
+  messages_userid_account_timestamp...`) — cancel it rather than waiting out the backoff.
+
+**Use `kubectl exec` into `gbv-cockroachdb-0`, not `devops/run-migration.sh`, until the attach
+flakiness is fixed.** The script's `kubectl run -i --rm` client lost its websocket both times and
+reported `ERROR: Migration failed` while the SQL had in fact committed — the most dangerous
+possible failure mode for a migration runner, because it invites a re-run that assumes nothing
+happened.
+
 ### 5.2 Order
 
 1. **Migrations 26, 27, 28 → staging.** `bash devops/run-migration.sh vstag migrations/NN-*.sql`
