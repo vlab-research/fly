@@ -37,6 +37,28 @@ CREATE INDEX IF NOT EXISTS messages_userid_account_timestamp_idx
 --   ALTER INDEX chatroach.messages@messages_userid_timestamp_idx VISIBLE;
 --
 -- Migration 29 drops it after a clean soak. Until then both are on disk.
+-- GUARD: never hide the old index while the new one is still being built.
+--
+-- CREATE INDEX returns when the schema-change JOB IS CREATED, not when the
+-- backfill finishes. Run this file straight through and the ALTER below can hide
+-- messages_userid_timestamp_idx while its replacement is still backfilling --
+-- leaving BOTH secondary indexes unusable and dropping replay onto a primary-key
+-- scan of a 384 GiB table. Observed on vstag 2026-08-22, where the backfill ran
+-- for 19 hours without completing.
+--
+-- Aborts the migration rather than proceeding. If it fires, wait for the job
+-- (SHOW JOBS) and re-run -- everything above is idempotent.
+SELECT crdb_internal.force_error(
+         'XXUUU',
+         'messages_userid_account_timestamp_idx is still building; refusing to hide '
+         || 'its predecessor. Wait for: ' || description
+       )
+FROM crdb_internal.jobs
+WHERE job_type IN ('SCHEMA CHANGE', 'NEW SCHEMA CHANGE')
+  AND status NOT IN ('succeeded', 'failed', 'canceled')
+  AND description LIKE '%messages_userid_account_timestamp_idx%'
+LIMIT 1;
+
 ALTER INDEX chatroach.messages@messages_userid_timestamp_idx NOT VISIBLE;
 
 -- THE PRIMARY KEY IS DELIBERATELY UNTOUCHED, and this asserts it stayed that way.
