@@ -35,9 +35,26 @@
 -- The real message ("memory budget exceeded ... bytes in budget") exists ONLY in
 -- the cockroach pod log. A wedged backfill and a slow one look identical in SQL.
 --
--- Production has the same 35 KB rows and the same 50000 default, so it WILL hit
--- this. Its larger SQL pool does not save it: the batch is sized by row count,
--- not by pool.
+-- PRODUCTION IS PROBABLY FINE WITHOUT EITHER SETTING -- corrected 2026-08-22,
+-- after measuring instead of assuming. An earlier version of this note claimed
+-- production "WILL hit this". It almost certainly will not.
+--
+-- Production rows are ~25x SMALLER than staging's: 1,067 B average (1,492 B over
+-- the last 3 days) against staging's 34.8 KB, and its pool is 3000Mi. The stock
+-- batch there is 50000 x ~1.5 KB = ~75 MB, a ~40x margin. The declarative schema
+-- changer only failed in staging BECAUSE the batch did not fit, so it should be
+-- fine in production too.
+--
+-- Staging is the outlier, not a preview of production. Whatever makes its rows
+-- 25x fatter (test payloads, media-heavy fixtures) is a staging artifact.
+--
+-- Still worth setting `bulkio.index_backfill.batch_size = 10000` for the
+-- production run as cheap insurance -- worst case 10000 x 35.8 KB = ~358 MB. Do
+-- NOT copy staging's 200: on 129 GB it would be needlessly slow.
+--
+-- Re-measure before running, rather than trusting these numbers:
+--   SELECT count(*), round(avg(length(content)),0)
+--     FROM (SELECT content FROM chatroach.messages LIMIT 20000);
 --
 -- Also: do NOT use `CREATE INDEX IF NOT EXISTS` to retry after a cancelled
 -- build. It no-ops against the cancelled index's lingering descriptor and prints

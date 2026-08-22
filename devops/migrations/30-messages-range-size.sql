@@ -30,11 +30,22 @@
 ALTER TABLE chatroach.messages
   CONFIGURE ZONE USING range_max_bytes = 67108864, range_min_bytes = 16777216;
 
--- Restore the stock GC TTL. It was lowered to 600s by hand on 2026-08-22 to force
--- prompt reclaim of the indexes migration 18 dropped; that was a one-off and must
--- not linger, since a short TTL shrinks the AS OF SYSTEM TIME window and the
--- protected window for incremental backups.
-ALTER TABLE chatroach.messages CONFIGURE ZONE USING gc.ttlseconds = 14400;
+-- DELIBERATELY NOT SET HERE: gc.ttlseconds.
+--
+-- An earlier version of this file carried `gc.ttlseconds = 14400`. That was
+-- staging's own default, restored after I lowered it to 600s by hand on
+-- 2026-08-22 to force prompt reclaim of the indexes migration 18 dropped.
+--
+-- Shipping it would have REGRESSED PRODUCTION. Production runs a table-level
+-- gc.ttlseconds = 90000 (25h) -- verified 2026-08-22 -- and migrations 18 and 19
+-- both depend on that window. Setting 14400 here would have cut it to 4h,
+-- shrinking the AS OF SYSTEM TIME window and the protected window for incremental
+-- backups, silently, as a side effect of a migration about range size.
+--
+-- The one-off restore was applied to staging directly and does not belong in a
+-- migration that runs everywhere. If a GC TTL ever needs changing per
+-- environment, it needs its own file and its own reasoning, not a passenger line
+-- in this one.
 
 -- VERIFY:
 --   SHOW ZONE CONFIGURATION FOR TABLE chatroach.messages;

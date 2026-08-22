@@ -319,6 +319,78 @@ reported `ERROR: Migration failed` while the SQL had in fact committed — the m
 possible failure mode for a migration runner, because it invites a re-run that assumes nothing
 happened.
 
+### 5.1d Production, measured 2026-08-22 (read-only)
+
+Everything below came from range metadata, stored statistics and bounded samples.
+No full scan of `messages` was run.
+
+| | staging | **production** |
+|---|---|---|
+| `messages` rows | 162,567 | **101,118,611+** (stats 2026-02-14, so a floor) |
+| avg `content` | 34.8 KB | **1,067 B** older / **1,492 B** last 3 days |
+| max `content` | 351 KB | **8.9 KB** older / **35.8 KB** recent |
+| `max-sql-memory` | 1GiB | **3000Mi** |
+| nodes | 1 | **4**, 234 GB each, 127-133 GB free |
+| `range_max_bytes` | 64 MiB (migration 30) | **already 64 MiB** |
+
+**PRODUCTION ROWS ARE ~25x SMALLER THAN STAGING'S. Staging is the outlier, not a
+preview.** The default backfill batch there is `50000 x ~1.5 KB` = ~75 MB against
+a 3000Mi pool -- a ~40x margin. So the two settings migration 26 needs in staging
+are very likely UNNECESSARY in production, including
+`use_declarative_schema_changer = 'off'`: the declarative changer only failed in
+staging because the batch did not fit.
+
+Recommended anyway as cheap insurance: `bulkio.index_backfill.batch_size = 10000`
+(worst case `10000 x 35.8 KB` = ~358 MB, safe under concurrent load). NOT
+staging's 200, which would make a 129 GB build needlessly slow.
+
+**Migration 30 is a near no-op in production** -- its range settings are already
+the live values. Its `gc.ttlseconds` line was REMOVED because production runs
+90000 (25h) and the file would have cut it to 4h as a side effect.
+
+#### Migration 28 will ABORT in production
+
+`responses` has **1,818,162 rows with NULL `pageid`**, and 28 force-errors on any.
+Staging had zero, so it passed trivially and proved nothing.
+
+Every one of those rows is from **2020** -- they predate `pageid` being recorded --
+so `devops/backfill-responses-pageid.sh`'s `''` sentinel is the right answer and
+no recent attribution is lost. ~91 batches at the default 20,000, inside the 200
+cap. `chat_log` has 14,834 NULLs, which migration 27 fixes itself.
+
+#### Migration 19: the canary never went dark
+
+`messages_userid_idx` has been NOT VISIBLE since 2026-07-22, yet it is STILL BEING
+READ: 45,478 -> 45,483 reads over 75 seconds, about 4/min or ~5,700/day. NOT
+VISIBLE stops the optimizer *choosing* an index; explicit hints,
+`optimizer_use_not_visible_indexes`, and constraint checks can still reach it.
+
+**This does not mean dropping it is dangerous.** The two indexes are near
+substitutes:
+
+| index | keyed on | stores |
+|---|---|---|
+| `messages_userid_idx` (19 drops this) | `(userid, hsh)` | content, timestamp |
+| `messages_userid_timestamp_idx` | `(userid, timestamp, hsh)` | content |
+
+Both are prefixed on `userid`; both cover `content`. The survivor is keyed on
+`(userid, timestamp)`, which is **strictly better** for the dominant
+`WHERE userid=$1 ORDER BY timestamp` pattern -- 19's own header makes this
+argument. Expected impact of the drop is therefore low.
+
+What the reading DOES invalidate is the *soak*: it was supposed to prove life
+without this index, and the index never actually left the serving path, so it
+proved nothing. Before running 19, identify the ~5,700/day reader and confirm it
+tolerates the substitute. (Querying `crdb_internal.statement_statistics` for it
+was getting expensive on the live cluster and was abandoned; try it in a quiet
+window, filtered to a short time range.)
+
+#### Disk
+
+The new index costs about what `messages_userid_timestamp_idx` costs -- 75.7 GB
+cluster-wide, ~19 GB/node against 127-133 GB free. Afterwards 19 and 29 reclaim
+93.5 GB and 75.7 GB. Net strongly negative, as §5.2 always said.
+
 ### 5.2 Order
 
 1. **Migrations 26, 27, 28 → staging.** `bash devops/run-migration.sh vstag migrations/NN-*.sql`
