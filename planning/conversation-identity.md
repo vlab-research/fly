@@ -218,50 +218,76 @@ producer returns. That is why restoring the producer is what detonates it.
 
 `messages` is safe in both directions — migration 26 deliberately left the key alone.
 
-### 5.1b THE BLOCKER FOUND ON 2026-08-22: migration 26's index does not fit
+### 5.1b Why migration 26 stalled on 2026-08-22, and the plan
 
-**Migration 26 cannot complete in staging, and on these numbers it cannot complete in
-production either.** This is not a code problem; it is a disk problem, and it was not known
-when §5 was written.
+**CORRECTION to an earlier version of this section.** It claimed §5.2's "migration 19 first
+makes this net disk-negative" arithmetic "does not work". That was wrong, and it was wrong
+because it assumed the new index is a net addition without checking what the existing indexes
+already store. They already store `content` — three of them do. §5.2 was right.
 
-The index migration 26 creates stores `content`:
+#### What is actually on disk
 
-```sql
-CREATE INDEX messages_userid_account_timestamp_idx
-  ON chatroach.messages (userid, account_id, timestamp ASC)
-  STORING (content, platform);
-```
+Measured in `vstag`, 2026-08-22, via `SHOW RANGES ... WITH DETAILS, INDEXES`:
 
-`STORING (content)` **duplicates the largest column in the database.** Measured in `vstag` on
-2026-08-22:
+| index | logical | **disk** | reads in 6d | stores `content`? |
+|---|---|---|---|---|
+| `primary` | 5,630 MB | **606 MB** | 1 | yes |
+| `messages_userid_idx` | 5,766 MB | **576 MB** | **66** | yes |
+| `messages_timestamp_idx` | 5,703 MB | **576 MB** | **0** | yes |
+| `messages_userid_timestamp_idx` | 5,980 MB | **564 MB** | **0** | yes |
 
-| | |
-|---|---|
-| `sum(length(content))` in `messages` | **5,517 MB** (162,567 rows) |
-| store used / available | **3.40 GB / 0.52 GB** (PVC is 5 Gi, 90% full) |
+`content` is stored **four times over**. Compression is ~9.5x, so each copy is ~580 MB on disk
+against ~5.7 GB logical. Migration 26's index is a *fifth* copy — the same size as its siblings,
+not an outlier.
 
-The index needs roughly as much space as the entire store currently holds, and there is half a
-gigabyte free. The backfill job has been retrying since 2026-08-21 21:29 UTC: `num_runs = 11`,
-`fraction_completed = 0`, backed off to `next_run` 2026-08-23 07:33.
+#### The actual failure
 
-**Production is the same shape, worse.** `messages.content` there is ~384 GiB, so this index
-adds ~384 GiB. §5.2 says applying migration 19 first (freeing ~128 GiB) makes the change "net
-disk-negative" — **that arithmetic does not work**: 128 GiB freed against ~384 GiB added leaves
-~256 GiB still needed, and §5.2's own note records the tightest node as having 127 GiB free.
-Verify against `crdb_internal.kv_store_status` before believing either number, but do not apply
-migration 26 to production on the assumption that migration 19 pays for it.
+Migration 26 **adds before it retires**. It creates the new index, and only marks
+`messages_userid_timestamp_idx` NOT VISIBLE (migration 29 does the DROP, later, after a soak).
+So at peak it needs one full index of headroom:
 
-**Options, none of them free:**
+    needed ~580 MB   ·   available 532 MB
 
-1. **Grow the volumes.** `vstag` needs ≳16 Gi to hold the index with headroom; production needs
-   a real capacity plan, not a bump.
-2. **Drop `STORING (content)`.** The index becomes small, and the covering property is lost —
-   `get()` selects `content`, so an account-scoped read costs an index join per row. That is a
-   performance decision, and the migration's own comment argues for the covering form.
-3. **Store only `platform`.** A middle option: keeps the index cheap, still avoids an index join
-   for the platform column, but not for `content`.
+It missed by about 50 MB. The backfill then retried 11 times over 19 hours at
+`fraction_completed = 0`, silently, while a zombie SQL session from the killed migration client
+held a descriptor lease and a second schema change queued behind it for 18h23m.
 
-Until one is chosen, the rollout stops here.
+#### The compounding cause: migrations 18 and 19 were never committed
+
+`git log --all --diff-filter=A -- devops/migrations/1[89]-*` returns nothing. The migration
+sequence jumps 17 → 20. Both files exist only as **untracked working-tree files in the primary
+worktree**, so they were never deployable and `vstag` never received them. That is why staging
+still carries two indexes those migrations were written to remove — ~1.15 GB of the 3.41 GB
+store, and far more than the headroom migration 26 needed.
+
+#### The plan: free a copy before adding one
+
+1. **Commit the 18/19 work.** Whatever is in those untracked files needs to become real tracked
+   migrations, or be rewritten. Until then the cleanup they describe cannot be applied anywhere.
+2. **Drop `messages_timestamp_idx` first.** Zero reads in six days of staging traffic, 576 MB,
+   and it is not part of the 26/29 sequence, so dropping it costs nothing that migration 26 was
+   relying on. Frees more than the new index needs.
+   *Verify read counts in production before dropping there* — staging carries little exporter
+   traffic, and a timestamp-ordered scan across all users is exactly the shape an export would
+   use.
+3. **Then apply 26.** Peak is now comfortable; end state is unchanged.
+4. **Soak, then drop the retired copies**: migration 29 drops `messages_userid_timestamp_idx`,
+   and 19 drops `messages_userid_idx` once the new index is proven to serve replay.
+
+End state is `primary` + the new index: `content` stored twice instead of four times, and the
+staging store roughly halves. **Net strongly disk-negative**, which is what §5.2 said.
+
+**Do not drop `messages_userid_idx` before 26 lands in staging.** It is the only index currently
+serving replay there (66 reads). Production differs — there it is already NOT VISIBLE (armed
+2026-07-22), so production's reads come from `messages_userid_timestamp_idx` instead, and
+phase-2'ing 19 there is the free headroom §5.2 was pointing at.
+
+#### Independently: grow the staging volume
+
+`vstag`'s PVC is **5 Gi at 90% full**. Even with the plan above it will sit near the line, and
+the next schema change will wedge the same way — silently, for 19 hours. 16 Gi of pd-ssd is a
+rounding error against the cost of that. This is not a substitute for the index cleanup; it is
+the headroom that makes the cleanup safe to attempt.
 
 ### 5.1c Current half-applied state of `vstag`
 
