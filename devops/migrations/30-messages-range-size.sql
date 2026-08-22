@@ -1,0 +1,52 @@
+-- Cap the range size on chatroach.messages so its index backfills fit in memory.
+--
+-- APPLY: bash devops/run-migration.sh <namespace> migrations/30-messages-range-size.sql
+--
+-- WHY THIS EXISTS. The index backfiller materializes index entries A RANGE AT A
+-- TIME, across several workers, inside the SQL memory pool (--max-sql-memory).
+-- So a backfill needs roughly `concurrency x range_size` of pool to succeed.
+--
+-- `messages` is not a normal table. Its rows carry the raw event JSON in
+-- `content`: 34.8 KB on average and up to 351 KB, measured on vstag 2026-08-22.
+-- At the 512 MiB CockroachDB default for range_max_bytes, its ranges ran 288-467
+-- MB. Against staging's 250MiB pool that was structurally impossible -- one range
+-- was larger than the entire pool -- and migration 26's CREATE INDEX could never
+-- complete.
+--
+-- IT FAILED SILENTLY, which is the part worth remembering:
+--   * SHOW JOBS reported status = 'running'
+--   * fraction_completed stayed at 0
+--   * the `error` column stayed EMPTY
+--   * retries backed off exponentially, reaching 17-hour gaps
+-- The actual message ("memory budget exceeded ... 262144000 bytes in budget")
+-- appeared ONLY in the cockroach pod log. A stuck backfill is indistinguishable
+-- from a slow one unless you read that log.
+--
+-- 64 MiB is chosen to leave a wide margin: with staging's raised 1GiB pool it is
+-- ~16x headroom, and it stays safe if backfill concurrency rises. The cost is
+-- more ranges (5.5 GB logical -> ~557 ranges rather than 62), which is normal and
+-- what CockroachDB is designed for.
+--
+-- This is deliberately a MIGRATION and not a helm value: zone configuration is
+-- SQL-level state, so the repo is its only reviewable home. It was originally set
+-- by hand while debugging, which is exactly the invisible live state this file
+-- exists to eliminate.
+--
+-- PRODUCTION: apply this there too, BEFORE migration 26. Production runs a 3000Mi
+-- pool and so may tolerate 512 MiB ranges, but that is a margin nobody has
+-- measured and the failure mode is silent. Verify first:
+--   SELECT count(*), max(range_size)/1024/1024 AS max_mb
+--     FROM [SHOW RANGES FROM TABLE chatroach.messages WITH DETAILS];
+ALTER TABLE chatroach.messages
+  CONFIGURE ZONE USING range_max_bytes = 67108864, range_min_bytes = 16777216;
+
+-- Restore the stock GC TTL. It was lowered to 600s by hand on 2026-08-22 to force
+-- prompt reclaim of the indexes migration 18 dropped; that was a one-off and must
+-- not linger, since a short TTL shrinks the AS OF SYSTEM TIME window and the
+-- protected window for incremental backups.
+ALTER TABLE chatroach.messages CONFIGURE ZONE USING gc.ttlseconds = 14400;
+
+-- VERIFY:
+--   SHOW ZONE CONFIGURATION FOR TABLE chatroach.messages;
+--   SELECT count(*) AS ranges, round(max(range_size)/1024.0/1024,0) AS max_mb
+--     FROM [SHOW RANGES FROM TABLE chatroach.messages WITH DETAILS];
