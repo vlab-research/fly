@@ -263,7 +263,10 @@ dean:
 
 scribble:
   image:
-    repository: vlabresearch/scribble
+    # ghcr, not docker.io/vlabresearch: .github/workflows/release.yml publishes
+    # every service to ghcr.io/vlab-research/<image>. The old docker.io repo has
+    # no tag past v0.0.32, so any newer tag here is an ImagePullBackOff.
+    repository: ghcr.io/vlab-research/scribble
     tag: *vscribble
     pullPolicy: Always
   resources:
@@ -454,7 +457,8 @@ linksniffer:
   replicaCount: 1
 
   image:
-    repository: vlabresearch/linksniffer
+    # ghcr, not docker.io/vlabresearch -- see the scribble note above.
+    repository: ghcr.io/vlab-research/linksniffer
     tag: *vlinksniffer
     pullPolicy: Always
 
