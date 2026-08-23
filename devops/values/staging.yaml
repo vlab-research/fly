@@ -973,6 +973,25 @@ cockroachdb:
     enabled: no
   storage:
     persistentVolume:
+      # PENDING RESIZE TO 20Gi -- deliberately still 5Gi here. See
+      # devops/resize-statefulset-pvc.sh.
+      #
+      # This number and the live StatefulSet must change TOGETHER. A StatefulSet's
+      # volumeClaimTemplates are immutable, so raising it here on its own makes every
+      # `helm upgrade` of this release fail hard, for every service in it:
+      #   The StatefulSet "gbv-cockroachdb" is invalid: spec: Forbidden: updates to
+      #   statefulset spec for fields other than 'replicas', 'ordinals', 'template', ...
+      # (verified with `kubectl apply --dry-run=server`, 2026-08-23). So the bump to
+      # 20Gi belongs in the SAME change as the resize run, never ahead of it.
+      #
+      # WHY 20Gi IS WANTED. 5Gi is 87% full (4.2G used, 688M free on 2026-08-23) and
+      # could not absorb the conversation-identity backfill: `messages` has no column
+      # families, so writing account_id rewrites the whole row -- `content` included --
+      # into every index, and that MVCC churn is held for gc.ttlseconds. Making room
+      # meant dropping both surviving index canaries, i.e. a schema decision forced by
+      # disk. 20Gi is sized for the operation needing the most room -- rebuilding a
+      # content-storing index needs a full second copy of the table (~22.1 GB logical /
+      # ~4.2 GB physical), and that rebuild is now the only rollback path.
       size: 5Gi
       storageClass: "pd-ssd"
 
