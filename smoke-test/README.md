@@ -177,6 +177,7 @@ accepted).
 | `test_attachments` → `media_third_party_url` → `media_legacy_attachment_id_<env>` → `media_asset_image_<env>` → `media_asset_repeat_<env>` → `media_asset_video_<env>` → `media_asset_file_<env>` → `confirm_attachment` | Six media-abstraction paths back to back, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole block straight to the moviehouse webview. One shared third-party field, then a five-field prod or staging chain — see [Media fields](#media-fields-what-each-one-proves) below | `multiple_choice` → `attachment` (`keepMoving`), one legacy `attachment_id`, one not-uploaded `url`, four uploaded-asset `url`s |
 | `confirm_attachment` | **Did they actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — this is the only signal that a media send silently failed. Also carries the env branch into the moviehouse webview | `multiple_choice` |
 | `movie_webview_prod`/`movie_webview_staging` → `movie_watched`/`movie_timeout` | **Webview button → moviehouse external events → logic reacting to them** (works in prod & staging); branched from `test_environment` by `confirm_attachment` | `webview` + `wait{op:or,[external moviehouse:play, timeout]}`; branch on `e_moviehouse_play_id` |
+| `test_links` → `link_new` → `link_legacy_<env>` → `movie_new` → `confirm_links` | **The conversation triple on first-party URLs** — the four link/webview paths, old and new, gated behind a yes/no. Proves an absent platform is *assumed* rather than dropped, and a stamped one is carried through. See [Conversation identity](#conversation-identity--the-four-link-paths) | `multiple_choice` → `link_tracking`, hand-authored `webview`, `moviehouse`; `wait{op:or,[external linksniffer:click, timeout]}` |
 | `stitch_statement` | **Form stitch** A → B | `stitch` |
 | `test_timeout` → `timeout_wait` → `welcome_back` (B) | **Timeout / dean followup** | `wait: timeout` |
 
@@ -191,6 +192,87 @@ types (`yes_no`/`legal`, `opinion_scale`, `rating`, `dropdown`, `email`,
 / one-time-notification, and `user_reaction` (message emoji reacts, which the
 machine intentionally ignores). Add them if a regression ever touches those
 paths.
+
+## Conversation identity — the four link paths
+
+A conversation is `(platform, account_id, user_id)`. Every first-party URL has to
+produce all three, including the URLs already sitting in participants' inboxes
+that predate `vlab_platform` entirely. There are exactly four shapes, and this
+survey drives all four:
+
+| # | path | field | what it sends | expect stored |
+|---|---|---|---|---|
+| 1 | legacy linksniffer | `link_legacy_prod` / `link_legacy_staging` | `id`, `pageid`, **no platform** | `platform = messenger` (**assumed**) |
+| 2 | new linksniffer | `link_new` | `vlab_user`, `vlab_account`, `vlab_platform` | the **stamped** value |
+| 3 | legacy moviehouse | `movie_webview_prod` / `movie_webview_staging` | `id`, `pageId`, `userId`, **no platform** | `platform = messenger` (**assumed**) |
+| 4 | new moviehouse | `movie_new` | `vlab_video` + the triple | the **stamped** value |
+
+**Why only the legacy fields are environment-split.** Paths 2 and 4 are field
+*types* (`link_tracking`, `moviehouse`) whose URL replybot owns end to end — the
+base comes from `LINKSNIFFER_URL` / `MOVIEHOUSE_URL` in each cluster's values
+file, so one field serves both environments and there is no page id for a
+researcher to hardcode. Paths 1 and 3 are hand-authored `webview`s with the host
+written in, so they need a prod and a staging copy, picked by `test_environment`.
+
+### Verifying it — the survey cannot check this itself
+
+Nothing a participant sees reveals which platform was recorded, so `confirm_links`
+only asks whether the redirects worked. **The actual assertion is in the event
+stream.** After a run, with the participant's user id:
+
+```sql
+SELECT "timestamp" AS at, platform, account_id,
+       content::JSONB->'event'->'value'->>'type' AS event
+  FROM chatroach.messages
+ WHERE userid = '<participant user id>'
+   AND content::JSONB->'event'->'value'->>'type'
+       IN ('linksniffer:click', 'moviehouse:play')
+ ORDER BY "timestamp" DESC LIMIT 20;
+```
+
+`platform` and `account_id` must be non-NULL on **every** row — the legacy ones
+included, which is the whole point. Quote `"timestamp"`: it is a reserved word and
+already a `timestamptz`, so wrapping it in `to_timestamp()` errors.
+
+Cross-check the assumption against linksniffer's own log, where an assumed
+platform is tagged separately from a supplied one:
+
+```bash
+kubectl logs -n <ns> deployment/gbv-linksniffer | grep LINKSNIFFER_PLATFORM_
+```
+
+`LINKSNIFFER_PLATFORM_ASSUMED` on the legacy paths is expected and is the legacy
+tail being measured. `LINKSNIFFER_PLATFORM_INVALID` is **not** expected from this
+survey at all — see below.
+
+### An invalid platform is refused, not coerced
+
+Since linksniffer v0.0.9, an unrecognised `vlab_platform` returns **400** instead
+of quietly becoming messenger. Only *absent* is assumed. replybot writes that
+param from `ctx.platform`, so a well-formed link cannot carry a bad value — an
+invalid one means a hand-authored `webview` or a tampered URL, and it must break
+where a tester sees it rather than become misattributed data months later.
+
+You can confirm the deployed behaviour without running the survey:
+
+```bash
+B=https://staging.links.vlab.digital
+curl -s -o /dev/null -w '%{http_code}\n' "$B/?id=probe&pageid=<acct>&url=example.com&p=https"                        # 302, assumed
+curl -s -o /dev/null -w '%{http_code}\n' "$B/?vlab_user=probe&vlab_account=<acct>&vlab_platform=whatsapp&url=example.com&p=https"  # 302, stamped
+curl -s -o /dev/null -w '%{http_code}\n' "$B/?vlab_user=probe&vlab_account=<acct>&vlab_platform=sms&url=example.com&p=https"       # 400, refused
+```
+
+Those probes write real rows to `messages`, so use an obviously synthetic user id.
+
+### The assumption has an expiry date
+
+Assuming messenger is only correct **while Messenger is the only live transport.**
+When WhatsApp carries production traffic, a legacy URL (paths 1 and 3) clicked by a
+WhatsApp participant addresses a Messenger conversation that does not exist — the
+2026-08-13 incident, where a hardcoded `pageId` left a phantom conversation BLOCKED
+in production. Before that point the legacy URLs must be gone, or the platform must
+come from a `credentials.entity` lookup rather than an assumption. See the WhatsApp
+launch checklist in `planning/multi-platform-plan.md`.
 
 ## The moviehouse section (webview + external events)
 

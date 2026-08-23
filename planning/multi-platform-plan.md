@@ -7,7 +7,7 @@ other is stale.
 
 **Status 2026-08-23:** staging fully rolled out; production untouched; Messenger is
 the only live transport. Integration suite 61/61, in CI and locally.
-**Phase 0: 0.1, 0.2 and 0.5 are DONE. 0.3 is waiting on MVCC GC, 0.4 is open.**
+**Phase 0: 0.1, 0.2, 0.4 and 0.5 are DONE. 0.3 is waiting on MVCC GC — the last one.**
 
 ---
 
@@ -52,8 +52,32 @@ the only live transport. Integration suite 61/61, in CI and locally.
   **Do not size an index by summing `SHOW RANGES ... WITH DETAILS, INDEXES`** — with
   `INDEXES` the whole range size is repeated once per index the range spans, which
   inflates the total several-fold. Take the table total without `INDEXES`.
-- **0.4 Extend `smoke-test/form-a.json` to all four paths.** It has moviehouse and
-  payment today and **no link field at all**.
+- **0.4 Extend `smoke-test/form-a.json` to all four paths. DONE 2026-08-23.**
+  Added a `test_links` gate → `link_new` (`link_tracking`) → `link_legacy_prod` /
+  `link_legacy_staging` (hand-authored `webview`) → `movie_new` (`moviehouse`) →
+  `confirm_links`, inserted between `movie_timeout` and `stitch_statement`.
+  Path 3 needed no new field — the existing `movie_webview_*` already hardcode
+  `pageId` and send no platform, which is exactly the legacy shape.
+
+  Only the legacy fields are environment-split. `link_tracking` and `moviehouse`
+  are field *types* whose URL replybot owns, base from `LINKSNIFFER_URL` /
+  `MOVIEHOUSE_URL`, so one field covers both environments.
+
+  Verified by translating the real fields through
+  `replybot/lib/generic-translator.js`, not by eyeballing the JSON:
+
+      link_new    .../?url=example.com&p=https&vlab_user=U&vlab_account=A&vlab_platform=messenger
+      movie_new   .../?vlab_video=164118668&vlab_user=U&vlab_account=A&vlab_platform=messenger
+      link_legacy .../?id={{hidden:id}}&pageid={{hidden:pageid}}&url=example.com&p=https
+
+  **Paths 1 and 2 are already proven end to end on vstag.** Probing the deployed
+  linksniffer wrote real rows, and `chatroach.messages` stored `platform=messenger`
+  for the legacy shape and `platform=whatsapp` for the stamped one, both with
+  `account_id`. Paths 3 and 4 still need a human to run the survey and tap a video.
+
+  The survey cannot assert the platform itself — nothing a participant sees reveals
+  it — so `smoke-test/README.md` now carries the verification query and the
+  `LINKSNIFFER_PLATFORM_*` log cross-check.
 
   | path | expect |
   |---|---|
