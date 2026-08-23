@@ -4,7 +4,7 @@
 migration is applied to a production database.** Branch `feature/conversation-identity`
 (PR #149), merged into `staging`.
 
-**If you are picking this up: go straight to §5.2, which is the runbook.** §5.1b–d are the
+**If you are picking this up: read `planning/multi-platform-plan.md` — it is the runbook and is authoritative for ordering.** Then §5.1 here for the one hazard most likely to bite you. §5.1b–d are the
 diagnostic record of what went wrong getting to staging; read them when something breaks, not
 before. §5.1 is still the highest-value five minutes in this document.
 
@@ -392,46 +392,21 @@ The new index costs about what `messages_userid_timestamp_idx` costs -- 75.7 GB
 cluster-wide, ~19 GB/node against 127-133 GB free. Afterwards 19 and 29 reclaim
 93.5 GB and 75.7 GB. Net strongly negative, as §5.2 always said.
 
-### 5.2 Order — START HERE
+### 5.2 Order — see `planning/multi-platform-plan.md`
 
-Staging is done (§5.1c). Everything below is production, plus two staging
-leftovers. Steps are in dependency order; nothing here is optional-but-nice.
+**The phase order now lives in `planning/multi-platform-plan.md` and that file is
+authoritative.** It covers the same rollout plus what comes after it — gate
+tightening, scaffolding removal, and the WhatsApp launch checklist — and keeping a
+second step list here would only drift out of date, which is exactly what happened
+to §4 and the old §5.1c.
 
-**Read §5.1 first** — the scribble/`responses` key mismatch is still the thing
-most likely to bite, and it applies to production exactly as it did to staging.
+Read that file for WHAT to do in WHICH ORDER. Read the rest of §5 for WHY, and for
+the hazards: §5.1 (the scribble/`responses` key mismatch, still the most likely
+thing to bite), §5.1b-d (what went wrong reaching staging, and the production
+measurements), §5.3 (gates), §5.4 (feature gates), §5.5 (rollback).
 
-#### Remaining on staging
-
-- **S1. Soak.** 24h against the §5.3 gates. Started 2026-08-22 ~19:00 UTC.
-- **S2. Run the account_id backfill.** `devops/backfill/README.md`: `--dry-run`,
-  then `--rehearse --max-batches 3`, then for real. Never run anywhere yet.
-- **S3. Migration 29** (drop `messages_userid_timestamp_idx`) once the new index
-  is proven. Reclaims ~566 MB, which staging needs at 87% disk. Not yet written.
-
-#### Production
-
-- **P1. Backfill `responses.pageid` FIRST.** `bash devops/backfill-responses-pageid.sh vprod`.
-  1,818,162 NULL rows, all from 2020, ~91 batches at the default 20,000.
-  **Migration 28 force-errors until this returns zero.** Verify:
-  `SELECT count(*) FROM chatroach.responses WHERE pageid IS NULL;`
-- **P2. Migrations 26, 27, 28.** Migration 30 is a near no-op there (production
-  already has 64 MiB ranges) — apply it or skip it, but do not "fix" its absence.
-  Re-measure row width before 26 and size `bulkio.index_backfill.batch_size`
-  accordingly; see §5.1d and 26's own header. Do NOT copy staging's 200.
-- **P3. Deploy the branch to production**, in a quiet window, scribble close
-  behind the migrations (§5.1). Same nine services as staging.
-- **P4. Watch 24h** against §5.3.
-- **P5. Flip production `STRICT_EVENT_ENVELOPE` to `"true"`** — only after
-  `CHAT_EVENTS_ENVELOPE_MISSING` reads zero for 24h. Its own reviewed diff.
-- **P6. Run the account_id backfill on production.** After staging completes.
-- **P7. Migration 19.** ONLY after P3 — its precondition 1 requires the
-  `SELECT *` -> `SELECT content` change, which ships in replybot v0.0.221.
-  Production is on v0.0.219 using the external `@vlab-research/chatbase-postgres`,
-  which still does `SELECT *`. Precondition 2 (CRDB replica co-location) is now
-  SATISFIED: all 4 pods sit on 4 distinct GKE nodes (verified 2026-08-22).
-  Also identify the ~5,700/day reader of the hidden index first (§5.1d).
-- **P8. `account_id` NOT NULL.** `planning/messages-account-not-null-todo.md`.
-  Its own effort; do not fold it in.
+The traps below are not repeated in the plan file and are the other half of §5.1 —
+every one was hit for real during the staging rollout.
 
 #### Known traps, all hit for real
 
