@@ -31,6 +31,10 @@
   // it as valid would let 'Messenger' become a distinct cache key downstream.
   var KNOWN_PLATFORMS = ['messenger', 'whatsapp'];
 
+  // What an absent platform resolves to. Messenger is the only live transport,
+  // and legacy URLs carry no platform at all.
+  var ASSUMED_PLATFORM = 'messenger';
+
   // THE canonical query params. replybot builds every `moviehouse` field's URL
   // from config and writes exactly these
   // (`replybot/lib/generic-translator.js` IDENTITY_PARAMS / VIDEO_PARAM), and
@@ -91,15 +95,35 @@
   //     a WhatsApp participant's play event to a Messenger page, producing a
   //     phantom conversation still BLOCKED in production.
   //
-  // When a component is absent it is reported and OMITTED, never guessed. An
-  // absent platform degrades (hermes stamps the account, replybot falls back to an
-  // account-scoped replay, the conversation still advances); a wrong platform
-  // addresses a conversation that does not exist, so the `wait` on
-  // `moviehouse:play` never resolves and the outbound commands are built for the
-  // wrong transport. At one heartbeat every 30 seconds that is a continuous stream
-  // of mis-addressed events rather than a one-shot risk, which is why moviehouse
-  // does not follow linksniffer's `[LINKSNIFFER_PLATFORM_ASSUMED]` precedent.
-  // Reasoning in full: `../planning/moviehouse-conversation-identity.md`.
+  // AN ABSENT PLATFORM IS ASSUMED 'messenger', matching linksniffer. Changed
+  // 2026-08-22, reversing the earlier decision recorded here and in
+  // `../planning/moviehouse-conversation-identity.md`.
+  //
+  // The earlier reasoning was that an absent platform degrades safely (hermes
+  // stamps the account, replybot falls back to an account-scoped replay, the
+  // conversation still advances) while a WRONG one addresses a conversation that
+  // does not exist -- and that at one heartbeat every 30 seconds a wrong platform
+  // is a continuous stream of mis-addressed events, not a one-shot risk. The
+  // 2026-08-13 incident, where a legacy hand-authored `webview` carrying a
+  // hardcoded `pageId` sent a WhatsApp participant's play event to a Messenger
+  // page and left a phantom conversation BLOCKED in production, is what that
+  // caution was built on.
+  //
+  // It is assumed anyway because MESSENGER IS THE ONLY LIVE TRANSPORT. WhatsApp
+  // carries a handful of test users, so the assumption is correct for
+  // effectively all traffic, and backwards compatibility for URLs already in
+  // participants' inboxes is worth more than the residual.
+  //
+  // THE RESIDUAL IS REAL AND IS THE THING TO REVISIT: the moment WhatsApp
+  // carries production traffic, a legacy moviehouse URL clicked by a WhatsApp
+  // participant reproduces 2026-08-13 exactly. Before that happens, either the
+  // legacy URLs must be gone or the platform must come from a lookup rather than
+  // an assumption -- `credentials.entity` maps an account to its transport
+  // (`facebook_page` -> messenger, `whatsapp_business` -> whatsapp) and is what
+  // formcentral already resolves surveys by.
+  //
+  // An INVALID platform is still never assumed: it is reported and omitted, so a
+  // value we do not recognise stays findable instead of being coerced.
   //
   // Returns { account_id, platform, invalidPlatform, missing } where each string
   // is '' when unresolved and `missing` names the unresolved components.
@@ -110,8 +134,18 @@
 
     var supplied = pick(params, [PARAM_PLATFORM, 'platform']);
     var known = supplied !== '' && KNOWN_PLATFORMS.indexOf(supplied) !== -1;
-    var platform = known ? supplied : '';
     var invalidPlatform = (supplied !== '' && !known) ? supplied : '';
+
+    // ABSENT -> assume messenger, matching linksniffer's
+    // `[LINKSNIFFER_PLATFORM_ASSUMED]`. Backwards compatibility for URLs already
+    // delivered: every moviehouse link built before `vlab_platform` existed
+    // carries no platform, Messenger's 24h window means they are clicked after
+    // the deploy, and messenger is the only live transport.
+    //
+    // INVALID -> still NOT assumed. A value we do not recognise is a bug, not a
+    // legacy URL, and it is reported so it is findable rather than coerced.
+    var platform = known ? supplied : (supplied === '' ? ASSUMED_PLATFORM : '');
+    var platformAssumed = (supplied === '');
 
     var missing = [];
     if (accountId === '') missing.push('account_id');
@@ -120,6 +154,7 @@
     return {
       account_id: accountId,
       platform: platform,
+      platformAssumed: platformAssumed,
       invalidPlatform: invalidPlatform,
       missing: missing
     };

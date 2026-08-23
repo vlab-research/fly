@@ -145,6 +145,7 @@ test.describe('resolveConversation - canonical params', () => {
     const c = resolveConversation({ vlab_account: 'a', vlab_platform: 'Messenger' });
 
     assert.strictEqual(c.platform, '');
+    assert.strictEqual(c.platformAssumed, false);
     assert.strictEqual(c.invalidPlatform, 'Messenger');
     assert.deepStrictEqual(c.missing, ['platform']);
   });
@@ -179,18 +180,23 @@ test.describe('resolveConversation', () => {
   test('treats empty and whitespace-only params as absent', () => {
     const c = resolveConversation({ account_id: '', pageId: '   ', platform: '  ' });
     assert.strictEqual(c.account_id, '');
-    assert.strictEqual(c.platform, '');
-    assert.deepStrictEqual(c.missing, ['account_id', 'platform']);
+    assert.strictEqual(c.platform, 'messenger');
+    assert.strictEqual(c.platformAssumed, true);
+    assert.deepStrictEqual(c.missing, ['account_id']);
   });
 
   // THE decision. A moviehouse event is a heartbeat every 30 seconds, and a
   // wrong platform builds outbound commands for the wrong transport, so an
   // absent platform is reported and omitted -- never assumed to be messenger.
   // Contrast linksniffer's [LINKSNIFFER_PLATFORM_ASSUMED].
-  test('never assumes a platform when the param is absent', () => {
-    const c = resolveConversation({ userId: 'psid-1', pageId: 'acct-1' });
-    assert.strictEqual(c.platform, '');
-    assert.deepStrictEqual(c.missing, ['platform']);
+  // CHANGED 2026-08-22: an absent platform is now assumed 'messenger', matching
+  // linksniffer, so that moviehouse URLs already delivered to participants keep
+  // resolving. Messenger is the only live transport.
+  test('assumes messenger when the platform param is absent', () => {
+    const c = resolveConversation({ vlab_account: 'acct-1' });
+    assert.strictEqual(c.platform, 'messenger');
+    assert.strictEqual(c.platformAssumed, true);
+    assert.deepStrictEqual(c.missing, []);
   });
 
   test('accepts messenger and whatsapp', () => {
@@ -223,15 +229,18 @@ test.describe('resolveConversation', () => {
     [undefined, null, {}].forEach(input => {
       const c = resolveConversation(input);
       assert.strictEqual(c.account_id, '');
-      assert.strictEqual(c.platform, '');
-      assert.deepStrictEqual(c.missing, ['account_id', 'platform']);
+      // Platform is assumed even here; the ACCOUNT is what cannot be invented.
+      assert.strictEqual(c.platform, 'messenger');
+      assert.strictEqual(c.platformAssumed, true);
+      assert.deepStrictEqual(c.missing, ['account_id']);
     });
   });
 
   test('does not mistake the Vimeo video id for the account or the user', () => {
     const c = resolveConversation({ id: '164118668' });
     assert.strictEqual(c.account_id, '');
-    assert.strictEqual(c.platform, '');
+    // The video id must not leak into the account. Platform is assumed, as ever.
+    assert.strictEqual(c.platform, 'messenger');
   });
 });
 
