@@ -68,22 +68,33 @@ var messagingPlatforms = map[string]bool{
 	"whatsapp":  true,
 }
 
-// resolvePlatform decides the conversation's platform from the researcher-authored
-// query param. It returns the platform, whether it was assumed, and whether the
-// supplied value was rejected as unrecognized.
+// resolvePlatform decides the conversation's platform from the query param. It
+// returns the platform, whether it was assumed, and whether the supplied value
+// was rejected as unrecognized.
 //
-// The param is researcher-authored and ends up as a component of the conversation
-// identity downstream, so it is validated here rather than trusted: a typo'd
-// platform would otherwise become a poisoned cache key that silently addresses a
-// conversation that does not exist. An unrecognized value is treated exactly like
-// an absent one -- assumed "messenger" -- but logged under its own tag so the typo
-// is findable instead of being folded into the assumed-platform count.
+// ABSENT and INVALID are deliberately NOT the same thing, and the caller treats
+// them differently:
+//
+//   ABSENT is legitimate. Every URL delivered to a participant before
+//   `vlab_platform` existed carries no platform, and those links must keep
+//   working for as long as they are in inboxes. Assume messenger -- the only
+//   live transport -- and log it so the legacy tail is measurable.
+//
+//   INVALID is a bug, and the caller REFUSES TO FORWARD. replybot owns these
+//   URLs end to end for the `link_tracking` and `moviehouse` field types and
+//   writes this param from `ctx.platform` (generic-translator.js), so a
+//   well-formed link CANNOT carry a bad value. An invalid one can only come from
+//   a hand-authored `webview` field or a tampered URL -- exactly the case a
+//   survey tester should see break loudly during testing, rather than have
+//   silently coerced to messenger and discovered later as misattributed data.
+//   Forwarding anyway would make a researcher's typo indistinguishable from a
+//   working link right up until the numbers are wrong.
 func resolvePlatform(platformParam string) (platform string, assumed bool, invalid bool) {
 	if platformParam == "" {
 		return "messenger", true, false
 	}
 	if !messagingPlatforms[platformParam] {
-		return "messenger", true, true
+		return "", false, true
 	}
 	return platformParam, false, false
 }
@@ -122,7 +133,11 @@ func (s *Server) forward(c echo.Context) error {
 	// Resolve platform and check if it was assumed
 	platform, platformAssumed, platformInvalid := resolvePlatform(platformParam)
 	if platformInvalid {
-		log.Printf("[LINKSNIFFER_PLATFORM_INVALID] id=%s account=%s platform=%q -- not a known platform, assuming messenger", id, resolvedAccountID, platformParam)
+		// Refuse. See resolvePlatform: replybot cannot emit this, so it is a
+		// hand-authored or tampered URL and must fail where a tester will see it.
+		log.Printf("[LINKSNIFFER_PLATFORM_INVALID] id=%s account=%s platform=%q -- not a known platform, refusing to forward", id, resolvedAccountID, platformParam)
+		e := fmt.Errorf("unknown platform %q -- must be one of messenger, whatsapp, or omitted", platformParam)
+		return echo.NewHTTPError(http.StatusBadRequest, e)
 	}
 	if platformAssumed {
 		log.Printf("[LINKSNIFFER_PLATFORM_ASSUMED] id=%s account=%s", id, resolvedAccountID)

@@ -250,11 +250,14 @@ func TestResolvePlatform(t *testing.T) {
 	}{
 		{"explicit messenger", "messenger", "messenger", false, false},
 		{"explicit whatsapp", "whatsapp", "whatsapp", false, false},
+		// ABSENT is the legacy tail and must keep working: assumed, not invalid.
 		{"absent defaults to messenger", "", "messenger", true, false},
-		// A researcher-authored typo must not become a conversation identity.
-		{"unknown platform is rejected, not trusted", "sms", "messenger", true, true},
-		{"wrong case is rejected, not silently accepted", "Messenger", "messenger", true, true},
-		{"synthetic is never a platform", "synthetic", "messenger", true, true},
+		// INVALID resolves to NO platform. The caller refuses to forward, so
+		// there is no value to coerce to -- returning "messenger" here would be
+		// the silent misattribution this exists to prevent.
+		{"unknown platform yields no platform", "sms", "", false, true},
+		{"wrong case yields no platform", "Messenger", "", false, true},
+		{"synthetic is never a platform", "synthetic", "", false, true},
 	}
 
 	for _, tt := range tests {
@@ -297,14 +300,23 @@ func TestForwardWithInvalidPlatformLogsItsOwnTag(t *testing.T) {
 	client := &http.Client{}
 	s := &Server{&Eventer{client, ts.URL}}
 
-	s.forward(c)
+	err := s.forward(c)
 
 	logOutput := logBuf.String()
 	assert.Contains(t, logOutput, "[LINKSNIFFER_PLATFORM_INVALID]")
 	assert.Contains(t, logOutput, `platform="sms"`)
-	// The participant still reaches their destination.
-	assert.Equal(t, http.StatusFound, rec.Code)
-	assert.Equal(t, "https://redcross.org", rec.Header().Get("Location"))
+
+	// FAIL LOUD AND FAST. An invalid platform is unreachable through replybot,
+	// which owns these URLs and writes the param from ctx.platform, so this can
+	// only be a hand-authored or tampered link. Refusing means a survey tester
+	// sees it break immediately instead of shipping a survey whose clicks are
+	// silently misattributed to messenger.
+	assert.NotNil(t, err)
+	he, ok := err.(*echo.HTTPError)
+	assert.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, he.Code)
+	// And no redirect was issued.
+	assert.NotEqual(t, http.StatusFound, rec.Code)
 }
 
 // TestBuildRedirectURL tests the pure function for URL construction.
