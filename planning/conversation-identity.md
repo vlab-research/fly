@@ -439,14 +439,22 @@ every one was hit for real during the staging rollout.
 
 | Gate | staging | production | Notes |
 |---|---|---|---|
-| `STRICT_EVENT_ENVELOPE` | **`true`** (set 2026-08-20, **not yet applied**) | `false` | Refuses to publish an unstamped event. Staging first: refusing drops the WhatsApp echo, which is the only thing advancing those conversations, so a stall is a test failure there and a hanging participant in production. Flip production only after the tag reads zero in staging for 24h. |
+| `STRICT_EVENT_ENVELOPE` | **`true`, APPLIED and live on vstag since 2026-08-22 18:36 UTC** | `false` | Refuses to publish an unstamped event. Staging first: refusing drops the WhatsApp echo, which is the only thing advancing those conversations, so a stall is a test failure there and a hanging participant in production. Flip production only after the tag reads zero in staging for 24h. |
 | `SYNTHETIC_REQUIRE_CONVERSATION` | `false` | `false` | hermes-side gate on incoming `/synthetic`. **Do not turn on until moviehouse sends `account_id` and `platform`** — it is served from Netlify, not the cluster, so it cannot roll out in the same apply. Turning it on early 400s every moviehouse event and kills video tracking. |
 
-Staging's `STRICT_EVENT_ENVELOPE` change is committed but needs:
+**CORRECTED 2026-08-23 — this said "committed but not yet applied", and that was
+stale.** The gate is live on vstag: the running `gbv-message-worker` pod was created
+2026-08-22T18:36:50Z already carrying `STRICT_EVENT_ENVELOPE=true`. No apply step is
+outstanding. `CHAT_EVENTS_ENVELOPE_MISSING` has read **zero** on message-worker since,
+so the 24h staging soak this gate owes production is already running — date it from
+2026-08-22 18:36, not from whenever it is next looked at.
+
+Verify rather than re-deriving from the values file, which says nothing about what is
+running:
 
 ```bash
-helm upgrade gbv vlab -f devops/values/staging.yaml -n vstag
-kubectl rollout restart deployment/gbv-message-worker -n vstag
+kubectl get pod -n vstag -l app=message-worker \
+  -o jsonpath='{.items[0].spec.containers[0].env}' | tr ',' '\n' | grep STRICT
 ```
 
 ### 5.5 Rollback

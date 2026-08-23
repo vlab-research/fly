@@ -5,24 +5,53 @@ describes the conversation-identity rollout in depth — the hazards, the gates,
 traps — but the phase order lives here. If the two disagree, this file wins and the
 other is stale.
 
-**Status 2026-08-22:** staging fully rolled out; production untouched; Messenger is
+**Status 2026-08-23:** staging fully rolled out; production untouched; Messenger is
 the only live transport. Integration suite 61/61, in CI and locally.
+**Phase 0: 0.1, 0.2 and 0.5 are DONE. 0.3 is waiting on MVCC GC, 0.4 is open.**
 
 ---
 
 ## Phase 0 · Finish staging — ~1 day
 
-- **0.1 Migration 29** (`DROP messages_userid_timestamp_idx`). Frees 566 MB, cuts
-  write amplification 4 indexes → 3. Still unwritten.
-  **BLOCKS 0.3**: the backfill rewrites every row (no column families, so `content`
-  is rewritten too) → ~2.3 GB of MVCC held for `gc.ttlseconds=14400`, against
-  ~700 MB free. Land 29 (+19), or grow the 5 Gi volume.
-- **0.2 Migration 19, staging only.** Preconditions met *here*: replybot v0.0.221 is
-  deployed and it is a single node. Frees a further 578 MB. Keep one canary until
-  0.3 has proven the new index under real traffic.
+- **0.1 Migration 29** (`DROP messages_userid_timestamp_idx`). **WRITTEN AND APPLIED
+  TO vstag 2026-08-23**, verified against the schema. Cuts write amplification
+  4 indexes → 3.
+- **0.2 Migration 19, staging only. APPLIED TO vstag 2026-08-23.** Preconditions
+  verified here rather than assumed: `visible=f`; both read paths EXPLAIN onto
+  `messages_userid_account_timestamp_idx`; `SELECT content` shipped in the deployed
+  replybot v0.0.221; single CRDB pod, so no replica co-location risk. Unlike
+  production's canary it had genuinely gone dark — `total_reads` static at 48 over
+  80 minutes while the replacement advanced.
+  **`chatroach.messages` is now exactly `primary` + `messages_userid_account_timestamp_idx`,
+  the end state migration 26 designed.**
+
+  ⚠️ **The "keep one canary until 0.3" advice was overtaken.** 0.1 and 0.2 together
+  drop both canaries, and the disk gate below required both. There is no instant
+  rollback left: if the backfill regresses the read path, roll **forward**. Recreating
+  either index on vstag needs migration 26's two settings TOGETHER or it wedges
+  silently at `fraction_completed = 0`.
 - **0.3 Run `devops/backfill`.** `--dry-run` → `--rehearse --max-batches 3` → real.
-  Never executed anywhere. Only this makes **history** triple-keyed: today 70 of
-  162,637 staging rows carry `account_id`.
+  Never executed anywhere. Only this makes **history** triple-keyed: today 124 of
+  162,691 staging rows carry `account_id` (measured 2026-08-23; the 124 grows on its
+  own because forward writes are already triple-keyed).
+
+  **BLOCKED UNTIL ~06:02 UTC 2026-08-23 — not on schema any more, on MVCC GC.** Both
+  DROPs are `waiting for MVCC GC` and reclaim only after `gc.ttlseconds = 14400` (4h)
+  from 01:53 and 02:02. Disk was still 4.2G used / 688M free at 02:11, unchanged.
+  **Re-measure `df` before starting; do not trust the estimate below.**
+
+  Sizing measured on vstag 2026-08-23, before the drops: the four indexes were
+  near-equal at 5,527–5,574 MB logical each of a 22,110.9 MB table, against 4.2 GB
+  physical — roughly 5.3x compression. On that basis the two drops free ~2.1 GB
+  physical and the backfill's own churn is ~2.1 GB, which fits but is not comfortable.
+  Growing the 5 Gi volume (`devops/values/staging.yaml:976`, and `pd-ssd` has
+  `ALLOWVOLUMEEXPANSION=true`) remains the durable fix; note a StatefulSet's
+  `volumeClaimTemplates` are immutable, so it needs a PVC expand plus an
+  orphan-cascade recreate, not just a `helm upgrade`.
+
+  **Do not size an index by summing `SHOW RANGES ... WITH DETAILS, INDEXES`** — with
+  `INDEXES` the whole range size is repeated once per index the range spans, which
+  inflates the total several-fold. Take the table total without `INDEXES`.
 - **0.4 Extend `smoke-test/form-a.json` to all four paths.** It has moviehouse and
   payment today and **no link field at all**.
 
@@ -33,8 +62,27 @@ the only live transport. Integration suite 61/61, in CI and locally.
   | legacy moviehouse (`pageId`, no platform) | `platform=messenger` (assumed) |
   | new moviehouse (`vlab_*`) | the stamped value |
 
-- **0.5 Cut and deploy linksniffer + moviehouse** with the assume-messenger change,
-  so 0.4 tests deployed behaviour rather than source.
+- **0.5 Cut and deploy linksniffer + moviehouse. DONE 2026-08-23.**
+  - **linksniffer v0.0.9** cut (`5c687072` + `99b57048`, neither in the deployed
+    v0.0.8), `devops/values/staging.yaml:42` bumped, `helm upgrade` → revision 86.
+    Verified against the deployed pod: absent platform → 302 +
+    `LINKSNIFFER_PLATFORM_ASSUMED`; `vlab_platform=whatsapp` → 302, nothing assumed;
+    `vlab_platform=sms` → **400** + `LINKSNIFFER_PLATFORM_INVALID`; no id → 400.
+  - **moviehouse needed no action — it was already deployed.** The `staging` branch
+    deploy of Netlify site `virtuallab-videos` (base `moviehouse`) has served
+    `80d0dc25` since 01:22, and its `identity.js` is byte-identical to
+    `moviehouse/src/identity.js`. Earlier notes saying this was "deployed nowhere"
+    were stale.
+
+  **Netlify deploys listed as `error` on this site are usually NOT failures.** Most
+  are `Canceled build due to no content change` — Netlify skipping a build because
+  nothing under the `moviehouse` base directory changed. Read `error_message` before
+  concluding a deploy broke.
+
+  Staging's moviehouse points at the **branch** deploy
+  (`MOVIEHOUSE_URL: https://staging--virtuallab-videos.netlify.app`,
+  `devops/values/staging.yaml:411`); the site's production branch is `main`. So a
+  staging moviehouse deploy cannot touch production.
 
 ## Phase 1 · Production rollout — ~1 week
 
