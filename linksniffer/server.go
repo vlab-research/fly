@@ -75,20 +75,20 @@ var messagingPlatforms = map[string]bool{
 // ABSENT and INVALID are deliberately NOT the same thing, and the caller treats
 // them differently:
 //
-//   ABSENT is legitimate. Every URL delivered to a participant before
-//   `vlab_platform` existed carries no platform, and those links must keep
-//   working for as long as they are in inboxes. Assume messenger -- the only
-//   live transport -- and log it so the legacy tail is measurable.
+//	ABSENT is legitimate. Every URL delivered to a participant before
+//	`vlab_platform` existed carries no platform, and those links must keep
+//	working for as long as they are in inboxes. Assume messenger -- the only
+//	live transport -- and log it so the legacy tail is measurable.
 //
-//   INVALID is a bug, and the caller REFUSES TO FORWARD. replybot owns these
-//   URLs end to end for the `link_tracking` and `moviehouse` field types and
-//   writes this param from `ctx.platform` (generic-translator.js), so a
-//   well-formed link CANNOT carry a bad value. An invalid one can only come from
-//   a hand-authored `webview` field or a tampered URL -- exactly the case a
-//   survey tester should see break loudly during testing, rather than have
-//   silently coerced to messenger and discovered later as misattributed data.
-//   Forwarding anyway would make a researcher's typo indistinguishable from a
-//   working link right up until the numbers are wrong.
+//	INVALID is a bug, and the caller REFUSES TO FORWARD. replybot owns these
+//	URLs end to end for the `link_tracking` and `moviehouse` field types and
+//	writes this param from `ctx.platform` (generic-translator.js), so a
+//	well-formed link CANNOT carry a bad value. An invalid one can only come from
+//	a hand-authored `webview` field or a tampered URL -- exactly the case a
+//	survey tester should see break loudly during testing, rather than have
+//	silently coerced to messenger and discovered later as misattributed data.
+//	Forwarding anyway would make a researcher's typo indistinguishable from a
+//	working link right up until the numbers are wrong.
 func resolvePlatform(platformParam string) (platform string, assumed bool, invalid bool) {
 	if platformParam == "" {
 		return "messenger", true, false
