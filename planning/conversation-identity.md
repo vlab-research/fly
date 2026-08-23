@@ -185,7 +185,7 @@ runs the real `UPDATE` in a transaction and rolls it back.
 | **Run the backfill** | Written and tested, never executed anywhere. §5.2 steps S2 / P6. |
 | **`messages.account_id` → NOT NULL** | Needs a sentinel pass first. Full plan: **`planning/messages-account-not-null-todo.md`**. Do not start without reading it. |
 | **Migration 29** — drop the superseded `messages_userid_timestamp_idx` | Still unwritten; now wanted on staging for disk (§5.2 S3). Migration 26 makes it NOT VISIBLE; 29 comes after a clean soak, following migration 18's pattern on this table. |
-| **`platform` on `responses` / `chat_log`** | Columns land in migration 26; **nothing writes them.** `scribble/response.go` and `chatlog.go` read no platform from their shapes. |
+| **`platform` on `chat_log`** | Column lands in migration 26; **nothing writes it** — the chat_log producer is gone (§6). `responses.platform` IS populated, by `scribble/response.go` (commit `29403222`); verified live on staging 2026-08-22, 13 of 13 recent rows. |
 | **`pageid` → `account_id` rename** | Untouched, cosmetic, last. Two aliases would go: `chatbase.js`'s `states.pageid AS ...` and dean's join. |
 | **hermes account→platform resolution** | Designed, not built, **no path forward.** It was to read an in-memory map from the messaging-account registry, and the registry was reverted (`5c4cab3e`). hermes has no database access, no background tasks and no metrics today. |
 | **Restore the `chat_log` producer** | Blocked — see §6. |
