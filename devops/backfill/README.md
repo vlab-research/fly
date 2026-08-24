@@ -17,6 +17,61 @@ go run ./devops/backfill --dsn "postgres://root@localhost:5455/chatroach" --dry-
 go run ./devops/backfill --dsn "$BACKFILL_DSN"
 ```
 
+### Two things that will bite you first — both hit for real on 2026-08-24
+
+**1. `--sql-dir` resolves against your cwd, not the binary.** The default is
+"`../sql` relative to this binary's source", but in practice it is looked up as the
+relative path `devops/sql/...`, so it only works from the repo root. Running from
+`devops/backfill` — the obvious place — fails with:
+
+```
+ERROR: reading devops/sql/messages-account-id-expr.sql: no such file or directory
+```
+
+Pass it explicitly and the problem disappears: `--sql-dir "$PWD/../sql"`.
+
+**2. Port 5455 in the example above is the LOCAL DEV CockroachDB.** It is very
+likely already listening (docker-compose), so a `kubectl port-forward ... 5455`
+fails with `address already in use` — and if you *don't* notice, following the
+example verbatim points this tool at the wrong database. Forward a cluster to a
+different port, and **prove which database you reached before pointing a write tool
+at it**:
+
+```bash
+kubectl port-forward -n <ns> pod/gbv-cockroachdb-0 5457:26257 &
+psql "postgres://root@localhost:5457/chatroach?sslmode=disable" \
+  -c "SELECT count(*), count(account_id) FROM chatroach.messages;"
+# must match what `kubectl exec -n <ns> gbv-cockroachdb-0 -- ./cockroach sql` reports
+```
+
+### Timing and disk
+
+Counting (`--dry-run`) ran ~100 s per 20,000-row batch on vstag; real `UPDATE`s are
+several times slower. Budget hours on production's 101M+ rows.
+
+`messages` has no column families, so setting `account_id` rewrites the **whole
+row** — `content` included — into every index. That MVCC garbage is held for
+`gc.ttlseconds`: 14400 (4h) on vstag but **90000 (25h) on production**, so on a
+multi-hour production run the garbage accumulates for the entire run rather than
+being reclaimed behind you. Watch it:
+
+```bash
+kubectl exec -n <ns> gbv-cockroachdb-0 -- df -h /cockroach/cockroach-data
+```
+
+### Measured on vstag, 2026-08-24 — do not transfer these to production
+
+| | |
+|---|---|
+| rows total / needing backfill | 162,691 / 162,567 |
+| `--dry-run` | **153,776 attributable, 9 batches, reached END** |
+| `--rehearse --max-batches 3` | 56,701, batch counts identical to the dry-run |
+| permanently unattributable | **8,791** — synthetic events with no account in `content` |
+
+Staging's data is synthetic-heavy, so that 8,791 is not a preview of production's
+(~3,000 by an older estimate). Re-derive it. See
+`planning/messages-account-not-null-todo.md`.
+
 Against production, port-forward the cluster's CockroachDB and pass that DSN. The
 prompt makes you type `vprod` when the DSN looks like production.
 

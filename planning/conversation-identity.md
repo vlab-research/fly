@@ -422,6 +422,16 @@ every one was hit for real during the staging rollout.
 - A wedged index backfill looks identical to a slow one in SQL: `status=running`,
   `fraction_completed=0`, empty `error`. The real cause is only in the cockroach
   pod log.
+- **Scribble restarts are the §5.1 alarm, and they have a common false positive.**
+  Before concluding the key mismatch, check whether ALL FOUR sinks terminated at
+  about the same moment and then stayed up — that is a shared-dependency blip, not
+  §5.1. On vstag 2026-08-23 all four exited 1 between 12:43 and 12:46 because the
+  CockroachDB pod had been recreated at 12:34:03 (node event); they restarted once
+  and recovered. Real §5.1 looks different: `scribble-responses` **alone**, and
+  **crash-looping** rather than restarting once, because `scribble.go` treats any
+  write error as `log.Fatalf`. Discriminate with:
+      kubectl get pod <crdb-pod> -n <ns> -o jsonpath='{.metadata.creationTimestamp}'
+      kubectl logs -n <ns> deployment/gbv-scribble-responses | grep -i 42P10
 - Production values still point **scribble and linksniffer at docker.io**, where
   CI does not publish. Not broken today (pinned to tags that exist) but it breaks
   on their next release. Staging is already fixed; production is a separate diff.

@@ -5,9 +5,52 @@ describes the conversation-identity rollout in depth — the hazards, the gates,
 traps — but the phase order lives here. If the two disagree, this file wins and the
 other is stale.
 
-**Status 2026-08-23:** staging fully rolled out; production untouched; Messenger is
+**Status 2026-08-24:** staging fully rolled out; production untouched; Messenger is
 the only live transport. Integration suite 61/61, in CI and locally.
-**Phase 0: 0.1, 0.2, 0.4 and 0.5 are DONE. 0.3 is waiting on MVCC GC — the last one.**
+
+**Phase 0: 0.1, 0.2, 0.4, 0.5 DONE. 0.3 is the only step left** — dry-run and
+rehearsal both pass and agree exactly; only the real run remains, one command,
+see 0.3. Nothing else blocks Phase 1.
+
+---
+
+## Start here if you are new to this
+
+Read in this order, and do not skip the first one:
+
+1. **This file** — authoritative for WHAT and in WHICH ORDER.
+2. **`planning/conversation-identity.md` §5.1** — the scribble/`responses` key
+   mismatch. Still the single most likely thing to break Phase 1, and it breaks in
+   *both* directions (old build + new schema, or new build + old schema).
+3. **`planning/conversation-identity.md` §5.2 "Known traps"** — every one was hit
+   for real. `run-migration.sh` lying about success is the big one.
+4. `§5.3` gates, `§5.4` feature gates, `§5.5` rollback.
+
+`§5.1b–d` are diagnostic history. Do not read them unless something breaks.
+
+**Working rule that this project keeps re-learning:** verify against the source or
+the live cluster, cite `file:line`, and say UNVERIFIED rather than reasoning from
+plausibility. Several confident numbers in these docs have been wrong — including
+two of mine, corrected in place at 0.1/0.3. Staging validated less than it looks:
+its rows are ~25x fatter than production's, its `responses` had zero NULL `pageid`
+where production has 1,818,162, and its single CRDB node hides the multi-node case.
+**Re-measure on production. Inherit nothing.**
+
+### State of the world, 2026-08-24
+
+| | staging (`vstag`) | production (`vprod`) |
+|---|---|---|
+| migrations 26/27/28/30 | applied | **none applied** |
+| migration 29, 19 | applied — `messages` is `primary` + `messages_userid_account_timestamp_idx` only | not applied |
+| `devops/backfill` | rehearsed, real run pending (0.3) | never run |
+| linksniffer | **v0.0.9** | older; still pointed at docker.io in values |
+| moviehouse | `staging` branch deploy, current | `main` deploy, **assume-messenger NOT shipped** |
+| `STRICT_EVENT_ENVELOPE` | `true`, live since 2026-08-22 18:36 | `false` |
+| `SYNTHETIC_REQUIRE_CONVERSATION` | `false` | `false` |
+| smoke-test form-a | deployed to Typeform, 42 fields | same form (shared) |
+
+Production is **completely untouched**. Messenger is the only live transport;
+WhatsApp is a handful of test users.
 
 ---
 
@@ -30,28 +73,60 @@ the only live transport. Integration suite 61/61, in CI and locally.
   rollback left: if the backfill regresses the read path, roll **forward**. Recreating
   either index on vstag needs migration 26's two settings TOGETHER or it wedges
   silently at `fraction_completed = 0`.
-- **0.3 Run `devops/backfill`.** `--dry-run` → `--rehearse --max-batches 3` → real.
-  Never executed anywhere. Only this makes **history** triple-keyed: today 124 of
-  162,691 staging rows carry `account_id` (measured 2026-08-23; the 124 grows on its
-  own because forward writes are already triple-keyed).
+- **0.3 Run `devops/backfill`. UNBLOCKED, REHEARSED, NOT YET RUN FOR REAL.**
 
-  **BLOCKED UNTIL ~06:02 UTC 2026-08-23 — not on schema any more, on MVCC GC.** Both
-  DROPs are `waiting for MVCC GC` and reclaim only after `gc.ttlseconds = 14400` (4h)
-  from 01:53 and 02:02. Disk was still 4.2G used / 688M free at 02:11, unchanged.
-  **Re-measure `df` before starting; do not trust the estimate below.**
+  The disk gate is CLEARED. Both GC jobs from 0.1/0.2 read `succeeded` and the
+  space came back: **3.1G used / 1.8G free (64%)**, from 4.2G/688M. `messages` is
+  **11,055 MB logical**, exactly half its former 22,110 MB — the two dropped
+  indexes were a quarter each, as measured.
 
-  Sizing measured on vstag 2026-08-23, before the drops: the four indexes were
-  near-equal at 5,527–5,574 MB logical each of a 22,110.9 MB table, against 4.2 GB
-  physical — roughly 5.3x compression. On that basis the two drops free ~2.1 GB
-  physical and the backfill's own churn is ~2.1 GB, which fits but is not comfortable.
-  Growing the 5 Gi volume (`devops/values/staging.yaml:976`, and `pd-ssd` has
-  `ALLOWVOLUMEEXPANSION=true`) remains the durable fix; note a StatefulSet's
-  `volumeClaimTemplates` are immutable, so it needs a PVC expand plus an
-  orphan-cascade recreate, not just a `helm upgrade`.
+  ⚠️ **A physical-size correction worth keeping.** An earlier note here predicted
+  the two drops would free ~2.1 GB. They freed **~1.1 GB**. The logical halving was
+  right; the physical extrapolation was not, because the 5.3x compression ratio it
+  used came from dividing total logical by *total volume used*, which includes
+  every other table plus WAL. The marginal ratio for `messages` is nearer **10x**.
+  Use the marginal ratio when sizing, and re-measure on production rather than
+  reusing either number.
 
-  **Do not size an index by summing `SHOW RANGES ... WITH DETAILS, INDEXES`** — with
-  `INDEXES` the whole range size is repeated once per index the range spans, which
-  inflates the total several-fold. Take the table total without `INDEXES`.
+  **Verified 2026-08-24, in the plan's own order:**
+
+  | step | result |
+  |---|---|
+  | `--dry-run` | **153,776 rows, 9 batches, reached END** |
+  | `--rehearse --max-batches 3` | 56,701 rows, batch counts identical to the dry-run |
+  | rollback check | `count(account_id)` still 124 — nothing persisted |
+
+  **8,791 rows are permanently unattributable here** (162,567 needing a backfill
+  minus 153,776 attributable): synthetic events carrying no account in `content`.
+  That is far more than the ~3,000 this doc cites for production, because staging's
+  data is synthetic-heavy. It does NOT transfer — re-derive it on production, and
+  see `planning/messages-account-not-null-todo.md`.
+
+  **The remaining command** (port-forward first; the tool is resumable and every
+  batch carries `AND account_id IS NULL`, so re-running is a no-op):
+
+  ```bash
+  kubectl port-forward -n vstag pod/gbv-cockroachdb-0 5457:26257 &
+  cd devops/backfill && go run . \
+    --dsn "postgres://root@localhost:5457/chatroach?sslmode=disable" \
+    --sql-dir "$PWD/../sql" --yes
+  ```
+
+  Expect ~9 batches. Counting runs ~100 s/batch; real `UPDATE`s are slower, so
+  budget 20–40 min. Watch disk while it runs — the churn is ~1.1 GB against 1.8 GB
+  free, which fits but is not roomy:
+  `kubectl exec -n vstag gbv-cockroachdb-0 -- df -h /cockroach/cockroach-data`
+
+  **Two traps, both hit for real on 2026-08-24:**
+  - `--sql-dir` defaults to a path resolved against **cwd**, not the binary, so
+    running from `devops/backfill` fails with
+    `open devops/sql/messages-account-id-expr.sql: no such file`. Pass it explicitly.
+  - The README's example DSN uses **port 5455, which is the LOCAL DEV CockroachDB**
+    in Docker and is very likely already listening. Forward staging to a different
+    port and *prove* which database you reached before pointing a write tool at it:
+    `SELECT count(*), count(account_id) FROM chatroach.messages;` must match what
+    `kubectl exec` reports in-cluster.
+
 - **0.4 Extend `smoke-test/form-a.json` to all four paths. DONE 2026-08-23.**
   Added a `test_links` gate → `link_new` (`link_tracking`) → `link_legacy_prod` /
   `link_legacy_staging` (hand-authored `webview`) → `movie_new` (`moviehouse`) →
@@ -78,6 +153,18 @@ the only live transport. Integration suite 61/61, in CI and locally.
   The survey cannot assert the platform itself — nothing a participant sees reveals
   it — so `smoke-test/README.md` now carries the verification query and the
   `LINKSNIFFER_PLATFORM_*` log cross-check.
+
+  **DEPLOYED TO TYPEFORM 2026-08-24** (`form_a: updated id=QJ6d4JHE`, live form now
+  42 fields / 23 logic rules). Both documented pre-flight checks passed first: no
+  `DELETED BY PUSH`, no `PROPERTY LOST`, and no title/description drift on any of
+  the 36 pre-existing fields — so nobody had edited the live form outside the repo
+  and the wholesale replace destroyed nothing. Every logic target resolves on the
+  live form, and every choice the logic references has an explicit `ref`.
+
+  Note `smoke-test/.env` and `.ids` are gitignored and therefore absent from a
+  fresh worktree; they were copied in from the primary worktree. **Paths 1 and 2
+  are already proven end to end** (see the table above); paths 3 and 4 still need a
+  human to walk `m.me/<PAGE>?ref=form.flysmoke`, pick **Staging**, and press play.
 
   | path | expect |
   |---|---|
@@ -121,9 +208,54 @@ the only live transport. Integration suite 61/61, in CI and locally.
   scribble close behind 1.2 (§5.1: the 4-column `ON CONFLICT` against a 3-column PK
   crash-loops the sink). Netlify ships in the same window — confirmed not a
   constraint, which is why the old "close the envelope gaps" phase folds in here.
+
+  **Concretely, from the staging rollout — production still needs all of these:**
+  - **linksniffer**: tag `linksniffer-vX.Y.Z` → CI publishes to ghcr → bump
+    `versionLinksniffer` in `devops/values/production.yaml` → `helm upgrade`.
+    Staging runs **v0.0.9**; production is behind. Behaviour change to announce: an
+    *invalid* `vlab_platform` now returns **400** instead of coercing to messenger.
+    Absent is still assumed messenger.
+  - **moviehouse**: Netlify site `virtuallab-videos`, base dir `moviehouse`,
+    **production branch is `main`** — so shipping it to production means merging to
+    `main`, not a branch deploy. Staging uses the `staging` branch deploy at
+    `https://staging--virtuallab-videos.netlify.app`.
+    ⚠️ Deploys listed as `error` on that site are usually
+    `Canceled build due to no content change` — Netlify skipping a build because
+    nothing under `moviehouse/` changed. **Read `error_message` before concluding a
+    deploy failed.** Verify by fetching the deployed asset and diffing it against
+    the source, not by trusting the dashboard:
+    `diff <(curl -s https://<host>/identity.js) moviehouse/src/identity.js`
+  - **values drift**: production still points **scribble and linksniffer at
+    docker.io**, where CI does not publish. Not broken today (pinned to tags that
+    exist) but it breaks on their next release. Staging is already fixed; this is a
+    separate production diff and 1.3 is when it bites.
 - **1.4 Soak 24h** on the §5.3 gates. Staging's soak proved little: it is idle
   (1 index read in 5h) and its data is unrepresentative.
 - **1.5 Run `devops/backfill` on production.** 101M+ rows; expect hours.
+
+  Sequence it exactly as staging did — `--dry-run`, then
+  `--rehearse --max-batches 3`, then real — and check the rehearsal's counts match
+  the dry-run's before committing. It is resumable (`--start-hsh` / `--start-userid`,
+  printed every batch and on failure) and every batch carries `AND account_id IS NULL`,
+  so re-running is a no-op, not a hazard.
+
+  **Do not reuse staging's numbers for anything.** Staging attributed 153,776 of
+  162,567 and left 8,791 unattributable; production's ratio will differ because
+  staging's data is synthetic-heavy.
+
+  **Disk is the thing to size, and the earlier arithmetic here was wrong once
+  already.** `messages` has no column families, so setting `account_id` rewrites the
+  whole row — `content` included — into every index, and that MVCC garbage is held
+  for `gc.ttlseconds` (production: **90000s / 25h**, far longer than staging's 4h,
+  so garbage accumulates much longer during a run that takes hours). Size against
+  the *marginal* compression ratio for this table (~10x on staging), not against
+  total-logical ÷ total-volume-used, which mixes in every other table and WAL.
+
+  Two operational traps, both hit on 2026-08-24:
+  - `--sql-dir` resolves against **cwd**, not the binary. Pass it explicitly.
+  - The README's example DSN port **5455 is the local dev CockroachDB**. Forward to
+    a different port and prove which database you reached before pointing a write
+    tool at it.
 
 ## Phase 2 · Tighten the gates — ~2 days
 
