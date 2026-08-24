@@ -386,11 +386,66 @@ tolerates the substitute. (Querying `crdb_internal.statement_statistics` for it
 was getting expensive on the live cluster and was abandoned; try it in a quiet
 window, filtered to a short time range.)
 
+**RESOLVED 2026-08-24. The reader is scribble's own INSERT, and it is not a read.**
+The abandoned `statement_statistics` query does work if you filter it — over 12h,
+exactly two fingerprints touch `71@4`, both of them:
+
+    INSERT INTO messages(userid, "timestamp", content)
+      VALUES (...) ON CONFLICT (hsh, userid) DO NOTHING     -- 1,954 + 142 execs
+
+`EXPLAIN` on prod shows why. The `DO NOTHING` existence check is an anti-join, and
+the optimizer serves it from this index:
+
+    arbiter indexes: primary
+    └── cross join (anti)
+        └── scan
+              table: messages@messages_userid_idx
+              spans: [/'<userid>'/<hsh> - /'<userid>'/<hsh>]
+
+`messages_userid_idx` is keyed `(userid)` + PK suffix `(hsh)`, so `(userid, hsh)` is
+exactly the point lookup the conflict check wants. **Conflict/uniqueness checks
+bypass `NOT VISIBLE`** — that is the "constraint checks can still reach it" clause,
+now pinned to a specific statement.
+
+Three consequences:
+
+1. **The soak was structurally incapable of going dark.** Migration 18 hid the index
+   from the optimizer, but the counter it was being judged by is driven by the write
+   path. Waiting longer would never have changed the reading. It measured nothing.
+2. **The fallback is proven, not assumed.** On vstag, where the index is already
+   dropped, the identical INSERT plans onto `messages@primary` with an equivalent
+   single-key point lookup. Same shape, same cost class.
+3. **The rate corroborates it.** ~2.4 index reads/min against ~162 inserts/hr is
+   near 1:1, and in the same 75 s window BOTH VISIBLE indexes took **zero** reads.
+
+**Precondition 1 (`SELECT *` -> `SELECT content`) is not a safety gate either.**
+Migration 19's own header says the problem is that EXPLAIN emits an index
+*recommendation* to recreate the dropped index — churn, not breakage. And replybot's
+live plan never touches `71@4`: `SELECT * FROM messages LEFT JOIN ... states`
+(1,500 execs/12h) uses `71@3` (primary) + `71@5` (`messages_userid_timestamp_idx`).
+
+Note `chatbase-postgres` is the npm driver package `@vlab-research/chatbase-postgres`,
+**not** an external database — prod replybot's `CHATBASE_HOST` is
+`gbv-cockroachdb-public`, this same cluster. Earlier wording here implying otherwise
+misleads.
+
+**Still true, and worth respecting:** disk does not come back for `gc.ttlseconds`
+(25 h on prod), so 19 cannot immediately precede a step that needs the space; and
+recreating a ~129 GiB index on prod is a multi-hour backfill, so treat the drop as
+one-way.
+
 #### Disk
 
-The new index costs about what `messages_userid_timestamp_idx` costs -- 75.7 GB
-cluster-wide, ~19 GB/node against 127-133 GB free. Afterwards 19 and 29 reclaim
-93.5 GB and 75.7 GB. Net strongly negative, as §5.2 always said.
+The new index costs about what `messages_userid_timestamp_idx` costs. Afterwards 19
+and 29 reclaim their own indexes. Net strongly negative, as §5.2 always said.
+
+**The GB figures previously here (75.7 / 93.5 GB cluster-wide, ~19 GB/node) look
+wrong and were removed.** Measured 2026-08-24: each of the three indexes on `messages`
+is ~129 GiB logical (primary 129.19, `messages_userid_idx` 129.14,
+`messages_userid_timestamp_idx` 129.15), which migration 19's own header corroborates
+at "~131.6 GiB logical". At the measured 3.47x cluster compression that is ~112 GiB
+physical per index, not ~76 GB. See the measured table in
+`planning/multi-platform-plan.md` and re-derive rather than reusing either set.
 
 ### 5.2 Order — see `planning/multi-platform-plan.md`
 

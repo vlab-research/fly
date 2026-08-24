@@ -8,9 +8,9 @@ other is stale.
 **Status 2026-08-24:** staging fully rolled out; production untouched; Messenger is
 the only live transport. Integration suite 61/61, in CI and locally.
 
-**Phase 0: 0.1, 0.2, 0.4, 0.5 DONE. 0.3 is the only step left** — dry-run and
-rehearsal both pass and agree exactly; only the real run remains, one command,
-see 0.3. Nothing else blocks Phase 1.
+**Phase 0 is COMPLETE (0.3 finished 2026-08-24).** All of 0.1-0.5 are done and
+verified. Phase 1 is next, and it is entirely production work — nothing has been
+applied to vprod yet.
 
 ---
 
@@ -42,7 +42,7 @@ where production has 1,818,162, and its single CRDB node hides the multi-node ca
 |---|---|---|
 | migrations 26/27/28/30 | applied | **none applied** |
 | migration 29, 19 | applied — `messages` is `primary` + `messages_userid_account_timestamp_idx` only | not applied |
-| `devops/backfill` | rehearsed, real run pending (0.3) | never run |
+| `devops/backfill` | **run for real 2026-08-24, verified** | never run |
 | linksniffer | **v0.0.9** | older; still pointed at docker.io in values |
 | moviehouse | `staging` branch deploy, current | `main` deploy, **assume-messenger NOT shipped** |
 | `STRICT_EVENT_ENVELOPE` | `true`, live since 2026-08-22 18:36 | `false` |
@@ -73,7 +73,31 @@ WhatsApp is a handful of test users.
   rollback left: if the backfill regresses the read path, roll **forward**. Recreating
   either index on vstag needs migration 26's two settings TOGETHER or it wedges
   silently at `fraction_completed = 0`.
-- **0.3 Run `devops/backfill`. UNBLOCKED, REHEARSED, NOT YET RUN FOR REAL.**
+- **0.3 Run `devops/backfill`. DONE 2026-08-24 — RAN FOR REAL, VERIFIED.**
+
+  `DONE: reached the end of the table. 153776 rows updated across 9 batches.`
+  (exit 0) — **the dry-run predicted 153,776 rows / 9 batches / reached END, and the
+  real run matched all three exactly.** Verified against the table afterwards, not
+  just from the tool's own output:
+
+  | check | result |
+  |---|---|
+  | `count(account_id)` | **153,900** = 124 pre-existing + 153,776 backfilled ✓ |
+  | rows still NULL | **8,791** — exactly the predicted unattributable count ✓ |
+  | `platform` populated | 9,793 (9,792 `messenger`, 1 `whatsapp`) |
+  | disk at completion | 4.1G used / **836M free** (84%), alarm at 600M never tripped |
+
+  The 152,898 NULL `platform` rows are expected, not a shortfall — see "Out of
+  scope": `messages-platform-expr.sql` refuses to guess, and `platform` NOT NULL is
+  explicitly not a goal.
+
+  Both documented traps were live hazards, not hypotheticals: port **5455 was
+  listening locally**, so the README's DSN would have pointed a write tool at the
+  local dev CockroachDB; and `--sql-dir` had to be passed explicitly. Target was
+  proved before writing — `162,691 / 124` via the port-forward matched `kubectl exec`
+  in-cluster exactly.
+
+  Historical detail from before the run, kept for the production sizing:
 
   The disk gate is CLEARED. Both GC jobs from 0.1/0.2 read `succeeded` and the
   space came back: **3.1G used / 1.8G free (64%)**, from 4.2G/688M. `messages` is
@@ -257,6 +281,70 @@ WhatsApp is a handful of test users.
     a different port and prove which database you reached before pointing a write
     tool at it.
 
+### Production, measured read-only 2026-08-24 (CRDB v24.1.28, 4 nodes)
+
+Every number below came from the live `vprod` cluster today. Where it confirms a
+figure this doc already cited, it says so; where it is new, it is new.
+
+| measurement | value | note |
+|---|---|---|
+| `responses` NULL `pageid` | **1,818,162** | confirms 1.1 exactly, unchanged |
+| `messages` rows | **106,974,507** | confirms "106M" (`devops/backfill/main.go:159`) |
+| `messages` logical | **387.48 GiB** / 9,160 ranges | confirms "384 GiB" |
+| primary / `messages_userid_idx` / `messages_userid_timestamp_idx` | **129.19 / 129.14 / 129.15 GiB** | near-perfect thirds — `content` is stored in all three |
+| base row width | **~1.30 KB** (129.19 GiB ÷ 107M) | confirms the 1.1–1.5 KB estimate; staging's 34.8 KB is **27x** wider |
+| `gc.ttlseconds` | **90000** (25 h) | confirms |
+| `range_max_bytes` | **67108864** (64 MiB) | confirms migration 30 is a no-op here |
+| `messages` columns | **no `account_id`, no `platform`** | migration 26 unapplied — 1.5 hard-depends on 1.2 |
+| cluster capacity / used / available | **943.7 / 416.40 / 518.83 GiB** | 4 stores x 235.93 GiB |
+| live vs total KV | **1442.13 vs 1444.10 GiB** | only **1.98 GiB** garbage — the cluster is effectively clean |
+| protected timestamps / running jobs | **none / none** | GC is unimpeded; no backup or changefeed pins it |
+
+**A usable compression ratio, and why this one is trustworthy.** live+garbage KV
+1444.10 GiB over 416.40 GiB physical = **3.47x**. This doc rightly warns against
+total-logical / total-volume ratios, because on staging that mixed in every other
+table. Here it does not mislead: `messages` is 387.48 of chatroach's 442.09 GiB,
+and chatroach is 92% of cluster live data, so **`messages` is ~81% of what is being
+measured** — the cluster ratio essentially *is* the `messages` ratio. Garbage is
+1.98 GiB, so `used` is not inflated. Do NOT carry staging's ~10x here.
+
+#### ⚠️ At 90000s GC TTL, 1.5 does not fit on disk after 1.2
+
+`messages` has no column families, so the backfill rewrites every row into every
+index, and 90000s (25 h) exceeds any plausible run length — so essentially **all**
+old versions are held at once.
+
+| step | arithmetic | physical |
+|---|---|---|
+| after 1.2 (migration 26 adds a 4th index) | 129.15 x 3 / 3.47 | **+111.7 GiB**, available falls 518.83 → **407.1 GiB** |
+| 1.5 rewrites 4 indexes | (387.48 + 129.15) x 3 / 3.47 | **446.9 GiB of retained garbage** |
+| | | **446.9 > 407.1 — short by ~40 GiB** |
+
+And that is before WAL, rebalancing, or ordinary traffic growth during a multi-hour
+run. CRDB thrashes on rebalance well before a store actually fills.
+
+**The fix the plan's own preconditions already allow: run migration 19 before 1.5.**
+3.3's only stated precondition is 1.3 (replybot v0.0.221 in prod), and the
+non-negotiable table says `1.3 → 3.3`, **not** `1.5 → 3.3`. Moving it to between 1.3
+and 1.5 both frees space and shrinks the rewrite set:
+
+| with migration 19 first | |
+|---|---|
+| drop `messages_userid_idx` | +111.7 GiB back → **518.8 GiB available** |
+| 1.5 rewrites 3 indexes | 387.49 x 3 / 3.47 = **335.2 GiB garbage** |
+| | **fits, ~184 GiB margin** |
+
+Belt and braces, if more headroom is wanted: temporarily lower `gc.ttlseconds` on
+`chatroach.messages` for the duration of the run so garbage is reclaimed
+continuously instead of accumulating. Nothing pins GC today (no protected
+timestamps, no jobs), so it would take effect. Per the IaC rule this is a file, not
+a `kubectl` one-liner.
+
+**UNVERIFIED:** the 3.47x ratio is measured, but the *marginal* ratio for newly
+written `account_id`-bearing rows could differ; and the run duration is an estimate,
+so "25 h > run length" should be re-checked against 1.5's actual pace. Both cut in
+the safe direction only if compression turns out better than measured.
+
 ## Phase 2 · Tighten the gates — ~2 days
 
 - **2.1 production `STRICT_EVENT_ENVELOPE` → `"true"`**, once
@@ -275,11 +363,36 @@ WhatsApp is a handful of test users.
 - **3.2 `messages.account_id` → NOT NULL.** See
   `planning/messages-account-not-null-todo.md`. Needs a `''` sentinel pass for the
   ~3,000 permanently unattributable rows.
-- **3.3 Migration 19 on production.** ONLY after 1.3 — precondition 1 needs the
-  `SELECT *` → `SELECT content` change shipped in replybot v0.0.221, and prod runs
-  v0.0.219 on the external `chatbase-postgres`. Precondition 2 (replica
-  co-location) is **satisfied**: 4 pods on 4 distinct nodes, verified 2026-08-22.
-  Identify the ~5,700/day reader of the hidden index first.
+- **3.3 Migration 19 on production. BOTH PRECONDITIONS NOW RESOLVED (2026-08-24) —
+  this no longer has to wait for 1.3, and there is a disk reason to move it earlier.**
+
+  The blocker was "identify the ~5,700/day reader of the hidden index first". It is
+  **scribble's own `ON CONFLICT (hsh, userid) DO NOTHING`** — a write-path existence
+  check, not a consumer. Conflict checks bypass `NOT VISIBLE`, which is why the
+  canary never went dark and never could have. Dropping the index makes that check
+  fall back to `primary`, proven on vstag where it is already gone. Full evidence,
+  including the EXPLAIN output, in `planning/conversation-identity.md` §5.1d.
+
+  Precondition 1 (`SELECT *` → `SELECT content`, replybot v0.0.221) is **not a
+  safety gate**: migration 19's own header says the issue is an EXPLAIN index
+  *recommendation* to recreate the index, and replybot's live plan uses `71@3` +
+  `71@5`, never `71@4`. Precondition 2 (replica co-location) is satisfied — 4 pods
+  on 4 distinct nodes, re-verified 2026-08-24.
+
+  **Why to move it before 1.5:** it is what makes the backfill fit on disk. See the
+  measured production table above — after 1.2 the backfill needs ~446.9 GiB of MVCC
+  garbage against ~407.1 GiB available; running 19 first frees ~111.7 GiB and cuts
+  the rewrite set to 3 indexes (~335.2 GiB), leaving ~184 GiB of margin.
+
+  ⚠️ **Sequencing constraint:** the space returns only after `gc.ttlseconds`
+  (90000s / **25 h** on prod), so 19 cannot immediately precede 1.5 — leave a GC
+  window between them, and confirm with `df` rather than assuming. Treat the drop as
+  one-way: recreating a ~129 GiB index on prod is a multi-hour backfill.
+
+  Running it before 1.3 is safe but leaves v0.0.219's `SELECT *` emitting an index
+  recommendation to recreate exactly this index. Harmless, but someone may act on it.
+
+
 - **3.4 `pageid` → `account_id` rename.** Cosmetic, last, its own PR.
 
 ## Out of scope
