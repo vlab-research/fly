@@ -72,7 +72,11 @@ versionReplybot: &vreplybot v0.0.221
 # vlab_platform now returns 400 instead of coercing to messenger. Absent is
 # still assumed messenger.
 versionLinksniffer: &vlinksniffer v0.0.9
-versionDean: &vdean v0.0.45
+# v0.0.45 -> v0.0.47: carries 36808aa5, the envelope. dean is a SYNTHETIC
+# PRODUCER (timeout events). An unstamped synthetic event triggers
+# assume-messenger, which is silently correct on Messenger and BLOCKS the
+# conversation on WhatsApp -- see versionDinersclub below for the incident.
+versionDean: &vdean v0.0.47
 # ############################################################################
 # DO NOT APPLY THIS VALUE BEFORE MIGRATION 28a HAS COMPLETED.
 #
@@ -99,10 +103,29 @@ versionScribble: &vscribble v0.0.34
 # metrics.go, the bounded provider client). dingconnect.go is untouched, so the
 # Generic Secrets concern that held dinersclub at v0.0.43-wa in PR #147 does
 # not apply here -- and dingconnect is not in DINERSCLUB_PROVIDERS anyway.
-versionDinersclub: &vdinersclub v0.0.46
+# v0.0.46 -> v0.0.48: carries 36808aa5, the envelope.
+#
+# WHY THIS IS NOT OPTIONAL -- reproduced on production 2026-08-25. dinersclub is
+# the payment synthetic producer. At v0.0.46 it emits payment:reloadly with the
+# LEGACY shape -- {"user":..., "page":...} -- carrying no platform. For a
+# WhatsApp participant that unstamped event triggers assume-messenger, so the
+# token lookup runs against entity 'facebook_page' for a whatsapp_business
+# account, finds no row, and the conversation goes BLOCKED:
+#
+#   platform API error (status 0): failed to get token: token not found for
+#   platform account: 1203867182815254 (db error: no rows in result set)
+#
+# The credential is present and correct; only the lookup entity is wrong. This
+# is exactly the W1 hazard in planning/multi-platform-plan.md: assume-messenger
+# is correct ONLY while Messenger is the only live transport. It passes on
+# Messenger and fails on WhatsApp, so a Messenger-only test cannot catch it.
+versionDinersclub: &vdinersclub v0.0.48
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.6.10
-versionExodus: &vexodus v0.2.3
+versionExporter: &vexporter v0.6.12
+# v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
+# second account's rows" -- multi-account specific, so it only manifests once a
+# participant exists on two accounts. Part of the same rollout stack.
+versionExodus: &vexodus v0.2.5
 # v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
 # 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
 # since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
