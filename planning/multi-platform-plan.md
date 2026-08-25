@@ -41,7 +41,7 @@ where production has 1,818,162, and its single CRDB node hides the multi-node ca
 | | staging (`vstag`) | production (`vprod`) |
 |---|---|---|
 | migrations 26/27/28/30 | applied | **none applied** |
-| migration 29, 19 | applied — `messages` is `primary` + `messages_userid_account_timestamp_idx` only | not applied |
+| migration 29, 19 | applied — `messages` is `primary` + `messages_userid_account_timestamp_idx` only | **19 applied 2026-08-25**; 29 not applied |
 | `devops/backfill` | **run for real 2026-08-24, verified** | never run |
 | linksniffer | **v0.0.9** | older; still pointed at docker.io in values |
 | moviehouse | `staging` branch deploy, current | `main` deploy, **assume-messenger NOT shipped** |
@@ -363,34 +363,38 @@ the safe direction only if compression turns out better than measured.
 - **3.2 `messages.account_id` → NOT NULL.** See
   `planning/messages-account-not-null-todo.md`. Needs a `''` sentinel pass for the
   ~3,000 permanently unattributable rows.
-- **3.3 Migration 19 on production. BOTH PRECONDITIONS NOW RESOLVED (2026-08-24) —
-  this no longer has to wait for 1.3, and there is a disk reason to move it earlier.**
+- **3.3 Migration 19 on production. DONE 2026-08-25 00:44 UTC — ran EARLY, ahead of
+  Phase 1, and verified.** This is a deliberate departure from the original phase
+  order; the reasoning is below and the preconditions were resolved first.
 
-  The blocker was "identify the ~5,700/day reader of the hidden index first". It is
-  **scribble's own `ON CONFLICT (hsh, userid) DO NOTHING`** — a write-path existence
-  check, not a consumer. Conflict checks bypass `NOT VISIBLE`, which is why the
-  canary never went dark and never could have. Dropping the index makes that check
-  fall back to `primary`, proven on vstag where it is already gone. Full evidence,
-  including the EXPLAIN output, in `planning/conversation-identity.md` §5.1d.
+  Applied with `bash devops/run-migration.sh vprod devops/migrations/19-drop-message-userid-idx.sql`
+  (the script reported success honestly this time; the schema was checked anyway).
 
-  Precondition 1 (`SELECT *` → `SELECT content`, replybot v0.0.221) is **not a
-  safety gate**: migration 19's own header says the issue is an EXPLAIN index
-  *recommendation* to recreate the index, and replybot's live plan uses `71@3` +
-  `71@5`, never `71@4`. Precondition 2 (replica co-location) is satisfied — 4 pods
-  on 4 distinct nodes, re-verified 2026-08-24.
+  | verification | result |
+  |---|---|
+  | `SHOW INDEXES` | 13 rows → **9**: only `primary` + `messages_userid_timestamp_idx` ✓ |
+  | scribble `ON CONFLICT` check | now plans onto **`messages@primary`** — the predicted fallback, confirmed on prod ✓ |
+  | replybot read path | **unchanged**: `messages_userid_timestamp_idx` → index join `primary` → lookup join `states` ✓ |
+  | sink / replybot restarts | none attributable; all counts timestamped ~36h before the change |
+  | GC job | `1204382092598476802`, `waiting for MVCC GC` — ~112 GiB expected back ~2026-08-26 01:44 UTC |
 
-  **Why to move it before 1.5:** it is what makes the backfill fit on disk. See the
-  measured production table above — after 1.2 the backfill needs ~446.9 GiB of MVCC
-  garbage against ~407.1 GiB available; running 19 first frees ~111.7 GiB and cuts
-  the rewrite set to 3 indexes (~335.2 GiB), leaving ~184 GiB of margin.
+  **Why it was safe to run early.** The blocker was "identify the ~5,700/day reader".
+  It is **scribble's own `ON CONFLICT (hsh, userid) DO NOTHING`** — a write-path
+  anti-join, not a consumer. Conflict checks bypass `NOT VISIBLE`, so the canary
+  could never have gone dark and the soak measured nothing. Precondition 1
+  (`SELECT *` → `SELECT content`, replybot v0.0.221) was never a safety gate:
+  migration 19's header says the issue is an EXPLAIN index *recommendation*, and
+  replybot's plan used `71@3` + `71@5`, never `71@4` — now confirmed unchanged after
+  the drop. Precondition 2 (replica co-location) was satisfied. Evidence in
+  `planning/conversation-identity.md` §5.1d.
 
-  ⚠️ **Sequencing constraint:** the space returns only after `gc.ttlseconds`
-  (90000s / **25 h** on prod), so 19 cannot immediately precede 1.5 — leave a GC
-  window between them, and confirm with `df` rather than assuming. Treat the drop as
-  one-way: recreating a ~129 GiB index on prod is a multi-hour backfill.
+  **Effect on the 1.5 disk problem.** This is what makes the backfill fit. Once GC
+  completes, `messages` is 2 indexes / 258.34 GiB logical. After 1.2 adds the account
+  index it is 3 / 387.49 GiB, so 1.5 rewrites ~335.0 GiB of garbage against ~518.8
+  GiB available — **~184 GiB margin**, where before it was ~40 GiB short.
 
-  Running it before 1.3 is safe but leaves v0.0.219's `SELECT *` emitting an index
-  recommendation to recreate exactly this index. Harmless, but someone may act on it.
+  ⚠️ **Do not start 1.5 until the GC job has actually completed and `df` confirms the
+  space.** The 25 h TTL is the gate, not the DROP.
 
 
 - **3.4 `pageid` → `account_id` rename.** Cosmetic, last, its own PR.
