@@ -57,6 +57,54 @@
 -- days. Run 28b once the new build is verified.
 -- =====================================================================
 --
+-- =====================================================================
+-- APPLY -- DO NOT USE run-migration.sh FOR THIS FILE.
+--
+--   { echo "SET use_declarative_schema_changer = 'off';"
+--     echo "SET CLUSTER SETTING bulkio.index_backfill.batch_size = 10000;"
+--     cat devops/migrations/28a-responses-account-scoped-key.sql
+--   } | kubectl exec -i -n <ns> gbv-cockroachdb-0 -- ./cockroach sql \
+--         --insecure --database=chatroach
+--   -- then: RESET CLUSTER SETTING bulkio.index_backfill.batch_size;
+--
+-- WHY -- LEARNED THE HARD WAY ON PRODUCTION 2026-08-25. The first attempt went
+-- through `run-migration.sh`, which does not disable the declarative schema
+-- changer. It WEDGED, in exactly the shape 26's header documents:
+--
+--     job_type          NEW SCHEMA CHANGE        <-- the tell
+--     status            running
+--     fraction_completed 0.00000  (for 21 minutes, never moved)
+--     error             EMPTY
+--     running_status    PostCommitPhase stage 2 of 15, 6 BackfillType ops pending
+--
+-- and the real cause visible ONLY in the cockroach pod log:
+--
+--     failed to construct index entries during backfill: bulk-mon:
+--     memory budget exceeded: 17707963 bytes requested,
+--     3135969641 currently allocated, 0 bytes in budget
+--
+-- 3.13 GB is the whole --max-sql-memory=3000Mi pool. `responses` has SIX
+-- indexes and ALTER PRIMARY KEY rebuilds them all concurrently, and the
+-- DECLARATIVE CHANGER IGNORES bulkio.index_backfill.batch_size -- so the
+-- setting alone buys nothing. Both settings, or neither works.
+--
+-- Note this contradicts 26's "PRODUCTION IS PROBABLY FINE WITHOUT EITHER
+-- SETTING". That held for `messages` (run with the settings, legacy changer,
+-- succeeded in 150m). It did NOT hold here. The difference is not row width --
+-- responses' wide columns average only 422 B -- it is six concurrent backfills
+-- under a changer that ignores the batch size.
+--
+-- RECOVERY, if it wedges anyway: CANCEL JOB <id>, wait for status 'canceled'
+-- (the declarative changer rolls back cleanly -- verified: the PK returned to
+-- the original 3 columns, pageid stayed NOT NULL, no leftover indexes), then
+-- re-run with the settings above. Do NOT wait it out: the job retries with
+-- exponential backoff, reaching 17-hour gaps.
+--
+-- The re-run under the legacy changer registers as job_type 'SCHEMA CHANGE'
+-- with running_status 'populating schema', and fraction_completed actually
+-- moves. That is how you know the setting took effect.
+-- =====================================================================
+--
 -- PRODUCTION PREREQUISITE -- READ THIS BEFORE RUNNING.
 --
 -- `pageid` cannot enter a primary key while it is nullable (SQLSTATE 42P15),
