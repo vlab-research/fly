@@ -478,6 +478,21 @@ every one was hit for real during the staging rollout.
 - A wedged index backfill looks identical to a slow one in SQL: `status=running`,
   `fraction_completed=0`, empty `error`. The real cause is only in the cockroach
   pod log.
+- **`SHOW JOBS` TRUNCATES `description` TO 69 CHARACTERS**, so the obvious way to
+  find a schema-change job cannot work:
+
+      WHERE description LIKE '%messages_userid_account_timestamp_idx%'   -- NEVER matches
+
+  The name is cut off mid-word at `...timestam`. `length(description)` is 69 for
+  every job on the cluster, so this is not specific to long statements. Match a
+  short prefix, or pin the `job_id`. Discovered 2026-08-25 while watching
+  migration 26 on vprod; the first watcher silently matched nothing for minutes.
+  **This compounds the trap above**: the query you would naturally write to check
+  "is it wedged?" returns empty, which reads as "the job is gone" rather than
+  "my filter is broken".
+- A zero-row `SHOW JOBS` query **still emits a header row** under `--format=tsv`.
+  Piping it to `tail -1` yields the header, not nothing, so naive parsers report
+  `status=status`. Use `tail -n +2`.
 - **Scribble restarts are the §5.1 alarm, and they have a common false positive.**
   Before concluding the key mismatch, check whether ALL FOUR sinks terminated at
   about the same moment and then stayed up — that is a shared-dependency blip, not
