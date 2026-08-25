@@ -39,7 +39,15 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 # changes; swap each to a clean tag as it next changes.
 versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
-versionHermes: &vhermes v0.0.3-wa
+# v0.0.3-wa -> v0.0.5: carries 36808aa5 "feat(envelope): every event carries
+# platform and account_id" -- the PRODUCER side of the conversation-identity
+# rollout. Without it production gets the schema and the consumers but nothing
+# stamps the triple, so CONVERSATION_TUPLE_MISSING is non-zero by construction
+# and new rows keep landing with NULL account_id (which would make 1.5 a
+# backfill racing its own writer). v0.0.5 is a clean descendant of v0.0.3-wa,
+# so the WhatsApp work is retained -- and it drops the -wa suffix, as the note
+# above asks. vstag has run v0.0.5 since 2026-08-23 with all 5.3 gates at zero.
+versionHermes: &vhermes v0.0.5
 # ############################################################################
 # MUST be >= v0.0.221 -- this file no longer sets CHATBASE_BACKEND.
 #
@@ -95,7 +103,10 @@ versionDinersclub: &vdinersclub v0.0.46
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.19
+# v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
+# 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
+# since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
+versionMessageWorker: &vmessageworker v0.1.21
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
