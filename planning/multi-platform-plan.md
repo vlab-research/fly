@@ -249,21 +249,39 @@ WhatsApp is a handful of test users.
     deploy failed.** Verify by fetching the deployed asset and diffing it against
     the source, not by trusting the dashboard:
     `diff <(curl -s https://<host>/identity.js) moviehouse/src/identity.js`
-  - **moviehouse: DELIBERATELY HELD for this window (decided 2026-08-25).** Do not
-    ship it earlier; the question was asked and answered. Facts established then:
-    - A `staging` → `main` merge carries **49 commits / 162 files / 20,232
-      insertions** — the whole unreleased rollout, not just moviehouse.
-    - **Only moviehouse would actually deploy**: `dashboard-client/` has zero diff
-      against `main`, and the only workflows on `main` are
-      `testcontainers-integration` and `replybot-test` — **no image publishing**.
-    - It hits production for real: `moviehouse/netlify.toml` production context
-      points at `https://fly-botserver.vlab.digital/synthetic`.
-    - Cherry-picking is not clean: `b5a4b99d` spans 24 files including linksniffer,
-      so a moviehouse-only pick is a synthetic commit that conflicts at merge time.
-    - The two commits to land are `b5a4b99d` and `80d0dc25`.
-    ⚠️ **Human verification of smoke-test paths 3 and 4 is still outstanding** (0.4)
-    and should happen on staging BEFORE this ships — it would otherwise be the
-    first real exercise of that path, in production.
+  - **moviehouse: HOLD LIFTED 2026-08-25, shipping in this window.** It was held
+    earlier the same day on the reasoning that nothing in production referenced
+    it — verified true at the time: **zero** production surveys used the
+    `moviehouse` or `link_tracking` field types, and prod replybot had neither
+    `MOVIEHOUSE_URL` nor `LINKSNIFFER_URL` set.
+
+    **What changed:** 1.3 deployed replybot v0.0.221, which owns first-party URLs
+    and now has `MOVIEHOUSE_URL` set. The moment the updated smoke form reaches
+    production, `movie_new` renders a `vlab_*`-stamped moviehouse URL — and
+    production's moviehouse had **no `identity.js` at all** (HTTP 404, against
+    200 on staging), so it cannot read those params. The play event lands
+    unstamped. That is exactly the shape of the 12 stale `moviehouse:play` rows
+    on vstag: `account_id` on all 12, `platform` NULL on all 12.
+
+    So the hold was correct while nothing referenced moviehouse, and stopped
+    being correct the moment 1.3 landed. Ship it before bringing the updated
+    form into production, or `movie_new` fails in a way that reads as a code bug
+    rather than a missing deploy.
+
+    Mechanics: Netlify site `virtuallab-videos`, base dir `moviehouse`,
+    production branch `main`. Staging already serves it from the `staging`
+    branch deploy. `main` is a clean **fast-forward** from `staging` (zero
+    main-only commits), and `main` takes changes by **pull request** — every
+    recent commit there is a PR merge. Only moviehouse actually redeploys:
+    `dashboard-client/` has zero diff against `main`, and the only workflows on
+    `main` are tests, not image publishing.
+
+    **Still outstanding after this ships:** production's `flysmoke` survey is the
+    OLD form — created 2026-08-11, 38 fields, no `link_new`/`movie_new`. The
+    42-field 0.4 update went to Typeform 2026-08-24 but production's copy
+    predates it, which is why a full prod smoke run still exercises only the
+    legacy paths.
+
 
   - **values drift**: production still points **scribble and linksniffer at
     docker.io**, where CI does not publish. Not broken today (pinned to tags that
