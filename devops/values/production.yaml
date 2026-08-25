@@ -40,7 +40,24 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
-versionReplybot: &vreplybot v0.0.219
+# ############################################################################
+# MUST be >= v0.0.221 -- this file no longer sets CHATBASE_BACKEND.
+#
+# v0.0.219 does `require(process.env.CHATBASE_BACKEND)` at
+# lib/spine-supervisor/spine-supervisor.js:14, i.e. on the CORE conversation
+# path. Commit b5a4b99d dropped that env var from this file for the new
+# replybot but left the version at v0.0.219, so applying that state would make
+# require(undefined) throw ERR_INVALID_ARG_TYPE and CRASH-LOOP replybot --
+# stopping conversations, not merely degrading them.
+#
+# v0.0.221 absorbs the client into lib/chatbase and requires it directly; it has
+# no runtime read of the env var. vstag has run v0.0.221 without CHATBASE_BACKEND
+# since the staging rollout. Caught before applying, 2026-08-25.
+#
+# If you ever need to roll replybot back below v0.0.221, you MUST restore
+# CHATBASE_BACKEND=@vlab-research/chatbase-postgres to replybot.env here.
+# ############################################################################
+versionReplybot: &vreplybot v0.0.221
 # Bumped v0.0.6 -> v0.0.9 together with the repository move below: ghcr holds
 # only v0.0.8/v0.0.9, so the registry change CANNOT ship without the version
 # change or the pull 404s. Behaviour change to announce: an *invalid*
