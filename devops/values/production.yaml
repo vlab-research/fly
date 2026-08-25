@@ -41,9 +41,29 @@ versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
 versionHermes: &vhermes v0.0.3-wa
 versionReplybot: &vreplybot v0.0.219
-versionLinksniffer: &vlinksniffer v0.0.6
+# Bumped v0.0.6 -> v0.0.9 together with the repository move below: ghcr holds
+# only v0.0.8/v0.0.9, so the registry change CANNOT ship without the version
+# change or the pull 404s. Behaviour change to announce: an *invalid*
+# vlab_platform now returns 400 instead of coercing to messenger. Absent is
+# still assumed messenger.
+versionLinksniffer: &vlinksniffer v0.0.9
 versionDean: &vdean v0.0.45
-versionScribble: &vscribble v0.0.32
+# ############################################################################
+# DO NOT APPLY THIS VALUE BEFORE MIGRATION 28a HAS COMPLETED.
+#
+# v0.0.33 is where scribble/response.go switched to the 4-column
+#   ON CONFLICT (userid, pageid, timestamp, question_ref)
+# and v0.0.34 carries it too. Against production's CURRENT 3-column responses
+# primary key that raises 42P10, and scribble.go treats any write error as
+# log.Fatalf -- so applying this early crash-loops gbv-scribble-responses.
+#
+# Correct order: 28a -> apply this -> verify -> 28b.
+# See devops/migrations/28a-responses-account-scoped-key.sql.
+#
+# Bumped v0.0.32 -> v0.0.34 together with the repository move below; ghcr holds
+# only v0.0.34, so the registry change cannot ship without the version change.
+# ############################################################################
+versionScribble: &vscribble v0.0.34
 # v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
 # /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
 # timeout work -- so the image and the env block below move together, never
@@ -328,7 +348,8 @@ dean:
 
 scribble:
   image:
-    repository: vlabresearch/scribble
+    # docker.io -> ghcr: CI does not publish to vlabresearch/*. See versionScribble.
+    repository: ghcr.io/vlab-research/scribble
     tag: *vscribble
     pullPolicy: IfNotPresent
   resources:
@@ -444,7 +465,8 @@ linksniffer:
   replicaCount: 2
 
   image:
-    repository: vlabresearch/linksniffer
+    # docker.io -> ghcr: CI does not publish to vlabresearch/*. See versionLinksniffer.
+    repository: ghcr.io/vlab-research/linksniffer
     tag: *vlinksniffer
     pullPolicy: IfNotPresent
 
