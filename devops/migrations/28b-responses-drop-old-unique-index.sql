@@ -53,10 +53,21 @@
 DROP INDEX IF EXISTS chatroach.responses@responses_userid_timestamp_question_ref_key CASCADE;
 
 -- Fail loudly if any unique index other than the new primary key survives.
+-- Assert on the KEY COLUMNS, not the index NAME. See 27's equivalent block:
+-- the name-based form raised a false alarm on production 2026-08-25, because
+-- production's primary-key index is named `primary` (legacy CockroachDB
+-- naming) while staging's is `responses_pkey`. Confirmed for responses
+-- specifically: prod `primary`, vstag `responses_pkey`. Had this shipped
+-- unchanged it would have failed here in exactly the same way.
 SELECT crdb_internal.force_error(
          'XXUUU',
-         'responses still has a unique index that excludes pageid: ' || index_name
+         'responses has a unique index that excludes pageid: ' || index_name
        )
-FROM [SHOW INDEXES FROM chatroach.responses]
-WHERE non_unique = false AND index_name != 'responses_pkey'
+FROM (
+  SELECT index_name, array_agg(column_name ORDER BY seq_in_index) AS cols
+  FROM [SHOW INDEXES FROM chatroach.responses]
+  WHERE non_unique = false AND storing = false AND implicit = false
+  GROUP BY index_name
+)
+WHERE cols != ARRAY['userid', 'timestamp', 'question_ref', 'pageid']
 LIMIT 1;

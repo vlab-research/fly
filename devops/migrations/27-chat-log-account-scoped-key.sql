@@ -126,10 +126,28 @@ DROP INDEX IF EXISTS chatroach.chat_log@chat_log_userid_timestamp_direction_key 
 
 -- Fail loudly if any unique index other than the new primary key survives --
 -- that index would silently reinstate the bug.
+-- Assert on the KEY COLUMNS, not the index NAME.
+--
+-- CORRECTED 2026-08-25 after this guard raised a FALSE ALARM on production. It
+-- used to read `index_name != 'chat_log_pkey'`, which assumes CockroachDB's
+-- modern primary-key naming. Production predates that: its PK index is named
+-- `primary` (so is messages'), while staging's is `chat_log_pkey`. The guard
+-- therefore flagged the CORRECT new 4-column key as a leftover and exited 1
+-- over a migration that had fully committed -- every statement above runs in
+-- its own implicit transaction, so nothing rolled back.
+--
+-- The column-based form below is name-independent and matches the pattern
+-- migration 26 already uses. Verified against production's post-migration
+-- chat_log 2026-08-25: returns zero rows.
 SELECT crdb_internal.force_error(
          'XXUUU',
-         'chat_log still has a unique index that excludes pageid: ' || index_name
+         'chat_log has a unique index that excludes pageid: ' || index_name
        )
-FROM [SHOW INDEXES FROM chatroach.chat_log]
-WHERE non_unique = false AND index_name != 'chat_log_pkey'
+FROM (
+  SELECT index_name, array_agg(column_name ORDER BY seq_in_index) AS cols
+  FROM [SHOW INDEXES FROM chatroach.chat_log]
+  WHERE non_unique = false AND storing = false AND implicit = false
+  GROUP BY index_name
+)
+WHERE cols != ARRAY['userid', 'timestamp', 'direction', 'pageid']
 LIMIT 1;
