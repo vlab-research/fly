@@ -249,6 +249,22 @@ WhatsApp is a handful of test users.
     deploy failed.** Verify by fetching the deployed asset and diffing it against
     the source, not by trusting the dashboard:
     `diff <(curl -s https://<host>/identity.js) moviehouse/src/identity.js`
+  - **moviehouse: DELIBERATELY HELD for this window (decided 2026-08-25).** Do not
+    ship it earlier; the question was asked and answered. Facts established then:
+    - A `staging` → `main` merge carries **49 commits / 162 files / 20,232
+      insertions** — the whole unreleased rollout, not just moviehouse.
+    - **Only moviehouse would actually deploy**: `dashboard-client/` has zero diff
+      against `main`, and the only workflows on `main` are
+      `testcontainers-integration` and `replybot-test` — **no image publishing**.
+    - It hits production for real: `moviehouse/netlify.toml` production context
+      points at `https://fly-botserver.vlab.digital/synthetic`.
+    - Cherry-picking is not clean: `b5a4b99d` spans 24 files including linksniffer,
+      so a moviehouse-only pick is a synthetic commit that conflicts at merge time.
+    - The two commits to land are `b5a4b99d` and `80d0dc25`.
+    ⚠️ **Human verification of smoke-test paths 3 and 4 is still outstanding** (0.4)
+    and should happen on staging BEFORE this ships — it would otherwise be the
+    first real exercise of that path, in production.
+
   - **values drift**: production still points **scribble and linksniffer at
     docker.io**, where CI does not publish. Not broken today (pinned to tags that
     exist) but it breaks on their next release. Staging is already fixed; this is a
