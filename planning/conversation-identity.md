@@ -493,6 +493,20 @@ every one was hit for real during the staging rollout.
 - A zero-row `SHOW JOBS` query **still emits a header row** under `--format=tsv`.
   Piping it to `tail -1` yields the header, not nothing, so naive parsers report
   `status=status`. Use `tail -n +2`.
+- **A long `CREATE INDEX` shows its session as `IDLE`, not active.** During
+  migration 26 on vprod the client session sat at `status = IDLE` for hours with
+  `last_active_query` pinned to the `CREATE INDEX`. CockroachDB releases the query
+  slot while the statement waits on the schema-change job, so `SHOW CLUSTER
+  SESSIONS` reports IDLE even though the client is very much still blocked.
+  **Do not read that as a dropped client and re-run the migration** — that lands
+  you straight in the `CREATE INDEX IF NOT EXISTS` no-op trap above. To tell a
+  live wait from a dead client, check the session AGE against the job's `started`
+  time; they track each other:
+
+      SELECT (now()-session_start)::string AS age, status, left(last_active_query,120)
+      FROM [SHOW CLUSTER SESSIONS] WHERE client_address = '<addr>';
+
+  `kubectl exec` sessions appear as `127.0.0.1:<port>` under user `root`.
 - **Scribble restarts are the §5.1 alarm, and they have a common false positive.**
   Before concluding the key mismatch, check whether ALL FOUR sinks terminated at
   about the same moment and then stayed up — that is a shared-dependency blip, not
