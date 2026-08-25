@@ -1,3 +1,50 @@
+# =============================================================================
+# UNDEPLOYED. This is the local/kind bootstrap values file, not a live
+# environment.
+#
+# Applied only by `devops/scripts/bootstrap-fly.sh`, the sole kind-related
+# script in the repo. No CI workflow references it. The cluster has exactly two
+# live namespaces — `vprod` and `vstag` — and there is no `fly` namespace and
+# only one kube context. Last touched 2026-06-28.
+#
+# -----------------------------------------------------------------------------
+# CONVERSATION IDENTITY IS NOT ENFORCED IN THIS ENVIRONMENT.
+# -----------------------------------------------------------------------------
+#
+# This file deploys `botserver` and NOT `hermes` — there is no hermes block
+# below, and the umbrella chart defaults `botserver.enabled: true`
+# (devops/vlab/values.yaml). Production and staging are the other way round:
+# botserver disabled, hermes serving every ingress path.
+#
+# **botserver does not stamp the normalized `account_id` / `platform` envelope,
+# and never has.** Closing exactly that gap is why hermes was written. So every
+# event on `chat-events` in a cluster bootstrapped from this file arrives with
+# no conversation identity, and consequently:
+#
+#   * replybot's state cache is BYPASSED on every event
+#     (`conversationFromRawEvent` returns null, `isNamed` fails)
+#   * every state read falls back to an UNSCOPED replay across all of a
+#     participant's accounts
+#   * a participant on two accounts will appear to bleed between conversations
+#
+# That is the pre-fix behaviour, faithfully reproduced. **It is a property of
+# this values file, not a bug in the conversation-identity work.** Anyone who
+# bootstraps a local cluster to test that work and concludes "the fix does not
+# work" has been caught by this file — which is precisely the trap the work
+# exists to remove.
+#
+# TO REVIVE THIS FILE: swap the `botserver:` block below for a `hermes:` block
+# copied from `devops/values/staging.yaml`, and set `botserver.enabled: false`.
+# Hermes is a drop-in replacement — it serves the same `/webhooks`,
+# `/synthetic` and `/health` paths and runs under the same service alias, so
+# every `http://fly-botserver/*` URL in this file keeps working unchanged. Also
+# add `STRICT_EVENT_ENVELOPE` to the message-worker block if you want the
+# producer-side guard to refuse rather than report.
+#
+# See documentation/event-envelope.md ("Producers") and
+# planning/conversation-identity.md §4.
+# =============================================================================
+
 tags:
   kafka: true
   cockroach: true
@@ -211,8 +258,6 @@ replybot:
       cpu: 10m
       memory: 64Mi
   env:
-  - name: CHATBASE_BACKEND
-    value: "@vlab-research/chatbase-postgres"
   - name: CHATBASE_DATABASE
     value: "chatroach"
   - name: CHATBASE_USER

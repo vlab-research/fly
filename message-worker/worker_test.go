@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vlab-research/botparty"
 	"github.com/vlab-research/fly/message-worker/types"
 	"go.uber.org/zap"
 )
@@ -201,7 +200,7 @@ func TestWorker_ProcessCommand_TranslationError(t *testing.T) {
 		t.Fatalf("Expected 1 request to botserver, got %d", len(mockBot.requests))
 	}
 
-	var externalEvent botparty.ExternalEvent
+	var externalEvent SyntheticEvent
 	if err := json.Unmarshal(mockBot.requests[0], &externalEvent); err != nil {
 		t.Fatalf("Failed to unmarshal botserver request: %v", err)
 	}
@@ -212,8 +211,11 @@ func TestWorker_ProcessCommand_TranslationError(t *testing.T) {
 	if externalEvent.User != cmd.UserID {
 		t.Errorf("Expected user '%s', got '%s'", cmd.UserID, externalEvent.User)
 	}
-	if externalEvent.Page != cmd.PlatformAccountID {
-		t.Errorf("Expected page '%s', got '%s'", cmd.PlatformAccountID, externalEvent.Page)
+	if externalEvent.AccountID != cmd.PlatformAccountID {
+		t.Errorf("Expected account_id '%s', got '%s'", cmd.PlatformAccountID, externalEvent.AccountID)
+	}
+	if externalEvent.Platform != string(cmd.Platform) {
+		t.Errorf("Expected platform '%s', got '%s'", string(cmd.Platform), externalEvent.Platform)
 	}
 
 	var reportValue MachineReportValue
@@ -411,7 +413,7 @@ func TestWorker_ProcessCommand_NoClientForPlatform(t *testing.T) {
 		t.Fatalf("Expected 1 request to botserver, got %d", len(mockBot.requests))
 	}
 
-	var externalEvent botparty.ExternalEvent
+	var externalEvent SyntheticEvent
 	if err := json.Unmarshal(mockBot.requests[0], &externalEvent); err != nil {
 		t.Fatalf("Failed to unmarshal botserver request: %v", err)
 	}
@@ -604,7 +606,7 @@ func TestWorker_ReportError_PlatformError(t *testing.T) {
 		t.Fatalf("Expected 1 request to botserver, got %d", len(mockBot.requests))
 	}
 
-	var externalEvent botparty.ExternalEvent
+	var externalEvent SyntheticEvent
 	if err := json.Unmarshal(mockBot.requests[0], &externalEvent); err != nil {
 		t.Fatalf("Failed to unmarshal botserver request: %v", err)
 	}
@@ -663,7 +665,7 @@ func TestWorker_ReportError_NonPlatformError(t *testing.T) {
 		t.Fatalf("Expected 1 request to botserver, got %d", len(mockBot.requests))
 	}
 
-	var externalEvent botparty.ExternalEvent
+	var externalEvent SyntheticEvent
 	if err := json.Unmarshal(mockBot.requests[0], &externalEvent); err != nil {
 		t.Fatalf("Failed to unmarshal botserver request: %v", err)
 	}

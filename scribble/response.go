@@ -30,16 +30,21 @@ type Response struct {
 	Seed               int64           `json:"seed" validate:"required"`
 	Timestamp          *JSTimestamp    `json:"timestamp" validate:"required"`
 	Metadata           json.RawMessage `json:"metadata" validate:"required"`
+	Platform           string          `json:"platform"`
 }
 
 func (r *Response) GetRow() []interface{} {
-	// Handle optional fields that should be NULL in postgres
-
-	var pageid *string
-	if r.Pageid != "" {
-		pageid = &r.Pageid
-	}
-
+	// pageid is part of responses' primary key as of migration 28, so it can no
+	// longer be NULL -- an identity component has no null. An absent account is
+	// written as the empty-string "account unknown" sentinel, the same value the
+	// migration backfilled the historical NULLs to. This path is cold: the
+	// newest NULL-pageid row in production dates from 2020-09-06.
+	//
+	// platform is NOT part of the primary key (migration 26 added it as a
+	// nullable VARCHAR), so an absent platform is written as NULL, not ''.
+	// This matches messages.platform (see account.go's nullIfEmpty / PlatformOrNil)
+	// and differs from pageid deliberately: the column can say "unknown"
+	// honestly without grouping every unattributable row under one fake platform.
 	// Required fields are validated by validator, no need for nil checks
 	return []interface{}{
 		r.ParentShortcode.String,
@@ -47,7 +52,7 @@ func (r *Response) GetRow() []interface{} {
 		r.Shortcode.String,
 		r.Flowid,
 		r.Userid,
-		pageid, // will be NULL in postgres if empty string
+		r.Pageid,
 		r.QuestionRef,
 		r.QuestionIdx,
 		r.QuestionText,
@@ -56,6 +61,7 @@ func (r *Response) GetRow() []interface{} {
 		r.Seed,
 		r.Timestamp.Time,
 		r.Metadata,
+		nullIfEmpty(r.Platform),
 	}
 }
 
@@ -81,9 +87,15 @@ func (s *ResponseScribbler) SendBatch(data []Writeable) error {
 		"seed",
 		"timestamp",
 		"metadata",
+		"platform",
 	}
 	query := SertQuery("INSERT", "responses", fields, len(data))
-	query += " ON CONFLICT(userid, timestamp, question_ref) DO NOTHING"
+	// The conflict target is the conversation, not the participant. Without
+	// pageid, a participant answering the same question_ref at the same instant
+	// on two accounts had one of the two answers silently discarded. Requires
+	// migration 28, which folds pageid into the primary key -- without it this
+	// raises 42P10.
+	query += " ON CONFLICT(userid, pageid, timestamp, question_ref) DO NOTHING"
 	_, err := s.pool.Exec(context.Background(), query, values...)
 	return err
 }

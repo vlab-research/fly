@@ -10,10 +10,21 @@ pub struct Config {
     pub fb_app_secret: Option<String>,
     /// Verify token for the WhatsApp Cloud API webhook (GET /whatsapp handshake).
     pub whatsapp_verify_token: Option<String>,
+    /// When true, /synthetic rejects requests missing user, account_id, or platform with 400.
+    /// When false (default), missing account_id/platform are accepted with warning log.
+    pub synthetic_require_conversation: bool,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
+        let synthetic_require_conversation = std::env::var("SYNTHETIC_REQUIRE_CONVERSATION")
+            .ok()
+            .map(|s| {
+                let lower = s.to_lowercase();
+                lower == "true" || lower == "1"
+            })
+            .unwrap_or(false);
+
         Ok(Config {
             event_topic: std::env::var("BOTSERVER_EVENT_TOPIC")
                 .map_err(|_| "BOTSERVER_EVENT_TOPIC not set")?,
@@ -33,6 +44,7 @@ impl Config {
                 .unwrap_or(8080),
             fb_app_secret: std::env::var("FB_APP_SECRET").ok(),
             whatsapp_verify_token: std::env::var("WHATSAPP_VERIFY_TOKEN").ok(),
+            synthetic_require_conversation,
         })
     }
 }

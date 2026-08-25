@@ -269,14 +269,14 @@ LIMIT 100000
 
 ```sql
 WITH response_times_0 AS (
-    SELECT userid, MIN(timestamp) as response_time
+    SELECT userid, pageid, MIN(timestamp) as response_time
     FROM responses
     WHERE shortcode = $1 AND question_ref = $2
-    GROUP BY userid
+    GROUP BY userid, pageid
 )
 SELECT DISTINCT s.userid, s.pageid
 FROM states s
-JOIN response_times_0 rt0 ON s.userid = rt0.userid
+LEFT JOIN response_times_0 rt0 ON s.userid = rt0.userid AND s.pageid = rt0.pageid
 WHERE rt0.response_time + $3::INTERVAL < NOW()
 LIMIT 100000
 ```
@@ -287,13 +287,13 @@ Parameters: `[$form, $question_ref, $duration]`
 
 ```sql
 WITH question_responses_0 AS (
-    SELECT DISTINCT userid
+    SELECT DISTINCT userid, pageid
     FROM responses
     WHERE shortcode = $1 AND question_ref = $2 AND response = $3
 )
 SELECT DISTINCT s.userid, s.pageid
 FROM states s
-JOIN question_responses_0 qr0 ON s.userid = qr0.userid
+LEFT JOIN question_responses_0 qr0 ON s.userid = qr0.userid AND s.pageid = qr0.pageid
 WHERE qr0.userid IS NOT NULL
 LIMIT 100000
 ```
@@ -304,18 +304,43 @@ Parameters: `[$form, $question_ref, $response]`
 
 ```sql
 WITH question_responses_0 AS (
-    SELECT DISTINCT userid
+    SELECT DISTINCT userid, pageid
     FROM responses
     WHERE shortcode = $1 AND question_ref = $2
 )
 SELECT DISTINCT s.userid, s.pageid
 FROM states s
-JOIN question_responses_0 qr0 ON s.userid = qr0.userid
+LEFT JOIN question_responses_0 qr0 ON s.userid = qr0.userid AND s.pageid = qr0.pageid
 WHERE qr0.userid IS NOT NULL
 LIMIT 100000
 ```
 
 Parameters: `[$form, $question_ref]`
+
+#### Targeting is scoped to the messaging account
+
+A conversation is the tuple `(platform, account_id, user_id)`, where `account_id` is the
+legacy column name `pageid`. `chatroach.states` is keyed `PRIMARY KEY (userid, pageid)`
+because the same participant id can hold two entirely independent conversations on two
+different messaging accounts — and those accounts may belong to two different researchers.
+
+Every response-derived CTE therefore projects `pageid` and is joined to `states` on
+`(userid, pageid)`, never on `userid` alone; `response_times_N` also aggregates per account
+(`GROUP BY userid, pageid`). This keeps an answer bound to the account it was given on.
+
+Joining on `userid` alone aggregates `responses` across *all* accounts and attaches them to
+account-scoped `states` rows, so a participant's answers on account A qualify them for a bail
+targeted at account B. That is both a mis-targeting bug and a cross-researcher data leak. The
+CTE joins are `LEFT JOIN` (an inner join would force AND semantics on every CTE-backed
+condition); the `IS NOT NULL` test enforces the actual match.
+
+`responses.pageid` used to be nullable, and the join's strict equality meant a `NULL` pageid
+matched no conversation — intended, since an unattributable response must not qualify anyone.
+As of `devops/migrations/28a-responses-account-scoped-key.sql` the column is `NOT NULL`, because
+it is part of the primary key, and the 1.82M historical NULLs were backfilled to the
+empty-string "account unknown" sentinel. The behaviour is unchanged: `''` matches no real
+account, so those rows remain inert for bail targeting. Not a live concern either way — every
+response written since September 2020 carries a real pageid.
 
 ### Execution Timing
 

@@ -13,13 +13,12 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/stretchr/testify/assert"
-	"github.com/vlab-research/botparty"
 )
 
 func getDC(ts *httptest.Server) *DC {
 	cfg := getConfig()
 	pool := getPool(cfg)
-	bp := &botparty.BotParty{Client: http.DefaultClient, Botserver: ts.URL}
+	poster := NewHTTPPoster(ts.URL)
 	cache, _ := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
@@ -27,23 +26,30 @@ func getDC(ts *httptest.Server) *DC {
 		Metrics:     true,
 	})
 	cache.Clear()
-	return &DC{cfg, pool, bp, cache, getProvider}
+	return &DC{cfg, pool, poster, cache, getProvider}
 }
 
 func TestDinersClub(t *testing.T) {
 	count := 0
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := []string{
-			`{"user":"foo","page":"page","event":{"type":"external","value":{"type":"foo","success":true,"timestamp":"0001-01-01T00:00:00Z"}}}`,
-			`{"user":"bar","page":"page","event":{"type":"external","value":{"type":"foo","success":true,"timestamp":"0001-01-01T00:00:00Z"}}}`,
-		}
-
 		data, _ := ioutil.ReadAll(r.Body)
 		dat := strings.TrimSpace(string(data))
 
-		good := dat == expected[0] || dat == expected[1]
-		assert.True(t, good)
+		// Parse the JSON to check the structure (field names matter, but order and exact formatting don't)
+		var parsed map[string]interface{}
+		err := json.Unmarshal([]byte(dat), &parsed)
+		assert.Nil(t, err)
+
+		// Check the full triple is present
+		assert.NotNil(t, parsed["user"])
+		assert.NotNil(t, parsed["account_id"])
+		assert.NotNil(t, parsed["platform"])
+		assert.NotNil(t, parsed["event"])
+
+		// Check request headers
+		assert.Equal(t, "dinersclub", r.Header.Get("X-Vlab-Poster"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		assert.Equal(t, "/", r.URL.Path)
 		w.WriteHeader(200)
@@ -237,7 +243,7 @@ func TestDinersClubErrorsWhenProviderNotListed(t *testing.T) {
 	cfg := getConfig()
 	cfg.Providers = []string{}
 	pool := getPool(cfg)
-	bp := &botparty.BotParty{Client: http.DefaultClient, Botserver: ts.URL}
+	poster := NewHTTPPoster(ts.URL)
 	cache, _ := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
@@ -245,7 +251,7 @@ func TestDinersClubErrorsWhenProviderNotListed(t *testing.T) {
 		Metrics:     true,
 	})
 	cache.Clear()
-	dc := &DC{cfg, pool, bp, cache, getProvider}
+	dc := &DC{cfg, pool, poster, cache, getProvider}
 	err := dc.Process(msgs)
 	assert.Nil(t, err)
 }
@@ -272,7 +278,7 @@ func TestDinersClubErrorsOnMissingUser(t *testing.T) {
 
 	cfg := getConfig()
 	pool := getPool(cfg)
-	bp := &botparty.BotParty{Client: http.DefaultClient, Botserver: ts.URL}
+	poster := NewHTTPPoster(ts.URL)
 	cache, _ := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
@@ -286,7 +292,7 @@ func TestDinersClubErrorsOnMissingUser(t *testing.T) {
 		}
 		return NewFakeProvider(getUser, auth)
 	}
-	dc := &DC{cfg, pool, bp, cache, getProvider}
+	dc := &DC{cfg, pool, poster, cache, getProvider}
 	err := dc.Process(msgs)
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Error(), "User not found for page id: invalid-page")

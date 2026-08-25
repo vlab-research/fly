@@ -15,14 +15,12 @@ type Event struct {
 }
 
 type ExternalEvent struct {
-	User string `json:"user"`
-	Page string `json:"page"`
-	// Platform is the messaging platform of the conversation
-	// ('messenger' | 'whatsapp'), read as COALESCE(states.platform,
-	// 'messenger') — legacy state rows without md.platform report
-	// 'messenger'. Botserver's /synthetic endpoint passes unknown
-	// fields through, so this rides along to replybot untouched.
-	Platform string `json:"platform,omitempty"`
+	User      string `json:"user"`
+	AccountID string `json:"account_id"`
+	// Messaging platform of the conversation ('messenger' | 'whatsapp'), read as
+	// COALESCE(states.platform, 'messenger') — legacy rows report 'messenger'.
+	// hermes rejects a synthetic post with a missing platform once its gate is on.
+	Platform string `json:"platform"`
 	Event    *Event `json:"event"`
 }
 
@@ -52,7 +50,7 @@ func getRedo(rows pgx.Rows) *ExternalEvent {
 	err := rows.Scan(&userid, &pageid, &platform)
 	handle(err)
 
-	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"redo", nil}}
+	return &ExternalEvent{User: userid, AccountID: pageid, Platform: platform, Event: &Event{"redo", nil}}
 }
 
 func getTimeout(rows pgx.Rows) *ExternalEvent {
@@ -64,7 +62,7 @@ func getTimeout(rows pgx.Rows) *ExternalEvent {
 	b, _ := json.Marshal(waitStart)
 	value := json.RawMessage(b)
 
-	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"timeout", &value}}
+	return &ExternalEvent{User: userid, AccountID: pageid, Platform: platform, Event: &Event{"timeout", &value}}
 }
 
 func getPayment(rows pgx.Rows) *ExternalEvent {
@@ -81,7 +79,7 @@ func getPayment(rows pgx.Rows) *ExternalEvent {
 	b, _ := json.Marshal(v)
 	value := json.RawMessage(b)
 
-	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"repeat_payment", &value}}
+	return &ExternalEvent{User: userid, AccountID: pageid, Platform: platform, Event: &Event{"repeat_payment", &value}}
 }
 
 func getFollowUp(rows pgx.Rows) *ExternalEvent {
@@ -93,7 +91,7 @@ func getFollowUp(rows pgx.Rows) *ExternalEvent {
 	b, _ := json.Marshal(question)
 	value := json.RawMessage(b)
 
-	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"follow_up", &value}}
+	return &ExternalEvent{User: userid, AccountID: pageid, Platform: platform, Event: &Event{"follow_up", &value}}
 }
 
 func getBlockUser(rows pgx.Rows) *ExternalEvent {
@@ -102,7 +100,7 @@ func getBlockUser(rows pgx.Rows) *ExternalEvent {
 	handle(err)
 
 	value := json.RawMessage([]byte(`null`))
-	return &ExternalEvent{User: userid, Page: pageid, Platform: platform, Event: &Event{"block_user", &value}}
+	return &ExternalEvent{User: userid, AccountID: pageid, Platform: platform, Event: &Event{"block_user", &value}}
 }
 
 func Respondings(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {

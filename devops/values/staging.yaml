@@ -22,40 +22,38 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 
 versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
-versionHermes: &vhermes v0.0.3-wa
-# replybot leaves the -wa line here (was v0.0.211-wa, which trailed prod's
-# v0.0.213). v0.0.215 is a clean tag, so staging catches up by v0.0.212
-# (quick-reply referral) and v0.0.213 (utility_message repeat) — both already
-# prod-validated — plus the md-durability fix. Per
-# documentation/staging-tagging-and-deploy.md, swap each remaining -wa service
-# to a clean tag as it next changes.
+# Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
+# suffix guards WhatsApp work from reaching production, and WhatsApp is in
+# production now, so the guard had become noise on this service.
+versionHermes: &vhermes v0.0.5
+# THE CONVERSATION-IDENTITY ROLLOUT. Every bump in this block is the same commit
+# (ad112fa0, PR #149 merged into `staging`) and they deploy TOGETHER -- a
+# conversation is (platform, account_id, user_id), and the services disagree about
+# what a conversation IS until all of them are on it.
 #
-# v0.0.215 carries no code change over v0.0.214. It exists because v0.0.214 was
-# built before the lockfile landed, so its image came from `npm install` against
-# floating ^ ranges and cannot be reproduced from source. v0.0.215 is the first
-# replybot image built with `npm ci` against a committed package-lock.json.
+# v0.0.221 is v0.0.219 plus conversation-identity: the state cache keyed by the
+# triple, the account-scoped replay, and the merged WhatsApp entry gate -- main's
+# percent-escape alphabet AND the branch's position-independent `form.` pair, both
+# of which are needed to stop a CTWA arrival misrouting to FALLBACK_FORM.
 #
-# v0.0.219 is v0.0.218 plus the arrival-health work (#150): ad-id capture, the
-# widened WhatsApp entry gate, the encoded-ref decoder, and `getMetadata` owning
-# `vt`. adopt v0.1.78 already percent-encodes every ref token in production, so
-# this is the reader catching up to a writer that has already shipped.
-versionReplybot: &vreplybot v0.0.219
-versionLinksniffer: &vlinksniffer v0.0.6
-versionDean: &vdean v0.0.45
-versionScribble: &vscribble v0.0.32
+# Production stays on v0.0.219 until this soaks 24h. See
+# planning/conversation-identity.md §5.
+versionReplybot: &vreplybot v0.0.221
+versionLinksniffer: &vlinksniffer v0.0.9
+versionDean: &vdean v0.0.47
+versionScribble: &vscribble v0.0.34
 # v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
 # /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
 # timeout work -- so the image and these values move together, never separately:
 # on the old image the metrics Service would point at a port nothing binds.
-versionDinersclub: &vdinersclub v0.0.46
+versionDinersclub: &vdinersclub v0.0.48
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.6.10
-versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.19
-# REQUIRED BEFORE APPLYING: media-proxy has never been released, so this tag
-# does not exist in ghcr.io yet. It is created by pushing the git tag
-# `media-proxy-v0.0.1`. Applying with a nonexistent tag gives an
-# ImagePullBackOff on a service that is on the media send path (§13).
+versionExporter: &vexporter v0.6.12
+versionExodus: &vexodus v0.2.5
+versionMessageWorker: &vmessageworker v0.1.21
+# Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
+# gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
+# does not exist in ghcr.io yet") is retired.
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here — it lives at the
@@ -265,7 +263,10 @@ dean:
 
 scribble:
   image:
-    repository: vlabresearch/scribble
+    # ghcr, not docker.io/vlabresearch: .github/workflows/release.yml publishes
+    # every service to ghcr.io/vlab-research/<image>. The old docker.io repo has
+    # no tag past v0.0.32, so any newer tag here is an ImagePullBackOff.
+    repository: ghcr.io/vlab-research/scribble
     tag: *vscribble
     pullPolicy: Always
   resources:
@@ -360,8 +361,6 @@ replybot:
   env:
   - name: FAKE
     value: "NOTHING"
-  - name: CHATBASE_BACKEND
-    value: "@vlab-research/chatbase-postgres"
   - name: CHATBASE_DATABASE
     value: "chatroach"
   - name: CHATBASE_USER
@@ -398,6 +397,18 @@ replybot:
     value: "https://graph.facebook.com/v25.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
+  # The `link_tracking` and `moviehouse` field types — see the matching block in
+  # production.yaml for why these are public hostnames rather than cluster-internal
+  # service names. Staging MUST carry its own values: the whole point of replybot
+  # owning the URL is that the environment decides where it points, so a staging
+  # survey that reached production's linksniffer would report clicks into the wrong
+  # environment's event stream.
+  - name: LINKSNIFFER_URL
+    value: "https://staging.links.vlab.digital"
+  # Netlify serves the `staging` branch of site `virtuallab-videos` at this
+  # branch-deploy hostname.
+  - name: MOVIEHOUSE_URL
+    value: "https://staging--virtuallab-videos.netlify.app"
   - name: STATE_STORE_LIMIT
     value: "30000"
   - name: NUM_SPINES
@@ -446,7 +457,8 @@ linksniffer:
   replicaCount: 1
 
   image:
-    repository: vlabresearch/linksniffer
+    # ghcr, not docker.io/vlabresearch -- see the scribble note above.
+    repository: ghcr.io/vlab-research/linksniffer
     tag: *vlinksniffer
     pullPolicy: Always
 
@@ -641,6 +653,29 @@ hermes:
     # WHATSAPP_VERIFY_TOKEN comes from the gbv-bot-envs secret via envFrom
     # (same pattern as VERIFY_TOKEN). Until the key is added to the secret,
     # GET /whatsapp verification returns 401.
+    #
+    # THE 400 GATE for the /synthetic conversation triple (user, account_id,
+    # platform) — see documentation/event-envelope.md and
+    # planning/conversation-identity.md §7.3.1.
+    #
+    # "false": hermes accepts a synthetic POST that is missing account_id or
+    # platform, stamps whatever it can derive, and logs the gap. "true": it
+    # returns 400 and produces nothing.
+    #
+    # Staging is where this gets flipped to "true" FIRST, once every poster is
+    # deployed here — that is the rehearsal for the production flip, and the
+    # place a missed poster should be discovered. Declared explicitly rather
+    # than left to hermes' default so the flip is an edit to this file plus a
+    # rollout restart, never a `kubectl set env` against live state.
+    #
+    # There are SIX posters, not the four named in the plan. Grep the
+    # BOTSERVER_URL values in this file to enumerate them:
+    #   dean, dinersclub, message-worker, replybot  — shipped with the triple
+    #   linksniffer, exodus                         — NOT YET COMPLIANT
+    # See the production.yaml comment on this same variable for why linksniffer
+    # cannot comply without a change to how replybot builds webview URLs.
+    - name: SYNTHETIC_REQUIRE_CONVERSATION
+      value: "false"
 
   resources:
     requests:
@@ -743,7 +778,46 @@ message-worker:
   - name: KAFKA_COMMAND_TOPIC
     value: *commandstopic
   - name: KAFKA_EVENT_TOPIC
+    # NOT merely an output topic. message-worker PRODUCES DIRECTLY to the chat
+    # topic, bypassing hermes: its WhatsApp send echo — the event that advances
+    # RESPONDING -> QOUT on a platform with no native echo webhook — is written
+    # here by message-worker/kafka.go. So `chat-events` has more than one
+    # producer, and message-worker stamps the account_id/platform envelope
+    # itself. See message-worker/README.md and documentation/event-envelope.md.
     value: *topic
+  - name: STRICT_EVENT_ENVELOPE
+    # The producer-side envelope gate, and the counterpart to
+    # SYNTHETIC_REQUIRE_CONVERSATION above: that one guards events entering the
+    # topic through hermes, this one guards events message-worker writes to it
+    # directly.
+    #
+    #   "false"       -> log CHAT_EVENTS_ENVELOPE_MISSING at Error, publish anyway
+    #   "true" (here) -> refuse to publish an event lacking account_id/platform
+    #
+    # STAGING IS WHERE THIS GETS TURNED ON FIRST, and this is the right place for
+    # it: refusing drops the WhatsApp send echo, and on WhatsApp that echo is the
+    # only thing that advances the conversation — so a stall here is a test
+    # failure, while the same stall in production is a participant left hanging
+    # mid-survey.
+    #
+    # NOT YET APPLIED as of this commit. Committing the value is half the change;
+    # it takes effect on
+    #   helm upgrade gbv vlab -f devops/values/staging.yaml -n vstag
+    #   kubectl rollout restart deployment/gbv-message-worker -n vstag
+    #
+    # Turned on deliberately for the account_id migration: a silent envelope
+    # omission that merely logs is one nobody chases, and the whole point of the
+    # migration window is to surface producer bugs immediately, while there is
+    # someone watching. A stalled staging survey is exactly the loud failure we
+    # want.
+    #
+    # PRODUCTION STAYS "false" until CHAT_EVENTS_ENVELOPE_MISSING reads zero here
+    # for 24h. Then flip production.yaml — as its own reviewed diff.
+    #
+    # Declared explicitly rather than left to config.go's default so turning it
+    # on is a reviewable committed diff plus a rollout restart — never a
+    # `kubectl set env` against live state.
+    value: "true"
   - name: KAFKA_GROUP_ID
     # Env-scoped: the Kafka cluster is shared with production. Mirrors the
     # vlab-<env>-* topic convention. See documentation/kafka-consumer-lag-alerting.md
@@ -870,17 +944,54 @@ cockroachdb:
     resources:
       requests:
         cpu: 100m
-        memory: 500Mi
+        # cache + max-sql-memory + Go runtime + Pebble overhead must fit in here.
+        # It previously did NOT: cache 250MiB + max-sql-memory 250MiB was exactly
+        # the 500Mi request, leaving nothing for anything else.
+        memory: 2Gi
+      limits:
+        memory: 3Gi
     budget:
       maxUnavailable: 0
   conf:
-    cache: 250MiB
-    max-sql-memory: 250MiB
+    cache: 256MiB
+    # RAISED 2026-08-22, from 250MiB.
+    #
+    # NOT because it fixed migration 26 -- it did not. That failure was
+    # `bulkio.index_backfill.batch_size` (50000 rows x 35 KB of `content`) and
+    # recurred unchanged at 1GiB, the allocation growing to fill whatever pool it
+    # was given. See 26-messages-account.sql. This comment previously claimed
+    # otherwise and was wrong.
+    #
+    # Raised because the old configuration was incoherent on its own terms:
+    # cache 250MiB + max-sql-memory 250MiB was EXACTLY the 500Mi request, leaving
+    # nothing for the Go runtime or Pebble. That is an OOMKill waiting for load,
+    # independent of any migration. Production runs 3000Mi (production.yaml);
+    # staging was the outlier.
+    max-sql-memory: 1GiB
     max-disk-temp-storage: 4GiB
   tls:
     enabled: no
   storage:
     persistentVolume:
+      # PENDING RESIZE TO 20Gi -- deliberately still 5Gi here. See
+      # devops/resize-statefulset-pvc.sh.
+      #
+      # This number and the live StatefulSet must change TOGETHER. A StatefulSet's
+      # volumeClaimTemplates are immutable, so raising it here on its own makes every
+      # `helm upgrade` of this release fail hard, for every service in it:
+      #   The StatefulSet "gbv-cockroachdb" is invalid: spec: Forbidden: updates to
+      #   statefulset spec for fields other than 'replicas', 'ordinals', 'template', ...
+      # (verified with `kubectl apply --dry-run=server`, 2026-08-23). So the bump to
+      # 20Gi belongs in the SAME change as the resize run, never ahead of it.
+      #
+      # WHY 20Gi IS WANTED. 5Gi is 87% full (4.2G used, 688M free on 2026-08-23) and
+      # could not absorb the conversation-identity backfill: `messages` has no column
+      # families, so writing account_id rewrites the whole row -- `content` included --
+      # into every index, and that MVCC churn is held for gc.ttlseconds. Making room
+      # meant dropping both surviving index canaries, i.e. a schema decision forced by
+      # disk. 20Gi is sized for the operation needing the most room -- rebuilding a
+      # content-storing index needs a full second copy of the table (~22.1 GB logical /
+      # ~4.2 GB physical), and that rebuild is now the only rollback path.
       size: 5Gi
       storageClass: "pd-ssd"
 

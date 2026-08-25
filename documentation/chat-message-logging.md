@@ -11,12 +11,13 @@ The chat log feature provides conversation replay for debugging and transparency
 
 ### Schema
 
-Defined in `devops/migrations/08-chat-log.sql`.
+Defined in `devops/migrations/08-chat-log.sql`, with the row key corrected by
+`devops/migrations/27-chat-log-account-scoped-key.sql`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS chatroach.chat_log (
     userid        VARCHAR NOT NULL,
-    pageid        VARCHAR,
+    pageid        VARCHAR NOT NULL,       -- messaging account; '' = account unknown, no default
     timestamp     TIMESTAMPTZ NOT NULL,
     direction     VARCHAR NOT NULL,       -- 'bot' or 'user'
     content       VARCHAR NOT NULL,       -- message text
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS chatroach.chat_log (
     message_type  VARCHAR,                -- 'echo', 'text', 'quick_reply', 'postback', or type from metadata
     raw_payload   JSONB,                  -- full Facebook event JSON
     metadata      JSONB,                  -- state machine metadata at time of message
-    PRIMARY KEY (userid, timestamp, direction)
+    PRIMARY KEY (userid, timestamp, direction, pageid)
 );
 ```
 
@@ -34,6 +35,21 @@ Indexes:
 - `(userid, timestamp ASC) STORING (content, question_ref)` -- per-user conversation replay
 - `(shortcode, userid, timestamp ASC)` -- per-survey filtering
 - `INVERTED INDEX (metadata)` -- JSONB queries on metadata
+
+**The key is the conversation, not the participant.** A conversation is
+`(platform, account_id, user_id)`; here the account is the legacy column name
+`pageid`. Migration 27 appended it to the primary key, because the original key
+made a participant's messages on a *second* messaging account collide with their
+messages on the first — and at second granularity that is a wide window. A
+collision on this table is not an error, it is an `ON CONFLICT ... DO NOTHING`, so
+the second researcher's message was silently discarded rather than reported.
+
+`pageid` is appended rather than inserted mid-key so `(userid, timestamp)` stays an
+exact key prefix and the per-user replay path keeps its locality. It is `NOT NULL`
+because CockroachDB refuses a nullable column in a primary key, and because an
+identity component has no null. Replybot omitted the account on roughly 0.9% of
+entries (14,834 rows), and those are stored under the `''` sentinel rather than
+dropped.
 
 ### What gets captured
 
@@ -43,6 +59,51 @@ Only **visible conversation messages** -- not synthetic events, watermarks, refe
 - **User messages** (`direction = 'user'`): Captured from TEXT, QUICK_REPLY, and POSTBACK events. Content is the user's text or the postback title.
 
 ## Capture Pipeline
+
+> **BROKEN IN PRODUCTION SINCE 2026-07-27.** The producer described below,
+> `replybot/lib/chat-log/publisher.js`, was deleted in `675c31bd` (2026-07-17,
+> "Phase 2: Refactor machine.js, transition.js, and core typewheels for
+> UniversalEvent") — collateral damage in that refactor, not a decision. The
+> deletion reached production with the `-wa` line around `replybot-v0.0.211-wa`
+> (2026-07-26) and the last `chat_log` row landed the next day. Production runs
+> `v0.0.218` today, which still contains the deletion, so **nothing writes
+> `chat_log`**.
+>
+> Everything downstream is still wired up and still shipped: the dashboard offers
+> "Create Chat Log Export", the exporter serves it, and the `chat_log` scribble
+> sink runs with an empty topic. Exports therefore succeed and silently return
+> data that stops on 2026-07-27.
+>
+> The table was at its highest volume ever when writes stopped — 606,187 rows in
+> July 2026, and still accelerating (Feb 70,234 · Mar 22,169 · Apr 67,593 · May
+> 224,655 · Jun 488,886 · Jul 606,187 · Aug 0) — against 1,479,724 rows total.
+>
+> ### Restoring the producer is BLOCKED on the account-scoping work
+>
+> **Do not restore `replybot/lib/chat-log/publisher.js` until migration 27 *and*
+> the matching scribble build are both deployed. Deploying the producer against
+> the old scribble build crash-loops the chat-log sink.**
+>
+> Why that is a block and not a warning: either half alone fails *every* write. The
+> migration without the build raises `42P10` on the old three-column `ON CONFLICT`
+> target; the build without the migration raises `42P10` on the new four-column
+> one. Scribble treats any write error as fatal (`scribble.go` `checkError` →
+> `log.Fatalf`), so the sink crash-loops rather than degrading. A dormant topic
+> **hides the mismatch entirely** until the first message arrives — which is the
+> moment the producer returns. The restoration is what detonates it, so the
+> restoration is what has to be gated.
+>
+> Sequencing, decided 2026-08-17: apply migrations 27 and 28, then deploy scribble
+> **once** — one build changes both `chatlog.go` and `response.go`, so a deploy
+> needs both migrations. The dormancy window does not expire on its own; it closes
+> when the producer returns, and that is under our control, so this work lands
+> first rather than racing it.
+>
+> The fix must also **publish the messaging account on every entry.** The deleted
+> producer omitted it on ~0.9% of writes (395 of the last 43,824 rows; 14,834 in
+> total), and `pageid` is part of the primary key now. Scribble coerces a missing
+> account to the `''` sentinel so it cannot become a fatal batch error, but that is
+> a backstop, not a licence to keep omitting it.
 
 ```
 Replybot (after processing each event)
@@ -58,7 +119,7 @@ Replybot (after processing each event)
     Scribble (chat_log sink)
             |
             v
-    INSERT INTO chat_log ... ON CONFLICT(userid, timestamp, direction) DO NOTHING
+    INSERT INTO chat_log ... ON CONFLICT(userid, pageid, timestamp, direction) DO NOTHING
 ```
 
 **Replybot** (`replybot/lib/chat-log/publisher.js`):
@@ -69,7 +130,12 @@ Replybot (after processing each event)
 **Scribble** (`scribble/chatlog.go`):
 - `ChatLogScribbler` implements the `Scribbler` interface.
 - Deserializes `ChatLogEntry` from Kafka JSON, writes batches to the `chat_log` table.
-- Uses `INSERT ... ON CONFLICT(userid, timestamp, direction) DO NOTHING` for idempotency.
+- Uses `INSERT ... ON CONFLICT(userid, pageid, timestamp, direction) DO NOTHING` for
+  idempotency. The conflict target must match the primary key exactly, so this
+  requires migration 27; against the old schema every write raises `42P10`, and
+  scribble treats a write error as fatal.
+- `GetRow` maps a nil `pageid` to `''` (`accountOrUnknown`), since the column is
+  `NOT NULL`. See `scribble/README.md`.
 - Runs as a separate scribble deployment with its own consumer group (`scribble-chat-log`).
 
 **Production config** (`devops/values/production.yaml`):

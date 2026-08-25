@@ -69,31 +69,74 @@ func insertSurvey(t *testing.T, pool *pgxpool.Pool, shortcode string) uuid.UUID 
 	return surveyID
 }
 
-// insertState creates a state row for a participant with the given shortcode as current_form.
-// userid is a plain string (VARCHAR in states table, not FK-constrained).
-func insertState(t *testing.T, pool *pgxpool.Pool, userid, shortcode string) {
+// defaultPageid is the messaging account used by tests that do not care about
+// account scoping. A conversation is keyed (platform, account, user); pageid is
+// the legacy column name for the account. Tests that only exercise boolean
+// condition logic keep state and responses on this single account so they stay
+// account-consistent.
+func defaultPageid(userid string) string { return userid + "-page" }
+
+// insertStateOn creates a state row for a participant's conversation on a specific
+// messaging account (pageid), with the given shortcode as current_form.
+// userid and pageid are plain strings (VARCHAR in states table, not FK-constrained).
+func insertStateOn(t *testing.T, pool *pgxpool.Pool, userid, pageid, shortcode string) {
 	t.Helper()
 	stateJSON := `{"forms": ["` + shortcode + `"]}`
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO chatroach.states (userid, pageid, updated, current_state, state_json)
 		VALUES ($1, $2, now(), 'RESPONDING', $3)
-	`, userid, userid+"-page", stateJSON)
+	`, userid, pageid, stateJSON)
 	if err != nil {
-		t.Fatalf("insertState: %v", err)
+		t.Fatalf("insertStateOn: %v", err)
 	}
 }
 
-// insertResponse creates a response row for a participant.
-func insertResponse(t *testing.T, pool *pgxpool.Pool, surveyID uuid.UUID, userid, shortcode, questionRef, response string) {
+// insertStateOnWithPlatform creates a state row whose state_json carries
+// md.platform, which is what the states.platform computed column reads. Rows
+// written by insertStateOn deliberately omit it, reproducing the 97.8% of
+// production rows that predate md.platform persistence and compute to NULL.
+func insertStateOnWithPlatform(t *testing.T, pool *pgxpool.Pool, userid, pageid, shortcode, platform string) {
+	t.Helper()
+	stateJSON := `{"forms": ["` + shortcode + `"], "md": {"platform": "` + platform + `"}}`
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO chatroach.states (userid, pageid, updated, current_state, state_json)
+		VALUES ($1, $2, now(), 'RESPONDING', $3)
+	`, userid, pageid, stateJSON)
+	if err != nil {
+		t.Fatalf("insertStateOnWithPlatform: %v", err)
+	}
+}
+
+// insertState creates a state row on the participant's default account.
+func insertState(t *testing.T, pool *pgxpool.Pool, userid, shortcode string) {
+	t.Helper()
+	insertStateOn(t, pool, userid, defaultPageid(userid), shortcode)
+}
+
+// insertResponseFull creates a response row attributed to a specific messaging
+// account (pageid) at a specific timestamp.
+func insertResponseFull(t *testing.T, pool *pgxpool.Pool, surveyID uuid.UUID, userid, pageid, shortcode, questionRef, response string, ts time.Time) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO chatroach.responses
-			(surveyid, parent_shortcode, shortcode, flowid, userid, question_ref, question_idx, question_text, response, seed, timestamp)
-		VALUES ($1, $2, $3, 0, $4, $5, 0, $6, $7, 0, $8)
-	`, surveyID, shortcode, shortcode, userid, questionRef, questionRef, response, time.Now())
+			(surveyid, parent_shortcode, shortcode, flowid, userid, pageid, question_ref, question_idx, question_text, response, seed, timestamp)
+		VALUES ($1, $2, $3, 0, $4, $5, $6, 0, $7, $8, 0, $9)
+	`, surveyID, shortcode, shortcode, userid, pageid, questionRef, questionRef, response, ts)
 	if err != nil {
-		t.Fatalf("insertResponse: %v", err)
+		t.Fatalf("insertResponseFull: %v", err)
 	}
+}
+
+// insertResponseOn creates a response row attributed to a specific messaging account.
+func insertResponseOn(t *testing.T, pool *pgxpool.Pool, surveyID uuid.UUID, userid, pageid, shortcode, questionRef, response string) {
+	t.Helper()
+	insertResponseFull(t, pool, surveyID, userid, pageid, shortcode, questionRef, response, time.Now())
+}
+
+// insertResponse creates a response row on the participant's default account.
+func insertResponse(t *testing.T, pool *pgxpool.Pool, surveyID uuid.UUID, userid, shortcode, questionRef, response string) {
+	t.Helper()
+	insertResponseFull(t, pool, surveyID, userid, defaultPageid(userid), shortcode, questionRef, response, time.Now())
 }
 
 // runQuery executes the generated SQL and returns the matched userids.
@@ -107,8 +150,8 @@ func runQuery(t *testing.T, pool *pgxpool.Pool, sql string, params []interface{}
 
 	var userids []string
 	for rows.Next() {
-		var userid, pageid string
-		if err := rows.Scan(&userid, &pageid); err != nil {
+		var userid, pageid, platform string
+		if err := rows.Scan(&userid, &pageid, &platform); err != nil {
 			t.Fatalf("runQuery scan: %v", err)
 		}
 		userids = append(userids, userid)
@@ -117,6 +160,59 @@ func runQuery(t *testing.T, pool *pgxpool.Pool, sql string, params []interface{}
 		t.Fatalf("runQuery rows: %v", err)
 	}
 	return userids
+}
+
+// conversation is the identity of a single conversation: (platform, account, user),
+// where the account is the legacy column name pageid. Bail targeting returns
+// conversations, not users, so account-scoping assertions must inspect all three.
+type conversation struct {
+	userid   string
+	pageid   string
+	platform string
+}
+
+// runQueryConversations executes the generated SQL and returns the matched
+// conversations.
+func runQueryConversations(t *testing.T, pool *pgxpool.Pool, sql string, params []interface{}) []conversation {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), sql, params...)
+	if err != nil {
+		t.Fatalf("runQueryConversations: %v\nSQL:\n%s\nParams: %v", err, sql, params)
+	}
+	defer rows.Close()
+
+	var out []conversation
+	for rows.Next() {
+		var c conversation
+		if err := rows.Scan(&c.userid, &c.pageid, &c.platform); err != nil {
+			t.Fatalf("runQueryConversations scan: %v", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("runQueryConversations rows: %v", err)
+	}
+	return out
+}
+
+// platformOf returns the platform the query attributed to a conversation, or ""
+// if the conversation did not match at all.
+func platformOf(cs []conversation, userid, pageid string) string {
+	for _, c := range cs {
+		if c.userid == userid && c.pageid == pageid {
+			return c.platform
+		}
+	}
+	return ""
+}
+
+func containsConversation(cs []conversation, userid, pageid string) bool {
+	for _, c := range cs {
+		if c.userid == userid && c.pageid == pageid {
+			return true
+		}
+	}
+	return false
 }
 
 func containsUserid(userids []string, target string) bool {
@@ -256,6 +352,157 @@ func TestIntegration_NOT_QuestionResponse(t *testing.T) {
 	}
 	if !containsUserid(matched, userB) {
 		t.Errorf("expected userB (response=2) to match NOT condition, got: %v", matched)
+	}
+}
+
+// TestIntegration_QuestionResponse_AccountScoped is the regression test for the
+// cross-account bail targeting leak.
+//
+// A conversation is the tuple (platform, account, user) — `pageid` is the legacy
+// column name for the account. The same participant id can hold two entirely
+// independent conversations on two different messaging accounts, and those accounts
+// may belong to two different researchers. Before the fix, the question_response CTE
+// aggregated `responses` across ALL accounts and joined to the account-scoped `states`
+// rows on `s.userid = qr.userid` alone, so an answer given on account A qualified the
+// participant for a bail evaluated against their conversation on account B.
+// A conversation is (platform, account, user), so a bail event must carry all
+// three. Conditions-based bails selected only (userid, pageid), leaving the
+// executor nothing to put on the event and posting an EMPTY platform -- while
+// user_list bails, whose platform comes from the caller's definition, carried
+// one. exodus was half-compliant with the event contract.
+//
+// Both cases below matter, and the second is the one a bare `s.platform` would
+// get wrong for 97.8% of production rows.
+func TestIntegration_ConditionsBail_CarriesPlatform(t *testing.T) {
+	pool := integrationPool(t)
+	defer pool.Close()
+	resetTablesForQuery(t, pool)
+
+	insertSurvey(t, pool, "platform-form")
+
+	const waUser, waPage = "user-on-whatsapp", "account-wa"
+	const legacyUser, legacyPage = "user-legacy", "account-legacy"
+
+	// A WhatsApp conversation: state_json carries md.platform.
+	insertStateOnWithPlatform(t, pool, waUser, waPage, "platform-form", "whatsapp")
+	// A legacy conversation predating md.platform persistence: computes to NULL.
+	insertStateOn(t, pool, legacyUser, legacyPage, "platform-form")
+
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"type": "form",
+			"value": "platform-form"
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery: %v", err)
+	}
+
+	matched := runQueryConversations(t, pool, sql, params)
+
+	if got := platformOf(matched, waUser, waPage); got != "whatsapp" {
+		t.Errorf("WhatsApp conversation must be bailed as platform 'whatsapp', got %q (matched: %v)", got, matched)
+	}
+
+	// NULL must not reach the executor: it type-asserts row["platform"] to string,
+	// so a nil would leave the platform empty AND log a warning per target.
+	if got := platformOf(matched, legacyUser, legacyPage); got != "messenger" {
+		t.Errorf("a state row with no md.platform must default to 'messenger', not %q -- "+
+			"NULL here means an empty platform on the bail event (matched: %v)", got, matched)
+	}
+}
+
+func TestIntegration_QuestionResponse_AccountScoped(t *testing.T) {
+	pool := integrationPool(t)
+	defer pool.Close()
+	resetTablesForQuery(t, pool)
+
+	surveyID := insertSurvey(t, pool, "shared-form")
+
+	const user = "user-cross-account"
+	const pageA, pageB = "account-A", "account-B"
+
+	// One participant id, two independent conversations on two accounts.
+	insertStateOn(t, pool, user, pageA, "shared-form")
+	insertStateOn(t, pool, user, pageB, "shared-form")
+
+	// The participant answered the question ONLY on account A.
+	insertResponseOn(t, pool, surveyID, user, pageA, "shared-form", "consent", "yes")
+
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"type": "question_response",
+			"form": "shared-form",
+			"question_ref": "consent",
+			"response": "yes"
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery: %v", err)
+	}
+
+	matched := runQueryConversations(t, pool, sql, params)
+
+	if !containsConversation(matched, user, pageA) {
+		t.Errorf("expected the account-A conversation (where the answer was given) to match, got: %v", matched)
+	}
+	if containsConversation(matched, user, pageB) {
+		t.Errorf("cross-account leak: the account-B conversation matched a bail on an answer given on account A, got: %v", matched)
+	}
+}
+
+// TestIntegration_ElapsedTime_AccountScoped is the same regression test for the
+// elapsed_time condition, whose response_times CTE had the identical defect.
+func TestIntegration_ElapsedTime_AccountScoped(t *testing.T) {
+	pool := integrationPool(t)
+	defer pool.Close()
+	resetTablesForQuery(t, pool)
+
+	surveyID := insertSurvey(t, pool, "elapsed-form")
+
+	const user = "user-elapsed-cross-account"
+	const pageA, pageB = "elapsed-account-A", "elapsed-account-B"
+
+	insertStateOn(t, pool, user, pageA, "elapsed-form")
+	insertStateOn(t, pool, user, pageB, "elapsed-form")
+
+	// The participant responded a week ago, ONLY on account A.
+	weekAgo := time.Now().Add(-7 * 24 * time.Hour)
+	insertResponseFull(t, pool, surveyID, user, pageA, "elapsed-form", "q1", "hello", weekAgo)
+
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"type": "elapsed_time",
+			"duration": "1 hour",
+			"since": {
+				"event": "response",
+				"details": {"question_ref": "q1", "form": "elapsed-form"}
+			}
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery: %v", err)
+	}
+
+	matched := runQueryConversations(t, pool, sql, params)
+
+	if !containsConversation(matched, user, pageA) {
+		t.Errorf("expected the account-A conversation (where the response happened) to match, got: %v", matched)
+	}
+	if containsConversation(matched, user, pageB) {
+		t.Errorf("cross-account leak: the account-B conversation matched an elapsed_time bail based on a response on account A, got: %v", matched)
 	}
 }
 

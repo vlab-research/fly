@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -32,6 +33,22 @@ func rowStrings(rows pgx.Rows) []*string {
 	return res
 }
 
+// colValues dereferences a getCol result so a whole column can be asserted as a
+// single slice. A length mismatch then reports as a readable diff instead of
+// panicking on an out-of-range index, which matters for the account-scoping
+// tests: their failure mode IS a missing row.
+func colValues(cols []*string) []string {
+	out := []string{}
+	for _, c := range cols {
+		if c == nil {
+			out = append(out, "<nil>")
+			continue
+		}
+		out = append(out, *c)
+	}
+	return out
+}
+
 func getCol(pool *pgxpool.Pool, table string, col string) []*string {
 	rows, err := pool.Query(context.Background(), fmt.Sprintf("select %v from %v", col, table))
 	if err != nil {
@@ -49,8 +66,20 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 	return
 }
 
+// testDSN is the CockroachDB the integration tests write against. It defaults
+// to the port `make -C devops test-db` publishes, and TEST_DATABASE_URL
+// overrides it -- the same escape hatch exodus/query's integration tests use,
+// so a second database can be stood up on a free port without a shared one
+// being torn down underneath another test run.
+func testDSN() string {
+	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
+		return dsn
+	}
+	return "postgres://root@localhost:5433/chatroach"
+}
+
 func testPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/chatroach")
+	config, err := pgxpool.ParseConfig(testDSN())
 	handle(err)
 
 	ctx := context.Background()

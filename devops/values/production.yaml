@@ -39,11 +39,56 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 # changes; swap each to a clean tag as it next changes.
 versionDashboard: &vdashboard v0.0.72
 versionBotserver: &vbotserver v0.0.12
-versionHermes: &vhermes v0.0.3-wa
-versionReplybot: &vreplybot v0.0.219
-versionLinksniffer: &vlinksniffer v0.0.6
+# v0.0.3-wa -> v0.0.5: carries 36808aa5 "feat(envelope): every event carries
+# platform and account_id" -- the PRODUCER side of the conversation-identity
+# rollout. Without it production gets the schema and the consumers but nothing
+# stamps the triple, so CONVERSATION_TUPLE_MISSING is non-zero by construction
+# and new rows keep landing with NULL account_id (which would make 1.5 a
+# backfill racing its own writer). v0.0.5 is a clean descendant of v0.0.3-wa,
+# so the WhatsApp work is retained -- and it drops the -wa suffix, as the note
+# above asks. vstag has run v0.0.5 since 2026-08-23 with all 5.3 gates at zero.
+versionHermes: &vhermes v0.0.5
+# ############################################################################
+# MUST be >= v0.0.221 -- this file no longer sets CHATBASE_BACKEND.
+#
+# v0.0.219 does `require(process.env.CHATBASE_BACKEND)` at
+# lib/spine-supervisor/spine-supervisor.js:14, i.e. on the CORE conversation
+# path. Commit b5a4b99d dropped that env var from this file for the new
+# replybot but left the version at v0.0.219, so applying that state would make
+# require(undefined) throw ERR_INVALID_ARG_TYPE and CRASH-LOOP replybot --
+# stopping conversations, not merely degrading them.
+#
+# v0.0.221 absorbs the client into lib/chatbase and requires it directly; it has
+# no runtime read of the env var. vstag has run v0.0.221 without CHATBASE_BACKEND
+# since the staging rollout. Caught before applying, 2026-08-25.
+#
+# If you ever need to roll replybot back below v0.0.221, you MUST restore
+# CHATBASE_BACKEND=@vlab-research/chatbase-postgres to replybot.env here.
+# ############################################################################
+versionReplybot: &vreplybot v0.0.221
+# Bumped v0.0.6 -> v0.0.9 together with the repository move below: ghcr holds
+# only v0.0.8/v0.0.9, so the registry change CANNOT ship without the version
+# change or the pull 404s. Behaviour change to announce: an *invalid*
+# vlab_platform now returns 400 instead of coercing to messenger. Absent is
+# still assumed messenger.
+versionLinksniffer: &vlinksniffer v0.0.9
 versionDean: &vdean v0.0.45
-versionScribble: &vscribble v0.0.32
+# ############################################################################
+# DO NOT APPLY THIS VALUE BEFORE MIGRATION 28a HAS COMPLETED.
+#
+# v0.0.33 is where scribble/response.go switched to the 4-column
+#   ON CONFLICT (userid, pageid, timestamp, question_ref)
+# and v0.0.34 carries it too. Against production's CURRENT 3-column responses
+# primary key that raises 42P10, and scribble.go treats any write error as
+# log.Fatalf -- so applying this early crash-loops gbv-scribble-responses.
+#
+# Correct order: 28a -> apply this -> verify -> 28b.
+# See devops/migrations/28a-responses-account-scoped-key.sql.
+#
+# Bumped v0.0.32 -> v0.0.34 together with the repository move below; ghcr holds
+# only v0.0.34, so the registry change cannot ship without the version change.
+# ############################################################################
+versionScribble: &vscribble v0.0.34
 # v0.0.46 is the first image that reads DINERSCLUB_PROVIDER_TIMEOUT and exposes
 # /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
 # timeout work -- so the image and the env block below move together, never
@@ -58,7 +103,10 @@ versionDinersclub: &vdinersclub v0.0.46
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.10
 versionExodus: &vexodus v0.2.3
-versionMessageWorker: &vmessageworker v0.1.19
+# v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
+# 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
+# since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
+versionMessageWorker: &vmessageworker v0.1.21
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
@@ -328,7 +376,8 @@ dean:
 
 scribble:
   image:
-    repository: vlabresearch/scribble
+    # docker.io -> ghcr: CI does not publish to vlabresearch/*. See versionScribble.
+    repository: ghcr.io/vlab-research/scribble
     tag: *vscribble
     pullPolicy: IfNotPresent
   resources:
@@ -444,7 +493,8 @@ linksniffer:
   replicaCount: 2
 
   image:
-    repository: vlabresearch/linksniffer
+    # docker.io -> ghcr: CI does not publish to vlabresearch/*. See versionLinksniffer.
+    repository: ghcr.io/vlab-research/linksniffer
     tag: *vlinksniffer
     pullPolicy: IfNotPresent
 
@@ -633,8 +683,6 @@ replybot:
   env:
   - name: FAKE
     value: "NOTHING"
-  - name: CHATBASE_BACKEND
-    value: "@vlab-research/chatbase-postgres"
   - name: CHATBASE_DATABASE
     value: "chatroach"
   - name: CHATBASE_USER
@@ -671,6 +719,28 @@ replybot:
     value: "https://graph.facebook.com/v25.0"
   - name: FORMCENTRAL_URL
     value: "http://gbv-formcentral"
+  # The `link_tracking` and `moviehouse` field types: replybot builds those URLs
+  # end to end, so it needs the participant-facing address of each service.
+  # Unlike BOTSERVER_URL / FORMCENTRAL_URL these are NOT cluster-internal names —
+  # the URL goes into a Messenger button or a WhatsApp cta_url and is opened by a
+  # phone on the public internet.
+  #
+  # LINKSNIFFER_URL must match `linksniffer.ingress.hosts[0].host` below. That is
+  # the only linksniffer hostname this cluster actually terminates TLS for: the
+  # legacy `gbvlinks.nandan.cloud` resolves to the same ingress IP but no Ingress
+  # claims it, so nginx answers with the ingress controller's self-signed
+  # "Kubernetes Ingress Controller Fake Certificate" and the link fails in the
+  # participant's browser. 193 stored fields still point at it. Do not use it.
+  - name: LINKSNIFFER_URL
+    value: "https://links.vlab.digital"
+  # moviehouse deploys from NETLIFY, not this cluster (site `virtuallab-videos`,
+  # branch `main` -> production), so there is no ingress here to read it off and
+  # no chart value that governs it — this is the only place its production address
+  # is declared. Note the apex: Netlify retired the pre-2020 `.netlify.com` form of
+  # this hostname and now returns 404 for it rather than redirecting, so only
+  # `.netlify.app` is a working address.
+  - name: MOVIEHOUSE_URL
+    value: "https://virtuallab-videos.netlify.app"
   - name: STATE_STORE_LIMIT
     value: "30000"
   - name: NUM_SPINES
@@ -788,6 +858,42 @@ hermes:
     # WHATSAPP_VERIFY_TOKEN comes from the gbv-bot-envs secret via envFrom.
     # It is NOT yet present in the vprod secret — GET /whatsapp verification
     # returns 401 until it is added. Messenger ingest is unaffected.
+    #
+    # THE 400 GATE for the /synthetic conversation triple (user, account_id,
+    # platform) — see documentation/event-envelope.md and
+    # planning/conversation-identity.md §7.3.1.
+    #
+    # "false": hermes accepts a synthetic POST that is missing account_id or
+    # platform, stamps whatever it can derive, and logs the gap. "true": it
+    # returns 400 and produces nothing.
+    #
+    # This MUST stay "false" until every synthetic poster is deployed with the
+    # triple AND the canary has read zero missing components for 24h. Flipping
+    # it early 400s in-flight posters mid-rollout — message-worker posts a
+    # machine_report on every send failure and replybot on every report, so the
+    # blast radius is the whole error-reporting path, not an edge case.
+    #
+    # There are SIX posters, not the four named in the plan. Grep the
+    # BOTSERVER_URL values in this file to enumerate them:
+    #   dean, dinersclub, message-worker, replybot  — shipped with the triple
+    #   linksniffer, exodus                         — NOT YET COMPLIANT
+    #
+    # linksniffer (linksniffer/eventer.go) cannot currently comply at all: its
+    # `id` and `pageid` come from researcher-authored query params in each
+    # survey's webview `url` object (documentation/questions.md "Links"), and
+    # there is no platform param and no place to put one without threading the
+    # conversation into replybot's translateWebview/makeUrl. exodus
+    # (exodus/sender/sender.go) can comply — `states.platform` exists — but its
+    # UserTarget carries no Platform field yet.
+    #
+    # Flipping this to "true" before both are fixed silently kills every tracked
+    # link click (linksniffer:click waits stop resolving) and every bail.
+    #
+    # It is declared here explicitly, rather than left to hermes' default, so
+    # step 4 of the rollout is a one-line edit to this file plus a rollout
+    # restart — never a `kubectl set env` against live state.
+    - name: SYNTHETIC_REQUIRE_CONVERSATION
+      value: "false"
 
   resources:
     requests:
@@ -910,7 +1016,37 @@ message-worker:
   - name: KAFKA_COMMAND_TOPIC
     value: *commandstopic
   - name: KAFKA_EVENT_TOPIC
+    # NOT merely an output topic. message-worker PRODUCES DIRECTLY to the chat
+    # topic, bypassing hermes: its WhatsApp send echo — the event that advances
+    # RESPONDING -> QOUT on a platform with no native echo webhook — is written
+    # here by message-worker/kafka.go. So `chat-events` has more than one
+    # producer, and message-worker stamps the account_id/platform envelope
+    # itself. See message-worker/README.md and documentation/event-envelope.md.
     value: *topic
+  - name: STRICT_EVENT_ENVELOPE
+    # The producer-side envelope gate, and the counterpart to
+    # SYNTHETIC_REQUIRE_CONVERSATION above: that one guards events entering the
+    # topic through hermes, this one guards events message-worker writes to it
+    # directly.
+    #
+    #   "false" (here) -> log CHAT_EVENTS_ENVELOPE_MISSING at Error, publish anyway
+    #   "true"         -> refuse to publish an event lacking account_id/platform
+    #
+    # MUST STAY "false" IN PRODUCTION FOR NOW. Refusing cannot break message
+    # delivery — the message is sent before the echo is emitted, and the echo's
+    # error is already logged and swallowed — but it DOES drop the echo, and on
+    # WhatsApp the echo is the only thing that advances the conversation. So
+    # "true" converts a producer bug into a full stall of every WhatsApp survey,
+    # whereas "false" degrades replybot to an unscoped replay, which still
+    # advances the conversation. Degraded-but-moving beats stopped.
+    #
+    # Rollout: flip it in staging.yaml first, confirm
+    # CHAT_EVENTS_ENVELOPE_MISSING reads zero for 24h, then flip it here.
+    #
+    # Declared explicitly rather than left to config.go's default so turning it
+    # on is a reviewable committed diff plus a rollout restart — never a
+    # `kubectl set env` against live state.
+    value: "false"
   - name: KAFKA_GROUP_ID
     # Env-scoped: the Kafka cluster is shared with staging. Mirrors the
     # vlab-<env>-* topic convention. See documentation/kafka-consumer-lag-alerting.md

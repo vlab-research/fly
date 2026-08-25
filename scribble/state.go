@@ -34,14 +34,34 @@ func NewStateScribbler(pool *pgxpool.Pool) Scribbler {
 	return &StateScribbler{pool}
 }
 
+// conversationKey identifies the conversation a row belongs to. A conversation
+// is (platform, account_id, user_id) -- never a user id on its own. The same
+// participant can hold a live conversation on every messaging account we run,
+// and on WhatsApp they always do, because wa_id is their phone number and is
+// identical across every business number they message.
+//
+// `states` already keys on the conversation: PRIMARY KEY (userid, pageid), with
+// platform as a computed column (migration 21). This mirrors that key.
+type conversationKey struct {
+	UserID string
+	PageID string
+}
+
+// DedupStates keeps the last state per conversation in a batch. It exists
+// because UPSERT cannot affect the same row twice in one statement, so its key
+// has to match the table's key exactly.
+//
+// Keyed on UserID alone this did not merely mis-scope: a batch carrying state
+// for one participant on two accounts silently kept ONE and dropped the other
+// before it ever reached the database.
 func DedupStates(data []Writeable) []Writeable {
-	dataMap := map[string]*State{}
+	dataMap := map[conversationKey]*State{}
 	for _, d := range data {
 		state, ok := d.(*State)
 		if !ok {
 			panic("Cannot decode state Writeable as State!")
 		}
-		dataMap[state.UserID] = state
+		dataMap[conversationKey{state.UserID, state.PageID}] = state
 	}
 
 	data = []Writeable{}

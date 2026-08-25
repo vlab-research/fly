@@ -302,7 +302,7 @@ func TestBuildQuery_ElapsedTimeCondition(t *testing.T) {
 	if !strings.Contains(sql, "WITH response_times_0 AS") {
 		t.Error("SQL missing CTE for response times")
 	}
-	if !strings.Contains(sql, "SELECT userid, MIN(timestamp) as response_time") {
+	if !strings.Contains(sql, "SELECT userid, pageid, MIN(timestamp) as response_time") {
 		t.Error("CTE missing correct SELECT")
 	}
 	if !strings.Contains(sql, "FROM responses") {
@@ -494,14 +494,14 @@ func TestValidateDuration(t *testing.T) {
 		{"5 months", true},
 		{"1 year", true},
 		{"10 milliseconds", true},
-		{"4weeks", false},        // missing space
-		{"four weeks", false},    // not a number
-		{"4 invalid", false},     // invalid unit
-		{"", false},              // empty
-		{"4", false},             // no unit
-		{"weeks", false},         // no number
-		{"-4 weeks", false},      // negative
-		{"4.5 weeks", false},     // decimal not supported by simple regex
+		{"4weeks", false},     // missing space
+		{"four weeks", false}, // not a number
+		{"4 invalid", false},  // invalid unit
+		{"", false},           // empty
+		{"4", false},          // no unit
+		{"weeks", false},      // no number
+		{"-4 weeks", false},   // negative
+		{"4.5 weeks", false},  // decimal not supported by simple regex
 	}
 
 	for _, tt := range tests {
@@ -756,6 +756,125 @@ func TestBuildQuery_ORQuestionResponseConditions(t *testing.T) {
 	}
 	if params[5] != "3" {
 		t.Errorf("Expected params[5]='3', got %v", params[5])
+	}
+}
+
+// TestBuildQuery_QuestionResponseIsAccountScoped asserts the question_response CTE
+// carries pageid and is joined to states on the full conversation identity.
+// A conversation is (platform, account, user); pageid is the account column. Joining
+// on userid alone lets an answer given on one messaging account qualify a participant
+// for a bail targeted at a different account — a correctness bug and a cross-researcher
+// data leak.
+func TestBuildQuery_QuestionResponseIsAccountScoped(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "question_response", "form": "myform", "question_ref": "q1", "response": "yes"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, _, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	if !strings.Contains(sql, "SELECT DISTINCT userid, pageid") {
+		t.Errorf("CTE must project pageid so responses stay account-scoped, got: %s", sql)
+	}
+	if !strings.Contains(sql, "LEFT JOIN question_responses_0 qr0 ON s.userid = qr0.userid AND s.pageid = qr0.pageid") {
+		t.Errorf("CTE must join states on (userid, pageid), got: %s", sql)
+	}
+}
+
+// The bail event must carry the whole conversation identity: (platform, account,
+// user). Conditions-based bails selected only (userid, pageid) and so posted an
+// empty platform, while user_list bails carried one from the caller's definition.
+func TestBuildQuery_SelectsPlatformAliasedForTheExecutor(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "form", "value": "myform"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, _, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	// COALESCE, not a bare column: states.platform is NULL for every row predating
+	// md.platform persistence (97.8% of production rows), and executor.go
+	// type-asserts the value to string, so a NULL yields an empty platform plus a
+	// warning log per target. 'messenger' is exact for those rows -- migration 21's
+	// documented consumer contract.
+	if !strings.Contains(sql, "COALESCE(s.platform, 'messenger')") {
+		t.Errorf("platform must be COALESCEd to 'messenger'; a bare s.platform is NULL for "+
+			"pre-md.platform rows and reaches the executor as an empty platform, got: %s", sql)
+	}
+
+	// The alias is load-bearing, not cosmetic: executor.go reads row["platform"].
+	// Unaliased, the value lands under the key "coalesce", the lookup misses, and
+	// the platform silently stays empty -- the fix would ship and do nothing.
+	if !strings.Contains(sql, "AS platform") {
+		t.Errorf("the platform expression must be aliased AS platform, or executor.go's "+
+			"row[\"platform\"] lookup misses and the fix is a silent no-op, got: %s", sql)
+	}
+}
+
+// TestBuildQuery_ElapsedTimeIsAccountScoped asserts the elapsed_time CTE aggregates
+// response times per (userid, pageid) and joins on the full conversation identity.
+func TestBuildQuery_ElapsedTimeIsAccountScoped(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"type": "elapsed_time",
+			"duration": "4 weeks",
+			"since": {"event": "response", "details": {"question_ref": "q1", "form": "myform"}}
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, _, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	if !strings.Contains(sql, "SELECT userid, pageid, MIN(timestamp) as response_time") {
+		t.Errorf("CTE must project pageid so response times are aggregated per account, got: %s", sql)
+	}
+	if !strings.Contains(sql, "GROUP BY userid, pageid") {
+		t.Errorf("CTE must group by (userid, pageid), not userid alone, got: %s", sql)
+	}
+	if !strings.Contains(sql, "LEFT JOIN response_times_0 rt0 ON s.userid = rt0.userid AND s.pageid = rt0.pageid") {
+		t.Errorf("CTE must join states on (userid, pageid), got: %s", sql)
+	}
+}
+
+// TestBuildQuery_MultipleCTEsAllAccountScoped guards the aliasing: every CTE join,
+// not just the first, must carry the pageid predicate.
+func TestBuildQuery_MultipleCTEsAllAccountScoped(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"op": "or",
+			"vars": [
+				{"type": "question_response", "form": "myform", "question_ref": "hpv_girl", "response": "2"},
+				{"type": "question_response", "form": "myform", "question_ref": "hpv_girl", "response": "3"}
+			]
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, _, err := BuildQuery(def)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	for _, want := range []string{
+		"LEFT JOIN question_responses_0 qr0 ON s.userid = qr0.userid AND s.pageid = qr0.pageid",
+		"LEFT JOIN question_responses_1 qr1 ON s.userid = qr1.userid AND s.pageid = qr1.pageid",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("SQL missing account-scoped join %q, got: %s", want, sql)
+		}
 	}
 }
 

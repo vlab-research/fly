@@ -112,6 +112,7 @@ func (a *Action) Validate() error {
 type UserListEntry struct {
 	UserID    string `json:"userid"`
 	PageID    string `json:"pageid"`
+	Platform  string `json:"platform"` // messaging platform ('messenger' | 'whatsapp')
 	Shortcode string `json:"shortcode"` // per-user destination form
 }
 

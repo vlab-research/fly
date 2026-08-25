@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{Query, Request, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -13,7 +13,10 @@ use std::sync::Arc;
 use tracing::{error, warn};
 
 use crate::config::Config;
-use crate::event::{stamp_event, stamp_whatsapp_event};
+use crate::event::{
+    messenger_account_id, stamp_event, stamp_whatsapp_event, synthetic_account_id,
+    synthetic_platform, synthetic_user, validate_synthetic_request,
+};
 use crate::producer::EventProducer;
 use crate::signature::verify_sha256;
 use crate::templates::handle_template_status_update;
@@ -171,6 +174,11 @@ async fn process_whatsapp_entry(state: &AppState, entry: &Value) -> Result<(), S
             warn!("[DROP] whatsapp change with no messages/statuses: {}", change);
         }
 
+        // Log when phone_number_id is empty (no account_id derivable)
+        if phone_number_id.is_empty() {
+            warn!("[NO_CONVERSATION_WHATSAPP] empty phone_number_id in change: {}", change);
+        }
+
         for key in &["messages", "statuses"] {
             if let Some(items) = value.get(key).and_then(|m| m.as_array()) {
                 for item in items {
@@ -197,6 +205,17 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     }
+}
+
+/// Extracts the poster identity from request headers for error attribution.
+/// Tries X-Vlab-Poster first, falls back to User-Agent, then "unknown".
+fn get_poster_identity(headers: &HeaderMap) -> String {
+    headers
+        .get("x-vlab-poster")
+        .and_then(|h| h.to_str().ok())
+        .or_else(|| headers.get("user-agent").and_then(|h| h.to_str().ok()))
+        .unwrap_or("unknown")
+        .to_string()
 }
 
 /// Mirrors handleMessengerEvents. Processes entry.messaging[], entry.messaging_handovers[],
@@ -230,6 +249,20 @@ async fn process_entry(state: &AppState, entry: &Value) -> Result<(), String> {
         if let Some(events) = entry.get(event_type).and_then(|e| e.as_array()) {
             handled = true;
             for event_data in events {
+                // Log when account_id is not derivable (malformed webhook)
+                if messenger_account_id(event_data).is_none() {
+                    let reason = if event_data.get("message")
+                        .and_then(|m| m.get("is_echo"))
+                        .and_then(|e| e.as_bool())
+                        .unwrap_or(false)
+                    {
+                        "echo with no sender"
+                    } else {
+                        "no recipient"
+                    };
+                    warn!("[NO_CONVERSATION_MESSENGER] could not derive account_id ({}): {}", reason, event_data);
+                }
+
                 match stamp_event(event_data.clone(), "messenger") {
                     Ok((user, bytes)) => {
                         state.producer.produce(&state.config.event_topic, user, bytes);
@@ -292,18 +325,68 @@ async fn process_entry(state: &AppState, entry: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Mirrors handleSyntheticEvents. Stamps source='synthetic' and timestamp=now_ms.
-/// Returns 500 on any error, 200 on success.
+/// Mirrors handleSyntheticEvents. Stamps source='synthetic', timestamp=now_ms,
+/// and account_id/platform when derivable. The 400 is gated by
+/// SYNTHETIC_REQUIRE_CONVERSATION.
+///
+/// Always rejects missing `user` with 400 (malformed POST, not a server error).
+///
+/// When SYNTHETIC_REQUIRE_CONVERSATION is off (default): missing account_id/platform
+/// are accepted with warn log, but logged distinctly so we can count them.
+///
+/// When SYNTHETIC_REQUIRE_CONVERSATION is on: missing account_id or platform
+/// returns 400 with error log (no Kafka produce).
 pub async fn handle_synthetic(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
-    let user = match body.get("user").and_then(|u| u.as_str()) {
-        Some(u) => u.to_string(),
-        None => {
-            error!("No user!");
-            return StatusCode::INTERNAL_SERVER_ERROR;
+    let poster = get_poster_identity(&headers);
+
+    // Validate what fields are missing
+    let missing = validate_synthetic_request(&body);
+    let event_type = body
+        .get("event")
+        .and_then(|e| e.get("type"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("unknown");
+
+    // Missing user is always 400 — it's a malformed POST, not a server error
+    if missing.user {
+        error!(
+            "[NO_USER] /synthetic from {}: event_type={}",
+            poster, event_type
+        );
+        return StatusCode::BAD_REQUEST;
+    }
+
+    // Check the gate for account_id and platform
+    if state.config.synthetic_require_conversation {
+        // Gate ON: reject if account_id or platform missing
+        if missing.account_id || missing.platform {
+            error!(
+                "[NO_CONVERSATION] /synthetic missing {} from {}: event_type={}",
+                missing, poster, event_type
+            );
+            return StatusCode::BAD_REQUEST;
         }
+    } else {
+        // Gate OFF: warn if account_id or platform are missing (but don't reject)
+        if missing.account_id || missing.platform {
+            warn!(
+                "[INCOMPLETE_CONVERSATION] /synthetic from {}: missing {} for event_type={}",
+                poster, missing, event_type
+            );
+        }
+    }
+
+    // Read the user through the same total function the validation used, so there
+    // is no second reader that can disagree with the first and no panic path in an
+    // HTTP handler. `missing.user` above already rejected the None case; hermes is
+    // the single ingester, so a panic here would drop webhooks.
+    let user = match synthetic_user(&body) {
+        Some(u) => u,
+        None => return StatusCode::BAD_REQUEST,
     };
 
     let now_ms = std::time::SystemTime::now()
@@ -314,6 +397,14 @@ pub async fn handle_synthetic(
     let mut message = body;
     message["source"] = Value::String("synthetic".to_string());
     message["timestamp"] = Value::Number(now_ms.into());
+
+    // Stamp account_id and platform when derivable
+    if let Some(account_id) = synthetic_account_id(&message) {
+        message["account_id"] = Value::String(account_id);
+    }
+    if let Some(platform) = synthetic_platform(&message) {
+        message["platform"] = Value::String(platform);
+    }
 
     let bytes = serde_json::to_vec(&message).expect("serialization is infallible");
     state.producer.produce(&state.config.event_topic, user, bytes);

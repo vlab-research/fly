@@ -247,6 +247,13 @@ const lookup = {
   date: validateString,
   share: validateStatement,
   webview: validateStatement,
+  // The first-party link types render as webviews and validate exactly as a
+  // webview does. These entries are NOT optional: machine.js:1119 calls
+  // validator() with the field type as promoted by addCustomType, so a missing
+  // entry throws "There is no validator for the question of type moviehouse"
+  // before the field is ever translated.
+  link_tracking: validateStatement,
+  moviehouse: validateStatement,
   wait: validateStatement,
   stitch: validateStatement,
   notify: validateNotify,

@@ -11,12 +11,52 @@ import { snooze } from './utils';
 import { getResponses, getState } from './responses';
 import mustache from 'mustache';
 import fs from 'fs';
+import { Pool } from 'pg';
 
 ///////////////////////////////////////////////
 // SETUP -----------------------------------
-const CHATBASE_BACKEND = process.env.CHATBASE_BACKEND || '@vlab-research/chatbase-postgres';
-const Chatbase = require(CHATBASE_BACKEND);
-const chatbase = new Chatbase();
+//
+// A plain `pg.Pool`, not `@vlab-research/chatbase-postgres` and not replybot's
+// vendored `lib/chatbase` either.
+//
+// This used to be `new (require(process.env.CHATBASE_BACKEND ||
+// '@vlab-research/chatbase-postgres'))()`, pinned at 0.0.3 while replybot ran
+// 0.2.0 -- four versions of skew. The skew turned out to be INERT: nothing in
+// this suite ever called `.get()` or `.put()`. `seed()`, `getState()`,
+// `getResponses()` and friends all take `{ pool }` (see the local `interface
+// Chatbase` in `responses.ts` and `seed-db.ts`), so the client was only ever a
+// wrapper for building a Pool out of the CHATBASE_* env vars. `test.tc.ts`
+// already does exactly this, with `chatbase = { pool }`.
+//
+// Requiring replybot's vendored module instead would NOT work here: this file
+// runs inside the testrunner image, whose Docker build context is
+// `facebot/testrunner` alone (`.github/workflows/release.yml`, `dev.sh`), so
+// `../../replybot/lib/chatbase` does not exist at runtime. Reaching into
+// replybot for a Pool constructor would also be coupling for nothing.
+//
+// The env defaults and the required-variable guard below are the ones the old
+// client's constructor applied, kept so a misconfigured job still fails fast
+// with a message that names what is missing.
+const CHATBASE_PORT = process.env.CHATBASE_PORT;
+const CHATBASE_HOST = process.env.CHATBASE_HOST;
+const CHATBASE_DATABASE = process.env.CHATBASE_DATABASE;
+
+if (!CHATBASE_PORT || !CHATBASE_HOST || !CHATBASE_DATABASE) {
+  throw new TypeError(
+    '(CHATBASE_DATABASE, CHATBASE_PORT, CHATBASE_HOST) are strictly required',
+  );
+}
+
+const chatbase = {
+  pool: new Pool({
+    user: process.env.CHATBASE_USER,
+    host: CHATBASE_HOST,
+    database: CHATBASE_DATABASE,
+    password: process.env.CHATBASE_PASSWORD,
+    port: Number(CHATBASE_PORT),
+  }),
+};
+chatbase.pool.on('error', (err) => { throw err });
 
 const ok: SuccessResponse = { res: 'success' };
 const err: ErrorResponse = { error: { message: 'test error', code: 555 } };

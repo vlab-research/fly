@@ -81,6 +81,14 @@ test-db:
 	@docker run --name vlab-cockroach -d \
 		-p $(PORT):26257 \
 		cockroachdb/cockroach:$(DB_VERSION) start-single-node --insecure
+	@echo "Waiting for CockroachDB to accept connections..."
+	@for i in $$(seq 1 30); do \
+		if docker run --rm --net=host cockroachdb/cockroach:$(DB_VERSION) \
+			sql --insecure --host localhost --port $(PORT) -e "SELECT 1" >/dev/null 2>&1; then \
+			echo "CockroachDB is ready"; break; \
+		fi; \
+		sleep 1; \
+	done
 	@cat ./migrations/*.sql | docker run -i \
 		--net=host \
 		--rm cockroachdb/cockroach:$(DB_VERSION) \

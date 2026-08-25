@@ -1,15 +1,35 @@
 'use strict';
-/* global Sentry, MessengerExtensions, Vimeo */
+/* global Sentry, MessengerExtensions, Vimeo, MoviehouseIdentity */
 
 const SERVER_URL = '{{{SERVER_URL}}}';
 const HEARTBEAT_INTERVAL_MS = parseInt('{{{HEARTBEAT_INTERVAL_MS}}}', 10) || 30000;
 
 // make params dissapear after getting them
 const params = getQueryParams()
-const videoId = params['id'];
-const pageId = params['pageId'];
-const userId = params['userId'];
+
+// Everything this page needs is resolved through the pure core, which reads the
+// canonical `vlab_*` names first and falls back to the legacy ones for URLs that
+// were already delivered to participants. Nothing here indexes a query param
+// directly any more -- that is what let `id` mean two different things.
+const videoId = MoviehouseIdentity.resolveVideoId(params);
+const userId = MoviehouseIdentity.resolveUser(params);
 const useExtensions = params['useExtensions'] === 'true';
+
+// The conversation this page's events belong to, resolved once from the query
+// string. Every /synthetic POST must carry the triple
+// (platform, account_id, user_id) -- see ../documentation/event-envelope.md.
+// A `moviehouse` field gets all three for free: replybot builds the URL.
+const conversation = MoviehouseIdentity.resolveConversation(params);
+
+// Logged ONCE per page load, not once per event: a heartbeat every 30 seconds
+// plus play/pause/seek would otherwise flood the console for a single watcher.
+if (conversation.invalidPlatform) {
+  console.warn(`[MOVIEHOUSE_PLATFORM_INVALID] video=${videoId} account=${conversation.account_id} platform="${conversation.invalidPlatform}" -- not a known platform, sending none`);
+}
+
+if (conversation.missing.length > 0) {
+  console.warn(`[MOVIEHOUSE_CONVERSATION_INCOMPLETE] video=${videoId} account=${conversation.account_id} missing: ${conversation.missing.join(', ')} -- change the survey field's type to 'moviehouse' so replybot builds this url`);
+}
 
 // Heartbeat state
 let heartbeatInterval = null;
@@ -29,14 +49,26 @@ function getQueryParams() {
   return obj
 }
 
+// The only place moviehouse talks to hermes. Body construction is pure
+// (identity.js buildSyntheticBody); this is the IO.
+function postEvent(psid, eventType, data) {
+  const body = MoviehouseIdentity.buildSyntheticBody({
+    user: psid,
+    conversation: conversation,
+    videoId: videoId,
+    eventType: eventType,
+    data: data
+  });
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', SERVER_URL);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.send(JSON.stringify(body));
+}
+
 function handleEvent(psid, eventType) {
   return function sendEvent(data) {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', SERVER_URL);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-
-    // add ID of video to event...
-    xhr.send(JSON.stringify({ user: psid, page: pageId, data, event: { type: 'external', value: { type: `moviehouse:${eventType}`, id: videoId } } }));
+    postEvent(psid, eventType, data);
   }
 }
 
@@ -55,18 +87,7 @@ async function sendHeartbeat() {
 
   try {
     const currentTime = await currentPlayer.getCurrentTime();
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', SERVER_URL);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.send(JSON.stringify({
-      user: currentPsid,
-      page: pageId,
-      data: { currentTime: currentTime },
-      event: {
-        type: 'external',
-        value: { type: 'moviehouse:heartbeat', id: videoId }
-      }
-    }));
+    postEvent(currentPsid, 'heartbeat', { currentTime: currentTime });
   } catch (err) {
     console.error('Heartbeat error:', err);
   }
@@ -165,13 +186,19 @@ function initMessenger() {
       handleError(new Error(err), title, message);
     }
   );
-};
+}
 
+// The required set is unchanged in substance -- video, account, participant --
+// but is now expressed over the RESOLVED values rather than over three literal
+// param names, so a legacy `id`/`pageId`/`userId` URL and a canonical
+// `vlab_video`/`vlab_account`/`vlab_user` one both satisfy it. The names in the
+// error message are the canonical ones, because that is what a researcher
+// should end up with.
 function validateRequiredParams() {
   const missing = [];
-  if (!videoId) missing.push('id');
-  if (!pageId) missing.push('pageId');
-  if (!userId) missing.push('userId');
+  if (!videoId) missing.push(MoviehouseIdentity.PARAM_VIDEO);
+  if (!conversation.account_id) missing.push(MoviehouseIdentity.PARAM_ACCOUNT);
+  if (!userId) missing.push(MoviehouseIdentity.PARAM_USER);
 
   if (missing.length > 0) {
     const title = '❌ Missing Parameters';

@@ -124,7 +124,33 @@ field), it falls back to `WHERE key = $1 AND entity IN ('facebook_page', 'whatsa
 safe because the `unique_messaging_account` partial index keeps account ids globally unique
 across messaging platforms. See `documentation/platform-abstraction.md` ("Account ID Routing").
 
-**Result**: Response sent to botserver indicating success or failure.
+**Result**: Response POSTed to hermes' `/synthetic` endpoint indicating success or failure.
+
+```jsonc
+{
+  "user":       "<pe.Userid>",
+  "account_id": "<pe.Pageid>",     // the platform account id
+  "platform":   "<pe.Platform>",   // "messenger" | "whatsapp"
+  "event":      { "type": "external", "value": { /* the Result below */ } }
+}
+```
+
+All three of `user`, `account_id` and `platform` are **required** by the event envelope
+contract (`documentation/event-envelope.md`) — a payment result that cannot be attributed to
+a conversation cannot be shown to the participant, and the conversation waits forever for an
+external event that never resolves. Hermes rejects an incomplete POST with 400 once
+`SYNTHETIC_REQUIRE_CONVERSATION` is enabled. The request carries `X-Vlab-Poster: dinersclub`
+so hermes can name dinersclub in a rejection log.
+
+`platform` comes straight from the consumed `PaymentEvent`, which replybot populates from the
+conversation's persisted `md.platform`.
+
+**Not botparty.** `dinersclub/synthetic.go` declares a local `SyntheticEvent` struct and a
+local `Poster`, because `botparty.ExternalEvent` lives in a separate repo and has no
+`Platform` field — publishing and bumping it across two services to add one field is more
+coupling than the field is worth, and hermes passes unknown fields through untouched. `dean`
+established this pattern. The non-200 error text is preserved verbatim from `botparty.Send`
+(`"Non 200 response from Botserver: %v"`) because tests and log greps depend on it.
 
 ```json
 {
@@ -1001,7 +1027,9 @@ error handling (`classify.go`) and metrics/instrumentation (`metrics.go`).
 
 ## Related Components
 
-- **botparty**: Client library for sending events to botserver
+- **hermes**: Ingester that receives payment results at `POST /synthetic`. Posted via the
+  local `Poster` in `synthetic.go`, **not** via botparty — see *Result* above and
+  `documentation/event-envelope.md`.
 - **go-reloadly**: Client library for Reloadly API
 - **spine**: Kafka consumer abstraction
 - **ristretto**: Cache implementation

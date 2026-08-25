@@ -59,7 +59,7 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/users` | Account operations |
 | `/exports` | Async data export (via Kafka) |
 | `/typeform` | Typeform integration |
-| `/credentials` | Credential management |
+| `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | Authentication endpoints |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware |
@@ -70,6 +70,19 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/media` | Researcher media library — upload bytes, get back a permanent public URL. Platform-independent: no page selector, no connected-page requirement. See "Media endpoints" below |
 | `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
+
+### Credentials
+
+`POST /api/v1/credentials` is the **single** credential-create path. Both messaging
+connect flows go through it — `dashboard-client` `FacebookPages.js` and
+`WhatsAppEmbedded.js` each POST `entity` themselves — so there is no separate
+"connect" endpoint distinct from a generic one, which is worth knowing before adding
+entity-specific behaviour here.
+
+A messaging credential's `key` **is** the platform account id (`facebook_page` →
+page id, `whatsapp_business` → phone_number_id), and those ids are globally unique
+across messaging entities, so a token can be resolved from an account id alone
+without knowing the platform. See `message-worker/tokenstore.go`.
 
 ### Media
 

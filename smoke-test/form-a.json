@@ -20,20 +20,33 @@
       "title": "What is your favorite color?\n- A. Red\n- B. Blue\n- C. Green",
       "properties": {
         "choices": [
-          { "label": "A", "ref": "choice_red" },
-          { "label": "B", "ref": "choice_blue" },
-          { "label": "C", "ref": "choice_green" }
+          {
+            "label": "A",
+            "ref": "choice_red"
+          },
+          {
+            "label": "B",
+            "ref": "choice_blue"
+          },
+          {
+            "label": "C",
+            "ref": "choice_green"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "short_text",
       "ref": "why_red",
       "title": "Why do you like the color red?",
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "statement",
@@ -48,7 +61,9 @@
       "type": "number",
       "ref": "siblings",
       "title": "How many siblings do you have?",
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "multiple_choice",
@@ -56,13 +71,21 @@
       "title": "Would you like to test the payment feature?",
       "properties": {
         "choices": [
-          { "label": "Yes", "ref": "choice_payment_yes" },
-          { "label": "No", "ref": "choice_payment_no" }
+          {
+            "label": "Yes",
+            "ref": "choice_payment_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_payment_no"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "multiple_choice",
@@ -70,15 +93,25 @@
       "title": "Please select your mobile network operator. For testing, select MTN Nigeria.",
       "properties": {
         "choices": [
-          { "label": "MTN Nigeria" },
-          { "label": "Airtel" },
-          { "label": "Glo" },
-          { "label": "9mobile" }
+          {
+            "label": "MTN Nigeria"
+          },
+          {
+            "label": "Airtel"
+          },
+          {
+            "label": "Glo"
+          },
+          {
+            "label": "9mobile"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "phone_number",
@@ -87,7 +120,9 @@
       "properties": {
         "default_country_code": "ng"
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "statement",
@@ -123,13 +158,21 @@
       "title": "Would you like to try again with a different number?",
       "properties": {
         "choices": [
-          { "label": "Yes", "ref": "choice_yes" },
-          { "label": "No", "ref": "choice_no" }
+          {
+            "label": "Yes",
+            "ref": "choice_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_no"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "multiple_choice",
@@ -137,13 +180,21 @@
       "title": "Would you like to test the thread control handoff feature?",
       "properties": {
         "choices": [
-          { "label": "Yes", "ref": "choice_handoff_yes" },
-          { "label": "No", "ref": "choice_handoff_no" }
+          {
+            "label": "Yes",
+            "ref": "choice_handoff_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_handoff_no"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "statement",
@@ -170,13 +221,21 @@
       "title": "Would you like to test Facebook UTILITY template messages? (Choices must match the buttons approved on this page — see the smoke-test README before answering Yes on a new page.)",
       "properties": {
         "choices": [
-          { "label": "Yes", "ref": "choice_test_utility_yes" },
-          { "label": "No", "ref": "choice_test_utility_no" }
+          {
+            "label": "Yes",
+            "ref": "choice_test_utility_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_test_utility_no"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "multiple_choice",
@@ -185,12 +244,17 @@
       "properties": {
         "description": "{\"type\":\"utility_message\",\"template\":\"recontact\",\"language\":\"en_US\",\"params\":[\"300 NGN\"]}",
         "choices": [
-          { "label": "OK!", "ref": "choice_utility_continue" }
+          {
+            "label": "OK!",
+            "ref": "choice_utility_continue"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "multiple_choice",
@@ -198,13 +262,21 @@
       "title": "🌐 Which environment are you testing right now? Asked once, up front, purely to pick the matching moviehouse video player later — production and staging run separate players that only talk to their own backend.",
       "properties": {
         "choices": [
-          { "label": "Production", "ref": "choice_env_prod" },
-          { "label": "Staging", "ref": "choice_env_staging" }
+          {
+            "label": "Production",
+            "ref": "choice_env_prod"
+          },
+          {
+            "label": "Staging",
+            "ref": "choice_env_staging"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "multiple_choice",
@@ -212,13 +284,21 @@
       "title": "📎 Would you like to test bot-sent media attachments (a legacy image, a third-party image, and uploaded image/video/PDF assets)? This sends several files back to back and can take a few moments — expect a short pause after you tap Yes.",
       "properties": {
         "choices": [
-          { "label": "Yes", "ref": "choice_test_attachments_yes" },
-          { "label": "No", "ref": "choice_test_attachments_no" }
+          {
+            "label": "Yes",
+            "ref": "choice_test_attachments_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_test_attachments_no"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "statement",
@@ -336,13 +416,21 @@
       "title": "Did those six attachments actually arrive — the shared third-party image URL, then the five for the environment you picked: legacy attachment_id image, uploaded image asset, the repeated image asset, uploaded video asset, and uploaded PDF asset? A failed send is reported and committed rather than retried, so answer honestly. On WhatsApp the legacy attachment_id one is EXPECTED to fail (WhatsApp never supported attachment ids) — the other five should still arrive there.",
       "properties": {
         "choices": [
-          { "label": "Yes", "ref": "choice_confirm_attachment_yes" },
-          { "label": "No", "ref": "choice_confirm_attachment_no" }
+          {
+            "label": "Yes",
+            "ref": "choice_confirm_attachment_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_confirm_attachment_no"
+          }
         ],
         "allow_multiple_selection": false,
         "vertical_alignment": true
       },
-      "validations": { "required": false }
+      "validations": {
+        "required": false
+      }
     },
     {
       "type": "statement",
@@ -383,6 +471,90 @@
       }
     },
     {
+      "type": "multiple_choice",
+      "ref": "test_links",
+      "title": "🔗 Would you like to test link tracking and the conversation triple (platform, account, user)? This opens up to three links in a row — a new-style tracked link, a legacy-style one, and a new-style video player.",
+      "properties": {
+        "choices": [
+          {
+            "label": "Yes",
+            "ref": "choice_test_links_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_test_links_no"
+          }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": {
+        "required": false
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "link_new",
+      "title": "🔗 [NEW] A `link_tracking` field. replybot builds this whole URL and stamps the conversation triple into it as vlab_user / vlab_account / vlab_platform. Tap it, then come back — I continue as soon as the click lands (or after 3 minutes).",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\": \"link_tracking\", \"url\": \"https://example.com\", \"buttonText\": \"Open tracked link\", \"wait\": {\"op\": \"or\", \"vars\": [{\"type\": \"external\", \"value\": {\"type\": \"linksniffer:click\"}}, {\"type\": \"timeout\", \"value\": \"3 minutes\"}]}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "link_legacy_prod",
+      "title": "🔗 [PRODUCTION · LEGACY] A hand-authored `webview` pointing straight at production linksniffer with the OLD params (id, pageid) and NO vlab_platform — exactly what URLs already delivered to participants look like. It must still track, with the platform ASSUMED as messenger.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\": \"webview\", \"extensions\": false, \"url\": \"https://links.vlab.digital/?id={{hidden:id}}&pageid={{hidden:pageid}}&url=example.com&p=https\", \"buttonText\": \"Open legacy link\", \"responseMessage\": \"Tap the button above. I'll continue once the click lands (or after 3 minutes).\", \"wait\": {\"op\": \"or\", \"vars\": [{\"type\": \"external\", \"value\": {\"type\": \"linksniffer:click\"}}, {\"type\": \"timeout\", \"value\": \"3 minutes\"}]}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "link_legacy_staging",
+      "title": "🔗 [STAGING · LEGACY] A hand-authored `webview` pointing straight at staging linksniffer with the OLD params (id, pageid) and NO vlab_platform — exactly what URLs already delivered to participants look like. It must still track, with the platform ASSUMED as messenger.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\": \"webview\", \"extensions\": false, \"url\": \"https://staging.links.vlab.digital/?id={{hidden:id}}&pageid={{hidden:pageid}}&url=example.com&p=https\", \"buttonText\": \"Open legacy link\", \"responseMessage\": \"Tap the button above. I'll continue once the click lands (or after 3 minutes).\", \"wait\": {\"op\": \"or\", \"vars\": [{\"type\": \"external\", \"value\": {\"type\": \"linksniffer:click\"}}, {\"type\": \"timeout\", \"value\": \"3 minutes\"}]}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "movie_new",
+      "title": "🎬 [NEW] A `moviehouse` field. replybot builds this URL too — the video goes in vlab_video and the triple in vlab_user / vlab_account / vlab_platform, so there is no page id for anyone to hardcode. Tap it and press ▶️ play.",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\": \"moviehouse\", \"videoId\": \"164118668\", \"buttonText\": \"Watch test video\", \"responseMessage\": \"Tap ▶️ above and press play. I'll continue once the play event lands (or after 3 minutes).\", \"wait\": {\"op\": \"or\", \"vars\": [{\"type\": \"external\", \"value\": {\"type\": \"moviehouse:play\"}}, {\"type\": \"timeout\", \"value\": \"3 minutes\"}]}}"
+      }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "confirm_links",
+      "title": "Did all of those behave? The tracked link and the legacy link should BOTH have redirected you to example.com, and the video player should have opened. Nothing here proves the platform was stamped correctly — that is checked in the event stream, see smoke-test/README.md.",
+      "properties": {
+        "choices": [
+          {
+            "label": "Yes",
+            "ref": "choice_confirm_links_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_confirm_links_no"
+          }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": {
+        "required": false
+      }
+    },
+    {
       "type": "statement",
       "ref": "stitch_statement",
       "title": "Now testing stitch to Part B...",
@@ -413,7 +585,8 @@
     "e_payment_reloadly_error_message",
     "e_handover_metadata_smoke_echo",
     "e_handover_metadata_echo_text",
-    "e_moviehouse_play_id"
+    "e_moviehouse_play_id",
+    "e_linksniffer_click_url"
   ],
   "logic": [
     {
@@ -423,20 +596,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "why_red" }
+            "to": {
+              "type": "field",
+              "value": "why_red"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "favorite_color" },
-              { "type": "choice", "value": "choice_red" }
+              {
+                "type": "field",
+                "value": "favorite_color"
+              },
+              {
+                "type": "choice",
+                "value": "choice_red"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "interesting_choice" }
+            "to": {
+              "type": "field",
+              "value": "interesting_choice"
+            }
           },
           "condition": {
             "op": "always",
@@ -452,7 +637,10 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "siblings" }
+            "to": {
+              "type": "field",
+              "value": "siblings"
+            }
           },
           "condition": {
             "op": "always",
@@ -468,7 +656,10 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "siblings" }
+            "to": {
+              "type": "field",
+              "value": "siblings"
+            }
           },
           "condition": {
             "op": "always",
@@ -484,20 +675,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "operator" }
+            "to": {
+              "type": "field",
+              "value": "operator"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "test_payment" },
-              { "type": "choice", "value": "choice_payment_yes" }
+              {
+                "type": "field",
+                "value": "test_payment"
+              },
+              {
+                "type": "choice",
+                "value": "choice_payment_yes"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "test_handoff" }
+            "to": {
+              "type": "field",
+              "value": "test_handoff"
+            }
           },
           "condition": {
             "op": "always",
@@ -513,20 +716,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "payment_success" }
+            "to": {
+              "type": "field",
+              "value": "payment_success"
+            }
           },
           "condition": {
             "op": "equal",
             "vars": [
-              { "type": "hidden", "value": "e_payment_reloadly_success" },
-              { "type": "constant", "value": "true" }
+              {
+                "type": "hidden",
+                "value": "e_payment_reloadly_success"
+              },
+              {
+                "type": "constant",
+                "value": "true"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "payment_failure" }
+            "to": {
+              "type": "field",
+              "value": "payment_failure"
+            }
           },
           "condition": {
             "op": "always",
@@ -542,7 +757,10 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "test_handoff" }
+            "to": {
+              "type": "field",
+              "value": "test_handoff"
+            }
           },
           "condition": {
             "op": "always",
@@ -558,20 +776,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "operator" }
+            "to": {
+              "type": "field",
+              "value": "operator"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "try_again" },
-              { "type": "choice", "value": "choice_yes" }
+              {
+                "type": "field",
+                "value": "try_again"
+              },
+              {
+                "type": "choice",
+                "value": "choice_yes"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "test_handoff" }
+            "to": {
+              "type": "field",
+              "value": "test_handoff"
+            }
           },
           "condition": {
             "op": "always",
@@ -587,20 +817,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "handoff_statement" }
+            "to": {
+              "type": "field",
+              "value": "handoff_statement"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "test_handoff" },
-              { "type": "choice", "value": "choice_handoff_yes" }
+              {
+                "type": "field",
+                "value": "test_handoff"
+              },
+              {
+                "type": "choice",
+                "value": "choice_handoff_yes"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "test_utility" }
+            "to": {
+              "type": "field",
+              "value": "test_utility"
+            }
           },
           "condition": {
             "op": "always",
@@ -616,20 +858,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "utility_message" }
+            "to": {
+              "type": "field",
+              "value": "utility_message"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "test_utility" },
-              { "type": "choice", "value": "choice_test_utility_yes" }
+              {
+                "type": "field",
+                "value": "test_utility"
+              },
+              {
+                "type": "choice",
+                "value": "choice_test_utility_yes"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "test_environment" }
+            "to": {
+              "type": "field",
+              "value": "test_environment"
+            }
           },
           "condition": {
             "op": "always",
@@ -645,33 +899,54 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "media_third_party_url" }
+            "to": {
+              "type": "field",
+              "value": "media_third_party_url"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "test_attachments" },
-              { "type": "choice", "value": "choice_test_attachments_yes" }
+              {
+                "type": "field",
+                "value": "test_attachments"
+              },
+              {
+                "type": "choice",
+                "value": "choice_test_attachments_yes"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_webview_staging" }
+            "to": {
+              "type": "field",
+              "value": "movie_webview_staging"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "test_environment" },
-              { "type": "choice", "value": "choice_env_staging" }
+              {
+                "type": "field",
+                "value": "test_environment"
+              },
+              {
+                "type": "choice",
+                "value": "choice_env_staging"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_webview_prod" }
+            "to": {
+              "type": "field",
+              "value": "movie_webview_prod"
+            }
           },
           "condition": {
             "op": "always",
@@ -687,20 +962,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "media_legacy_attachment_id_staging" }
+            "to": {
+              "type": "field",
+              "value": "media_legacy_attachment_id_staging"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "test_environment" },
-              { "type": "choice", "value": "choice_env_staging" }
+              {
+                "type": "field",
+                "value": "test_environment"
+              },
+              {
+                "type": "choice",
+                "value": "choice_env_staging"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "media_legacy_attachment_id_prod" }
+            "to": {
+              "type": "field",
+              "value": "media_legacy_attachment_id_prod"
+            }
           },
           "condition": {
             "op": "always",
@@ -716,7 +1003,10 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "confirm_attachment" }
+            "to": {
+              "type": "field",
+              "value": "confirm_attachment"
+            }
           },
           "condition": {
             "op": "always",
@@ -732,7 +1022,10 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "confirm_attachment" }
+            "to": {
+              "type": "field",
+              "value": "confirm_attachment"
+            }
           },
           "condition": {
             "op": "always",
@@ -748,20 +1041,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_webview_staging" }
+            "to": {
+              "type": "field",
+              "value": "movie_webview_staging"
+            }
           },
           "condition": {
             "op": "is",
             "vars": [
-              { "type": "field", "value": "test_environment" },
-              { "type": "choice", "value": "choice_env_staging" }
+              {
+                "type": "field",
+                "value": "test_environment"
+              },
+              {
+                "type": "choice",
+                "value": "choice_env_staging"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_webview_prod" }
+            "to": {
+              "type": "field",
+              "value": "movie_webview_prod"
+            }
           },
           "condition": {
             "op": "always",
@@ -777,20 +1082,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_watched" }
+            "to": {
+              "type": "field",
+              "value": "movie_watched"
+            }
           },
           "condition": {
             "op": "equal",
             "vars": [
-              { "type": "hidden", "value": "e_moviehouse_play_id" },
-              { "type": "constant", "value": "164118668" }
+              {
+                "type": "hidden",
+                "value": "e_moviehouse_play_id"
+              },
+              {
+                "type": "constant",
+                "value": "164118668"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_timeout" }
+            "to": {
+              "type": "field",
+              "value": "movie_timeout"
+            }
           },
           "condition": {
             "op": "always",
@@ -806,20 +1123,32 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_watched" }
+            "to": {
+              "type": "field",
+              "value": "movie_watched"
+            }
           },
           "condition": {
             "op": "equal",
             "vars": [
-              { "type": "hidden", "value": "e_moviehouse_play_id" },
-              { "type": "constant", "value": "164118668" }
+              {
+                "type": "hidden",
+                "value": "e_moviehouse_play_id"
+              },
+              {
+                "type": "constant",
+                "value": "164118668"
+              }
             ]
           }
         },
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "movie_timeout" }
+            "to": {
+              "type": "field",
+              "value": "movie_timeout"
+            }
           },
           "condition": {
             "op": "always",
@@ -835,7 +1164,168 @@
         {
           "action": "jump",
           "details": {
-            "to": { "type": "field", "value": "stitch_statement" }
+            "to": {
+              "type": "field",
+              "value": "test_links"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "test_links",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "link_new"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "test_links"
+              },
+              {
+                "type": "choice",
+                "value": "choice_test_links_yes"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "stitch_statement"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "link_new",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "link_legacy_staging"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "test_environment"
+              },
+              {
+                "type": "choice",
+                "value": "choice_env_staging"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "link_legacy_prod"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "link_legacy_prod",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "movie_new"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "link_legacy_staging",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "movie_new"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "movie_new",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "confirm_links"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "confirm_links",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "stitch_statement"
+            }
           },
           "condition": {
             "op": "always",

@@ -1,0 +1,224 @@
+{
+  "$comment": [
+    "SHARED CROSS-LANGUAGE TEST VECTORS. Do not move without updating both loaders.",
+    "",
+    "The Messenger account-id derivation rule exists in two languages and must not drift:",
+    "  - Rust:       hermes/src/event.rs  -> conversation_from_messenger_event()",
+    "  - JavaScript: replybot/lib/event-normalizer.js -> parseMessengerEvent()",
+    "",
+    "Both suites load THIS FILE rather than restating the rule in their own unit tests:",
+    "  - hermes/src/event.rs      #[cfg(test)] mod tests, via include_str!",
+    "  - replybot/lib/event-normalizer.test.js, via require()",
+    "",
+    "THE RULE (documentation/event-envelope.md §Derivation):",
+    "  account_id = message.is_echo === true ? sender.id : recipient.id",
+    "  user_id    = message.is_echo === true ? recipient.id : sender.id",
+    "  platform   = 'messenger', always",
+    "An echo is a message the PAGE sent, so the roles invert: the page is the sender.",
+    "",
+    "`expected` values of null mean 'not derivable'. Hermes must NOT stamp an absent or",
+    "empty account_id -- a conversation must never be keyed under a name we cannot verify.",
+    "Both harnesses normalize undefined/absent to null before comparing."
+  ],
+  "vectors": [
+    {
+      "name": "inbound_text",
+      "description": "Ordinary inbound text from a participant. No is_echo key at all.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_1" },
+        "recipient": { "id": "ACCOUNT_1" },
+        "timestamp": 1786647529000,
+        "message": { "mid": "mid.1", "text": "hello" }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_1",
+        "account_id": "ACCOUNT_1",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "echo_of_bot_message",
+      "description": "Echo of a message the page sent. Roles invert: sender IS the account.",
+      "event": {
+        "sender": { "id": "ACCOUNT_1" },
+        "recipient": { "id": "PARTICIPANT_1" },
+        "timestamp": 1786647529000,
+        "message": {
+          "mid": "mid.2",
+          "is_echo": true,
+          "text": "How old are you?",
+          "metadata": "{\"ref\":\"abc123\"}"
+        }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_1",
+        "account_id": "ACCOUNT_1",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "explicit_is_echo_false",
+      "description": "is_echo present but false. Must take the non-echo branch, not merely 'is_echo is present'.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_2" },
+        "recipient": { "id": "ACCOUNT_2" },
+        "timestamp": 1786647529000,
+        "message": { "mid": "mid.3", "is_echo": false, "text": "yes" }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_2",
+        "account_id": "ACCOUNT_2",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "quick_reply",
+      "description": "Quick reply answer. Still a plain inbound message.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_1" },
+        "recipient": { "id": "ACCOUNT_1" },
+        "timestamp": 1786647529000,
+        "message": {
+          "mid": "mid.4",
+          "text": "Yes",
+          "quick_reply": { "payload": "{\"value\":\"Yes\",\"ref\":\"abc123\"}" }
+        }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_1",
+        "account_id": "ACCOUNT_1",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "postback_no_message_key",
+      "description": "Postback events carry no `message` object at all. is_echo lookup must not throw.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_3" },
+        "recipient": { "id": "ACCOUNT_3" },
+        "timestamp": 1786647529000,
+        "postback": { "title": "Get Started", "payload": "{\"ref\":\"form.abc\"}" }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_3",
+        "account_id": "ACCOUNT_3",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "referral_entry",
+      "description": "m.me?ref= entry. Conversation start; account is the recipient.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_4" },
+        "recipient": { "id": "ACCOUNT_1" },
+        "timestamp": 1786647529000,
+        "referral": { "ref": "form.flysmoke", "source": "SHORTLINK", "type": "OPEN_THREAD" }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_4",
+        "account_id": "ACCOUNT_1",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "optin_one_time_notif",
+      "description": "One-time-notification opt-in. Messenger-only. Non-echo shape.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_5" },
+        "recipient": { "id": "ACCOUNT_2" },
+        "timestamp": 1786647529000,
+        "optin": {
+          "type": "one_time_notif_req",
+          "one_time_notif_token": "TOKEN123",
+          "payload": "{\"ref\":\"notifyref\"}"
+        }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_5",
+        "account_id": "ACCOUNT_2",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "delivery_receipt",
+      "description": "Delivery receipt. Sent by the participant's client, so sender is the participant.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_1" },
+        "recipient": { "id": "ACCOUNT_1" },
+        "timestamp": 1786647529000,
+        "delivery": { "mids": ["mid.2"], "watermark": 1786647528000 }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_1",
+        "account_id": "ACCOUNT_1",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "handover_pass_thread_control",
+      "description": "entry.messaging_handovers[] item. No `message` key; non-echo rule applies.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_6" },
+        "recipient": { "id": "ACCOUNT_3" },
+        "timestamp": 1786647529000,
+        "pass_thread_control": {
+          "new_owner_app_id": 263902037430900,
+          "previous_owner_app_id": 1234567890,
+          "metadata": "handing back"
+        }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_6",
+        "account_id": "ACCOUNT_3",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "echo_with_attachment",
+      "description": "Echo of a page-sent media message. Inversion is driven by is_echo, not by content.",
+      "event": {
+        "sender": { "id": "ACCOUNT_2" },
+        "recipient": { "id": "PARTICIPANT_2" },
+        "timestamp": 1786647529000,
+        "message": {
+          "mid": "mid.5",
+          "is_echo": true,
+          "attachments": [{ "type": "image", "payload": { "url": "https://cdn/x.jpg" } }]
+        }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_2",
+        "account_id": "ACCOUNT_2",
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "missing_recipient",
+      "description": "Malformed: no recipient. account_id is NOT derivable and must not be stamped.",
+      "event": {
+        "sender": { "id": "PARTICIPANT_7" },
+        "timestamp": 1786647529000,
+        "message": { "mid": "mid.6", "text": "hi" }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_7",
+        "account_id": null,
+        "platform": "messenger"
+      }
+    },
+    {
+      "name": "echo_missing_sender",
+      "description": "Malformed echo: no sender. account_id is NOT derivable on the echo branch.",
+      "event": {
+        "recipient": { "id": "PARTICIPANT_8" },
+        "timestamp": 1786647529000,
+        "message": { "mid": "mid.7", "is_echo": true, "text": "hi" }
+      },
+      "expected": {
+        "user_id": "PARTICIPANT_8",
+        "account_id": null,
+        "platform": "messenger"
+      }
+    }
+  ]
+}

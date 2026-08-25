@@ -39,6 +39,8 @@ export interface Stack {
   redis: StartedTestContainer;
   scribbleStates: StartedTestContainer;
   scribbleResponses: StartedTestContainer;
+  scribbleMessages: StartedTestContainer;
+  scribbleChatlLog: StartedTestContainer;
   formcentral: StartedTestContainer;
   dinersclub: StartedTestContainer;
   botserver: StartedTestContainer;
@@ -48,6 +50,8 @@ export interface Stack {
   facebotUrl: string;
   botserverUrl: string;
   chatbaseConnString: string;
+  redisPort: number;
+  redisUrl: string;
   deanImage: string;
   deanEnv: Record<string, string>;
 }
@@ -207,6 +211,18 @@ export async function startStack(): Promise<Stack> {
 
   // Start redpanda
   console.time('[setup] redpanda + topics');
+  // A10. Kafka is deliberately NOT exposed to the host.
+  //
+  // Redpanda advertises PLAINTEXT://redpanda:9092, which only resolves inside the
+  // docker network: a host client connects, gets told to talk to `redpanda:9092`,
+  // and fails. Fixing that properly needs two listeners with an external
+  // advertised address, and the external port is not known until after the
+  // container starts -- a chicken-and-egg that testcontainers solves only with
+  // fixed host ports or a restart-with-rewritten-config dance.
+  //
+  // Not worth it: the one test that wants Kafka (B1-4, "both conversations are
+  // produced under the same user-id key") can consume from INSIDE the network via
+  // `rpk`, which needs no external listener at all. Use consumeTopic() below.
   const redpanda = await new GenericContainer('redpandadata/redpanda:v23.3.18')
     .withNetwork(network)
     .withNetworkAliases('redpanda')
@@ -250,7 +266,10 @@ export async function startStack(): Promise<Stack> {
   }
   console.timeEnd('[setup] redpanda + topics');
 
-  // Load scribble env from YAML and apply overrides
+  // Load scribble env from YAML and apply overrides.
+  // A8: Added scribble-messages and scribble-chat-log sinks. Without these, the
+  // event log (chatroach.messages) is never populated, so replay tests would pass
+  // vacuously.
   console.time('[setup] scribble + redis + formcentral');
   const scribbleStatesEnv = loadKubeEnv(
     path.join(repoRoot, 'scribble/kube-dev/states.yaml')
@@ -262,7 +281,17 @@ export async function startStack(): Promise<Stack> {
   );
   scribbleResponsesEnv.KAFKA_BROKERS = 'redpanda:9092';
 
-  const [scribbleStates, scribbleResponses] = await Promise.all([
+  const scribbleMessagesEnv = loadKubeEnv(
+    path.join(repoRoot, 'scribble/kube-dev/messages.yaml')
+  );
+  scribbleMessagesEnv.KAFKA_BROKERS = 'redpanda:9092';
+
+  const scribbleChatlLogEnv = loadKubeEnv(
+    path.join(repoRoot, 'scribble/kube-dev/chat-log.yaml')
+  );
+  scribbleChatlLogEnv.KAFKA_BROKERS = 'redpanda:9092';
+
+  const [scribbleStates, scribbleResponses, scribbleMessages, scribbleChatlLog] = await Promise.all([
     new GenericContainer(scribbleImageName)
       .withNetwork(network)
       .withNetworkAliases('scribble-states')
@@ -275,12 +304,27 @@ export async function startStack(): Promise<Stack> {
       .withEnvironment(scribbleResponsesEnv)
       .withWaitStrategy(Wait.forLogMessage(/Scribble responses ready/))
       .start(),
+    new GenericContainer(scribbleImageName)
+      .withNetwork(network)
+      .withNetworkAliases('scribble-messages')
+      .withEnvironment(scribbleMessagesEnv)
+      .withWaitStrategy(Wait.forLogMessage(/Scribble messages ready/))
+      .start(),
+    new GenericContainer(scribbleImageName)
+      .withNetwork(network)
+      .withNetworkAliases('scribble-chat-log')
+      .withEnvironment(scribbleChatlLogEnv)
+      .withWaitStrategy(Wait.forLogMessage(/Scribble chat-log ready/))
+      .start(),
   ]);
 
-  // Start redis (required by replybot for state locking)
+  // Start redis (required by replybot for state locking).
+  // A9: Expose Redis port so tests can connect from host for direct key inspection
+  // (e.g., asserting cache shape or that certain operations never ran).
   const redis = await new GenericContainer('redis:7-alpine')
     .withNetwork(network)
     .withNetworkAliases('redis')
+    .withExposedPorts(6379)
     .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
     .start();
 
@@ -356,6 +400,20 @@ export async function startStack(): Promise<Stack> {
   // Ensure VLAB_CHAT_LOG_TOPIC is set
   if (!replybotEnv.VLAB_CHAT_LOG_TOPIC) {
     replybotEnv.VLAB_CHAT_LOG_TOPIC = 'vlab-chat-log';
+  }
+
+  // THE RESET SHORTCODE. `replybot/kube-dev/dev.yaml` does not set it, while
+  // `devops/values/{staging,production}.yaml` both set it to "reset" -- so a
+  // production code path was UNREACHABLE in the harness and nobody noticed.
+  //
+  // It is the only referral branch that sets `state_json.pointer`
+  // (machine.js, REFERRAL -> action RESET), and therefore the only way to make
+  // `states.message_pointer` non-NULL (a computed column, migrations/04-pointers.sql).
+  // `message_pointer` is the truncation checkpoint the replay JOIN reads, so with
+  // the var unset the whole pointer half of it -- B8-2's subject -- could
+  // not be exercised at all. See RESET_SHORTCODE in test.tc.ts.
+  if (!replybotEnv.REPLYBOT_RESET_SHORTCODE) {
+    replybotEnv.REPLYBOT_RESET_SHORTCODE = 'reset';
   }
 
   // Disable SSL for pg connections (cockroach runs insecure)
@@ -446,6 +504,11 @@ export async function startStack(): Promise<Stack> {
   const botserverPort = botserver.getMappedPort(80);
   const botserverUrl = `http://localhost:${botserverPort}`;
 
+  // A9: Get Redis mapped port for direct host connection (tests read cache shape).
+  // A10: Get Redpanda mapped port for host-side Kafka topic consumption.
+  const redisPort = redis.getMappedPort(6379);
+  const redisUrl = `redis://localhost:${redisPort}`;
+
   // Load dean env from YAML
   const deanEnv = loadKubeEnv(path.join(repoRoot, 'dean/kube-dev/dev.yaml'));
   deanEnv.CHATBASE_HOST = 'cockroach';
@@ -471,6 +534,8 @@ export async function startStack(): Promise<Stack> {
     redis,
     scribbleStates,
     scribbleResponses,
+    scribbleMessages,
+    scribbleChatlLog,
     formcentral,
     dinersclub,
     botserver,
@@ -480,6 +545,8 @@ export async function startStack(): Promise<Stack> {
     facebotUrl,
     botserverUrl,
     chatbaseConnString,
+    redisPort,
+    redisUrl,
     deanImage: deanImageName,
     deanEnv,
   };
@@ -498,9 +565,158 @@ export async function stopStack(stack: Stack): Promise<void> {
     stack.replybot.stop(),
     stack.scribbleStates.stop(),
     stack.scribbleResponses.stop(),
+    stack.scribbleMessages.stop(),
+    stack.scribbleChatlLog.stop(),
     stack.redis.stop(),
     stack.redpanda.stop(),
     stack.cockroach.stop(),
   ]);
   await stack.network.stop();
+}
+
+export interface TopicRecord {
+  partition: number;
+  offset: number;
+  key: string | null;
+  value: any;
+}
+
+/** Per-partition offsets of a topic: `{ [partition]: offset }`. */
+export type TopicOffsets = Record<number, number>;
+
+/**
+ * The current high watermark of every partition of `topic` — i.e. the offset the
+ * NEXT record produced to that partition will get.
+ *
+ * This is the "bookmark" half of the consumeTopic API: snapshot it before the
+ * activity you care about, hand it back as `{ from }`, and you read exactly the
+ * records your own test produced and nothing else. See consumeTopic below for
+ * why that matters.
+ *
+ * Parses `rpk topic describe <topic> -p`, which prints a fixed-width table:
+ *
+ *     PARTITION  LEADER  EPOCH  REPLICAS  LOG-START-OFFSET  HIGH-WATERMARK
+ *     0          0       1      [0]       0                 556
+ *
+ * Column position is read from the header rather than hard-coded, because
+ * `--stable` (not passed here) inserts an extra column.
+ */
+export async function topicEndOffsets(stack: Stack, topic: string): Promise<TopicOffsets> {
+  const res = await stack.redpanda.exec(['rpk', 'topic', 'describe', topic, '-p']);
+  if (res.exitCode !== 0) {
+    throw new Error(`topicEndOffsets(${topic}) failed (exit ${res.exitCode}): ${res.output}`);
+  }
+
+  const lines = res.output.split('\n').map(l => l.trim()).filter(l => l !== '');
+  const headerIdx = lines.findIndex(l => l.startsWith('PARTITION') && l.includes('HIGH-WATERMARK'));
+  if (headerIdx === -1) {
+    throw new Error(
+      `topicEndOffsets(${topic}): no partition table in \`rpk topic describe -p\` output. ` +
+      `Does the topic exist? Got:\n${res.output}`,
+    );
+  }
+
+  const header = lines[headerIdx].split(/\s+/);
+  const partitionCol = header.indexOf('PARTITION');
+  const hwmCol = header.indexOf('HIGH-WATERMARK');
+
+  const offsets: TopicOffsets = {};
+  for (const line of lines.slice(headerIdx + 1)) {
+    const cols = line.split(/\s+/);
+    if (cols.length <= hwmCol) continue;
+    const partition = Number(cols[partitionCol]);
+    const hwm = Number(cols[hwmCol]);
+    if (Number.isNaN(partition) || Number.isNaN(hwm)) continue;
+    offsets[partition] = hwm;
+  }
+
+  if (Object.keys(offsets).length === 0) {
+    throw new Error(`topicEndOffsets(${topic}): parsed no partitions from:\n${res.output}`);
+  }
+  return offsets;
+}
+
+/**
+ * Consume records of a Kafka topic from INSIDE the docker network, via redpanda's
+ * own `rpk`.
+ *
+ * Why not a host-side Kafka client: see the A10 note next to the redpanda
+ * container. The broker advertises an address that only resolves inside the
+ * network, so an external client cannot follow the redirect. Running `rpk` in the
+ * container sidesteps the whole problem.
+ *
+ * WHICH RECORDS. This used to be `--offset start --num 500`, i.e. the OLDEST 500
+ * records of the topic. That is a bug that gets worse with every test added:
+ * `chat-events` was measured at a high watermark of 556 and climbing, so a test
+ * running late in the suite produced its events well outside that window, found
+ * none of them, and failed as a bare 120s mocha timeout with nothing pointing at
+ * the cause. Scale-dependent, silent, and guaranteed to come back.
+ *
+ * Two modes, and both are bounded by the topic's CURRENT end, so neither can hang:
+ *
+ *   - `{ from }`  — a `topicEndOffsets()` snapshot taken before the activity under
+ *                   test. Reads exactly what was produced since. PREFER THIS: its
+ *                   cost is proportional to what your test did, not to the size of
+ *                   the suite, so it stays correct however much the suite grows.
+ *   - `{ newest }` — the last N records. A fallback for when there was no chance to
+ *                   take a bookmark first.
+ *
+ * Every read resolves to an explicit `<start>:end` range per partition. That is
+ * deliberate rather than using rpk's own relative `-o -N`: `-o -N --num N` blocks
+ * forever when the topic holds fewer than N records (it waits for the rest), which
+ * would trade the old silent-empty failure for a silent-hang one.
+ *
+ * `value` is parsed as JSON when possible — it is JSON for every topic in this
+ * stack — and left as a string otherwise.
+ */
+export async function consumeTopic(
+  stack: Stack,
+  topic: string,
+  opts: { from?: TopicOffsets; newest?: number } = {},
+): Promise<TopicRecord[]> {
+  const ends = await topicEndOffsets(stack, topic);
+  const newest = opts.newest ?? 500;
+
+  const records: TopicRecord[] = [];
+
+  for (const partition of Object.keys(ends).map(Number).sort((a, b) => a - b)) {
+    const end = ends[partition];
+    const start = opts.from && opts.from[partition] !== undefined
+      ? opts.from[partition]
+      : Math.max(0, end - newest);
+
+    if (start >= end) continue; // nothing produced in the window
+
+    const res = await stack.redpanda.exec([
+      'rpk', 'topic', 'consume', topic,
+      '--partitions', String(partition),
+      '--offset', `${start}:end`,
+      '--format', '%p\t%o\t%k\t%v\n',
+    ]);
+
+    if (res.exitCode !== 0) {
+      throw new Error(
+        `consumeTopic(${topic}) partition ${partition} [${start}:end] failed ` +
+        `(exit ${res.exitCode}): ${res.output}`,
+      );
+    }
+
+    for (const line of res.output.split('\n')) {
+      if (line.trim() === '') continue;
+      const parts = line.split('\t');
+      if (parts.length < 4) continue;
+      const [p, o, k, ...rest] = parts;
+      const raw = rest.join('\t');
+      let value: any = raw;
+      try { value = JSON.parse(raw); } catch { /* leave as string */ }
+      records.push({
+        partition: Number(p),
+        offset: Number(o),
+        key: k === '' ? null : k,
+        value,
+      });
+    }
+  }
+
+  return records;
 }

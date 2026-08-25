@@ -109,10 +109,12 @@ func TestEventsCarryPlatformFromStateWithMessengerDefault(t *testing.T) {
 	assert.Equal(t, "whatsapp", platforms["wa-user"])
 	assert.Equal(t, "messenger", platforms["legacy-user"])
 
-	// The platform field must ride along in the JSON body sent to botserver.
+	// The full triple (user, account_id, platform) must ride along in the JSON body sent to botserver.
 	for _, e := range events {
 		b, err := json.Marshal(e)
 		assert.Nil(t, err)
+		assert.Contains(t, string(b), `"user":`)
+		assert.Contains(t, string(b), `"account_id":`)
 		if e.User == "wa-user" {
 			assert.Contains(t, string(b), `"platform":"whatsapp"`)
 		} else {

@@ -33,6 +33,7 @@ Designed as a stateless Rust service for simplicity and performance; Kafka is th
 | `FB_APP_SECRET` | No | — | Meta app secret for payload signature verification (X-Hub-Signature-256, HMAC-SHA256). Applied to both `/webhooks` and `/whatsapp` POST. If unset, signature checks are bypassed (local dev, testrunner). |
 | `KAFKA_BROKERS` | Yes | — | Comma-separated Kafka broker addresses (e.g., `kafka:9092` in dev, `broker1:9092,broker2:9092` in prod) |
 | `BOTSERVER_EVENT_TOPIC` | No | `events` | Kafka topic for publishing events. Alias: `VLAB_EVENT_TOPIC`. |
+| `SYNTHETIC_REQUIRE_CONVERSATION` | No | `false` | When `true`/`1`, `POST /synthetic` returns 400 if `account_id` or `platform` is missing. Off means accept-and-log. See *The conversation triple*. Declared explicitly in `devops/values/{production,staging}.yaml` so flipping it is a committed-file edit, not a live mutation. |
 | `PORT` | No | `3000` | HTTP listen port |
 | `DASHBOARD_URL` | No | — | Unused (placeholder for future template status polling) |
 | `AUTH0_DASHBOARD_SECRET` | No | — | Unused (placeholder for future auth) |
@@ -59,8 +60,8 @@ Designed as a stateless Rust service for simplicity and performance; Kafka is th
 1. **Verify (GET):** Meta sends `hub.verify_token` + `hub.challenge`. Handler checks token against `VERIFY_TOKEN` and echoes challenge (or 401).
 2. **Ingest (POST):** Meta sends webhook with `entry[]` array containing `messaging[]` and `messaging_handovers[]` events.
 3. **Process:** Walk `entry.changes[field=message_template_status_update]` for template approval/rejection updates; forward to template status handler.
-4. **Stamp:** Tag events with `source: 'messenger'` + `page_id` (extracted from webhook entry).
-5. **Publish:** One message per event to Kafka topic (user-keyed by PSID / page_id pair for partitioning).
+4. **Stamp:** `source: 'messenger'`, a normalized ms `timestamp`, `platform: 'messenger'`, and `account_id` derived from the echo rule — `sender.id` on an echo, `recipient.id` otherwise. **Not** from `entry[].id`; the account is per-event, because an echo inverts sender and recipient.
+5. **Publish:** One message per event to the Kafka topic, keyed by the **user id** (the PSID — `recipient.id` on an echo, `sender.id` otherwise).
 
 ### WhatsApp Webhooks (`/whatsapp`)
 
@@ -68,58 +69,127 @@ Designed as a stateless Rust service for simplicity and performance; Kafka is th
 2. **Ingest (POST):** Meta sends webhook with `entry[]` array containing `changes[].value.{messages,statuses}[]`.
 3. **Process:** Walk `changes[].value.messages` for inbound messages, `changes[].value.statuses` for delivery/read receipts.
 4. **Extract phone_number_id:** From `metadata.phone_number_id` in the change value.
-5. **Stamp:** Tag events with `source: 'whatsapp'` + `phone_number_id`.
-6. **Publish:** One message per item to Kafka topic (user-keyed by phone number / phone_number_id for partitioning).
+5. **Stamp:** `source: 'whatsapp'`, `phone_number_id`, a normalized ms `timestamp` (WhatsApp sends seconds, as a string), `platform: 'whatsapp'`, and `account_id` = `phone_number_id`.
+6. **Publish:** One message per item to the Kafka topic, keyed by the **user id** — `from` on a message, `recipient_id` on a status, so both partition to the same participant.
 
 ### Synthetic Events (`/synthetic`)
 
-1. **Ingest:** POST body is a pre-normalized `UniversalEvent` JSON.
-2. **Parse:** Extract `user_id` from the event.
-3. **Publish:** Kafka message keyed by `user_id`, body is the JSON as-is.
-4. **Use case:** Staging tests, manual re-entry simulation, admin tooling (no Meta webhook setup required).
+Internal endpoint for events that did not arrive from Meta — dean's timeouts and
+follow-ups, dinersclub's payment results, replybot's and message-worker's
+`machine_report`s, linksniffer's click events, exodus' bails. Also the entry point for
+staging tests and admin tooling, since it needs no Meta webhook setup.
 
-Example:
-```json
+**The body is NOT a UniversalEvent.** Normalization happens downstream in replybot's
+`event-normalizer.js`. Hermes takes a flat envelope, stamps `source`, `timestamp` and the
+conversation fields onto it, and publishes it as-is. Unknown fields pass through
+untouched, which is why a poster can add a field without hermes changing.
+
+```jsonc
+POST /synthetic
+Headers: X-Vlab-Poster: <service name>      // for attributing rejections
 {
-  "event_id": "evt_test_001",
-  "user_id": "27123456789",
-  "timestamp": 1721678400000,
-  "source": { "type": "whatsapp", "account_id": "1023456789" },
-  "event_type": "conversation_started",
-  "payload": {
-    "type": "conversation_started",
-    "trigger": "referral",
-    "referral": { "ref": "form.flysmoke" }
-  },
-  "raw": {}
+  "user":       "<user_id>",                // required
+  "account_id": "<account_id>",             // required; `page` accepted as a deprecated alias
+  "platform":   "messenger" | "whatsapp",   // required
+  "event":      { "type": "...", "value": ... }
 }
 ```
+
+1. **Validate:** `user`, `account_id`, `platform`. A missing `user` is always 400. A
+   missing `account_id`/`platform` is 400 only when `SYNTHETIC_REQUIRE_CONVERSATION` is
+   on — see *The conversation triple* below.
+2. **Stamp:** `source: "synthetic"`, `timestamp: now_ms`, plus `account_id` and
+   `platform` when derivable.
+3. **Publish:** Kafka message keyed by `user`, body is the stamped JSON.
 
 ## Source Schema & Account ID Stamping
 
-### Messenger
+Every event hermes publishes — all three shapes — carries two normalized top-level fields
+identifying the conversation it belongs to:
 
-```json
+```jsonc
 {
-  "source": "messenger",
-  "page_id": "<facebook_page_id>",
-  "timestamp": <seconds>
+  "account_id": "<account>",              // the messaging account
+  "platform":   "messenger" | "whatsapp"  // the conversation's transport
 }
 ```
 
-The `page_id` is extracted from the webhook's `entry[].id` field (Meta always sends the page ID in the entry for Messenger webhooks).
+`documentation/event-envelope.md` is the full contract. Derivation, per shape:
 
-### WhatsApp
+| Shape | `account_id` | `platform` |
+|---|---|---|
+| Messenger | `sender.id` if `message.is_echo` else `recipient.id` | `"messenger"` |
+| WhatsApp | `phone_number_id` (from `entry.changes[].value.metadata`) | `"whatsapp"` |
+| Synthetic | POSTed `account_id`, else `page` (deprecated) | POSTed `platform` |
 
-```json
-{
-  "source": "whatsapp",
-  "phone_number_id": "<phone_number_id>",
-  "timestamp": <seconds>
-}
-```
+A field is stamped **only when it derives to a non-empty string** — never `null`, never
+`""`. Absent is safe: the consumer treats a missing component as "do not touch the state
+cache" and replays from the event log. An empty string would be a poisoned conversation
+key, which is not safe.
 
-The `phone_number_id` is extracted from `entry.changes[].value.metadata.phone_number_id` for each message or status.
+`platform` is stamped unconditionally on Messenger and WhatsApp, independently of whether
+`account_id` derives — the transport is known there regardless.
+
+**On Messenger the account is echo-dependent.** An echo is a message the *page* sent, so
+the roles invert and the page is the `sender`. That rule is duplicated in JS in
+`replybot/lib/event-normalizer.js` `parseMessengerEvent`, and is the only two-language
+logic in this work, so it is pinned by a shared fixture —
+`testdata/event-envelope/messenger-account-derivation.json`, loaded by
+`hermes/src/event.rs` tests via `include_str!` and by
+`replybot/lib/event-normalizer.test.js` via `require`. Change the rule in one language and
+the other language's suite fails. The fixture is safe at the repo root despite the
+per-service Docker build contexts, because the Rust loader sits in a `#[cfg(test)]` module
+that `cargo build --release` never compiles.
+
+### `source` is not `platform`
+
+Both fields exist, both stay, and they are not synonyms.
+
+- **`source`** — where the event came *in from*: `messenger` | `whatsapp` | `synthetic`.
+- **`platform`** — what transport the *conversation* runs on: `messenger` | `whatsapp`.
+  **Never `synthetic`.**
+
+They differ exactly on synthetic events, which is the whole reason `platform` must be sent
+explicitly rather than inferred from `source`: a payment result arrives with
+`source: "synthetic"`, which says nothing about how to reach the participant.
+
+### Nothing was removed
+
+`phone_number_id`, `page`, `recipient.id` and `sender.id` keep their names and meanings
+alongside the new fields. The `messages` backfill reads the account out of historical
+`messages.content` under those per-shape names, so keeping them lets old and new rows
+share one extraction path.
+
+## The conversation triple
+
+A synthetic event without a platform cannot be attributed to a conversation, so accepting
+it silently reproduces the cross-account state-bleed bug the envelope exists to prevent.
+Hermes rejects an incomplete `/synthetic` POST with **400**, logging the poster identity
+(`X-Vlab-Poster`, falling back to `User-Agent`) and the event type so the culprit is
+findable.
+
+This is **gated**, because hermes must accept-but-not-require until every poster is
+deployed — otherwise in-flight posters 400 mid-rollout:
+
+| `SYNTHETIC_REQUIRE_CONVERSATION` | Behaviour |
+|---|---|
+| absent, or anything but `true`/`1` — the default | accept, stamp what derives, log the gap |
+| `true` or `1` (case-insensitive) | 400, produce nothing |
+
+Greppable log tags, deliberately distinct so "the poster did not send it" is never confused
+with "hermes could not derive it":
+
+| Tag | Meaning |
+|---|---|
+| `[NO_USER]` | `/synthetic` with no `user`. Always 400. |
+| `[NO_CONVERSATION]` | `/synthetic` missing `account_id`/`platform`, gate **on**. 400. |
+| `[INCOMPLETE_CONVERSATION]` | same, gate **off**. Accepted — this is the rollout counter. |
+| `[NO_CONVERSATION_MESSENGER]` | `account_id` not derivable from a Messenger webhook |
+| `[NO_CONVERSATION_WHATSAPP]` | `phone_number_id` empty on a WhatsApp webhook |
+
+**Do not turn the gate on yet.** Two of the six synthetic posters — `linksniffer` and
+`exodus` — do not send the triple. See `documentation/event-envelope.md` for why
+linksniffer cannot without a change to how replybot builds webview URLs.
 
 ## Test Layout
 
@@ -130,6 +200,12 @@ The `phone_number_id` is extracted from `entry.changes[].value.metadata.phone_nu
 - Kafka producer mocking
 
 All tests import and call `build_router(state)` directly, ensuring they exercise the exact same routing as production.
+
+Unit tests for the pure derivation live in `src/event.rs`'s `#[cfg(test)] mod tests`. The
+Messenger echo rule is exercised there against the **shared cross-language fixture** at
+`testdata/event-envelope/messenger-account-derivation.json` (loaded with `include_str!`),
+which `replybot/lib/event-normalizer.test.js` also loads. Do not restate that rule in a
+hand-written Rust test — add a vector to the fixture instead, so both languages get it.
 
 ## Template Status Updates
 
@@ -230,6 +306,7 @@ Partitioning ensures all events for a user route to the same partition, so downs
 
 ## See Also
 
+- `documentation/event-envelope.md` — the event envelope contract: the two normalized fields, the derivation table, the posters, and the 400 gate
 - `documentation/platform-abstraction.md` — overall architecture and account-id routing
 - `replybot/README.md` — event normalization and state machine
 - `message-worker/README.md` — outbound message translation and sending

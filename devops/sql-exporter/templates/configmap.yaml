@@ -45,12 +45,23 @@ data:
     # Until 2026-07-27 every query below carried
     #   CASE WHEN a.form = '305' THEN 'fallback (no study)' ELSE ... END
     # which OVERWROTE the real survey name for shortcode 305. That was factually
-    # wrong. 305 is simultaneously (a) the global FALLBACK_FORM target and (b) a
-    # live survey belonging to a real researcher. Verified on prod 2026-07-27:
-    # 50 survey versions carry shortcode '305', it currently resolves to survey
-    # "MENtality" / worldbank@vlab.digital, and over 24h it had 218 users reach END
-    # alongside its 164 FORM_NOT_FOUND errors. Labelling all of that
-    # "fallback (no study)" destroyed a real researcher's real study.
+    # wrong. 305 is simultaneously (a) the global FALLBACK_FORM target and (b) an
+    # ordinary shortcode that accounts use for real studies.
+    #
+    # SHORTCODES ARE USER-SCOPED. There is no single survey called 305. A
+    # shortcode is unique per account owner, not globally, and formcentral
+    # resolves one by `s.userid = (SELECT userid FROM credentials WHERE key =
+    # <pageid>)` (formcentral/db.go:82). So `305` names a DIFFERENT survey for
+    # every account that has one, and FALLBACK_FORM always resolves inside the
+    # conversation's own account -- it can never route anyone into another
+    # account's study. Verified on prod 2026-08-20: 52 survey versions carry
+    # shortcode '305' across 11 distinct accounts (worldbank@vlab.digital 17,
+    # nandanmarkrao@gmail.com 14, mchatila@worldbank.org 6, and eight others).
+    #
+    # That is exactly why the CASE was wrong: it collapsed 11 accounts' real
+    # studies into one label. Verified on prod 2026-07-27, over 24h form 305 had
+    # 218 users reach END alongside its 164 FORM_NOT_FOUND errors. Labelling all
+    # of that "fallback (no study)" destroyed real studies.
     #
     # The special case also caused the bug that triggered the 2026-07 dashboard
     # review: some panels filtered on study!="fallback (no study)" and some did not,
