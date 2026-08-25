@@ -440,9 +440,13 @@ credential also serve Instagram?
 
 | | why |
 |---|---|
-| 1.1 → 1.2 | `responses` NULLs abort migration 28 |
-| 1.2 → 1.3 | schema before scribble, closely (§5.1) |
-| 1.3 → 3.3 | migration 19 needs replybot v0.0.221 in prod |
+| 1.1 → 1.2 | `responses` NULLs abort migration 28a's guard |
+| 1.2 → 1.3 | schema before scribble (§5.1). **The 28a/28b split removes the window** — after 28a both the old and new build have a valid `ON CONFLICT` arbiter, so the deploy is no longer a race. 28b closes the overlap afterwards. |
+| **1.3 → 1.5** | **the backfill must not run behind a writer still producing NULLs.** After 1.3 the new code stamps `account_id` on every new row, so 1.5 only fills historical gaps and `AND account_id IS NULL` makes it idempotent. Reversed, you would backfill forever. |
+| 3.3 → 1.5 | migration 19 frees the disk 1.5 needs — **and it must be a completed GC, not just a completed DROP** (25h TTL) |
 | 0.5 → 0.4 | test the deployed services, not the source |
 | 1.3 → 2.2 | the gate cannot precede the producers it would reject |
 | 0.1/0.2 → 0.3 | staging lacks disk for the backfill's MVCC churn |
+
+~~1.3 → 3.3~~ is **retired**: migration 19 never needed replybot v0.0.221, and it
+was applied to production on 2026-08-25 ahead of Phase 1. See 3.3.

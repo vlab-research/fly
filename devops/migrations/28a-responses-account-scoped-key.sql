@@ -1,0 +1,162 @@
+-- 28a-responses-account-scoped-key.sql  (PHASE 1 of 2)
+--
+-- Make the responses row key the CONVERSATION, not the participant.
+--
+-- Same defect and same fix as 27-chat-log-account-scoped-key.sql; read that
+-- file's header first, it explains why widening the ON CONFLICT target alone
+-- cannot work and why ALTER PRIMARY KEY is the only route. Everything there
+-- was reproduced against CockroachDB v24.1.0 on both tables.
+--
+-- responses was keyed PRIMARY KEY (userid, timestamp, question_ref) and
+-- scribble wrote `ON CONFLICT (userid, timestamp, question_ref) DO NOTHING`,
+-- so an answer recorded for one participant on two of our messaging accounts
+-- at the same instant was silently DISCARDED rather than stored. Narrower
+-- exposure than chat_log -- it needs millisecond-exact collision -- but it is
+-- the same class of bug and the same participant-vs-conversation confusion.
+--
+-- =====================================================================
+-- WHY THIS IS SPLIT IN TWO (2026-08-25)
+--
+-- This file was one migration. It is now 28a + 28b so that production can be
+-- deployed with NO scribble downtime.
+--
+-- ALTER PRIMARY KEY *retains the old primary key as a unique secondary index*.
+-- That is normally a nuisance -- 28b exists to drop it -- but it is also the
+-- thing that removes the rollout window. After 28a, BOTH unique constraints
+-- exist at once:
+--
+--   old scribble  ON CONFLICT (userid, timestamp, question_ref)
+--                 -> matches the retained unique index          -> WORKS
+--   new scribble  ON CONFLICT (userid, pageid, timestamp, question_ref)
+--                 -> matches the new primary key                -> WORKS
+--
+-- So the old and new builds are simultaneously valid, and the deploy is not a
+-- race. Run 28a, deploy at leisure, verify, then run 28b.
+--
+-- VERIFIED 2026-08-25 that the unsplit form really does have a window: against
+-- the fully migrated schema on vstag, the OLD 3-column ON CONFLICT raises
+--
+--   ERROR: there is no unique or exclusion constraint matching the ON CONFLICT
+--          specification / SQLSTATE: 42P10
+--
+-- and scribble.go treats any write error as log.Fatalf, so that is a CRASH LOOP
+-- on gbv-scribble-responses, not a degradation.
+--
+-- NOTE this contradicts a claim in the previous version of this header, which
+-- said "the reverse window -- migration applied, old pods still serving -- is
+-- safe on THIS table". That reasoning only covered 23502 (NULL violations) and
+-- missed 42P10. planning/conversation-identity.md 5.1 was right; this file was
+-- wrong. The NULL argument itself still holds and is kept below.
+--
+-- COST OF THE OVERLAP, stated honestly: while the old unique index survives it
+-- still enforces the constraint this migration removes, so a genuine
+-- dual-account millisecond-exact collision raises 23505 (also fatal to
+-- scribble) instead of being silently discarded. That is the very bug being
+-- fixed and it requires millisecond-exact collision, so exposure across a short
+-- overlap is very low -- but it is not zero, so do not sit in this state for
+-- days. Run 28b once the new build is verified.
+-- =====================================================================
+--
+-- PRODUCTION PREREQUISITE -- READ THIS BEFORE RUNNING.
+--
+-- `pageid` cannot enter a primary key while it is nullable (SQLSTATE 42P15),
+-- and production holds 1,818,162 NULL-pageid rows out of ~18.0M. Unlike
+-- chat_log's 14.8k, that is far too many to backfill in the single implicit
+-- transaction a .sql migration would give it. Those rows are frozen legacy --
+-- max(timestamp) where pageid IS NULL is 2020-09-06 (re-verified 2026-08-25,
+-- unchanged) while the table's newest row is minutes old -- so the backfill is
+-- a one-time historical cleanup that live traffic cannot re-dirty.
+--
+-- Run the batched backfill FIRST, to completion:
+--
+--     bash devops/backfill-responses-pageid.sh <namespace>
+--
+-- then this file. The guard below refuses to proceed otherwise, so getting
+-- the order wrong is a loud no-op rather than a half-migrated table. On a
+-- fresh database (test harnesses, `make test-db`) there are no NULL rows and
+-- the guard passes untouched.
+--
+-- =====================================================================
+-- SEQUENCING (revised 2026-08-25 for the 28a/28b split):
+--
+--     1. bash devops/run-migration.sh <ns> migrations/27-chat-log-account-scoped-key.sql
+--     2. bash devops/backfill-responses-pageid.sh <ns>
+--     3. bash devops/run-migration.sh <ns> migrations/28a-responses-account-scoped-key.sql
+--     4. deploy the scribble build carrying both new ON CONFLICT targets
+--     5. verify: no 42P10, no 23505, responses count advancing
+--     6. bash devops/run-migration.sh <ns> migrations/28b-responses-drop-old-unique-index.sql
+--
+-- One scribble build changes BOTH response.go and chatlog.go, so a deploy needs
+-- both migrations applied. See 27's header for why 27 must not be applied alone
+-- and left undeployed. 27 does NOT need this split: its topic is dormant (newest
+-- chat_log row 2026-07-27), so there is no live writer to strand.
+--
+-- ORDERING: schema before code, always. The new ON CONFLICT target raises 42P10
+-- against the old schema and scribble treats every write error as fatal
+-- (scribble.go:36-39, log.Fatalf), so shipping the code first is a crash loop.
+--
+-- On NULLs specifically the old code is safe during the overlap: it writes NULL
+-- only for an absent pageid, and current traffic produces none. So no 23502
+-- during the rollout. chat_log does not have that property, which is why
+-- scribble coerces nil there.
+--
+-- Also block the chat-log producer restoration on this landing; step 4 is
+-- shared. See documentation/chat-message-logging.md.
+-- =====================================================================
+--
+-- COST AND HEADROOM. This is the only genuinely hot table in this pair, and the
+-- one real cost in the whole change. Re-measured in production 2026-08-25:
+--
+--     responses    39.56 GiB    989 ranges   17,990,549 rows
+--     (for scale:  chat_log 2.91 GiB / 65 ranges; messages 387.48 GiB / 9160)
+--
+-- ALTER PRIMARY KEY is an ONLINE schema change -- background index backfill then
+-- swap, no table lock, writes continue throughout. It rewrites the primary index
+-- and rebuilds the secondary indexes, so peak additional space is roughly the
+-- size of the table again while the old indexes still exist.
+--
+-- THE range_size AMBIGUITY IS RESOLVED (2026-08-25). A previous version of this
+-- header bracketed the estimate because it could not tell whether `range_size`
+-- was replica-inclusive or per-replica. It is PER-REPLICA LOGICAL: the chatroach
+-- database sums to 442.09 GiB via SHOW RANGES, while livebytes across the four
+-- stores is 1442.13 GiB, i.e. almost exactly 3x plus system ranges. So the
+-- second reading applies: peak ~118 GiB cluster-wide at RF=3, ~29 GiB/node,
+-- about 23% of free space. Comfortable, and now known rather than bracketed.
+--
+-- Space is NOT reclaimed at completion: dropped index data is garbage-collected
+-- asynchronously per the table's zone `gc.ttlseconds` (production: 90000s/25h),
+-- so plan for peak usage to persist for that TTL afterwards.
+--
+-- The rewrite moves more bytes than 18.0M rows suggests, because the primary
+-- key's STORING set includes `metadata` JSONB, `response` and `question_text`.
+-- Prefer a low-traffic window. Correctness was verified against CockroachDB
+-- v24.1.0 on the real DDL -- FK to surveys, the `clusterid` STORED computed
+-- column, the inverted index and the wide covering index all survive -- but that
+-- verification was a single node with trivial data, NOT concurrency at 18.0M
+-- rows under load. Watch the schema-change job rather than assuming.
+
+-- Refuse to run against un-backfilled data. See the header.
+SELECT crdb_internal.force_error(
+         'XXUUU',
+         'responses still has NULL pageid rows -- run devops/backfill-responses-pageid.sh first'
+       )
+FROM chatroach.responses
+WHERE pageid IS NULL
+LIMIT 1;
+
+-- NOT NULL, and deliberately NO DEFAULT -- see 27's equivalent block for the full
+-- reasoning. In short: '' is the sentinel for rows whose account was never
+-- recorded (the backfill above), but a column DEFAULT applies to future INSERTs
+-- and would silently hand "account unknown" to a writer that merely forgot the
+-- column. This migration exists because attribution was failing silently, so an
+-- omitting writer gets a loud 23502. `states.pageid` is likewise NOT NULL with no
+-- default.
+ALTER TABLE chatroach.responses ALTER COLUMN pageid SET NOT NULL;
+
+-- pageid is APPENDED, so (userid, timestamp) stays an exact key prefix and
+-- every existing access path keeps its locality.
+--
+-- This leaves the OLD primary key behind as a unique secondary index. That is
+-- intentional here and is what makes the deploy raceless -- 28b drops it.
+ALTER TABLE chatroach.responses
+  ALTER PRIMARY KEY USING COLUMNS (userid, timestamp, question_ref, pageid);

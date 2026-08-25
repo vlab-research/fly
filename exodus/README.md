@@ -207,7 +207,7 @@ The join uses strict equality, so a response row with no real account matches no
 at all. This is deliberate — an unattributable response must not qualify anyone.
 
 `responses.pageid` was nullable until
-`devops/migrations/28-responses-account-scoped-key.sql`, which made it `NOT NULL` — it is part
+`devops/migrations/28a-responses-account-scoped-key.sql`, which made it `NOT NULL` — it is part
 of the primary key now — and backfilled the 1.82M historical NULLs to the empty-string
 "account unknown" sentinel. Either way those rows stay inert for bail targeting, since no real
 account id is `''`. In practice this is not a live concern: every response written since

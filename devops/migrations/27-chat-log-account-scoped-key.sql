@@ -54,7 +54,8 @@
 --
 --     1. bash devops/run-migration.sh <ns> migrations/27-chat-log-account-scoped-key.sql
 --     2. bash devops/backfill-responses-pageid.sh <ns>
---     3. bash devops/run-migration.sh <ns> migrations/28-responses-account-scoped-key.sql
+--     3. bash devops/run-migration.sh <ns> migrations/28a-responses-account-scoped-key.sql
+--     (then deploy scribble, verify, then 28b-responses-drop-old-unique-index.sql)
 --     4. deploy the scribble build carrying both new ON CONFLICT targets
 --
 -- One scribble build changes BOTH chatlog.go and response.go, so a deploy

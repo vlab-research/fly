@@ -87,7 +87,7 @@ describe('Response queries', () => {
     afterParam = null
 
     // `pageid` is the messaging account, and it became part of the responses primary
-    // key in devops/migrations/28-responses-account-scoped-key.sql -- a conversation
+    // key in devops/migrations/28a-responses-account-scoped-key.sql -- a conversation
     // is (platform, account_id, user_id), not a user id on its own. The column is
     // NOT NULL with no default, so a fixture has to name the account explicitly;
     // omitting it raises 23502 rather than quietly recording an unattributed

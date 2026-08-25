@@ -77,7 +77,8 @@ Widening the two `ON CONFLICT` targets is not a code-only change. The old target
   a write error is not a dropped row — it is a **crash loop**.
 
 `devops/migrations/27-chat-log-account-scoped-key.sql` and
-`28-responses-account-scoped-key.sql` fold `pageid` into those primary keys.
+`28a-responses-account-scoped-key.sql` fold `pageid` into those primary keys.
+(28 was split into 28a/28b so the scribble deploy has no window -- see 28a's header.)
 **Both must be applied before the matching scribble build is deployed.** Migration
 28 additionally requires `devops/backfill-responses-pageid.sh` to have been run to
 completion first; its own guard refuses to proceed otherwise.

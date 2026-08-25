@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # WHY THIS IS NOT A .sql MIGRATION
 #
-# devops/migrations/28-responses-account-scoped-key.sql needs pageid to be NOT
+# devops/migrations/28a-responses-account-scoped-key.sql needs pageid to be NOT
 # NULL so it can enter the primary key -- a conversation is (platform,
 # account_id, user_id), and an identity component cannot be nullable.
 # CockroachDB rejects a nullable column in a primary key outright (SQLSTATE
@@ -55,7 +55,7 @@ usage() {
 Usage: $(basename "$0") <namespace>
 
 Backfill chatroach.responses.pageid from NULL to '' in bounded batches, so that
-devops/migrations/28-responses-account-scoped-key.sql can make the column NOT
+devops/migrations/28a-responses-account-scoped-key.sql can make the column NOT
 NULL and fold it into the primary key.
 
 Arguments:
@@ -160,7 +160,7 @@ for (( batch = 1; batch <= MAX_BATCHES; batch++ )); do
     if [[ "$updated" -eq 0 ]]; then
         success "Backfill complete. ${total} rows updated across $(( batch - 1 )) batches."
         echo ""
-        info "Next: bash devops/run-migration.sh ${NAMESPACE} migrations/28-responses-account-scoped-key.sql"
+        info "Next: bash devops/run-migration.sh ${NAMESPACE} migrations/28a-responses-account-scoped-key.sql (then deploy scribble, then 28b)"
         exit 0
     fi
 done

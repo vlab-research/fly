@@ -336,7 +336,7 @@ condition); the `IS NOT NULL` test enforces the actual match.
 
 `responses.pageid` used to be nullable, and the join's strict equality meant a `NULL` pageid
 matched no conversation — intended, since an unattributable response must not qualify anyone.
-As of `devops/migrations/28-responses-account-scoped-key.sql` the column is `NOT NULL`, because
+As of `devops/migrations/28a-responses-account-scoped-key.sql` the column is `NOT NULL`, because
 it is part of the primary key, and the 1.82M historical NULLs were backfilled to the
 empty-string "account unknown" sentinel. The behaviour is unchanged: `''` matches no real
 account, so those rows remain inert for bail targeting. Not a live concern either way — every

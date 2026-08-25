@@ -151,7 +151,8 @@ pointer. `USER_BLOCKED` and `RESTORE_STATE` set it too.
 |---|---|---|
 | `26-messages-account.sql` | `messages.account_id` + `.platform`, new covering index, old index NOT VISIBLE | **No** |
 | `27-chat-log-account-scoped-key.sql` | `chat_log` PK gains `pageid` | **No** |
-| `28-responses-account-scoped-key.sql` | `responses` PK gains `pageid` | **No** |
+| `28a-responses-account-scoped-key.sql` | `responses` PK gains `pageid` (old PK survives as a unique index) | **No** |
+| `28b-responses-drop-old-unique-index.sql` | drops that retained index; run only after scribble is deployed and verified | **No** |
 
 Verified against `vprod` 2026-08-20: none of the columns exist, both PKs are still their
 original three columns.
