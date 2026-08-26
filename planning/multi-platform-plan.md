@@ -5,21 +5,36 @@ describes the conversation-identity rollout in depth — the hazards, the gates,
 traps — but the phase order lives here. If the two disagree, this file wins and the
 other is stale.
 
-**Status 2026-08-26:** Phase 1 complete except 1.5, whose *packaging* is now built
-and tested but which has not been run. Production runs the full nine-service stack
-at staging parity; migrations 19/26/27/28a/28b applied and verified; new rows
-arrive stamped with `account_id` (8,800 of 106,994,949 as of 2026-08-26).
-Messenger is the only live transport.
+**Status 2026-08-26 23:30 UTC:** Phase 1 is complete except 1.5, and **1.5 is
+RUNNING** — the production backfill is in flight as an in-cluster Job, projected
+to finish 2026-08-28 between ~14:40 and ~20:00 UTC. Production runs the full
+nine-service stack at staging parity; migrations 19/26/27/28a/28b/31 applied and
+verified; new rows arrive stamped with `account_id`. Messenger is the only live
+transport.
+
+**Next human action:** nothing until the backfill finishes — it is unattended by
+design. Then follow the completion runbook in
+`planning/backfill-in-cluster-job.md` ("WHEN IT FINISHES"): capture the logs
+*before* disarming, verify the migration 26 §4 gate reads 0, set
+`messagesBackfill.enabled: false`, record the unattributable count into
+`planning/messages-account-not-null-todo.md`, then Phase 1 is done and **2.1 is
+next**.
 
 **Phase 0 is COMPLETE (0.3 finished 2026-08-24).** All of 0.1-0.5 are done and
-verified. Phase 1 is next, and it is entirely production work — nothing has been
-applied to vprod yet.
+verified. **Phase 1 is complete except 1.5, which is running.** Phase 1 was
+entirely production work and production has now had all of it.
 
 ---
 
 ## Start here if you are new to this
 
-Read in this order, and do not skip the first one:
+**Shortcut, while 1.5 is in flight:** if you are here to deal with the running
+backfill and nothing else, go straight to
+`planning/backfill-in-cluster-job.md` — it opens with "YOU ARE HERE", the
+completion runbook and the failure runbook, and it is self-contained. Come back
+here afterwards for what Phase 2 needs.
+
+Otherwise read in this order, and do not skip the first one:
 
 1. **This file** — authoritative for WHAT and in WHICH ORDER.
 2. **`planning/conversation-identity.md` §5.1** — the scribble/`responses` key
@@ -39,21 +54,29 @@ its rows are ~25x fatter than production's, its `responses` had zero NULL `pagei
 where production has 1,818,162, and its single CRDB node hides the multi-node case.
 **Re-measure on production. Inherit nothing.**
 
-### State of the world, 2026-08-24
+### State of the world, 2026-08-26
 
 | | staging (`vstag`) | production (`vprod`) |
 |---|---|---|
-| migrations 26/27/28/30 | applied | **none applied** |
-| migration 29, 19 | applied — `messages` is `primary` + `messages_userid_account_timestamp_idx` only | **19 applied 2026-08-25**; 29 not applied |
-| `devops/backfill` | **run for real 2026-08-24, verified** | never run |
-| linksniffer | **v0.0.9** | older; still pointed at docker.io in values |
-| moviehouse | `staging` branch deploy, current | `main` deploy, **assume-messenger NOT shipped** |
-| `STRICT_EVENT_ENVELOPE` | `true`, live since 2026-08-22 18:36 | `false` |
+| migrations 26/27/28a/28b/30 | applied | **applied, guards passed** |
+| migration 29, 19 | applied — `messages` is `primary` + `messages_userid_account_timestamp_idx` only | **19 applied 2026-08-25, GC completed**; 29 not applied. 3 indexes, one NOT VISIBLE |
+| migration 31 (backfill cursor) | applied 2026-08-26 | **applied 2026-08-26** |
+| `devops/backfill` | **run for real 2026-08-24, verified**; Job rehearsed in-cluster 2026-08-26 | **RUNNING since 2026-08-26 23:30 UTC** as an in-cluster Job |
+| `messagesBackfill` (helm) | `false` (rehearsed, then disarmed at rev 88) | **`true` — disarm when the run ends** |
+| linksniffer | **v0.0.9** | **v0.0.9**, on ghcr |
+| moviehouse | `staging` branch deploy, current | shipped to `main` |
+| `STRICT_EVENT_ENVELOPE` | `true`, live since 2026-08-22 18:36 | `false` — **this is 2.1, the next phase** |
 | `SYNTHETIC_REQUIRE_CONVERSATION` | `false` | `false` |
-| smoke-test form-a | deployed to Typeform, 42 fields | same form (shared) |
+| smoke-test form-a | deployed to Typeform, 42 fields | **still the OLD 38-field form** — see 1.3 |
 
-Production is **completely untouched**. Messenger is the only live transport;
-WhatsApp is a handful of test users.
+Production now runs the full nine-service stack at staging parity. Messenger is
+the only live transport; WhatsApp is a handful of test users.
+
+**The "re-measure on production" rule above kept earning its keep.** Two examples
+from 1.5 alone: the `chatroach` service user turned out to hold only
+`INSERT`/`SELECT` on `messages`, so the Job had to connect as `root`; and the
+unattributable-row count came out ~16x the sampled estimate. Neither was
+predictable from staging or from the docs.
 
 ---
 
@@ -328,20 +351,31 @@ WhatsApp is a handful of test users.
   at revision 88 and pruned cleanly. It proves nothing about duration or disk.
 
   **THE FULL RUN IS IN FLIGHT — started 2026-08-26 23:30:24 UTC**, helm revision
-  652, projected to finish ~2026-08-28 20:00 UTC. Migration 31 is applied to
-  vprod and the image is published (`ghcr.io/vlab-research/backfill:v0.1.0`).
+  652. Projected finish **2026-08-28, ~14:40–20:00 UTC** (the spread is real: the
+  bounded pass measured 30.1 s/batch, the first 47 batches of the full run ran at
+  26.4). Migration 31 is applied to vprod; the image is published as
+  `ghcr.io/vlab-research/backfill:v0.1.0`.
 
-  A bounded `--max-batches=20` pass went first and measured what the rehearsal
-  could not: **399,779 rows in 603 s = 30.1 s/batch for committed writes**, only
-  1.08x the rehearsal's 28 s. So the 41-hour floor stood and the real figure is
-  **~44.6 h**. The full run then RESUMED from the stored cursor across a Job
-  deletion, beginning immediately past batch 20's boundary.
+  **It is unattended. Nothing needs doing while it runs.** The cursor is durable
+  and `backoffLimit: 3` restarts it on failure. Cheap progress check, no table
+  scan: `SELECT batches, rows_updated, done FROM chatroach.backfill_cursor;`
+  (~5,350 batches is the whole table).
 
-  **When it finishes:** capture the final log lines FIRST — setting
-  `messagesBackfill.enabled: false` makes helm prune the Job and its logs — then
-  turn it off, and re-derive the unattributable count for Phase 3.2. An early
-  slice put that at 0.055% (~59,000 rows), **20x** the ~3,000 that
-  `planning/messages-account-not-null-todo.md` assumes.
+  A bounded `--max-batches=20` pass went first, to measure what a rehearsal
+  cannot: **399,779 rows in 603 s = 30.1 s/batch for committed writes**, only
+  1.08x the rehearsal's rolled-back 28 s. The 41-hour floor held. The full run
+  then RESUMED from the stored cursor across a Job deletion, beginning
+  immediately past batch 20's boundary — no gap, no overlap.
+
+  **When it finishes, follow the runbook in
+  `planning/backfill-in-cluster-job.md` § "WHEN IT FINISHES".** In short: capture
+  the logs FIRST (disarming prunes the Job and its logs), verify the migration 26
+  §4 gate reads 0 rather than trusting the tool's output, set
+  `messagesBackfill.enabled: false`, and record the real unattributable count.
+  That last one matters beyond bookkeeping: the bounded pass implies **~48,800**
+  such rows against the **~3,000** that
+  `planning/messages-account-not-null-todo.md` is written around — a correction
+  already noted in that file, to be replaced with the measured number.
 
   Everything 1.5 depends on is done and verified: migrations 26/27/28a/28b, the
   1.3 deploy, and migration 19 whose GC has completed and returned the space.
@@ -469,6 +503,7 @@ credential also serve Instagram?
 | 1.2 → 1.3 | schema before scribble (§5.1). **The 28a/28b split removes the window** — after 28a both the old and new build have a valid `ON CONFLICT` arbiter, so the deploy is no longer a race. 28b closes the overlap afterwards. |
 | **1.3 → 1.5** | **the backfill must not run behind a writer still producing NULLs.** After 1.3 the new code stamps `account_id` on every new row, so 1.5 only fills historical gaps and `AND account_id IS NULL` makes it idempotent. Reversed, you would backfill forever. |
 | 3.3 → 1.5 | migration 19 frees the disk 1.5 needs — **and it must be a completed GC, not just a completed DROP** (25h TTL) |
+| migration 31 → 1.5 | the Job passes `--cursor-key`, and the tool fails at STARTUP if `chatroach.backfill_cursor` is missing — deliberately, so a broken cursor is not discovered 40 hours in |
 | 0.5 → 0.4 | test the deployed services, not the source |
 | 1.3 → 2.2 | the gate cannot precede the producers it would reject |
 | 0.1/0.2 → 0.3 | staging lacks disk for the backfill's MVCC churn |

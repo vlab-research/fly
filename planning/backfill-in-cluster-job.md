@@ -1,21 +1,32 @@
 # Run `devops/backfill` as an in-cluster Job (Phase 1.5)
 
-**Status 2026-08-26:** the packaging is BUILT AND TESTED; the backfill has not
-been run. Everything 1.5 depends on is DONE and verified on production; this is
-the last step of the conversation-identity rollout.
+**Status 2026-08-26 23:30 UTC: THE PRODUCTION BACKFILL IS RUNNING.** Everything
+that had to be built is built, tested and shipped; the run itself is in flight
+and unattended. This is the last step of the conversation-identity rollout, and
+finishing it completes Phase 1.
+
+**If you are picking this up cold, read three sections and skip the rest:**
+[YOU ARE HERE](#-you-are-here--the-run-is-in-flight-started-2026-08-26-233024-utc)
+for state and how to check on it,
+[WHEN IT FINISHES](#-when-it-finishes--do-these-in-this-order) for what to do
+next, [IF SOMETHING GOES WRONG](#-if-something-goes-wrong) for recovery.
+Everything below those is the record of how it was built and why — reference, not
+instructions.
 
 | the work | state |
 |---|---|
 | `devops/backfill/Dockerfile` (+ `devops/.dockerignore`) | written; **image built and smoke-tested locally against a real CockroachDB** |
 | `.github/workflows/release.yml` | `backfill` case + the `file:` input it needs |
 | `devops/vlab/templates/messages-backfill-job.yaml` | written; renders and validates against the vprod API schema |
-| `devops/vlab/values.yaml` / `devops/values/production.yaml` | `messagesBackfill`, **`enabled: false`** |
+| `devops/vlab/values.yaml` / `devops/values/production.yaml` | `messagesBackfill` — chart default `false`; **production is currently `true`** and must be set back to `false` when the run ends |
 | durable cursor (the open question below) | **DONE** — `--cursor-key`, `devops/migrations/31-backfill-cursor.sql`, 10 new tests, mutation-checked |
 | image published to ghcr | **DONE** — `ghcr.io/vlab-research/backfill:v0.1.0`, and the `*-expr.sql` inside it diff clean against the repo |
 | migration 31 applied to **vstag** | **DONE** — schema verified, `hsh`/`userid` nullable as designed |
 | the Job **rehearsed in-cluster on vstag** | **DONE, PASSED** — see below |
-| migration 31 applied to **vprod** | **NO** |
-| the backfill itself | **NOT RUN** |
+| migration 31 applied to **vprod** | **DONE 2026-08-26** — 7 columns, `hsh`/`userid` nullable, `root` ALL, no grant to the service user |
+| bounded first pass on vprod (`maxBatches: 20`) | **DONE** — 399,779 rows, measured 30.1 s/batch for committed writes |
+| **the backfill itself** | **RUNNING since 2026-08-26 23:30:24 UTC** (revision 652), projected finish 2026-08-28 ~14:40–20:00 UTC |
+| disarming it afterwards | **NOT DONE — this is the next human action.** See "WHEN IT FINISHES" |
 
 ### The in-cluster rehearsal, vstag 2026-08-26 (helm revision 87)
 
@@ -89,10 +100,27 @@ deployment strategy.
 
 ---
 
-## THE FULL RUN IS IN FLIGHT — started 2026-08-26 23:30:24 UTC
+## ⏳ YOU ARE HERE — the run is in flight, started 2026-08-26 23:30:24 UTC
 
-helm revision 652, `maxBatches: 20000`. Projected finish **~2026-08-28 20:00 UTC**
-(~44.6 h from the start). It **resumed** rather than restarted:
+helm revision 652 on vprod, `messagesBackfill.enabled: true`,
+`maxBatches: 20000`. **Nothing needs doing while it runs.** It is unattended by
+design: the cursor is durable and `backoffLimit: 3` restarts it on failure.
+
+**Projected finish: 2026-08-28, between ~14:40 and ~20:00 UTC.** The spread is
+real, not hedging — the bounded pass measured 30.1 s/batch and the first 47
+batches of the full run ran at 26.4 s/batch. Re-derive from the cursor rather
+than trusting either:
+
+```sql
+SELECT batches, rows_updated, done, updated_at FROM chatroach.backfill_cursor;
+```
+
+`batches` counts from the very beginning (the bounded pass's 20 included), and
+~5,350 is the whole table. That query is the cheap progress check — it does not
+scan `messages`.
+
+It **resumed** rather than restarted when it was widened, which is the durable
+cursor working across a Job deletion in production:
 
 ```
 RESUMING from the stored cursor: hsh=-9154446195056495845 userid=3047173258742232
@@ -100,29 +128,120 @@ RESUMING from the stored cursor: hsh=-9154446195056495845 userid=304717325874223
 batch 1: updated 19996 rows (total 19996) cursor hsh=-9151006287849897919 ...
 ```
 
-Batch 1 begins immediately past the bounded pass's batch-20 boundary — no gap and
-no overlap — which is the durable cursor working across a Job deletion and
-recreation in production. That is the thing the "open design question" was about.
+Batch 1 begins immediately past the bounded pass's batch-20 boundary — no gap,
+no overlap.
 
-**Watching it** (do not tail interactively for two days):
+### Checking on it
 
 ```bash
-kubectl logs -n vprod job/gbv-messages-backfill --tail=5
 kubectl get job -n vprod gbv-messages-backfill
-kubectl exec -n vprod gbv-cockroachdb-0 -- ./cockroach sql --insecure \
-  -e "SELECT batches, rows_updated, done, updated_at FROM chatroach.backfill_cursor;"
+kubectl logs -n vprod job/gbv-messages-backfill --tail=5      # never -f for two days
 for p in 0 1 2 3; do kubectl exec -n vprod gbv-cockroachdb-$p -- \
   df -h /cockroach/cockroach-data | tail -1; done
 ```
 
-The cursor row is the cheap progress check — it needs no scan of `messages`.
-Byte-exact disk baseline at the start, for comparing against later:
-**405.28 GiB used / 538.36 GiB available** across the four nodes.
+Byte-exact disk at the start, for comparison: **405.28 GiB used / 538.36 GiB
+available** across the four nodes. Projected garbage ~335 GiB, so ~203 GiB
+margin — and `gc.ttlseconds` is 90000 (25 h), so on a ~40-hour run the first
+~15 hours of garbage is collected *during* it. Peak will land below 335 GiB.
 
-**Known cosmetic wart, not worth a redeploy mid-run.** The banner prints
-`resuming    (start)` even when resuming, because it is written before the pool
-is opened and the stored cursor is read. The authoritative line is the
-`RESUMING from the stored cursor:` one below it. Fix in a v0.1.1.
+---
+
+## ▶ WHEN IT FINISHES — do these, in this order
+
+**1. Capture the logs BEFORE anything else.** There is no `ttlSecondsAfterFinished`,
+so nothing deletes the Job on its own — but step 3 does, and it takes the pod and
+its logs with it.
+
+```bash
+kubectl logs -n vprod job/gbv-messages-backfill > /tmp/backfill-prod-final.log
+tail -5 /tmp/backfill-prod-final.log     # expect: DONE: reached the end of the table.
+kubectl get job -n vprod gbv-messages-backfill -o json | \
+  python3 -c "import json,sys; j=json.load(sys.stdin)['status']; print(j)"
+```
+
+Success looks like `DONE: reached the end of the table. N rows updated across M
+batches.` and `1 succeeded, 0 failed`. Anything ending `STOPPED at --max-batches`
+means it hit the safety stop rather than the table's end — see "If it stops
+short" below.
+
+**2. Verify against the database, not the tool's output.** This project has been
+burned by tools reporting success they did not achieve (`run-migration.sh`, see
+`planning/conversation-identity.md` §5.2).
+
+```sql
+SELECT batches, rows_updated, done FROM chatroach.backfill_cursor;   -- done must be t
+SELECT count(*) AS total, count(account_id) AS with_acct,
+       count(*) - count(account_id) AS still_null
+  FROM chatroach.messages;
+```
+
+`still_null` **will not be zero and should not be** — those are the permanently
+unattributable rows. The real gate is migration 26 §4: rows still *attributable
+but not yet attributed* must be **0**. Run that one, it is the only one that
+proves completion.
+
+**3. Disarm it.** `messagesBackfill.enabled: false` in
+`devops/values/production.yaml`, then `helm upgrade gbv vlab -f
+values/production.yaml -n vprod`. Helm prunes the Job. A one-shot must not be
+left armed. (Re-enabling later would exit immediately with `ALREADY DONE`
+anyway, because the cursor row records `done`.)
+
+**4. Record the unattributable count — Phase 3.2 depends on it.** Take
+`still_null` from step 2 to `planning/messages-account-not-null-todo.md`, which
+is written around ~3,000 and is **probably wrong by an order of magnitude**: the
+bounded pass implies ~48,800. That document carries the correction and the
+reasoning; replace the estimate with the real number.
+
+**5. Update the plans.** `planning/multi-platform-plan.md` 1.5 → DONE with the
+figures, and the "Status" line at its head. Then Phase 1 is complete and **2.1 is
+next** (`STRICT_EVENT_ENVELOPE` → true, gated on `CHAT_EVENTS_ENVELOPE_MISSING`
+reading zero for 24h).
+
+Optionally drop the cursor row — but keeping it is free and is the only durable
+record that this ran:
+
+```sql
+-- only if you want a clean slate; not required
+DELETE FROM chatroach.backfill_cursor WHERE cursor_key = 'messages-account-backfill';
+```
+
+---
+
+## ✖ IF SOMETHING GOES WRONG
+
+**The pod died / restarted.** Nothing to do. `backoffLimit: 3` recreates it and
+it resumes from `chatroach.backfill_cursor` automatically — verified in
+production. Confirm with `kubectl get job` (`BACKOFF` count) and check the new
+pod's log says `RESUMING from the stored cursor:`.
+
+**It exhausted `backoffLimit` (Job shows failed).** Read the last log lines for
+the real error, then delete the Job and re-apply — it resumes. A Job's spec is
+immutable, so any settings change needs the delete first:
+
+```bash
+kubectl logs -n vprod job/gbv-messages-backfill --tail=40
+kubectl delete job gbv-messages-backfill -n vprod
+helm upgrade gbv vlab -f values/production.yaml -n vprod
+```
+
+**Disk is running low.** The margin is ~203 GiB against ~335 GiB of projected
+garbage, so this should not happen — but if `avail` drops below ~60 GiB on any
+node, stop it: set `enabled: false` and `helm upgrade` (capture logs first). The
+cursor holds the position, so restarting after GC catches up loses nothing.
+`gc.ttlseconds` is 90000, so space returns ~25 h after the writes that made it.
+
+**You need to stop it deliberately.** `enabled: false` + `helm upgrade`. It is
+safe to kill at any point: each batch is one statement, so there is no
+half-applied batch, and `AND account_id IS NULL` makes everything already done a
+no-op on resume.
+
+**You need to force a position.** `messagesBackfill.extraArgs:
+["--start-hsh=<n>", "--start-userid=<s>"]` — explicit flags override the stored
+cursor. Needed only to recover from something unusual; the stored cursor is
+otherwise authoritative.
+
+---
 
 ## MEASURED FOR REAL ON PRODUCTION, 2026-08-26 (bounded first pass)
 
@@ -218,7 +337,11 @@ before migration 19; dropping that index is what made 1.5 possible.
 
 ---
 
-## The work
+## The work — BUILT, SHIPPED AND VERIFIED. Reference only.
+
+Everything in this section is done and merged. It is kept because the *reasoning*
+is load-bearing — three of these decisions are non-obvious and each one is a trap
+someone would otherwise re-open. Nothing here is an outstanding instruction.
 
 ### 1. `devops/backfill/Dockerfile`
 
@@ -312,67 +435,26 @@ the wire."* The database does the work.
 
 ---
 
-## Running it
+## How it was started — historical, already done
 
-Edit `devops/values/production.yaml` — `messagesBackfill.enabled: true` — and
-apply. **Not `--set`; see the deviation note at the top.**
+Kept because it records what the sequence actually was, not because anything here
+is outstanding. **All three steps are complete.** For anything you need to DO
+now, use "YOU ARE HERE" and the runbooks at the top of this file instead.
 
 ```bash
+# 1. the cursor table                              (applied to vprod 2026-08-26)
+bash devops/run-migration.sh vprod devops/migrations/31-backfill-cursor.sql
+# 2. publish the image                             (CI green, tag pushed)
+git tag backfill-v0.1.0 && git push origin backfill-v0.1.0
+# 3. arm it in the values file -- NOT --set        (revisions 651 then 652)
+#    messagesBackfill.enabled: true
 helm upgrade gbv vlab -f values/production.yaml -n vprod
 ```
 
-First, once each:
-
-```bash
-bash devops/run-migration.sh vprod devops/migrations/31-backfill-cursor.sql
-git tag backfill-v0.1.0 && git push origin backfill-v0.1.0
-```
-
-Then watch. Do NOT tail it interactively for two days:
-
-```bash
-kubectl logs -n vprod job/gbv-messages-backfill -f --tail=20
-kubectl get job -n vprod gbv-messages-backfill -w
-```
-
-⚠️ **Capture the final log lines BEFORE setting `enabled: false` afterwards.**
-Turning it off makes helm prune the Job, which takes its pod and its logs with
-it — as it did on vstag at revision 88. There is no `ttlSecondsAfterFinished` so
-nothing else deletes it, but the values flip does.
-
-Progress query — cheap, uses no table scan of consequence:
-
-```sql
-SELECT count(account_id) AS filled FROM chatroach.messages;
-```
-
-Watch disk across all four nodes periodically. The margin is ~131 GiB, which is
-comfortable, but this is a 41-hour write:
-
-```bash
-for p in 0 1 2 3; do kubectl exec -n vprod gbv-cockroachdb-$p -- \
-  df -h /cockroach/cockroach-data | tail -1; done
-```
-
-### If the pod dies
-
-The tool prints its cursor on **every batch** and on failure:
-
-```
-resume with: --start-hsh=<n> --start-userid="<s>"
-```
-
-With `--cursor-key` set — which the Job passes — you no longer need to. The pod
-resumes by itself, and `backoffLimit: 3` lets Kubernetes do it for you. Check
-where it is:
-
-```sql
-SELECT * FROM chatroach.backfill_cursor;
-```
-
-The log-scrape path remains as the manual override: recover the last cursor line
-and set it in `messagesBackfill.extraArgs` as `--start-hsh=` / `--start-userid=`,
-which take precedence over the stored position. Do not restart from scratch.
+It went in two passes: `maxBatches: 20` first, to measure committed writes
+(revision 651), then `maxBatches: 20000` for the real run (revision 652). The
+widening required deleting the completed bounded Job, because a Job's spec is
+immutable.
 
 ---
 
