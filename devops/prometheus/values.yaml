@@ -75,13 +75,98 @@ grafana:
   enabled: true
   image:
     repository: grafana/grafana
-    tag: 7.4.2
+    # NOT "latest stable". Grafana 13.x refuses to start against this
+    # instance's database: its unified-storage "playlists migration" queries
+    # playlist.uid, a column that no schema migration ever adds to a DB whose
+    # playlist table was created by Grafana 7.x, so startup aborts with
+    # `SQL logic error: no such column: p.uid` and the pod crash-loops.
+    # 12.4.0 was verified against a copy of the live grafana.db: clean start,
+    # all 32 dashboards intact. Re-verify the same way before bumping again --
+    # see devops/grafana/README.md ("Verifying a version bump").
+    tag: 12.4.0
   persistence:
     type: pvc
     enabled: true
     accessModes:
       - ReadWriteOnce
     size: 5Gi
+
+  # REQUIRED because persistence is a ReadWriteOnce PVC. The chart defaults to
+  # RollingUpdate, which deadlocks every single pod change: the new pod cannot
+  # attach the disk while the old pod still holds it ("Multi-Attach error for
+  # volume ... Volume is already used by pod(s) ..."), and the old pod is never
+  # torn down because the new one never becomes ready. The rollout then sits
+  # stuck until it times out. Recreate stops the old pod first -- a few seconds
+  # of Grafana downtime per deploy, which is the correct trade for a single-
+  # replica dashboard server.
+  deploymentStrategy:
+    type: Recreate
+
+  # Public entrypoint. Auth is Grafana's own OAuth (below), not oauth2-proxy --
+  # so unlike Karma this needs only ONE ingress with no auth-request
+  # annotations: Grafana itself redirects anonymous users to its login page.
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - grafana.vlab.digital
+    path: /
+    pathType: Prefix
+    tls:
+      - hosts:
+          - grafana.vlab.digital
+        secretName: grafana-tls
+
+  # GF_AUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET. Kept out of grafana.ini because
+  # that renders into a ConfigMap. Source: devops/grafana/.env ->
+  # `bash secrets.sh monitoring grafana-oauth grafana/.env`.
+  envFromSecret: grafana-oauth
+
+  grafana.ini:
+    server:
+      # Must match the Authorized redirect URI on the Google OAuth client
+      # exactly (that URI is <root_url>/login/google), or login breaks.
+      root_url: https://grafana.vlab.digital
+    # Straight to Google -- no identity broker in between. The OAuth client is
+    # created by hand in the Google Cloud Console (there is no API for creating
+    # "Sign in with Google" web clients), which is why only the id/secret are
+    # configuration here. See devops/grafana/README.md.
+    auth.google:
+      enabled: true
+      # New allowlisted users are created on first login. Safe here because the
+      # allowlist is enforced by role_attribute_path below, and because this
+      # instance has exactly one pre-existing user (admin), so there is no
+      # account to hijack by email collision -- which is what lets us leave
+      # oauth_allow_insecure_email_lookup at its secure default of false.
+      allow_sign_up: true
+      scopes: openid email profile
+      auth_url: https://accounts.google.com/o/oauth2/v2/auth
+      token_url: https://oauth2.googleapis.com/token
+      api_url: https://openidconnect.googleapis.com/v1/userinfo
+      # THIS IS THE ACCESS CONTROL. Google will authenticate any Google account,
+      # so Grafana does the gating: the JMESPath yields 'Admin' for an
+      # allowlisted email and '' for anyone else, and role_attribute_strict
+      # turns "no valid role" into a denied login. Fails closed. Grafana renders
+      # that denial as an ugly 500 rather than a 403 (grafana/grafana#82971) --
+      # expected, not a misconfiguration.
+      # Adding a teammate = add their email here, then helm upgrade.
+      #
+      # Deliberately NOT allowed_domains: the team is not on one Google
+      # Workspace domain (one member uses a personal gmail.com address), and
+      # allowed_domains would admit *everyone* at any listed domain.
+      role_attribute_path: "contains(['nandan@vlab.digital','nandanmarkrao@gmail.com'], email) && 'Admin' || ''"
+      role_attribute_strict: true
+      # LOAD-BEARING. Grafana defaults this to TRUE for the google provider
+      # (Google carries no role/group claims), and while it is true BOTH
+      # role_attribute_path and role_attribute_strict are ignored outright --
+      # no warning, no log line. Every account then falls through to
+      # [users] auto_assign_org_role (Viewer), i.e. anyone with any Google
+      # account gets in. That happened here on 2026-08-05; the tell was that
+      # the *allowlisted* account also came out as Viewer instead of Admin.
+      # Never remove this line without re-running the rejection test below.
+      skip_org_role_sync: false
 
   sidecar:
     datasources:
