@@ -129,7 +129,13 @@ versionExodus: &vexodus v0.2.5
 # v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
 # 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
 # since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
-versionMessageWorker: &vmessageworker v0.1.21
+# v0.1.21 -> v0.1.22: token lookup failures are no longer classified as
+# platform errors. At v0.1.21 they were wrapped in &PlatformError{StatusCode:0},
+# tagged FB, and turned into BLOCKED -- which dean cannot retry, because its
+# Blocked query keys on fb_error_code and a lookup miss has none. A production
+# conversation was stranded permanently on 2026-08-25. They now fall through to
+# STATE_ACTIONS -> ERROR, which dean's Errored query retries with backoff.
+versionMessageWorker: &vmessageworker v0.1.22
 versionMediaProxy: &vmediaproxy v0.0.1
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
