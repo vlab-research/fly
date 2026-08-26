@@ -173,9 +173,56 @@ grafana:
       enabled: true
       defaultDatasourceEnabled: true
 
+      # NOT the chart default of `grafana_datasource`, and this is load-bearing:
+      # it is what keeps Grafana able to start at all.
+      #
+      # The datasource sidecar mounts EVERY ConfigMap carrying the watched
+      # label, and Grafana provisioning rejects the whole batch -- fatally, as a
+      # failed startup module, not a warning -- if two of them set
+      # `isDefault: true`. The `loki` release (loki-stack 2.6.5, installed 2022)
+      # ships exactly such a ConfigMap, `loki-loki-stack`, hard-coding the Loki
+      # datasource as default alongside our Prometheus one. Grafana 7 tolerated
+      # the clash; 12 crash-loops on it:
+      #
+      #   Datasource provisioning error: datasource.yaml config is invalid.
+      #   Only one datasource per organization can be marked as default
+      #
+      # The obvious fix -- set `loki.isDefault: false` and upgrade the `loki`
+      # release -- is not available. That chart renders a PodSecurityPolicy
+      # (policy/v1beta1), a kind this cluster no longer has, so ANY
+      # `helm upgrade loki` fails at render time. The release is frozen until
+      # someone migrates it to the modern grafana/loki chart.
+      #
+      # So we move our own label out from under it instead. Our ConfigMap is
+      # relabelled and the sidecar watches the new name, which leaves
+      # `loki-loki-stack` matching nothing -- inert, ignored, and no longer able
+      # to break provisioning. Loki itself is not lost: it is re-declared under
+      # additionalDataSources below, with isDefault false.
+      #
+      # Consequence to remember: any FUTURE datasource ConfigMap must be
+      # labelled `grafana_datasource_vlab`, not `grafana_datasource`.
+      label: grafana_datasource_vlab
+
       # If not defined, will use prometheus.prometheusSpec.scrapeInterval or its default
       # defaultDatasourceScrapeInterval: 15s
 
       ## Annotations for Grafana datasource configmaps
       ## TODO: put your
       annotations: {}
+
+  # Rendered into the SAME ConfigMap as the Prometheus datasource above, so it
+  # inherits the `grafana_datasource_vlab` label and is the only Loki definition
+  # the sidecar now sees. Same name/url/maxLines as the orphaned
+  # `loki-loki-stack` ConfigMap it replaces, so provisioning updates the
+  # existing `Loki` datasource in Grafana's database in place rather than
+  # creating a second one -- deliberately no `uid:` here for that reason.
+  #
+  # isDefault is omitted (Grafana defaults it to false): Prometheus is the
+  # single provisioned default.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki:3100
+      jsonData:
+        maxLines: 1000

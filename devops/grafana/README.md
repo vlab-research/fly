@@ -30,12 +30,14 @@ Browser ─► grafana.vlab.digital (nginx ingress, TLS via cert-manager)
    └─► PostgreSQL  gbv-cockroachdb-public.vprod.svc.cluster.local:26257  (CockroachDB)
 ```
 
-All three datasources are stored in the database, not provisioned from values —
-the `PostgreSQL` one points at **prod CockroachDB** and is what the older study
-dashboards (`form-status`, `campaign-optimization`, `responses-over-time`) query.
-Grafana rewrote the Postgres datasource backend after 7.x, so include a
-Cockroach-backed dashboard in the post-upgrade spot-check, not just a Prometheus
-one.
+`Prometheus` and `Loki` are **provisioned as code**, both from the `grafana:`
+key of `devops/prometheus/values.yaml` (see "Datasource provisioning" below).
+`PostgreSQL` exists **only in Grafana's database** — it was added by hand years
+ago and nothing in the repo declares it. It points at **prod CockroachDB** and is
+what the older study dashboards (`form-status`, `campaign-optimization`,
+`responses-over-time`) query. Grafana rewrote the Postgres datasource backend
+after 7.x, so include a Cockroach-backed dashboard in the post-upgrade
+spot-check, not just a Prometheus one.
 
 **Deliberately different from Karma.** Karma (`devops/karma/`) has no auth of its
 own, so it sits behind oauth2-proxy in nginx `auth_request` mode, needs two
@@ -313,35 +315,84 @@ step 4. Reverting only the image tag is *usually* enough — 7.4.2 does still op
 a DB that 13.x migrated — but a partially-migrated schema is not a state to
 trust, so prefer the snapshot.
 
-## Known issue: two provisioned datasources both claim `isDefault`
+## Datasource provisioning, and the label that isn't the default one
 
-Grafana logs this on every datasource-sidecar reload, and provisioning fails
-wholesale:
+Both provisioned datasources — `Prometheus` and `Loki` — come from a single
+ConfigMap, `prometheus-kube-prometheus-grafana-datasource`, rendered from
+`devops/prometheus/values.yaml`. `Loki` is declared there under
+`grafana.additionalDataSources`; `Prometheus` comes from
+`grafana.sidecar.datasources.defaultDatasourceEnabled` and is the sole default.
+
+That ConfigMap is labelled **`grafana_datasource_vlab: "1"`**, not the chart's
+default `grafana_datasource`, and the sidecar is pointed at the same renamed
+label via `grafana.sidecar.datasources.label`.
+
+> **Any new datasource ConfigMap must carry `grafana_datasource_vlab`.** Labelled
+> `grafana_datasource`, it will be silently ignored.
+
+### Why the label was renamed (2026-08-26 outage)
+
+The datasource sidecar mounts *every* ConfigMap carrying the watched label, and
+Grafana provisioning rejects the whole batch if two of them set
+`isDefault: true`:
 
 ```
 Failed to provision data sources  error="datasource.yaml config is invalid.
 Only one datasource per organization can be marked as default"
 ```
 
-Two ConfigMaps labelled `grafana_datasource=1` each set `isDefault: true`:
+Two ConfigMaps labelled `grafana_datasource=1` each set `isDefault: true`: ours,
+and `loki-loki-stack` from the `loki` release (loki-stack 2.6.5, installed 2022),
+which hard-codes Loki as the default. Both were ~4 years old. Grafana 7 tolerated
+the clash; **Grafana 12 does not — it is fatal, not cosmetic**:
 
-| ConfigMap | Owner | Datasource |
-|---|---|---|
-| `loki-loki-stack` | `loki` release (loki-stack 2.6.5, 2022) | Loki |
-| `prometheus-kube-prometheus-grafana-datasource` | `prometheus` release | Prometheus |
+```
+Error: ✗ invalid service state: Failed ... [starting module provisioning:
+Datasource provisioning error: ... marked as default]
+```
 
-**Pre-existing, not caused by the 12.4.0 upgrade** — both ConfigMaps are ~4 years
-old. Grafana 7 tolerated the clash; 12 rejects the batch.
+Provisioning is a startup module, so the failure aborts the process and the pod
+crash-loops. `grafana.vlab.digital` served **503 for ~2.5 days** (721 restarts)
+before this was found.
 
-**Impact is limited:** all three datasources already exist in Grafana's database
-(`Loki` holds the default flag, `Prometheus` and `PostgreSQL` don't) and all
-query fine, so dashboards work. What's broken is *provisioning* — an edit to
-either ConfigMap will not be applied.
+The delay between the 12.4.0 upgrade (2026-08-05) and the outage (2026-08-23) is
+a **race, not a grace period**: the datasource sidecar is an ordinary container,
+not an init container, so on a cold start Grafana sometimes finishes provisioning
+before the sidecar has written the second file. Win the race and Grafana runs
+indefinitely; lose it once and the pod is wedged, because by the time the 5-minute
+CrashLoopBackOff retry comes round both files are long since on disk. Any pod
+reschedule was a coin flip. **Treat a clash like this as an outage waiting for a
+node event, never as a warning you can leave in place.**
 
-**Fix** (not done — it means touching the unrelated `loki` release): set the Loki
-datasource's `isDefault: false` in the `loki` release's values so Prometheus is
-the sole provisioned default, then `helm upgrade` that release. Worth doing
-before anyone relies on datasource provisioning.
+### Why not just fix the `loki` release
+
+Because that release cannot be upgraded at all. loki-stack 2.6.5 renders a
+`PodSecurityPolicy` (`policy/v1beta1`), a kind removed in Kubernetes 1.25, so
+**every** `helm upgrade loki` dies at render time before it can change anything:
+
+```
+Error: UPGRADE FAILED: resource mapping not found for name: "loki" namespace: ""
+from "": no matches for kind "PodSecurityPolicy" in version "policy/v1beta1"
+```
+
+Verify before assuming otherwise:
+
+```bash
+helm -n monitoring upgrade loki grafana/loki-stack --version 2.6.5 \
+  -f devops/loki.yaml --dry-run=client
+```
+
+So `loki.isDefault: false` — the fix an earlier revision of this file proposed —
+is not reachable. Moving our own label out from under the collision is, and it
+needs only the `prometheus` release we already deploy from. `loki-loki-stack` now
+matches nothing: inert, ignored, and unable to break provisioning again.
+
+`devops/loki.yaml` is **stale and must not be applied** even if the chart is
+fixed: it says 100Gi where the live StatefulSet's (immutable) claim template says
+50Gi and the actual PVC has been resized to 600Gi, and it adds a
+`vlab-prod-response` promtail scrape topic that has never been deployed.
+Un-freezing Loki means migrating to the modern `grafana/loki` chart and
+reconciling that file first — a separate job.
 
 ## Troubleshooting
 
@@ -356,6 +407,8 @@ before anyone relies on datasource provisioning.
 | Login button missing | `grafana-oauth` secret absent or not picked up — `envFrom` is read at container start, so `rollout restart` after `secrets.sh`. |
 | Cert stuck `READY=False` | DNS not resolving yet; `kubectl -n monitoring describe certificate grafana-tls`. |
 | Pod crash-loops after a tag bump | Almost certainly the playlists migration above. Revert the tag, restore the snapshot. |
+| Pod crash-loops, `Only one datasource per organization can be marked as default` | Another ConfigMap labelled `grafana_datasource_vlab` also sets `isDefault: true`. Provisioning is a startup module, so this kills the process. `kubectl -n monitoring get cm -A -l grafana_datasource_vlab` to find it. |
+| A new datasource ConfigMap is ignored | It is labelled `grafana_datasource` (the chart default). This instance watches `grafana_datasource_vlab` — see "Datasource provisioning" above. |
 
 ## See also
 
