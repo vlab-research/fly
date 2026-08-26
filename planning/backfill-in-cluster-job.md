@@ -11,9 +11,48 @@ the last step of the conversation-identity rollout.
 | `devops/vlab/templates/messages-backfill-job.yaml` | written; renders and validates against the vprod API schema |
 | `devops/vlab/values.yaml` / `devops/values/production.yaml` | `messagesBackfill`, **`enabled: false`** |
 | durable cursor (the open question below) | **DONE** — `--cursor-key`, `devops/migrations/31-backfill-cursor.sql`, 10 new tests, mutation-checked |
-| migration 31 applied to vprod | **NO** |
-| image published to ghcr | **NO** (needs tag `backfill-v0.1.0`) |
+| image published to ghcr | **DONE** — `ghcr.io/vlab-research/backfill:v0.1.0`, and the `*-expr.sql` inside it diff clean against the repo |
+| migration 31 applied to **vstag** | **DONE** — schema verified, `hsh`/`userid` nullable as designed |
+| the Job **rehearsed in-cluster on vstag** | **DONE, PASSED** — see below |
+| migration 31 applied to **vprod** | **NO** |
 | the backfill itself | **NOT RUN** |
+
+### The in-cluster rehearsal, vstag 2026-08-26 (helm revision 87)
+
+The delivery mechanism has now been exercised end to end in a real cluster. It
+was deliberately a **no-op run**: vstag was backfilled for real on 2026-08-24 and
+its remaining 8,791 NULL rows are the permanently-unattributable synthetic ones,
+so every `UPDATE` was excluded by `AND account_id IS NULL`.
+
+```
+batch 1..8: updated 0 rows ...
+batch 9:    updated 0 rows (total 0) cursor END
+DONE: reached the end of the table. 0 rows updated across 9 batches.
+```
+
+**9 batches — the same count 0.3's real run reported.** Job succeeded in 108s.
+
+| check | result |
+|---|---|
+| Job status | `1 succeeded, 0 failed` |
+| image pull from ghcr into the cluster | worked, `IfNotPresent` |
+| `root` DSN against `gbv-cockroachdb-public` from a pod | connected |
+| `--sql-dir=/app/sql`, `--yes` | correct — no startup failure, no prompt hang |
+| cursor row afterwards | `9 batches, rows_updated 0, done=t` — **written as root from inside the cluster** |
+| `chatroach.messages` afterwards | 162,691 / 153,900 / 8,791 — **unchanged** |
+| helm prune on `enabled: false` (revision 88) | Job deleted cleanly, cluster healthy |
+
+**What it did NOT prove, and must not be read as proving:** a committed `UPDATE`
+to `messages` from in-cluster (there was nothing left to update, so root's write
+privilege on `messages` still rests on `SHOW GRANTS` plus the cursor-table write
+the Job did perform), and anything at all about duration, disk churn or scale.
+vstag's rows are ~25x fatter and it runs one CockroachDB node. Re-measure on
+production; inherit nothing.
+
+**One thing the upgrade surfaced that was not ours:** vstag's message-worker was
+on v0.1.21 while `staging.yaml` said v0.1.22 — drift from commit `d4f21927`,
+which was applied to prod and never to staging. The upgrade corrected it, which
+is the values file's own desired state and was already prod-proven.
 
 **One precondition the plan did not have, found while wiring the Job.** Every
 service in the chart connects as `chatroach`, and that user holds only `INSERT`
@@ -225,6 +264,11 @@ Then watch. Do NOT tail it interactively for two days:
 kubectl logs -n vprod job/gbv-messages-backfill -f --tail=20
 kubectl get job -n vprod gbv-messages-backfill -w
 ```
+
+⚠️ **Capture the final log lines BEFORE setting `enabled: false` afterwards.**
+Turning it off makes helm prune the Job, which takes its pod and its logs with
+it — as it did on vstag at revision 88. There is no `ttlSecondsAfterFinished` so
+nothing else deletes it, but the values flip does.
 
 Progress query — cheap, uses no table scan of consequence:
 

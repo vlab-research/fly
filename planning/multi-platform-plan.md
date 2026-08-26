@@ -319,10 +319,18 @@ WhatsApp is a handful of test users.
     a command-line flag is deleted by the next `helm upgrade` anyone runs from
     the values file — plausibly 30 hours into a 41-hour run.
 
-  **Still outstanding before it can run:** apply migration 31 to vprod, tag
-  `backfill-v0.1.0` so CI publishes the image, then flip
-  `messagesBackfill.enabled` to `true` and `helm upgrade`. That flip IS the start
-  command.
+  **Rehearsed in-cluster on vstag 2026-08-26 (helm revision 87), passed.** A
+  deliberate no-op — vstag is already backfilled — so it proved the delivery
+  mechanism, not the backfill: image pull from ghcr, the `root` DSN from a pod,
+  `--sql-dir`/`--yes`, the cursor table written as root from inside the cluster,
+  9 batches to END (the same count 0.3 reported), Job succeeded in 108s, and
+  `messages` unchanged at 162,691 / 153,900 / 8,791 afterwards. Turned back off
+  at revision 88 and pruned cleanly. It proves nothing about duration or disk.
+
+  **Still outstanding before it can run:** apply migration 31 to vprod, then flip
+  `messagesBackfill.enabled` to `true` in `production.yaml` and `helm upgrade`.
+  That flip IS the start command. The image is already published
+  (`ghcr.io/vlab-research/backfill:v0.1.0`, tag `backfill-v0.1.0`, CI green).
 
   Everything 1.5 depends on is done and verified: migrations 26/27/28a/28b, the
   1.3 deploy, and migration 19 whose GC has completed and returned the space.

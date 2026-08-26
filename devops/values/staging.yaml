@@ -936,6 +936,52 @@ mediaReconciler:
     limits:
       memory: 512Mi
 
+# ###########################################################################
+# THE PHASE 1.5 BACKFILL JOB, ON STAGING (planning/backfill-in-cluster-job.md)
+#
+# This is a REHEARSAL OF THE DELIVERY MECHANISM, not of the backfill. vstag was
+# backfilled for real on 2026-08-24 and its remaining 8,791 NULL rows are the
+# permanently-unattributable synthetic ones, so this Job walks ~9 batches and
+# commits ZERO updates. That is the intent: every UPDATE is a no-op by way of
+# `AND account_id IS NULL`, and what is under test is everything around it --
+# that the image pulls from ghcr, that the root DSN connects from inside the
+# cluster, that --sql-dir and --yes are right, that the cursor table is both
+# readable and writable by the Job, and that the loop reaches END and records
+# `done`.
+#
+# It therefore proves NOTHING about duration, disk churn or the write path
+# itself. vstag's rows are ~25x fatter than production's and it runs a single
+# CockroachDB node. Re-measure on production; inherit nothing.
+#
+# RUN AND VERIFIED 2026-08-26 (helm revision 87, Job succeeded in 108s):
+# 9 batches, 0 rows updated, reached END -- and chatroach.messages was unchanged
+# afterwards at 162,691 / 153,900 / 8,791, exactly as before. The cursor row it
+# left behind (9 batches, done=t) is the proof that the Job wrote to
+# chatroach.backfill_cursor as root from inside the cluster.
+#
+# Turned back off: this is one-shot, and a completed one-shot should not stay
+# armed. Re-enabling would now exit immediately with ALREADY DONE anyway.
+# ###########################################################################
+messagesBackfill:
+  enabled: false
+  image:
+    repository: ghcr.io/vlab-research/backfill
+    tag: v0.1.0
+    pullPolicy: IfNotPresent
+  batchSize: 20000
+  maxBatches: 20000
+  statementTimeout: "10m"
+  cursorKey: "messages-account-backfill"
+  backoffLimit: 3
+  activeDeadlineSeconds: ~
+  extraArgs: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
 cockroachdb:
   image:
     tag: v24.1.28
