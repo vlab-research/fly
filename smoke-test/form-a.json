@@ -433,6 +433,28 @@
       }
     },
     {
+      "type": "multiple_choice",
+      "ref": "test_movie_legacy",
+      "title": "🎬 Would you like to test the LEGACY moviehouse webview? Messenger only — this URL carries no platform, so on WhatsApp the play event is assumed to be Messenger and will block the conversation.",
+      "properties": {
+        "choices": [
+          {
+            "label": "Yes",
+            "ref": "choice_test_movie_legacy_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_test_movie_legacy_no"
+          }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
       "type": "statement",
       "ref": "movie_webview_prod",
       "title": "🎬 Testing in PRODUCTION. Now testing the video webview + moviehouse events — tap the button to open the production video player, then press ▶️ play. I'll react as soon as you start it.",
@@ -500,6 +522,28 @@
         "hide_marks": false,
         "button_text": "Continue",
         "description": "{\"type\": \"link_tracking\", \"url\": \"https://example.com\", \"buttonText\": \"Open tracked link\", \"wait\": {\"op\": \"or\", \"vars\": [{\"type\": \"external\", \"value\": {\"type\": \"linksniffer:click\"}}, {\"type\": \"timeout\", \"value\": \"3 minutes\"}]}}"
+      }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "test_links_legacy",
+      "title": "🔗 Would you like to also open the LEGACY tracked link? Messenger only — it carries no platform, so on WhatsApp the click is assumed to be Messenger and will block the conversation.",
+      "properties": {
+        "choices": [
+          {
+            "label": "Yes",
+            "ref": "choice_test_links_legacy_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_test_links_legacy_no"
+          }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": {
+        "required": true
       }
     },
     {
@@ -589,6 +633,132 @@
     "e_linksniffer_click_url"
   ],
   "logic": [
+    {
+      "type": "field",
+      "ref": "test_links_legacy",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "movie_new"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "test_links_legacy"
+              },
+              {
+                "type": "choice",
+                "value": "choice_test_links_legacy_no"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "link_legacy_staging"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "test_environment"
+              },
+              {
+                "type": "choice",
+                "value": "choice_env_staging"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "link_legacy_prod"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "test_movie_legacy",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "test_links"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "test_movie_legacy"
+              },
+              {
+                "type": "choice",
+                "value": "choice_test_movie_legacy_no"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "movie_webview_staging"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "test_environment"
+              },
+              {
+                "type": "choice",
+                "value": "choice_env_staging"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "movie_webview_prod"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
     {
       "type": "field",
       "ref": "favorite_color",
@@ -923,29 +1093,7 @@
           "details": {
             "to": {
               "type": "field",
-              "value": "movie_webview_staging"
-            }
-          },
-          "condition": {
-            "op": "is",
-            "vars": [
-              {
-                "type": "field",
-                "value": "test_environment"
-              },
-              {
-                "type": "choice",
-                "value": "choice_env_staging"
-              }
-            ]
-          }
-        },
-        {
-          "action": "jump",
-          "details": {
-            "to": {
-              "type": "field",
-              "value": "movie_webview_prod"
+              "value": "test_movie_legacy"
             }
           },
           "condition": {
@@ -1043,29 +1191,7 @@
           "details": {
             "to": {
               "type": "field",
-              "value": "movie_webview_staging"
-            }
-          },
-          "condition": {
-            "op": "is",
-            "vars": [
-              {
-                "type": "field",
-                "value": "test_environment"
-              },
-              {
-                "type": "choice",
-                "value": "choice_env_staging"
-              }
-            ]
-          }
-        },
-        {
-          "action": "jump",
-          "details": {
-            "to": {
-              "type": "field",
-              "value": "movie_webview_prod"
+              "value": "test_movie_legacy"
             }
           },
           "condition": {
@@ -1226,29 +1352,7 @@
           "details": {
             "to": {
               "type": "field",
-              "value": "link_legacy_staging"
-            }
-          },
-          "condition": {
-            "op": "is",
-            "vars": [
-              {
-                "type": "field",
-                "value": "test_environment"
-              },
-              {
-                "type": "choice",
-                "value": "choice_env_staging"
-              }
-            ]
-          }
-        },
-        {
-          "action": "jump",
-          "details": {
-            "to": {
-              "type": "field",
-              "value": "link_legacy_prod"
+              "value": "test_links_legacy"
             }
           },
           "condition": {
