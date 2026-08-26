@@ -89,6 +89,41 @@ deployment strategy.
 
 ---
 
+## MEASURED FOR REAL ON PRODUCTION, 2026-08-26 (bounded first pass)
+
+The 41-hour projection came from a `--rehearse`, which rolls its work back. This
+is what committed writes actually cost, from a deliberately bounded
+`--max-batches=20` run on vprod (helm revision 651):
+
+| | |
+|---|---|
+| rows committed | **399,779** across 20 batches |
+| wall clock | **603 s** |
+| per batch | **30.1 s** — against the rehearsal's 28 s, i.e. **1.08x** |
+| per row | 1.508 ms |
+| batches remaining | ~5,329 |
+| **projected remaining** | **~44.6 h (1.86 days)** |
+
+**The rehearsal was a good proxy.** Real commits cost 8% more than rolled-back
+ones, not 2x — so the plan's "41 hours, and that is a FLOOR" was right and the
+floor is close to the ceiling.
+
+Verified afterwards rather than trusted:
+
+| check | result |
+|---|---|
+| `count(account_id)` | 410,139 = 10,310 before + 399,779 backfilled + ~50 new arrivals ✓ |
+| cursor row | `20 batches, 399,779 rows, done=f`, resume point recorded ✓ |
+| Job | `1 succeeded, 0 failed` |
+| disk after | **538.36 GiB available** across the four nodes — better than the 466 GiB the sizing assumed, because 28a/28b's GC is still returning space. ~335 GiB projected garbage leaves **~203 GiB margin**. |
+
+**An early signal for Phase 3.2, not a conclusion.** 221 of the 400,000 rows in
+this slice were unattributable (0.055%). Extrapolated naively that is ~59,000
+across the table — **20x the "~3,000 by an older count"** that
+`planning/messages-account-not-null-todo.md` is written around. This slice is the
+low end of the `hsh` keyspace and may not be representative, so re-derive the
+real number at the end. Do not plan the `''` sentinel pass around 3,000.
+
 ## The measurement that forces this
 
 Rehearsal on production (`--rehearse --max-batches 3`, real `UPDATE`s rolled back):

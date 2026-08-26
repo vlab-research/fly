@@ -1276,7 +1276,8 @@ mediaReconciler:
 # result in planning/multi-platform-plan.md. It must not be left armed.
 # ###########################################################################
 messagesBackfill:
-  enabled: false
+  # ARMED 2026-08-26 FOR A BOUNDED FIRST PASS. See maxBatches below.
+  enabled: true
   image:
     repository: ghcr.io/vlab-research/backfill
     tag: *vbackfill
@@ -1284,8 +1285,20 @@ messagesBackfill:
   # The value the ~28 s/batch measurement was taken at. A larger batch does not
   # make the run shorter -- the cost is per-row -- it only holds locks longer.
   batchSize: 20000
-  # ~5,350 batches are needed; this is the safety stop, left at the default.
-  maxBatches: 20000
+  # ############# BOUNDED FIRST PASS -- 20, NOT 20000. #############
+  # ~5,350 batches are needed for the whole table. This deliberately stops after
+  # 20 so we get a real per-batch time for COMMITTED writes before committing to
+  # two days of them. The ~28 s/batch that produced the 41-hour projection came
+  # from a --rehearse, which rolls its work back; the plan calls that a floor and
+  # says real commits add replication cost. This is how much that costs.
+  #
+  # Widening afterwards: a Job's spec is IMMUTABLE, so raising this while the Job
+  # exists fails the upgrade with "field is immutable". Delete the completed Job
+  # first, then set 20000 and upgrade. The durable cursor means the second run
+  # resumes exactly where this one stopped -- nothing is redone and nothing is
+  # skipped.
+  # ###############################################################
+  maxBatches: 20
   statementTimeout: "10m"
   cursorKey: "messages-account-backfill"
   # Non-zero only because the cursor is durable: a retry resumes where it left
