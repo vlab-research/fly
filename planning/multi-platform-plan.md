@@ -289,95 +289,35 @@ WhatsApp is a handful of test users.
     separate production diff and 1.3 is when it bites.
 - **1.4 Soak 24h** on the §5.3 gates. Staging's soak proved little: it is idle
   (1 index read in 5h) and its data is unrepresentative.
-- **1.5 Run `devops/backfill` on production.** 101M+ rows; expect hours.
+- **1.5 Run `devops/backfill` on production. NOT STARTED — and it needs a delivery
+  mechanism first. See `planning/backfill-in-cluster-job.md`.**
 
-  Sequence it exactly as staging did — `--dry-run`, then
-  `--rehearse --max-batches 3`, then real — and check the rehearsal's counts match
-  the dry-run's before committing. It is resumable (`--start-hsh` / `--start-userid`,
-  printed every batch and on failure) and every batch carries `AND account_id IS NULL`,
-  so re-running is a no-op, not a hazard.
+  Everything 1.5 depends on is done and verified: migrations 26/27/28a/28b, the
+  1.3 deploy, and migration 19 whose GC has completed and returned the space.
+  Disk headroom is ~131 GiB against a projected ~335 GiB of MVCC garbage.
 
-  **Do not reuse staging's numbers for anything.** Staging attributed 153,776 of
+  **What changed the approach: it is ~41 hours, not "hours".** Measured on vprod
+  2026-08-26 by rehearsing 3 real batches — 83.7s for 3 batches, ~28 s/batch,
+  ~5,350 batches at the default 20,000. That is a floor: a rehearsal rolls back,
+  and real commits add replication cost. A bigger `--batch-size` does not help,
+  because the cost is per-row, not per-round-trip.
+
+  The tool was designed to run locally against a `kubectl port-forward`, which is
+  right for staging (~25 minutes) and wrong for a two-day production run. So 1.5
+  is now: package it as an image, run it as a k8s `Job`, then run the backfill.
+  The linked plan has the Dockerfile, the `release.yml` change it needs (the build
+  context must be `devops/`, and the workflow currently cannot express that), the
+  Job settings that matter for a 41-hour run, and the recovery path.
+
+  Sequence it as staging did once it is running — the rehearsal is already done and
+  passed: 3 batches, 59,974 rows, counts consistent. It is resumable
+  (`--start-hsh` / `--start-userid`, printed every batch) and every batch carries
+  `AND account_id IS NULL`, so re-running is a no-op, not a hazard.
+
+  **Do not reuse staging's attribution numbers.** Staging attributed 153,776 of
   162,567 and left 8,791 unattributable; production's ratio will differ because
   staging's data is synthetic-heavy.
 
-  **Disk is the thing to size, and the earlier arithmetic here was wrong once
-  already.** `messages` has no column families, so setting `account_id` rewrites the
-  whole row — `content` included — into every index, and that MVCC garbage is held
-  for `gc.ttlseconds` (production: **90000s / 25h**, far longer than staging's 4h,
-  so garbage accumulates much longer during a run that takes hours). Size against
-  the *marginal* compression ratio for this table (~10x on staging), not against
-  total-logical ÷ total-volume-used, which mixes in every other table and WAL.
-
-  Two operational traps, both hit on 2026-08-24:
-  - `--sql-dir` resolves against **cwd**, not the binary. Pass it explicitly.
-  - The README's example DSN port **5455 is the local dev CockroachDB**. Forward to
-    a different port and prove which database you reached before pointing a write
-    tool at it.
-
-### Production, measured read-only 2026-08-24 (CRDB v24.1.28, 4 nodes)
-
-Every number below came from the live `vprod` cluster today. Where it confirms a
-figure this doc already cited, it says so; where it is new, it is new.
-
-| measurement | value | note |
-|---|---|---|
-| `responses` NULL `pageid` | **1,818,162** | confirms 1.1 exactly, unchanged |
-| `messages` rows | **106,974,507** | confirms "106M" (`devops/backfill/main.go:159`) |
-| `messages` logical | **387.48 GiB** / 9,160 ranges | confirms "384 GiB" |
-| primary / `messages_userid_idx` / `messages_userid_timestamp_idx` | **129.19 / 129.14 / 129.15 GiB** | near-perfect thirds — `content` is stored in all three |
-| base row width | **~1.30 KB** (129.19 GiB ÷ 107M) | confirms the 1.1–1.5 KB estimate; staging's 34.8 KB is **27x** wider |
-| `gc.ttlseconds` | **90000** (25 h) | confirms |
-| `range_max_bytes` | **67108864** (64 MiB) | confirms migration 30 is a no-op here |
-| `messages` columns | **no `account_id`, no `platform`** | migration 26 unapplied — 1.5 hard-depends on 1.2 |
-| cluster capacity / used / available | **943.7 / 416.40 / 518.83 GiB** | 4 stores x 235.93 GiB |
-| live vs total KV | **1442.13 vs 1444.10 GiB** | only **1.98 GiB** garbage — the cluster is effectively clean |
-| protected timestamps / running jobs | **none / none** | GC is unimpeded; no backup or changefeed pins it |
-
-**A usable compression ratio, and why this one is trustworthy.** live+garbage KV
-1444.10 GiB over 416.40 GiB physical = **3.47x**. This doc rightly warns against
-total-logical / total-volume ratios, because on staging that mixed in every other
-table. Here it does not mislead: `messages` is 387.48 of chatroach's 442.09 GiB,
-and chatroach is 92% of cluster live data, so **`messages` is ~81% of what is being
-measured** — the cluster ratio essentially *is* the `messages` ratio. Garbage is
-1.98 GiB, so `used` is not inflated. Do NOT carry staging's ~10x here.
-
-#### ⚠️ At 90000s GC TTL, 1.5 does not fit on disk after 1.2
-
-`messages` has no column families, so the backfill rewrites every row into every
-index, and 90000s (25 h) exceeds any plausible run length — so essentially **all**
-old versions are held at once.
-
-| step | arithmetic | physical |
-|---|---|---|
-| after 1.2 (migration 26 adds a 4th index) | 129.15 x 3 / 3.47 | **+111.7 GiB**, available falls 518.83 → **407.1 GiB** |
-| 1.5 rewrites 4 indexes | (387.48 + 129.15) x 3 / 3.47 | **446.9 GiB of retained garbage** |
-| | | **446.9 > 407.1 — short by ~40 GiB** |
-
-And that is before WAL, rebalancing, or ordinary traffic growth during a multi-hour
-run. CRDB thrashes on rebalance well before a store actually fills.
-
-**The fix the plan's own preconditions already allow: run migration 19 before 1.5.**
-3.3's only stated precondition is 1.3 (replybot v0.0.221 in prod), and the
-non-negotiable table says `1.3 → 3.3`, **not** `1.5 → 3.3`. Moving it to between 1.3
-and 1.5 both frees space and shrinks the rewrite set:
-
-| with migration 19 first | |
-|---|---|
-| drop `messages_userid_idx` | +111.7 GiB back → **518.8 GiB available** |
-| 1.5 rewrites 3 indexes | 387.49 x 3 / 3.47 = **335.2 GiB garbage** |
-| | **fits, ~184 GiB margin** |
-
-Belt and braces, if more headroom is wanted: temporarily lower `gc.ttlseconds` on
-`chatroach.messages` for the duration of the run so garbage is reclaimed
-continuously instead of accumulating. Nothing pins GC today (no protected
-timestamps, no jobs), so it would take effect. Per the IaC rule this is a file, not
-a `kubectl` one-liner.
-
-**UNVERIFIED:** the 3.47x ratio is measured, but the *marginal* ratio for newly
-written `account_id`-bearing rows could differ; and the run duration is an estimate,
-so "25 h > run length" should be re-checked against 1.5's actual pace. Both cut in
-the safe direction only if compression turns out better than measured.
 
 ## Phase 2 · Tighten the gates — ~2 days
 
