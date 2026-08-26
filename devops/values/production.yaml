@@ -1276,7 +1276,10 @@ mediaReconciler:
 # result in planning/multi-platform-plan.md. It must not be left armed.
 # ###########################################################################
 messagesBackfill:
-  # ARMED 2026-08-26 FOR A BOUNDED FIRST PASS. See maxBatches below.
+  # ARMED 2026-08-26. The bounded first pass is done; this is the FULL RUN,
+  # ~44.6 hours. See maxBatches below. Capture the final log lines BEFORE
+  # setting this back to false -- the flip makes helm prune the Job and its
+  # pod, taking the logs with it.
   enabled: true
   image:
     repository: ghcr.io/vlab-research/backfill
@@ -1285,20 +1288,23 @@ messagesBackfill:
   # The value the ~28 s/batch measurement was taken at. A larger batch does not
   # make the run shorter -- the cost is per-row -- it only holds locks longer.
   batchSize: 20000
-  # ############# BOUNDED FIRST PASS -- 20, NOT 20000. #############
-  # ~5,350 batches are needed for the whole table. This deliberately stops after
-  # 20 so we get a real per-batch time for COMMITTED writes before committing to
-  # two days of them. The ~28 s/batch that produced the 41-hour projection came
-  # from a --rehearse, which rolls its work back; the plan calls that a floor and
-  # says real commits add replication cost. This is how much that costs.
+  # ################## FULL RUN, WIDENED 2026-08-26 ##################
+  # The bounded --max-batches=20 pass is done: 399,779 rows in 603 s, i.e.
+  # 30.1 s/batch for COMMITTED writes against the rehearsal's 28 s -- only 1.08x,
+  # so the plan's 41-hour floor stands and the real figure is ~44.6 h.
   #
-  # Widening afterwards: a Job's spec is IMMUTABLE, so raising this while the Job
-  # exists fails the upgrade with "field is immutable". Delete the completed Job
-  # first, then set 20000 and upgrade. The durable cursor means the second run
-  # resumes exactly where this one stopped -- nothing is redone and nothing is
+  # ~5,329 batches remain. This is the safety stop, back at the tool's default;
+  # it is not a target and the run ends by reaching the end of the table.
+  #
+  # It RESUMES rather than restarts: chatroach.backfill_cursor holds batch 20's
+  # position, so the new pod continues from there. Nothing is redone (and it
+  # would be a no-op anyway, via `AND account_id IS NULL`) and nothing is
   # skipped.
-  # ###############################################################
-  maxBatches: 20
+  #
+  # A Job's spec is IMMUTABLE, so this widening required deleting the completed
+  # bounded Job first. Same applies to any further change while this one runs.
+  # ##################################################################
+  maxBatches: 20000
   statementTimeout: "10m"
   cursorKey: "messages-account-backfill"
   # Non-zero only because the cursor is durable: a retry resumes where it left

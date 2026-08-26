@@ -327,10 +327,21 @@ WhatsApp is a handful of test users.
   `messages` unchanged at 162,691 / 153,900 / 8,791 afterwards. Turned back off
   at revision 88 and pruned cleanly. It proves nothing about duration or disk.
 
-  **Still outstanding before it can run:** apply migration 31 to vprod, then flip
-  `messagesBackfill.enabled` to `true` in `production.yaml` and `helm upgrade`.
-  That flip IS the start command. The image is already published
-  (`ghcr.io/vlab-research/backfill:v0.1.0`, tag `backfill-v0.1.0`, CI green).
+  **THE FULL RUN IS IN FLIGHT — started 2026-08-26 23:30:24 UTC**, helm revision
+  652, projected to finish ~2026-08-28 20:00 UTC. Migration 31 is applied to
+  vprod and the image is published (`ghcr.io/vlab-research/backfill:v0.1.0`).
+
+  A bounded `--max-batches=20` pass went first and measured what the rehearsal
+  could not: **399,779 rows in 603 s = 30.1 s/batch for committed writes**, only
+  1.08x the rehearsal's 28 s. So the 41-hour floor stood and the real figure is
+  **~44.6 h**. The full run then RESUMED from the stored cursor across a Job
+  deletion, beginning immediately past batch 20's boundary.
+
+  **When it finishes:** capture the final log lines FIRST — setting
+  `messagesBackfill.enabled: false` makes helm prune the Job and its logs — then
+  turn it off, and re-derive the unattributable count for Phase 3.2. An early
+  slice put that at 0.055% (~59,000 rows), **20x** the ~3,000 that
+  `planning/messages-account-not-null-todo.md` assumes.
 
   Everything 1.5 depends on is done and verified: migrations 26/27/28a/28b, the
   1.3 deploy, and migration 19 whose GC has completed and returned the space.

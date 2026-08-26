@@ -89,6 +89,41 @@ deployment strategy.
 
 ---
 
+## THE FULL RUN IS IN FLIGHT — started 2026-08-26 23:30:24 UTC
+
+helm revision 652, `maxBatches: 20000`. Projected finish **~2026-08-28 20:00 UTC**
+(~44.6 h from the start). It **resumed** rather than restarted:
+
+```
+RESUMING from the stored cursor: hsh=-9154446195056495845 userid=3047173258742232
+                                 (399779 rows across 20 batches so far)
+batch 1: updated 19996 rows (total 19996) cursor hsh=-9151006287849897919 ...
+```
+
+Batch 1 begins immediately past the bounded pass's batch-20 boundary — no gap and
+no overlap — which is the durable cursor working across a Job deletion and
+recreation in production. That is the thing the "open design question" was about.
+
+**Watching it** (do not tail interactively for two days):
+
+```bash
+kubectl logs -n vprod job/gbv-messages-backfill --tail=5
+kubectl get job -n vprod gbv-messages-backfill
+kubectl exec -n vprod gbv-cockroachdb-0 -- ./cockroach sql --insecure \
+  -e "SELECT batches, rows_updated, done, updated_at FROM chatroach.backfill_cursor;"
+for p in 0 1 2 3; do kubectl exec -n vprod gbv-cockroachdb-$p -- \
+  df -h /cockroach/cockroach-data | tail -1; done
+```
+
+The cursor row is the cheap progress check — it needs no scan of `messages`.
+Byte-exact disk baseline at the start, for comparing against later:
+**405.28 GiB used / 538.36 GiB available** across the four nodes.
+
+**Known cosmetic wart, not worth a redeploy mid-run.** The banner prints
+`resuming    (start)` even when resuming, because it is written before the pool
+is opened and the stored cursor is read. The authoritative line is the
+`RESUMING from the stored cursor:` one below it. Fix in a v0.1.1.
+
 ## MEASURED FOR REAL ON PRODUCTION, 2026-08-26 (bounded first pass)
 
 The 41-hour projection came from a `--rehearse`, which rolls its work back. This
