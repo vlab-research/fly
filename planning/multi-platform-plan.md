@@ -5,8 +5,11 @@ describes the conversation-identity rollout in depth — the hazards, the gates,
 traps — but the phase order lives here. If the two disagree, this file wins and the
 other is stale.
 
-**Status 2026-08-24:** staging fully rolled out; production untouched; Messenger is
-the only live transport. Integration suite 61/61, in CI and locally.
+**Status 2026-08-26:** Phase 1 complete except 1.5, whose *packaging* is now built
+and tested but which has not been run. Production runs the full nine-service stack
+at staging parity; migrations 19/26/27/28a/28b applied and verified; new rows
+arrive stamped with `account_id` (8,800 of 106,994,949 as of 2026-08-26).
+Messenger is the only live transport.
 
 **Phase 0 is COMPLETE (0.3 finished 2026-08-24).** All of 0.1-0.5 are done and
 verified. Phase 1 is next, and it is entirely production work — nothing has been
@@ -289,8 +292,37 @@ WhatsApp is a handful of test users.
     separate production diff and 1.3 is when it bites.
 - **1.4 Soak 24h** on the §5.3 gates. Staging's soak proved little: it is idle
   (1 index read in 5h) and its data is unrepresentative.
-- **1.5 Run `devops/backfill` on production. NOT STARTED — and it needs a delivery
-  mechanism first. See `planning/backfill-in-cluster-job.md`.**
+- **1.5 Run `devops/backfill` on production. PACKAGING DONE 2026-08-26; THE
+  BACKFILL HAS NOT BEEN RUN. See `planning/backfill-in-cluster-job.md`.**
+
+  The delivery mechanism it needed now exists and is tested: a Dockerfile whose
+  build context is `devops/`, the `release.yml` change that lets the workflow
+  express that (a `file:` input — `backfill` is the only service whose Dockerfile
+  is not at `<context>/Dockerfile`), and
+  `devops/vlab/templates/messages-backfill-job.yaml` gated on
+  `messagesBackfill.enabled`, which is **false** in `production.yaml`.
+
+  The recommended cursor persistence was done rather than skipped:
+  `--cursor-key` writes the position to `chatroach.backfill_cursor`
+  (`devops/migrations/31-backfill-cursor.sql`) after every committed batch, so a
+  restarted pod resumes by itself and `backoffLimit` is 3 instead of 0. 10 new
+  tests, mutation-checked; the whole lifecycle — partial run, self-resume,
+  already-done — was driven through the built image against a real CockroachDB.
+
+  **Two things the plan did not have, both found while wiring it:**
+  - **The Job must connect as `root`.** `chatroach`, the user every service in
+    the chart uses, holds only `INSERT` and `SELECT` on `chatroach.messages`
+    (`SHOW GRANTS`, vprod, 2026-08-26). A Job reusing the services' DSN would
+    connect cleanly, print a healthy banner, and fail on its first `UPDATE`.
+  - **`enabled` is committed to `production.yaml`, not passed as `--set`.** Helm
+    prunes what a release no longer renders, so a Job that exists only because of
+    a command-line flag is deleted by the next `helm upgrade` anyone runs from
+    the values file — plausibly 30 hours into a 41-hour run.
+
+  **Still outstanding before it can run:** apply migration 31 to vprod, tag
+  `backfill-v0.1.0` so CI publishes the image, then flip
+  `messagesBackfill.enabled` to `true` and `helm upgrade`. That flip IS the start
+  command.
 
   Everything 1.5 depends on is done and verified: migrations 26/27/28a/28b, the
   1.3 deploy, and migration 19 whose GC has completed and returned the space.

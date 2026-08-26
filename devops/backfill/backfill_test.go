@@ -135,3 +135,52 @@ func TestRedactDSNHidesThePassword(t *testing.T) {
 		t.Fatalf("user should survive: %s", got)
 	}
 }
+
+// --- The durable resume cursor ---
+
+func TestCursorSaveQueryParameterizesTheKeyAndTheUserID(t *testing.T) {
+	nasty := "u'; DROP TABLE messages; --"
+
+	q, args := CursorSaveQuery("k'; DROP TABLE backfill_cursor; --",
+		Cursor{Hsh: 7, UserID: nasty, Set: true}, 3, 42, false)
+
+	if strings.Contains(q, "DROP TABLE") {
+		t.Fatalf("caller-supplied text reached the SQL: %s", q)
+	}
+	if len(args) != 6 {
+		t.Fatalf("args = %v, want 6", args)
+	}
+	if args[2] != nasty {
+		t.Errorf("the userid must arrive as an argument, got %v", args[2])
+	}
+}
+
+// "started, no batch finished yet" is a real state, and it has to be
+// distinguishable from a genuine row at hsh 0 -- otherwise a restart would
+// resume just past the first row of the table instead of at the beginning.
+func TestCursorSaveQueryWritesNULLForAnUnsetCursor(t *testing.T) {
+	_, args := CursorSaveQuery("k", Cursor{}, 0, 0, false)
+
+	if args[1] != nil || args[2] != nil {
+		t.Fatalf("an unset cursor must be NULL, got hsh=%v userid=%v", args[1], args[2])
+	}
+}
+
+func TestCursorSaveQueryCarriesTheDoneFlag(t *testing.T) {
+	_, args := CursorSaveQuery("k", Cursor{Hsh: 1, UserID: "u", Set: true}, 9, 99, true)
+
+	if args[5] != true {
+		t.Fatalf("done must reach the statement, got %v", args[5])
+	}
+}
+
+func TestCursorLoadQueryParameterizesTheKey(t *testing.T) {
+	q, args := CursorLoadQuery("k'; DROP TABLE backfill_cursor; --")
+
+	if strings.Contains(q, "DROP TABLE") {
+		t.Fatalf("the key reached the SQL text: %s", q)
+	}
+	if len(args) != 1 {
+		t.Fatalf("args = %v, want 1", args)
+	}
+}

@@ -137,6 +137,10 @@ versionExodus: &vexodus v0.2.5
 # STATE_ACTIONS -> ERROR, which dean's Errored query retries with backoff.
 versionMessageWorker: &vmessageworker v0.1.22
 versionMediaProxy: &vmediaproxy v0.0.1
+# One-shot, not a service: the Phase 1.5 messages backfill
+# (planning/backfill-in-cluster-job.md). Kept here anyway so its image is
+# pinned and reviewable exactly like every other image this file deploys.
+versionBackfill: &vbackfill v0.1.0
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
 # Kafka cluster, Prometheus and kminion are singletons shared by prod+staging,
@@ -1241,6 +1245,63 @@ mediaReconciler:
       memory: 256Mi
     limits:
       memory: 512Mi
+
+# ###########################################################################
+# THE PHASE 1.5 MESSAGES BACKFILL (planning/backfill-in-cluster-job.md)
+#
+# One-shot. Fills chatroach.messages.account_id/.platform for the ~107M rows
+# written before the 1.3 deploy started stamping them forward.
+#
+# `enabled: true` IS THE RUN. There is no separate start command: flipping this
+# and applying
+#
+#   helm upgrade gbv vlab -f values/production.yaml -n vprod
+#
+# creates the Job, and the Job begins immediately. It is a ~41-hour write across
+# a 388 GiB table -- measured on 2026-08-26, not estimated -- so treat this line
+# as the trigger it is.
+#
+# Do NOT turn it on with `--set` instead. Helm prunes what a release no longer
+# renders, so a Job that exists only because of a command-line flag is deleted
+# by the next `helm upgrade` anyone runs from this file -- possibly 30 hours in.
+# The template header explains this and the Job-immutability trap alongside it.
+#
+# BEFORE FLIPPING IT:
+#   - devops/migrations/31-backfill-cursor.sql applied (cursorKey needs it)
+#   - ghcr.io/vlab-research/backfill:v0.1.0 published (tag backfill-v0.1.0)
+#   - disk checked on all four CockroachDB nodes; ~335 GiB of MVCC garbage is
+#     expected against ~466 GiB free
+#
+# AFTER IT COMPLETES: set this back to false, delete the Job, and record the
+# result in planning/multi-platform-plan.md. It must not be left armed.
+# ###########################################################################
+messagesBackfill:
+  enabled: false
+  image:
+    repository: ghcr.io/vlab-research/backfill
+    tag: *vbackfill
+    pullPolicy: IfNotPresent
+  # The value the ~28 s/batch measurement was taken at. A larger batch does not
+  # make the run shorter -- the cost is per-row -- it only holds locks longer.
+  batchSize: 20000
+  # ~5,350 batches are needed; this is the safety stop, left at the default.
+  maxBatches: 20000
+  statementTimeout: "10m"
+  cursorKey: "messages-account-backfill"
+  # Non-zero only because the cursor is durable: a retry resumes where it left
+  # off rather than re-walking 107M rows. If cursorKey is ever cleared, this
+  # must go back to 0.
+  backoffLimit: 3
+  # Unset on purpose. 41 hours is a projection; a deadline would be a timer set
+  # to kill the job on the strength of that projection being right.
+  activeDeadlineSeconds: ~
+  extraArgs: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 
 cockroachdb:
   image:

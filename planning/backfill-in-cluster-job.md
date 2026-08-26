@@ -1,7 +1,46 @@
 # Run `devops/backfill` as an in-cluster Job (Phase 1.5)
 
-**Status 2026-08-26:** not started. Everything 1.5 depends on is DONE and verified
-on production; this is the last step of the conversation-identity rollout.
+**Status 2026-08-26:** the packaging is BUILT AND TESTED; the backfill has not
+been run. Everything 1.5 depends on is DONE and verified on production; this is
+the last step of the conversation-identity rollout.
+
+| the work | state |
+|---|---|
+| `devops/backfill/Dockerfile` (+ `devops/.dockerignore`) | written; **image built and smoke-tested locally against a real CockroachDB** |
+| `.github/workflows/release.yml` | `backfill` case + the `file:` input it needs |
+| `devops/vlab/templates/messages-backfill-job.yaml` | written; renders and validates against the vprod API schema |
+| `devops/vlab/values.yaml` / `devops/values/production.yaml` | `messagesBackfill`, **`enabled: false`** |
+| durable cursor (the open question below) | **DONE** — `--cursor-key`, `devops/migrations/31-backfill-cursor.sql`, 10 new tests, mutation-checked |
+| migration 31 applied to vprod | **NO** |
+| image published to ghcr | **NO** (needs tag `backfill-v0.1.0`) |
+| the backfill itself | **NOT RUN** |
+
+**One precondition the plan did not have, found while wiring the Job.** Every
+service in the chart connects as `chatroach`, and that user holds only `INSERT`
+and `SELECT` on `chatroach.messages` — `SHOW GRANTS`, vprod, 2026-08-26. A Job
+reusing the services' DSN would connect cleanly, print a healthy banner, and fail
+on its **first** `UPDATE`. **The Job connects as `root`.** The host is still
+reused from `.Values.chatbaseHost` rather than restated, which was the part of
+the "reuse existing values" advice that actually mattered.
+
+**A second deviation, deliberate.** "Running it" below says
+`--set messagesBackfill.enabled=true`. **Do not.** Helm prunes what a release no
+longer renders, so a Job that exists only because of a command-line flag is
+deleted by the next `helm upgrade` anyone runs from the values file — plausibly
+30 hours into a 41-hour run, by someone shipping something unrelated. `enabled`
+is therefore committed in `devops/values/production.yaml`, and flipping it to
+`true` and applying IS the start command. (A Job's `spec.template` and
+`backoffLimit` are also immutable after creation: re-rendering identical YAML
+patches to a no-op, but changing a setting while the Job exists fails the upgrade
+loudly, which is the right outcome.)
+
+**Re-verified on vprod 2026-08-26 before any of this was written:**
+
+| check | result |
+|---|---|
+| `count(*)` / `count(account_id)` | 106,994,949 / **8,800** — producers stamping forward, up from 1,288 |
+| indexes on `messages` | 3: `primary`, `messages_userid_account_timestamp_idx`, `messages_userid_timestamp_idx` (NOT VISIBLE) — as the sizing assumes |
+| disk, all four nodes | 124 / 127 / 125 / 126 GiB free (~502 GB) — the ~466 GiB the sizing assumes, still there |
 
 **Why this exists:** the tool was designed to run locally against a
 `kubectl port-forward`, and its README says so. That is fine for staging, which
@@ -166,9 +205,18 @@ the wire."* The database does the work.
 
 ## Running it
 
+Edit `devops/values/production.yaml` — `messagesBackfill.enabled: true` — and
+apply. **Not `--set`; see the deviation note at the top.**
+
 ```bash
-helm upgrade gbv vlab -f values/production.yaml -n vprod \
-  --set messagesBackfill.enabled=true
+helm upgrade gbv vlab -f values/production.yaml -n vprod
+```
+
+First, once each:
+
+```bash
+bash devops/run-migration.sh vprod devops/migrations/31-backfill-cursor.sql
+git tag backfill-v0.1.0 && git push origin backfill-v0.1.0
 ```
 
 Then watch. Do NOT tail it interactively for two days:
@@ -200,21 +248,65 @@ The tool prints its cursor on **every batch** and on failure:
 resume with: --start-hsh=<n> --start-userid="<s>"
 ```
 
-Recover the last one from the pod logs and set it in values as extra args. Do not
-restart from scratch.
+With `--cursor-key` set — which the Job passes — you no longer need to. The pod
+resumes by itself, and `backoffLimit: 3` lets Kubernetes do it for you. Check
+where it is:
+
+```sql
+SELECT * FROM chatroach.backfill_cursor;
+```
+
+The log-scrape path remains as the manual override: recover the last cursor line
+and set it in `messagesBackfill.extraArgs` as `--start-hsh=` / `--start-userid=`,
+which take precedence over the stored position. Do not restart from scratch.
 
 ---
 
-## Open design question worth fixing first
+## The open design question — RESOLVED, the cursor is now durable
 
-**The cursor lives only in stdout.** For a 41-hour job that is thin: recovery
-depends on scraping a log line from a pod that may have been garbage-collected.
+It was: *the cursor lives only in stdout, so recovery depends on scraping a log
+line from a pod that may have been garbage-collected.* It is now persisted, and
+`backoffLimit` is 3 rather than 0 as a result.
 
-Consider persisting the cursor — a one-row table, or a ConfigMap the job updates —
-so a restarted pod resumes automatically and `backoffLimit` can be raised above 0.
-That turns a babysat job into an unattended one, and it is maybe an hour of work
-against a two-day run. **Recommended, but not required**; the log-scrape path does
-work.
+**A table, not a ConfigMap.** The process already holds a connection to this
+database and already has write privileges on it. A ConfigMap would need a
+ServiceAccount, a Role, a RoleBinding and a Kubernetes client in a tool whose
+entire dependency list is pgx — new failure modes, none in the direction of the
+actual risk.
+
+`devops/migrations/31-backfill-cursor.sql` creates `chatroach.backfill_cursor`;
+`--cursor-key <name>` turns it on. A restart with no `--start-*` flags resumes by
+itself; explicit `--start-*` still override; a completed run exits immediately
+instead of re-walking the table; totals accumulate across restarts so an operator
+watching for two days does not see them reset to zero when a pod is replaced.
+
+Three decisions worth keeping:
+
+- **The cursor is written after the batch, never before.** Ahead of its work it
+  would make a restart skip that batch's rows, and a skipped row is never
+  revisited. One batch stale is harmless — `AND account_id IS NULL` — so lagging
+  is the correct direction to fail in.
+- **Not in the batch's transaction, deliberately.** Each batch is one statement,
+  which CockroachDB runs as an implicit transaction and can retry at the gateway.
+  An explicit `BEGIN`/`COMMIT` would push retryable 40001s out to a client with no
+  retry loop: a harmless race traded for a new way to abort a two-day job.
+- **`--dry-run`/`--rehearse` never move it.** A rehearsal rolls its work back; a
+  rehearsal that advanced the cursor would make the next real run skip every
+  range it rehearsed.
+
+A missing table or grant is fatal at **startup** — the tool reads the cursor and
+writes a probe row before doing any work — so a broken sink cannot be discovered
+40 hours in. A write failure mid-run is a loud warning and the run continues.
+
+**Verified, not assumed.** 10 new tests, and the two mutations that matter both
+fail: removing the dry-run/rehearse guard fails two tests, and moving the save
+ahead of its batch fails with rows left NULL — the silent-skip signature.
+
+The whole lifecycle was also driven through the built image against a real
+CockroachDB: a run stopped at `--max-batches=1`, a restart with no flags that
+printed `RESUMING from the stored cursor`, and a third that printed
+`ALREADY DONE` — with cumulative totals (3 batches / 4 rows) matching what the
+dry-run predicted.
 
 ---
 

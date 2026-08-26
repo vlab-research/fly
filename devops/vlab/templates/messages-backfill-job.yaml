@@ -1,0 +1,116 @@
+{{- if .Values.messagesBackfill.enabled }}
+# The chatroach.messages account_id/platform backfill (Phase 1.5,
+# planning/backfill-in-cluster-job.md).
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS A JOB AND NOT A `go run` THROUGH A PORT-FORWARD
+# ---------------------------------------------------------------------------
+# The tool was built to be driven from a laptop, and on staging that was right:
+# ~25 minutes. Production was MEASURED on 2026-08-26 by rehearsing three real
+# batches -- ~28 s/batch over ~5,350 batches, so ~41 HOURS, and that is a floor
+# because a rehearsal rolls back and real commits add replication cost. A
+# port-forward held open for two days is not a deployment strategy: it dies with
+# the laptop, the VPN, or the terminal.
+#
+# A bigger --batch-size does not shorten it. The cost is per-row -- scan, rewrite
+# the whole row into three indexes, replicate -- so the total work is roughly
+# constant however it is sliced.
+#
+# ---------------------------------------------------------------------------
+# TWO WAYS A HELM UPGRADE CAN RUIN A 41-HOUR RUN. BOTH ARE WHY `enabled` LIVES
+# IN devops/values/production.yaml AND NOT IN A `--set` ON THE COMMAND LINE.
+# ---------------------------------------------------------------------------
+# 1. DELETION. Helm prunes resources a release no longer renders. If this Job is
+#    turned on with `--set messagesBackfill.enabled=true`, then ANY later
+#    `helm upgrade gbv vlab -f values/production.yaml -n vprod` -- someone else
+#    shipping an unrelated service, an hour into day two -- renders the release
+#    WITHOUT this Job and deletes the running pod. Committing `enabled: true` to
+#    the values file makes every upgrade render it, so there is nothing to prune.
+#
+# 2. IMMUTABILITY. A Job's `spec.template` and `backoffLimit` cannot be changed
+#    after creation. Re-rendering identical YAML patches to a no-op and is fine;
+#    changing any setting below WHILE THE JOB EXISTS fails the upgrade with
+#    "field is immutable". That is the correct, loud outcome -- to change a
+#    setting, delete the completed Job first.
+#
+# There is deliberately no `ttlSecondsAfterFinished`. This runs once in the
+# lifetime of the system; its final log line and its exit status are the record
+# that Phase 1.5 completed, and a TTL would quietly delete both.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-messages-backfill
+  labels:
+    app.kubernetes.io/name: messages-backfill
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  # A restart is SAFE -- every batch carries `AND account_id IS NULL`, so
+  # redoing one updates nothing -- but without a cursor it restarts at the
+  # beginning of a 107M-row keyspace and spends hours scanning back to where it
+  # was. With messagesBackfill.cursorKey set, the position is durable
+  # (devops/migrations/31-backfill-cursor.sql) and a restarted pod resumes by
+  # itself, which is what makes a non-zero backoffLimit reasonable here.
+  backoffLimit: {{ .Values.messagesBackfill.backoffLimit }}
+  {{- if .Values.messagesBackfill.activeDeadlineSeconds }}
+  # DANGER: this KILLS the job when it expires, mid-batch, however much work is
+  # left. The default is unset -- no deadline -- and unset is correct for a run
+  # whose duration is a projection, not a guarantee. Anything under ~200000 is a
+  # timer set to fire before the work can finish.
+  activeDeadlineSeconds: {{ .Values.messagesBackfill.activeDeadlineSeconds }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: messages-backfill
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: messages-backfill
+          image: "{{ .Values.messagesBackfill.image.repository }}:{{ .Values.messagesBackfill.image.tag }}"
+          imagePullPolicy: {{ .Values.messagesBackfill.image.pullPolicy }}
+          args:
+            # The default is the literal relative path `devops/sql`, resolved
+            # against the working directory (main.go:74), which does not exist
+            # in the image. Omitting this is an immediate startup failure.
+            - "--sql-dir=/app/sql"
+            # REQUIRED. Without it the process blocks forever on a confirmation
+            # prompt -- and because the DSN says vprod, that prompt demands the
+            # word "vprod" on a stdin no Job has.
+            - "--yes"
+            - "--batch-size={{ .Values.messagesBackfill.batchSize | int64 }}"
+            - "--max-batches={{ .Values.messagesBackfill.maxBatches | int64 }}"
+            - "--statement-timeout={{ .Values.messagesBackfill.statementTimeout }}"
+            {{- if .Values.messagesBackfill.cursorKey }}
+            - "--cursor-key={{ .Values.messagesBackfill.cursorKey }}"
+            {{- end }}
+            {{- range .Values.messagesBackfill.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: BACKFILL_DSN
+              # ############################################################
+              # THE USER IS `root`, AND IT HAS TO BE.
+              #
+              # Every service in this chart connects as `chatroach`. That user
+              # holds only INSERT and SELECT on chatroach.messages -- verified
+              # on vprod 2026-08-26 with SHOW GRANTS -- so a backfill running as
+              # it would fail on its FIRST UPDATE, after connecting cleanly and
+              # printing a healthy-looking banner. Widening the service user's
+              # grants to suit a one-off migration would be the wrong trade in
+              # the wrong direction, and permanent.
+              #
+              # The host is .Values.chatbaseHost, the same anchor every service
+              # reads. It is not restated here: a second copy of the database
+              # host is a second copy that can disagree, and this one would
+              # disagree while pointed at a real database that is not this one.
+              # ############################################################
+              value: {{ .Values.messagesBackfill.dsn | default (printf "postgres://root@%s:26257/chatroach?sslmode=disable" .Values.chatbaseHost) | quote }}
+          resources:
+            # Deliberately small. Per devops/backfill/README.md the expressions
+            # run SERVER-SIDE and `content` never crosses the wire -- this
+            # process issues UPDATEs and moves a cursor. The 41 hours are spent
+            # in CockroachDB, not here.
+            {{- toYaml .Values.messagesBackfill.resources | nindent 12 }}
+{{- end }}

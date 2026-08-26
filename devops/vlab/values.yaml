@@ -77,3 +77,48 @@ mediaReconciler:
       memory: 256Mi
     limits:
       memory: 512Mi
+
+# The chatroach.messages account_id/platform backfill Job
+# (templates/messages-backfill-job.yaml, planning/backfill-in-cluster-job.md).
+#
+# OFF BY DEFAULT, and this one matters more than most: it is a ~41-hour write
+# across a 107M-row, 388 GiB table. It must never render because someone ran a
+# helm upgrade in an environment nobody thought about.
+#
+# It is also ONE-SHOT. Unlike mediaReconciler this is not a standing mechanism;
+# it exists to close a historical gap once, and after it completes the right
+# state for every environment is `enabled: false` again.
+messagesBackfill:
+  enabled: false
+  image:
+    repository: ghcr.io/vlab-research/backfill
+    tag: v0.1.0
+    pullPolicy: IfNotPresent
+  # 20000 is the tool's own default and was what the production timing was
+  # measured at. Raising it does NOT shorten the run -- the cost is per-row, not
+  # per-round-trip -- but it does make each batch hold locks for longer.
+  batchSize: 20000
+  # A safety stop, not a target. Production needs ~5,350 batches.
+  maxBatches: 20000
+  statementTimeout: "10m"
+  # Persist the resume cursor in chatroach.backfill_cursor under this key, so a
+  # restarted pod resumes by itself instead of re-walking the keyspace. Empty
+  # disables it and puts recovery back on scraping the pod log.
+  # REQUIRES devops/migrations/31-backfill-cursor.sql.
+  cursorKey: "messages-account-backfill"
+  # Safe only BECAUSE the cursor is durable: each retry resumes rather than
+  # starting over. Set this to 0 if cursorKey is empty.
+  backoffLimit: 3
+  # Unset means NO DEADLINE, which is what a run of projected -- not
+  # guaranteed -- duration needs. Setting a number here kills the job mid-batch
+  # when it expires.
+  activeDeadlineSeconds: ~
+  # Extra flags, e.g. an operator-supplied --start-hsh/--start-userid override.
+  extraArgs: []
+  # The database does the work; this process moves a cursor.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
