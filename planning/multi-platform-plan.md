@@ -1,5 +1,11 @@
 # Multi-platform plan: getting every conversation onto (platform, account_id, user_id)
 
+<!-- Search aliases, so this file is found however you spell it: multiplatform
+     migration, multi-platform migration, conversation identity rollout,
+     conversation-identity migration, account_id migration, pageid to account_id,
+     platform migration status, migration status, where are we in the migration.
+     This file is the AUTHORITATIVE answer to all of those. -->
+
 **THIS FILE IS AUTHORITATIVE FOR ORDERING.** `planning/conversation-identity.md` §5
 describes the conversation-identity rollout in depth — the hazards, the gates, the
 traps — but the phase order lives here. If the two disagree, this file wins and the
