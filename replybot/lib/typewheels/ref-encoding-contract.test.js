@@ -80,6 +80,23 @@ function deployedReplybotTag() {
 
 // Materialise one git ref's copy of the decoder, and return its module.
 function loadFromTag(tag) {
+  // Fail on the missing tag specifically, and say what to do about it. A CI
+  // checkout at the default `fetch-depth: 1` has no tags at all, so without
+  // this the whole suite dies inside `git show` with "fatal: invalid object
+  // name" -- which reads like the contract is broken when the truth is that
+  // the runner never fetched the thing being asserted about.
+  try {
+    execFileSync('git', ['rev-parse', '--verify', `${tag}^{commit}`],
+                 { cwd: REPO, stdio: 'pipe' })
+  } catch (e) {
+    throw new Error(
+      `replybot tag ${tag} is not in this checkout. It is named by ` +
+      `devops/values/production.yaml, so it exists on the remote; this clone ` +
+      `just does not have it. In CI, checkout needs fetch-depth: 0 (tags ` +
+      `included). Locally: git fetch --tags.`
+    )
+  }
+
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'replybot-deployed-'))
 
   for (const rel of NEEDED) {

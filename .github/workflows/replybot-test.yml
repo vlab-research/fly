@@ -3,12 +3,20 @@ name: replybot-test
 # `devops/migrations/**` is a trigger because `replybot/lib/chatbase` is tested
 # against a real schema (see the step that starts the database below), so a
 # migration can break this suite without touching a file under `replybot/`.
+#
+# `devops/values/production.yaml` is a trigger for a sharper reason:
+# `lib/typewheels/ref-encoding-contract.test.js` reads `versionReplybot` out of
+# it and asserts that THAT TAG decodes the refs vlab mints. A deploy bump is
+# therefore the single most important moment for this suite to run, and it is
+# the one change that touches nothing under `replybot/`. Without this line the
+# contract silently stops being checked exactly when the thing it checks moves.
 on:
   pull_request:
     paths:
       - 'replybot/**'
       - 'testdata/**'
       - 'devops/migrations/**'
+      - 'devops/values/production.yaml'
       - '.github/workflows/replybot-test.yml'
   push:
     branches: [main]
@@ -16,6 +24,7 @@ on:
       - 'replybot/**'
       - 'testdata/**'
       - 'devops/migrations/**'
+      - 'devops/values/production.yaml'
       - '.github/workflows/replybot-test.yml'
 
 jobs:
@@ -25,7 +34,15 @@ jobs:
       run:
         working-directory: replybot
     steps:
+      # fetch-depth: 0 fetches full history AND tags, which
+      # `lib/typewheels/ref-encoding-contract.test.js` requires: it extracts the
+      # deployed replybot tag's decoder with `git show <tag>:<path>` rather than
+      # requiring the checked-out copy, because the whole point is to assert
+      # against what RUNS rather than against whatever branch this is. The
+      # default depth-1 checkout has no tags and that test cannot run at all.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version-file: replybot/.nvmrc
