@@ -458,6 +458,48 @@ predictable from staging or from the docs.
 
 - **3.4 `pageid` → `account_id` rename.** Cosmetic, last, its own PR.
 
+## Doc hygiene — what can be deleted, and when
+
+`planning/` is temporary by convention (`CLAUDE.md`), but this rollout's docs are
+**not** disposable yet: Phases 2 and 3 still consume them.
+
+**Deleted 2026-08-26**, after verifying each had no referrer outside its own
+island:
+
+- the **pageid investigation** — `pageid-*.md` and `PAGEID_*.md`, 9 files from
+  2026-03-22, all concluding "COMPLETE / NO ISSUES FOUND". Entirely superseded by
+  the account_id work, which restructured what they mapped. `pageid-code-reference.md`
+  looked useful for 3.4's rename and is the opposite: a five-month-old code map,
+  written before the message-worker extraction, platform abstraction and
+  conversation identity all moved the code. `grep` beats it.
+- **`platform-abstraction-plan.md`** (110 KB) and
+  **`platform-abstraction-plan-consolidated.md`** — pure implementation
+  scaffolding ("Files to Create / Modify / Delete", "Implementation Order"). Spent
+  by construction: the repo is now the answer. The durable content is
+  `documentation/platform-abstraction.md`.
+
+**Deliberately KEPT, with the reason, so nobody re-litigates it:**
+
+| kept | why |
+|---|---|
+| `conversation-identity.md` | §5.1–5.5 are cited by name in this file's "Start here" |
+| `messages-account-not-null-todo.md` | it *is* Phase 3.2's spec |
+| `backfill-in-cluster-job.md` | the 1.5 runbook, live |
+| `event-envelope-contract.md` | the wire contract 2.1/2.2's gates enforce; cited by `documentation/event-envelope.md` |
+| `moviehouse-conversation-identity.md` | **referenced from code** — `moviehouse/src/identity.js`, `replybot/lib/generic-translator.js`, `form.js` |
+| `whatsapp-webview-exposure.md` | the exposure picture W1–W3 rests on |
+| `whatsapp-plan.md` | cited from `devops/migrations/20-*.sql`; names remaining work |
+| `staging-rollout-runbook.md` | `whatsapp-plan.md` lists it as **remaining**, not done — its 2026-07-22 date is misleading |
+| `platform-threading-{replybot,writers}-findings.md` | cited by `whatsapp-plan.md` in `{a,b}` brace shorthand, which a naive grep for the filename does not find |
+| `whatsapp-trackA/trackB-findings.md` | cited by `documentation/whatsapp-onboarding.md` |
+
+**When the rest becomes deletable:** after Phase 3 lands. At that point
+`conversation-identity.md`, `event-envelope-contract.md`,
+`messages-account-not-null-todo.md`, `backfill-in-cluster-job.md` and this file
+can collapse into whatever `documentation/` needs to keep. Not before — and check
+for `{a,b}` brace references and code references before deleting anything, because
+both defeat a plain filename grep.
+
 ## Out of scope
 
 **`platform` NOT NULL is not achievable — drop it as a goal.** Only synthetic events

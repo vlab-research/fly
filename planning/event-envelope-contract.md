@@ -1,6 +1,7 @@
 # Event envelope — the wire contract
 
-**Status: built on `feature/conversation-identity`, not deployed.** This file stays because it
+**Status: DEPLOYED TO PRODUCTION in the Phase 1.3 deploy, 2026-08-25** (was "built on
+`feature/conversation-identity`, not deployed" — corrected 2026-08-26). This file stays because it
 is the *what* — the shape every producer must put on the wire — and it is still the reference
 an implementer needs. `documentation/event-envelope.md` is the user-facing version;
 `planning/conversation-identity.md` §2 and §3.1 are the *why*.

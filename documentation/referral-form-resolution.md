@@ -418,8 +418,10 @@ through `parseEvent`, as the machine test above does.
 
 ## A form-less entry event may not re-enter a live conversation (resolved, 2026-08-17)
 
-**Status: fixed on branch `feature/conversation-identity`, not yet deployed.** Live
-in production from at least **2020-06 until the deploy of this fix** — the
+**Status: fixed and DEPLOYED TO PRODUCTION** in the Phase 1.3 deploy, 2026-08-25
+(replybot v0.0.221). Corrected 2026-08-26 — this previously read "fixed on branch
+`feature/conversation-identity`, not yet deployed", which had been false since the
+deploy. Live in production from at least **2020-06 until the deploy of this fix** — the
 longest-running instance of this failure family, and the third after VIR-19 and the
 CTWA order-dependence below: a ref that fails to resolve silently becomes survey
 `305`.
