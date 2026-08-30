@@ -1,6 +1,6 @@
 const util = require('util')
 const _ = require('lodash')
-const { getForm, getMetadata, _group } = require('./utils')
+const { getForm, getMetadata, refNamesForm } = require('./utils')
 const { validator, defaultMessage, followUpMessage, offMessage } = require('../generic-validator')
 const { translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const { waitConditionFulfilled } = require('./waiting')
@@ -110,38 +110,6 @@ function _isSynthetic(event) {
 }
 
 
-
-// Pure, total. Did this entry event NAME a form, or is its form about to come
-// from FALLBACK_FORM?
-//
-// This is a question about the REF, deliberately not about the resolved form.
-// `getForm(event) === process.env.FALLBACK_FORM` reads as the obvious equivalent
-// and is wrong: a ref may name the fallback shortcode EXPLICITLY, and production
-// has such refs -- `?ref=form.305.country.iraq` on the Iraq vaccination page,
-// three live `states` rows. Those are real referrals and must keep switching a
-// live participant's form like any other referral. Only an entry that names no
-// form at all is refused below.
-//
-// Mirrors `getMetadata`'s own extraction (utils.js) exactly: the same
-// `r && r.ref` guard and the same `_group(split('.').map(decodeURIComponent))`,
-// with `_group` REUSED rather than reimplemented -- so the two cannot come to
-// different conclusions about whether a ref carries a form, and the even-token-
-// boundary rule (`creative.form.ABC` names no form) is automatically the same one.
-//
-// Total by construction: a malformed ref answers "no form", which routes to the
-// conservative branch rather than throwing on the hot path.
-function _refNamesForm(event) {
-  try {
-    if (event.event_type !== 'conversation_started') return false
-
-    const r = event.payload && event.payload.referral
-    if (!r || !r.ref) return false
-
-    return _group(r.ref.split('.').map(decodeURIComponent)).form !== undefined
-  } catch (e) {
-    return false
-  }
-}
 
 function _handleExternalEvent(state, nxt, includeMetadata = false) {
   // A synthetic event cannot be a first contact -- every producer requires the
@@ -352,8 +320,8 @@ function exec(state, nxt) {
       // FALLBACK_FORM MAY START A CONVERSATION. IT MAY NEVER RE-ENTER ONE.
       //
       // An entry event naming no form resolves to FALLBACK_FORM. Two shapes reach
-      // here: Messenger's bare `get_started`, and a referral whose ref carries no
-      // `form` pair. Blank-starting either onto a conversation that already has a
+      // here: Messenger's bare `get_started`, and a referral whose ref names no
+      // form in EITHER grammar. Blank-starting either onto a conversation that has a
       // form pushes FALLBACK_FORM onto its stack and replaces `md` wholesale, so
       // the participant's answers land on the wrong survey and look like
       // completions.
@@ -365,12 +333,16 @@ function exec(state, nxt) {
       // no conversation at all.
       //
       // A referral that DOES name a form still switches a live participant onto it.
-      // That is the intended behaviour and is why this case is narrow.
+      // That is the intended behaviour and is why this case is narrow. `refNamesForm`
+      // lives in utils.js beside `getMetadata` and shares its parse, so the predicate
+      // and the resolution cannot disagree about a ref -- they did, for the encoded
+      // `r.<base64url>` grammar, and every such referral onto a live conversation was
+      // silently dropped (VIR-35).
       //
       // Not done deliberately: a `get_started` at QOUT could re-send the pending
       // question, which is what the `_hasForm` branch above already does. That is a
       // product decision with its own state write, not a bug fix.
-      if (!_refNamesForm(nxt) && state.forms.length) return _noop()
+      if (!refNamesForm(nxt) && state.forms.length) return _noop()
 
       return _blankStart(nxt)
     }

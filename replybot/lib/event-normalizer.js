@@ -44,7 +44,7 @@ function categorizeMessengerEvent(data) {
   //
   // What must not happen is a form-less entry RE-entering a conversation that
   // already has a form. That is refused one layer down, in machine.js's REFERRAL
-  // case (`_refNamesForm`), because the same refusal has to cover a referral whose
+  // case (`utils.refNamesForm`), because the same refusal has to cover a referral whose
   // ref names no form -- `clickToMessengerAds`, a CTWA referral object with no
   // `ref` -- which is indistinguishable from a real referral here. The normalizer
   // reports what arrived; the machine decides what it may do.

@@ -3605,6 +3605,122 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
 // payload as a JSON string. These are RAW webhook shapes run through the real
 // event-normalizer, mirroring production where parseEvent runs per Kafka
 // message -- a normalized fixture would not exercise the defect.
+// VIR-35. The encoded ref (`r.<base64url>`) carries its shortcode INSIDE the
+// payload, so it has no `form` pair for the dotted grammar to find. The REFERRAL
+// case's form-less-entry guard tested the dotted grammar only and therefore
+// classified every encoded ref as "names no form" -- while `getForm` on the same
+// event resolved the shortcode correctly. Two functions in the same handler
+// disagreeing about the same string, and the disagreement dropped the referral.
+//
+// The drop was silent and conditional on prior state: `forms: []` fell through to
+// `_blankStart` and worked, so it passed every first-time test and failed for
+// anyone who had ever touched a survey on that page -- exactly the population
+// most likely to click a second study. Found fielding `vl-pulse-nigeria-smoke`
+// against deployed replybot-v0.0.221, 2026-08-30.
+//
+// The fix moved the predicate to `utils.refNamesForm`, beside `getMetadata` and
+// sharing its parse. These tests are the machine-level half; `utils.test.js`
+// pins the agreement itself.
+describe('an encoded ref must switch a live participant onto the referred form', () => {
+
+  // The real minted ref from the smoke test: form `vlpulseng`, token fd7b8a8199.
+  const ENCODED_REF = 'r.AQl2bHB1bHNlbmf9e4qBmQ'
+  const T = 1756593761000
+
+  const raw = (extra, timestamp) => ({
+    source: 'messenger',
+    sender: { id: USER_ID },
+    recipient: { id: PAGE_ID },
+    timestamp,
+    ...extra
+  })
+
+  // Production's own delivery shape: the referral rides a quick_reply payload
+  // string (see the describe below), not a top-level `referral` object.
+  const encodedArrival = raw({
+    message: {
+      mid: 'm_vlpulse',
+      text: 'Get Started',
+      quick_reply: { payload: `{"referral": {"ref": "${ENCODED_REF}"}}` }
+    }
+  }, T)
+
+  // The same ref as a top-level referral webhook, the other delivery shape.
+  const encodedReferral = raw({ referral: { ref: ENCODED_REF, type: 'OPEN_THREAD' } }, T)
+
+  // A live conversation on a DIFFERENT survey -- the tester's own state in the
+  // production report: forms ['lachealthtestexp'], QOUT, awaiting an answer.
+  const liveLog = [parseEvent(raw(
+    { referral: { ref: 'form.lachealthtestexp', type: 'OPEN_THREAD' } }, T - 60000)), echo]
+
+  it('switches a live participant onto the encoded ref\'s form', () => {
+    const before = getState(liveLog)
+    before.forms.should.eql(['lachealthtestexp'])
+    before.state.should.equal('QOUT')
+
+    const after = getState([...liveLog, parseEvent(encodedArrival)])
+
+    after.forms.should.eql(['lachealthtestexp', 'vlpulseng'])
+    after.md.form.should.equal('vlpulseng')
+  })
+
+  // The defect's signature: `publish: false` and a byte-identical state. The
+  // regression is that this is NOT a no-op.
+  it('does not no-op the referral away', () => {
+    exec(getState(liveLog), parseEvent(encodedArrival)).action.should.not.equal('NONE')
+    exec(getState(liveLog), parseEvent(encodedReferral)).action.should.not.equal('NONE')
+  })
+
+  it('carries the attribution token through as md.vt', () => {
+    const after = getState([...liveLog, parseEvent(encodedArrival)])
+
+    after.md.vt.should.equal('fd7b8a8199')
+    should.not.exist(after.md.r)
+  })
+
+  // The guard is conditioned on `state.forms.length`, so an empty stack always
+  // worked. Pinned so a future fix cannot regress to "works only when empty".
+  it('still enters the encoded ref\'s form on an empty conversation', () => {
+    const state = getState([parseEvent(encodedArrival)])
+
+    state.forms.should.eql(['vlpulseng'])
+    state.md.form.should.equal('vlpulseng')
+  })
+
+  it('works from every state a live conversation can be in', () => {
+    for (const s of ['QOUT', 'RESPONDING', 'END', 'WAIT_EXTERNAL_EVENT']) {
+      const live = { ...getState(liveLog), state: s }
+
+      exec(live, parseEvent(encodedArrival)).action.should.not.equal('NONE', `state: ${s}`)
+    }
+  })
+
+  // The guard it must not undo: a form-less entry on the same live conversation
+  // is still refused. The fix widens what counts as "names a form", nothing else.
+  it('still refuses a form-less entry on the same live conversation', () => {
+    const getStarted = raw({ postback: { title: 'Get Started', payload: 'get_started' } }, T)
+
+    exec(getState(liveLog), parseEvent(getStarted)).action.should.equal('NONE')
+  })
+
+  // A blocked participant is refused before the guard is reached, encoded or not.
+  it('still no-ops for a USER_BLOCKED participant', () => {
+    const blocked = { ...getState(liveLog), state: 'USER_BLOCKED' }
+
+    exec(blocked, parseEvent(encodedArrival)).action.should.equal('NONE')
+  })
+
+  // A ref that will not decode must stay LOUD -- the encoded ref is the only
+  // carrier of the shortcode, so falling through to FALLBACK_FORM would be the
+  // silent misroute the format exists to prevent. The guard must not convert
+  // that throw into a quiet no-op by answering "names no form" for it.
+  it('throws on an undecodable encoded ref rather than silently no-oping', () => {
+    const bad = raw({ referral: { ref: 'r.AQ', type: 'OPEN_THREAD' } }, T)
+
+    ;(() => exec(getState(liveLog), parseEvent(bad))).should.throw(/encoded ref/)
+  })
+})
+
 describe('Referral delivered inside a quick_reply payload string', () => {
   const REAL_REF = 'creative.3b.gender.men.geography.other_states2.form.hpvintrotriple'
 

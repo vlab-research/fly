@@ -424,7 +424,7 @@ longest-running instance of this failure family, and the third after VIR-19 and 
 CTWA order-dependence below: a ref that fails to resolve silently becomes survey
 `305`.
 
-The fix is in `machine.js`'s `REFERRAL` case (`_refNamesForm` + a `_noop()`). It is
+The fix is in `machine.js`'s `REFERRAL` case (`refNamesForm` + a `_noop()`). It is
 **not logged**, so there is no tag to count; the detector query and the behavioural
 change are at the end of this section.
 
@@ -562,7 +562,7 @@ so: all 450 entries happened on the **first event the machine acted on**, so
 `USER_BLOCKED` / `_hasForm` / self-referrer guards:
 
 ```js
-if (!_refNamesForm(nxt) && state.forms.length) return _noop()
+if (!refNamesForm(nxt) && state.forms.length) return _noop()
 return _blankStart(nxt)
 ```
 
@@ -573,9 +573,11 @@ Two choices in there are load-bearing:
    is wrong: a ref may name the fallback shortcode *explicitly*. Production has
    three live rows entered on `?ref=form.305.country.iraq` (the Iraq vaccination
    page, `pageid 102398018371948`), which are real referrals and must keep
-   switching forms. `_refNamesForm` re-uses `_group` from `utils.js`, so it cannot
-   disagree with `getMetadata` about whether a ref carries a form — including the
-   even-token-boundary rule.
+   switching forms. `refNamesForm` shares `getMetadata`'s parse, so it cannot
+   disagree with it about whether a ref carries a form — including the
+   even-token-boundary rule. **It did not always share it**: the predicate
+   originally lived in `machine.js` with a `_group` call of its own and knew only
+   the dotted grammar, which is VIR-35 below.
 2. **The state test is `state.forms.length`, not `state.state !== 'START'`.** They
    agree on all 3,732 appends and all 450 entries, and `forms.length` is safer
    where they diverge: a `machine_report` error arriving before entry leaves the
@@ -673,6 +675,107 @@ deliberately.
 - `replybot/lib/event-normalizer.test.js` — "keeps the bare `get_started` an entry
   signal, with no referral to resolve", pinning the normalizer *against* the
   tempting fix that would break organic entry.
+
+## The form-less-entry guard knew only one ref grammar (resolved, VIR-35, 2026-08-30)
+
+**An amendment to the section above, not a separate defect family.** The guard is
+right; its predicate was reading the wrong half of the ref. Live from the deploy of
+the guard until this fix — including deployed `replybot-v0.0.221`.
+
+`_refNamesForm` lived in `machine.js` and tested the **dotted** grammar only:
+
+```js
+return _group(r.ref.split('.').map(decodeURIComponent)).form !== undefined
+```
+
+An encoded ref carries its shortcode *inside* the payload (see "The encoded ref"
+below), so `_group` yields `{ r: "<base64url>" }` and there is no `form` key to
+find. Run against a real minted ref, using the deployed tag's own code:
+
+```
+_group("r.AQl2bHB1bHNlbmf9e4qBmQ".split("."))  =  {"r":"AQl2bHB1bHNlbmf9e4qBmQ"}
+_refNamesForm         ->  false        <- the guard's verdict
+decodeRecruitmentRef  ->  {"form":"vlpulseng","token":"fd7b8a8199"}
+getForm               ->  vlpulseng    <- the truth
+```
+
+Two functions in the same handler disagreeing about the same string. `getForm`
+resolved the referred form; the predicate said the ref named none; the guard
+therefore read a real referral as a form-less entry.
+
+### Impact
+
+| `state.forms` | Result |
+| -- | -- |
+| empty | falls through to `_blankStart` — works |
+| non-empty | `_noop()` — **referral silently ignored** |
+
+An encoded-ref ad could not recruit **anyone who had ever touched any survey on
+that page**. First-time users worked, so it passed casual testing and failed in
+exactly the population most likely to click a second study. The failure was
+silent in the same way the guard's own refusal is: `publish: false`, state
+byte-identical, no error and no log line.
+
+Observed fielding `vl-pulse-nigeria-smoke`, tester `1989430067808669`, page
+`1855355231229529`, 2026-08-30 22:42:41 UTC:
+
+```
+EVENT:  quick_reply.payload {"referral": {"ref": "r.AQl2bHB1bHNlbmf9e4qBmQ"}}
+STATE:  { state: 'QOUT', forms: ['lachealthtestexp'], question: 'exp_food_4_tl' }
+REPORT: { publish: false, newState: <byte-identical to STATE> }
+```
+
+Clearing state with `form.reset` and re-clicking the same ad started the survey —
+that is the `forms.length === 0` path, not a fix. The ad itself was correct.
+
+### The fix
+
+The predicate moved to `replybot/lib/typewheels/utils.js` as `refNamesForm`,
+beside `getMetadata`, and the two now share one parse — `_refPairs`, the single
+place the dotted grammar is read. The predicate is:
+
+```js
+return md.form !== undefined || md.r !== undefined
+```
+
+**`r` settles it without decoding.** `getMetadata` either resolves an encoded ref
+or throws `RefDecodeError` (see "A decode failure is loud, not swallowed" below),
+so an encoded ref never falls through to `FALLBACK_FORM` — which is the only
+condition this predicate exists to detect. Decoding a second time on the hot path
+would buy nothing and would reintroduce a way for the two to disagree. It also
+keeps the loud failure loud: answering "names no form" for an undecodable ref
+would have converted the throw into a quiet `_noop()`.
+
+**A second divergence went with it.** The old predicate mapped tokens with a bare
+`decodeURIComponent`, which *throws* on a lone `%`; `getMetadata` uses the total
+`_decodeToken`, which falls back to the raw string. So `?ref=form.100%.country.iraq`
+resolved to form `100%` while the predicate called it form-less. Sharing `_refPairs`
+fixes both halves at once, and it is why the fix is a move rather than an added
+`|| md.r` branch: the class of bug is *two parses*, not *one missing case*.
+
+### Regression coverage
+
+- `replybot/lib/typewheels/utils.test.js` — describe **"refNamesForm"** (7 tests).
+  The invariant is one table asserting the predicate and `getMetadata` agree
+  across both grammars and both answers, including the explicit-fallback ref and
+  the even-token boundary. Also pins the `%` divergence, totality on garbage, and
+  that an undecodable `r` answers *yes* while `getForm` throws.
+- `replybot/lib/typewheels/machine.test.js` — describe **"an encoded ref must
+  switch a live participant onto the referred form"** (8 tests). Drives the real
+  minted ref through `parseEvent` in production's own delivery shape (a
+  `quick_reply` payload string) onto the traced live conversation, and asserts the
+  switch, `md.vt`, every live state, and that the form-less-entry guard above is
+  still enforced on the same conversation.
+
+Both halves of the bug were uncovered before this: the existing referral tests all
+started from an **empty** state and all used **dotted** refs.
+
+### Detector
+
+There is none, for the same reason the guard above has none — a refused referral
+is a `_noop()` that appends nothing and logs nothing. The negative check is that a
+study recruiting on an encoded ref shows arrivals from returning participants;
+see `documentation/recruitment-arrival-health.md`.
 
 ### 7. Form Loading from Database
 
@@ -1328,9 +1431,12 @@ proves less than it appears to.
 - **Event categorization**: `replybot/lib/typewheels/machine.js:categorizeEvent()`
 - **REFERRAL handler**: `replybot/lib/typewheels/machine.js`, `exec`'s `REFERRAL` case
 - **Blank start**: `replybot/lib/typewheels/machine.js:_blankStart()`
-- **"Did the ref name a form?"**: `replybot/lib/typewheels/machine.js:_refNamesForm()` —
+- **"Did the ref name a form?"**: `replybot/lib/typewheels/utils.js:refNamesForm()` —
   the discriminator that lets a form-less entry start a conversation but never
-  re-enter one; re-uses `_group` from `utils.js`
+  re-enter one. Lives beside `getMetadata` and shares its parse (`_refPairs`),
+  and answers for **both** grammars: a dotted `form` pair, or an encoded `r`.
+  It was in `machine.js` with a parse of its own until VIR-35, where the two
+  disagreed about every encoded ref
 - **Refusals**: both are plain `_noop()` returns from `machine.js` — the synthetic
   one in `_handleExternalEvent`, the form-less-entry one in the `REFERRAL` case.
   Neither is logged and neither has a distinct action or tag
