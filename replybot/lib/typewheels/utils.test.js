@@ -515,3 +515,105 @@ describe('getMetadata with an encoded ref', () => {
     md.gender.should.equal('women')
   })
 })
+
+// ---------------------------------------------------------------------------
+// VIR-35. `refNamesForm` is the predicate the REFERRAL case uses to tell a
+// form-less entry event (which resolves to FALLBACK_FORM, and must not re-enter
+// a live conversation) from a real referral (which must keep switching forms).
+//
+// It lives here, beside `getMetadata` and sharing its parse, because when it
+// lived in machine.js with a parse of its own the two disagreed: the predicate
+// tested the DOTTED grammar only, so it answered "names no form" for every
+// encoded `r.<base64url>` ref while `getForm` on the same event resolved the
+// shortcode perfectly well. These tests pin the agreement, not the predicate.
+// ---------------------------------------------------------------------------
+describe('refNamesForm', () => {
+
+  const entry = ref => ({
+    event_id: 'evt_names_form',
+    user_id: 'u1',
+    timestamp: 1755000000474,
+    source: { type: 'messenger', account_id: 'p1' },
+    event_type: 'conversation_started',
+    payload: {
+      type: 'conversation_started',
+      trigger: 'referral',
+      referral: ref === undefined ? undefined : { ref }
+    }
+  })
+
+  // The real minted ref from the vl-pulse-nigeria smoke test, 2026-08-30.
+  const REAL_ENCODED = 'AQl2bHB1bHNlbmf9e4qBmQ'
+
+  it('answers yes for an encoded ref, whose form lives inside the payload', () => {
+    u.refNamesForm(entry(`r.${REAL_ENCODED}`)).should.be.true
+  })
+
+  it('answers yes for a dotted ref carrying a form pair', () => {
+    u.refNamesForm(entry('creative.3b.gender.men.form.hpvintrotriple')).should.be.true
+  })
+
+  // THE INVARIANT. The predicate exists to answer "would getMetadata fall
+  // through to FALLBACK_FORM?", so it may never disagree with getMetadata about
+  // a ref. Asserted against both grammars and both answers at once.
+  it('agrees with getMetadata about every ref, in both grammars', () => {
+    process.env.FALLBACK_FORM = 'fallback'
+
+    const cases = [
+      [`r.${REAL_ENCODED}`, 'vlpulseng'],
+      [`r.${encodeRef('mnchweek', 'a7f3c20b1e')}`, 'mnchweek'],
+      ['form.hpvintrotriple.gender.men', 'hpvintrotriple'],
+      ['creative.Static English.State.Bauchi.form.mnchweek', 'mnchweek'],
+      ['form.fallback.country.iraq', 'fallback'],  // names the fallback EXPLICITLY
+      ['clickToMessengerAds', undefined],
+      ['creative.form.ABC', undefined],            // even-token boundary: no form
+      ['homescreenpwa', undefined],
+      [undefined, undefined]
+    ]
+
+    for (const [ref, expected] of cases) {
+      const event = entry(ref)
+      const resolvesOwnForm = u.getForm(event) !== process.env.FALLBACK_FORM ||
+        expected === process.env.FALLBACK_FORM
+
+      u.refNamesForm(event).should.equal(resolvesOwnForm, `ref: ${ref}`)
+      if (expected !== undefined) u.getForm(event).should.equal(expected)
+    }
+  })
+
+  // The second half of the same divergence. The predicate used a bare
+  // `decodeURIComponent`, which THROWS on a lone `%`, so it answered "no form"
+  // for a ref `getMetadata` reads fine through the total `_decodeToken`.
+  it('answers yes for a form whose token is not valid percent-encoding', () => {
+    process.env.FALLBACK_FORM = 'fallback'
+
+    u.refNamesForm(entry('form.100%.country.iraq')).should.be.true
+    u.getMetadata(entry('form.100%.country.iraq')).form.should.equal('100%')
+  })
+
+  it('answers no for a form-less entry, whatever shape it arrives in', () => {
+    u.refNamesForm(entry(undefined)).should.be.false
+    u.refNamesForm(entry('clickToMessengerAds')).should.be.false
+    u.refNamesForm({ ...entry('form.FOO'), event_type: 'user_interaction' }).should.be.false
+  })
+
+  // Total on the hot path: a malformed event answers "no form" and routes to the
+  // conservative branch rather than throwing during a replay.
+  it('is total -- garbage answers no rather than throwing', () => {
+    u.refNamesForm({}).should.be.false
+    u.refNamesForm({ event_type: 'conversation_started' }).should.be.false
+    u.refNamesForm(entry(12345)).should.be.false
+  })
+
+  // An encoded ref that will not decode still NAMES a form -- it claims one, and
+  // getMetadata throws RefDecodeError rather than falling through to
+  // FALLBACK_FORM. Answering "yes" is what keeps the loud failure loud: the
+  // guard is for form-less entries, and this is not one.
+  it('answers yes for an undecodable encoded ref, which throws rather than falling back', () => {
+    process.env.FALLBACK_FORM = 'fallback'
+    const bad = entry('r.AQ')
+
+    u.refNamesForm(bad).should.be.true
+    ;(() => u.getForm(bad)).should.throw(/encoded ref/)
+  })
+})
