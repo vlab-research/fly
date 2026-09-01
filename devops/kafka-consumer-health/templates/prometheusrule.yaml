@@ -32,6 +32,7 @@ spec:
       rules:
       {{- range .Values.groups }}
       {{- $drain := .drainSeconds | default $d.drainSeconds | default 600 }}
+      {{- $warnDrain := .warnDrainSeconds }}
       {{- $stuckWindow := .stuckWindow | default $d.stuckWindow | default "10m" }}
       {{- $for := .for | default $d.for | default "10m" }}
       {{- $sev := .severity | default $d.severity | default "warning" }}
@@ -77,6 +78,35 @@ spec:
               consume rate. Messages are waiting too long.
             runbook_url: "{{ $runbook }}#kafkaconsumerdrainslobreach"
             dashboard: "Kafka Consumer Health"
+      {{- if $warnDrain }}
+        {{- /*
+          Optional early-warning band for groups whose paging SLO is far enough
+          above normal that breaching it is already an incident. The band is
+          EXCLUSIVE (> warn AND <= crit) so exactly one drain alert fires at a
+          time — AlertManager has a single flat Slack receiver with no severity
+          routing, so an inclusive band would double-post one problem.
+        */}}
+        - alert: KafkaConsumerDrainSLOWarning
+          expr: |
+            (kafka:consumergroup_drain_seconds{group_id="{{ .group }}", topic_name="{{ .topic }}"} > {{ $warnDrain }})
+            <= {{ $drain }}
+          for: {{ $for }}
+          labels:
+            severity: warning
+            env: {{ $env }}
+            consumergroup: "{{ .group }}"
+            topic: "{{ .topic }}"
+          annotations:
+            summary: "[{{ $env }}] Kafka consumer '{{ .group }}' drain time > {{ $warnDrain }}s on {{ .topic }}"
+            description: >-
+              Estimated time to clear the backlog for group '{{ .group }}' on
+              topic '{{ .topic }}' is above its {{ $warnDrain }}s early-warning
+              threshold (paging SLO is {{ $drain }}s). The consumer is falling
+              behind but has not yet breached the SLO — investigate now, before
+              it pages.
+            runbook_url: "{{ $runbook }}#kafkaconsumerdrainslobreach"
+            dashboard: "Kafka Consumer Health"
+      {{- end }}
         - alert: KafkaConsumerGroupAbsent
           expr: |
             absent(kminion_kafka_consumer_group_topic_lag{group_id="{{ .group }}", topic_name="{{ .topic }}"})
