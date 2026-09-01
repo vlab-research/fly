@@ -50,11 +50,19 @@ type WhatsAppSendResponse struct {
 func (c *WhatsAppClient) SendMessage(ctx context.Context, platformAccountID, userID string, message interface{}, platformContext json.RawMessage) (*SendMessageResponse, error) {
 	token, err := c.tokenStore.GetToken(ctx, string(types.PlatformWhatsApp), platformAccountID)
 	if err != nil {
-		return nil, &PlatformError{
-			StatusCode: 0,
-			Message:    fmt.Sprintf("failed to get token: %v", err),
-			Retriable:  false,
-		}
+		// NOT a *PlatformError. A token lookup failure never reached the
+		// platform, so classifying it as one is wrong twice over: reportError
+		// tags *PlatformError as "FB", which the state machine turns into
+		// BLOCKED, and dean's Blocked retry keys on fb_error_code -- which a
+		// lookup miss does not have (StatusCode was 0, stored as NULL). The
+		// conversation was therefore stranded permanently, unreachable by
+		// either retry path. Reproduced on production 2026-08-25.
+		//
+		// Returning a plain error leaves reportError's default tag,
+		// STATE_ACTIONS, which is in DEAN_ERROR_TAGS, so the state goes to
+		// ERROR and dean's Errored query retries it -- the same treatment an
+		// EXPIRED credential already gets via fb code 190.
+		return nil, fmt.Errorf("failed to get token: %w", err)
 	}
 
 	waMsg, ok := message.(types.WhatsAppMessage)

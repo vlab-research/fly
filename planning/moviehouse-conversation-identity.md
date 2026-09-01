@@ -5,7 +5,11 @@ flag plus a `KNOWN_TRACKED_HOSTS` allowlist with per-service param schemes) was 
 has been removed from the text. The **production measurements are kept** — they are why the
 replacement exists. Git history has the original.
 
-**Status: built on `feature/conversation-identity`. Not deployed.**
+**Status: DEPLOYED TO PRODUCTION 2026-08-25** (Phase 1.3; moviehouse shipped to the
+Netlify `main` branch in the same window). Corrected 2026-08-26 — this read "built on
+`feature/conversation-identity`. Not deployed." **This file is referenced from code**
+(`moviehouse/src/identity.js`, `replybot/lib/generic-translator.js`,
+`replybot/lib/typewheels/form.js`), so it is not a deletion candidate.
 
 ---
 

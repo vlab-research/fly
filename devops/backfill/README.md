@@ -85,6 +85,94 @@ prompt makes you type `vprod` when the DSN looks like production.
 | `--rehearse` | false | run the real `UPDATE` in a transaction and **roll it back** |
 | `--statement-timeout` | 10m | per statement |
 | `--yes` | false | skip the confirmation |
+| `--cursor-key` | `$BACKFILL_CURSOR_KEY` | persist the cursor in `chatroach.backfill_cursor` under this key and resume from it automatically. Empty keeps the cursor on stdout only. |
+
+## The durable resume cursor
+
+By default the cursor exists only in stdout. That was enough while this was a
+25-minute run driven by hand; it is thin for the ~41-hour production run, where
+recovery would mean scraping a log line out of a pod that may already have been
+garbage collected — and failing that, restarting at the beginning of a 107M-row
+keyspace.
+
+Pass `--cursor-key <name>` and the position is written to
+`chatroach.backfill_cursor` after every committed batch
+(`devops/migrations/31-backfill-cursor.sql` — apply it first). Then:
+
+- a restart with **no** `--start-*` flags resumes by itself, and says so;
+- `--start-hsh`/`--start-userid` still win when given, because an operator
+  overriding the stored position is doing it deliberately;
+- a run that already reached the end exits immediately instead of re-walking the
+  table to update nothing;
+- `batches` and `rows_updated` accumulate **across restarts**, so the totals an
+  operator is watching do not reset to zero when a pod is replaced.
+
+```sql
+SELECT * FROM chatroach.backfill_cursor;
+```
+
+Three properties are worth stating because they are what make it safe:
+
+**The cursor is written after the batch, never before.** A cursor ahead of its
+work would make a restart skip that batch's rows, and a skipped row is never
+revisited. Lagging by one batch is harmless — `AND account_id IS NULL` makes
+redoing it a no-op — so lagging is the correct direction to fail in.
+
+**It is not written in the batch's transaction, deliberately.** Each batch is one
+statement, which CockroachDB runs as an implicit transaction and can retry at the
+gateway. An explicit `BEGIN`/`COMMIT` around the `UPDATE` and the cursor upsert
+would push retryable serialization errors (40001) out to a client that has no
+retry loop — trading a harmless one-batch race for a new way to abort a two-day
+job.
+
+**`--dry-run` and `--rehearse` never move it.** A rehearsal rolls its work back;
+if it advanced the stored cursor, the next real run would skip every range it
+rehearsed.
+
+A missing table or a missing grant is fatal **at startup** — the tool reads the
+cursor and writes a probe row before doing any work, so a broken sink cannot be
+discovered 40 hours in. A write failure *during* the run is a loud warning and
+the run continues: the batch is already durable and the cursor is still on
+stdout.
+
+## Running it in the cluster
+
+Against production this is a ~41-hour run, so it ships as an image and runs as a
+Kubernetes `Job` rather than through a port-forward. See
+`planning/backfill-in-cluster-job.md` for the whole procedure and
+`devops/vlab/templates/messages-backfill-job.yaml` for the Job itself.
+
+```bash
+git tag backfill-v0.1.0 && git push origin backfill-v0.1.0   # CI publishes to ghcr
+# then set messagesBackfill.enabled: true in devops/values/production.yaml and
+helm upgrade gbv vlab -f values/production.yaml -n vprod
+```
+
+Three things about the image, all of which are startup failures if missed:
+
+- **The build context is `devops/`, not `devops/backfill/`** — the `*-expr.sql`
+  files live outside this directory and Docker cannot reach above its context.
+  `.github/workflows/release.yml` carries the matching `file:` input; this is the
+  only service whose Dockerfile is not at `<context>/Dockerfile`.
+- **`--sql-dir=/app/sql` must be passed**, because the default is a relative path
+  resolved against the working directory.
+- **`--yes` must be passed**, or the process blocks forever on a prompt no Job
+  can answer.
+
+### The database user must be `root`
+
+Every service in the chart connects as `chatroach`. On `chatroach.messages` that
+user holds only `INSERT` and `SELECT` — verified on vprod 2026-08-26:
+
+```
+chatroach | INSERT
+chatroach | SELECT
+```
+
+So a backfill running as the service user connects cleanly, prints a healthy
+banner, and then fails on its **first** `UPDATE`. The Job connects as `root`
+(the cluster is insecure, so no password). Do not widen the service user's
+grants to suit a one-off migration.
 
 ## How it works
 
@@ -180,10 +268,18 @@ userids surviving the cursor, a forward-written row arriving mid-run,
 `--dry-run` writing nothing, and `--rehearse` executing the real statement while
 persisting nothing and reporting the same count the real run writes.
 
+The cursor tests need `devops/migrations/31-backfill-cursor.sql` applied to the
+test database; they skip with a pointer to it if the table is absent. They cover
+the round trip, an unset cursor staying distinguishable from `hsh = 0`, totals
+accumulating across restarts, a resume from the *stored* position deriving a
+correct table, and neither `--dry-run` nor `--rehearse` moving it.
+
 The suite is mutation-checked. Dropping the `account_id IS NULL` guard fails three
 tests; turning the batch upper bound from `<=` into `<` fails four, including rows
 silently skipped — the failure mode that matters, because a skipped row is never
-revisited.
+revisited. Removing the dry-run/rehearse guard on the cursor save fails two;
+moving the save ahead of its batch fails with rows left NULL — the same
+silent-skip signature.
 
 ## Not done here
 

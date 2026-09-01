@@ -72,7 +72,11 @@ versionReplybot: &vreplybot v0.0.221
 # vlab_platform now returns 400 instead of coercing to messenger. Absent is
 # still assumed messenger.
 versionLinksniffer: &vlinksniffer v0.0.9
-versionDean: &vdean v0.0.45
+# v0.0.45 -> v0.0.47: carries 36808aa5, the envelope. dean is a SYNTHETIC
+# PRODUCER (timeout events). An unstamped synthetic event triggers
+# assume-messenger, which is silently correct on Messenger and BLOCKS the
+# conversation on WhatsApp -- see versionDinersclub below for the incident.
+versionDean: &vdean v0.0.47
 # ############################################################################
 # DO NOT APPLY THIS VALUE BEFORE MIGRATION 28a HAS COMPLETED.
 #
@@ -99,15 +103,44 @@ versionScribble: &vscribble v0.0.34
 # metrics.go, the bounded provider client). dingconnect.go is untouched, so the
 # Generic Secrets concern that held dinersclub at v0.0.43-wa in PR #147 does
 # not apply here -- and dingconnect is not in DINERSCLUB_PROVIDERS anyway.
-versionDinersclub: &vdinersclub v0.0.46
+# v0.0.46 -> v0.0.48: carries 36808aa5, the envelope.
+#
+# WHY THIS IS NOT OPTIONAL -- reproduced on production 2026-08-25. dinersclub is
+# the payment synthetic producer. At v0.0.46 it emits payment:reloadly with the
+# LEGACY shape -- {"user":..., "page":...} -- carrying no platform. For a
+# WhatsApp participant that unstamped event triggers assume-messenger, so the
+# token lookup runs against entity 'facebook_page' for a whatsapp_business
+# account, finds no row, and the conversation goes BLOCKED:
+#
+#   platform API error (status 0): failed to get token: token not found for
+#   platform account: 1203867182815254 (db error: no rows in result set)
+#
+# The credential is present and correct; only the lookup entity is wrong. This
+# is exactly the W1 hazard in planning/multi-platform-plan.md: assume-messenger
+# is correct ONLY while Messenger is the only live transport. It passes on
+# Messenger and fails on WhatsApp, so a Messenger-only test cannot catch it.
+versionDinersclub: &vdinersclub v0.0.48
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.6.10
-versionExodus: &vexodus v0.2.3
+versionExporter: &vexporter v0.6.12
+# v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
+# second account's rows" -- multi-account specific, so it only manifests once a
+# participant exists on two accounts. Part of the same rollout stack.
+versionExodus: &vexodus v0.2.5
 # v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
 # 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
 # since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
-versionMessageWorker: &vmessageworker v0.1.21
+# v0.1.21 -> v0.1.22: token lookup failures are no longer classified as
+# platform errors. At v0.1.21 they were wrapped in &PlatformError{StatusCode:0},
+# tagged FB, and turned into BLOCKED -- which dean cannot retry, because its
+# Blocked query keys on fb_error_code and a lookup miss has none. A production
+# conversation was stranded permanently on 2026-08-25. They now fall through to
+# STATE_ACTIONS -> ERROR, which dean's Errored query retries with backoff.
+versionMessageWorker: &vmessageworker v0.1.22
 versionMediaProxy: &vmediaproxy v0.0.1
+# One-shot, not a service: the Phase 1.5 messages backfill
+# (planning/backfill-in-cluster-job.md). Kept here anyway so its image is
+# pinned and reviewable exactly like every other image this file deploys.
+versionBackfill: &vbackfill v0.1.0
 
 # Kafka consumer-group lag/health alerting is NOT defined here anymore. The
 # Kafka cluster, Prometheus and kminion are singletons shared by prod+staging,
@@ -1212,6 +1245,82 @@ mediaReconciler:
       memory: 256Mi
     limits:
       memory: 512Mi
+
+# ###########################################################################
+# THE PHASE 1.5 MESSAGES BACKFILL (planning/backfill-in-cluster-job.md)
+#
+# One-shot. Fills chatroach.messages.account_id/.platform for the ~107M rows
+# written before the 1.3 deploy started stamping them forward.
+#
+# `enabled: true` IS THE RUN. There is no separate start command: flipping this
+# and applying
+#
+#   helm upgrade gbv vlab -f values/production.yaml -n vprod
+#
+# creates the Job, and the Job begins immediately. It is a ~41-hour write across
+# a 388 GiB table -- measured on 2026-08-26, not estimated -- so treat this line
+# as the trigger it is.
+#
+# Do NOT turn it on with `--set` instead. Helm prunes what a release no longer
+# renders, so a Job that exists only because of a command-line flag is deleted
+# by the next `helm upgrade` anyone runs from this file -- possibly 30 hours in.
+# The template header explains this and the Job-immutability trap alongside it.
+#
+# BEFORE FLIPPING IT:
+#   - devops/migrations/31-backfill-cursor.sql applied (cursorKey needs it)
+#   - ghcr.io/vlab-research/backfill:v0.1.0 published (tag backfill-v0.1.0)
+#   - disk checked on all four CockroachDB nodes; ~335 GiB of MVCC garbage is
+#     expected against ~466 GiB free
+#
+# AFTER IT COMPLETES: set this back to false, delete the Job, and record the
+# result in planning/multi-platform-plan.md. It must not be left armed.
+# ###########################################################################
+messagesBackfill:
+  # ARMED 2026-08-26. The bounded first pass is done; this is the FULL RUN,
+  # ~44.6 hours. See maxBatches below. Capture the final log lines BEFORE
+  # setting this back to false -- the flip makes helm prune the Job and its
+  # pod, taking the logs with it.
+  enabled: true
+  image:
+    repository: ghcr.io/vlab-research/backfill
+    tag: *vbackfill
+    pullPolicy: IfNotPresent
+  # The value the ~28 s/batch measurement was taken at. A larger batch does not
+  # make the run shorter -- the cost is per-row -- it only holds locks longer.
+  batchSize: 20000
+  # ################## FULL RUN, WIDENED 2026-08-26 ##################
+  # The bounded --max-batches=20 pass is done: 399,779 rows in 603 s, i.e.
+  # 30.1 s/batch for COMMITTED writes against the rehearsal's 28 s -- only 1.08x,
+  # so the plan's 41-hour floor stands and the real figure is ~44.6 h.
+  #
+  # ~5,329 batches remain. This is the safety stop, back at the tool's default;
+  # it is not a target and the run ends by reaching the end of the table.
+  #
+  # It RESUMES rather than restarts: chatroach.backfill_cursor holds batch 20's
+  # position, so the new pod continues from there. Nothing is redone (and it
+  # would be a no-op anyway, via `AND account_id IS NULL`) and nothing is
+  # skipped.
+  #
+  # A Job's spec is IMMUTABLE, so this widening required deleting the completed
+  # bounded Job first. Same applies to any further change while this one runs.
+  # ##################################################################
+  maxBatches: 20000
+  statementTimeout: "10m"
+  cursorKey: "messages-account-backfill"
+  # Non-zero only because the cursor is durable: a retry resumes where it left
+  # off rather than re-walking 107M rows. If cursorKey is ever cleared, this
+  # must go back to 0.
+  backoffLimit: 3
+  # Unset on purpose. 41 hours is a projection; a deadline would be a timer set
+  # to kill the job on the strength of that projection being right.
+  activeDeadlineSeconds: ~
+  extraArgs: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 
 cockroachdb:
   image:

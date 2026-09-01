@@ -1,7 +1,31 @@
 # TODO — get `messages.account_id` to NOT NULL
 
 **Status: not started. Deliberately deferred 2026-08-20.** The backfill
-(`devops/backfill`) is written and tested; this is the step *after* it.
+(`devops/backfill`) is written and tested; this is the step *after* it. **The
+production backfill is RUNNING as of 2026-08-26 23:30 UTC** — see
+`planning/backfill-in-cluster-job.md`. Do not start this until it completes.
+
+> ## ⚠️ THE ~3,000 FIGURE BELOW IS PROBABLY LOW BY AN ORDER OF MAGNITUDE
+>
+> **Corrected 2026-08-26 from real backfill output**, not from a sample. The
+> first 20 committed batches covered 400,000 rows and updated 399,779 — leaving
+> **221 untouched**. About 39 of those are rows already stamped forward by the
+> 1.3 deploy (excluded by `AND account_id IS NULL`, not unattributable), so
+> roughly **182 per 400,000 = 0.046%**, extrapolating to **~48,800 across the
+> table** against the ~3,000 this document is written around.
+>
+> **Why the old sample under-counted:** it counted two specific *causes* —
+> `bad_json` and synthetic-with-no-page — at 9 per 300,000. The backfill's own
+> figure counts every row the rule returns NULL for, whatever the reason, which
+> is the number the sentinel pass actually has to cover.
+>
+> **Do not plan the sentinel pass around 3,000.** Neither number is authoritative
+> yet: the measured slice is the low end of the `hsh` keyspace and may not be
+> representative. **Re-derive with the migration 26 §4 gate once the backfill
+> finishes** (see "Steps, in order" below) and correct this document then. The
+> sentinel `UPDATE` is unbatched as written below, which is defensible at 3,000
+> and is not at 50,000 — reuse `devops/backfill`'s batching, as step 3 already
+> says.
 
 Owner decision recorded: *"No SET NOT NULL yet, we'll do that after."*
 
@@ -13,7 +37,8 @@ without a `page`. The extraction rule returns NULL for them by design
 (`devops/sql/messages-account-id-expr.sql`, final `ELSE NULL`), and NULL is the
 honest answer, not a bug to fix.
 
-Measured on production 2026-08-20, from a 300,000-row sample:
+Measured on production 2026-08-20, from a 300,000-row sample — **superseded, see
+the correction at the top of this file**:
 
 ```
 sampled  bad_json  synthetic-with-no-page
@@ -64,11 +89,14 @@ SELECT count(*) FROM chatroach.messages
 ```
 
 A plain `count(*) WHERE account_id IS NULL` never reaches zero and should not —
-that is the ~3,000 rows this pass exists for.
+that is the rows this pass exists for (~3,000 by the old sample, **~48,800 by the
+backfill's own output**; re-derive before acting).
 
 ## Steps, in order
 
-1. Run `devops/backfill` to completion against production.
+1. Run `devops/backfill` to completion against production. **In flight since
+   2026-08-26 23:30 UTC** as an in-cluster Job; `planning/backfill-in-cluster-job.md`
+   has the completion runbook.
 2. Verify the §4 gate above returns **0**.
 3. Sentinel pass (the UPDATE above), batched the same way — reuse
    `devops/backfill` with a sentinel flag rather than writing new bash.

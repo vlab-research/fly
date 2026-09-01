@@ -37,6 +37,35 @@ These patterns **preserve the suffix**, so a tag like `replybot-v0.0.205-wa` yie
 
 The Docker image built and pushed to GHCR is: `ghcr.io/vlab-research/replybot:v0.0.205-wa`
 
+### Build Context and Dockerfile Resolution
+
+A `case` in the same step maps the service name to a build context (`CTX`) and an
+image name (`IMG`). A service missing from that map fails the workflow with a
+message telling you to add it — deliberately, so an unknown tag is never built
+into a surprising image name.
+
+The Dockerfile is normally **derived**, not declared: `<context>/Dockerfile`.
+`backfill` is the single exception and the reason the workflow passes an explicit
+`file:` to `docker/build-push-action`:
+
+| service | context | Dockerfile |
+|---|---|---|
+| everything else | its own directory | `<context>/Dockerfile` (derived) |
+| `backfill` | `devops` | `devops/backfill/Dockerfile` (declared) |
+
+The backfill reads its extraction rule at startup from `devops/sql/*-expr.sql`,
+which sit *outside* `devops/backfill/`, and Docker cannot reach above its build
+context — so the context has to be the parent, which then breaks the derived
+Dockerfile path. Those SQL files are shared with `scribble`'s
+`TestBackfillSQLMatchesGo`, so copying them in beside the Go would create a
+second definition of the rule that can silently diverge. See the header of
+`devops/backfill/Dockerfile`.
+
+`DOCKERFILE` is cleared at the top of the step, so the declared path cannot leak
+into another service's build, and the emitted value is
+`${DOCKERFILE:-$CTX/Dockerfile}` — identical to what the action assumed
+implicitly before the `file:` input existed, for every other service.
+
 ### GitHub Actions Tag Triggers
 
 `.github/workflows/release.yml` (lines 4–6) has two patterns in `on: push: tags:`:

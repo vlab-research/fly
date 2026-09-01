@@ -26,6 +26,7 @@ type config struct {
 	rehearse    bool
 	assumeYes   bool
 	statementTO time.Duration
+	cursorKey   string
 }
 
 func main() {
@@ -50,6 +51,8 @@ func parseFlags() (config, error) {
 	flag.BoolVar(&c.dryRun, "dry-run", false, "count what each batch WOULD update, write nothing")
 	flag.BoolVar(&c.rehearse, "rehearse", false, "run the real UPDATE in a transaction and ROLL IT BACK -- proves the statement executes against real rows, persists nothing")
 	flag.BoolVar(&c.assumeYes, "yes", false, "skip the interactive confirmation")
+	flag.StringVar(&c.cursorKey, "cursor-key", os.Getenv("BACKFILL_CURSOR_KEY"),
+		"persist the resume cursor in "+CursorTable+" under this key, and resume from it automatically. Empty (the default) keeps the cursor on stdout only. Defaults to $BACKFILL_CURSOR_KEY.")
 	flag.DurationVar(&c.statementTO, "statement-timeout", 10*time.Minute, "per-statement timeout")
 	flag.Parse()
 
@@ -98,6 +101,9 @@ func run() error {
 	fmt.Printf("  batch size  %d\n", cfg.batchSize)
 	fmt.Printf("  rule        %s/messages-{account-id,platform}-expr.sql\n", cfg.sqlDir)
 	fmt.Printf("  resuming    %s\n", cfg.start)
+	if cfg.cursorKey != "" {
+		fmt.Printf("  cursor      %s key=%s\n", CursorTable, cfg.cursorKey)
+	}
 	if cfg.dryRun {
 		fmt.Println("  DRY RUN     counting only, nothing will be written")
 	}
@@ -119,6 +125,14 @@ func run() error {
 	}
 	defer pool.Close()
 
+	sink, alreadyDone, err := openCursor(ctx, pool, &cfg)
+	if err != nil {
+		return err
+	}
+	if alreadyDone {
+		return nil
+	}
+
 	r := &Runner{
 		Pool:      pool,
 		AcctExpr:  acctExpr,
@@ -128,6 +142,7 @@ func run() error {
 		Rehearse:  cfg.rehearse,
 		Timeout:   cfg.statementTO,
 		Log:       func(s string) { fmt.Println(s) },
+		Sink:      sink,
 	}
 
 	res, err := r.Run(ctx, cfg.start, cfg.maxBatches)
@@ -170,4 +185,64 @@ func confirm(dsn string) error {
 		return fmt.Errorf("cancelled")
 	}
 	return nil
+}
+
+// openCursor prepares the durable resume cursor, if one was asked for. It
+// returns the sink to hand the Runner, and whether the work is already finished.
+//
+// It also RESOLVES cfg.start: an explicit --start-hsh/--start-userid always
+// wins, because an operator overriding the stored position is doing so
+// deliberately and usually to recover from something. Otherwise the stored
+// position is used.
+//
+// Every failure in here is fatal. That is the point of doing it at startup: the
+// two things that break a durable cursor -- the table not existing and the user
+// not being able to write it -- are both configuration, both permanent, and both
+// far cheaper to hit now than 40 hours in.
+func openCursor(ctx context.Context, pool *pgxpool.Pool, cfg *config) (CursorSink, bool, error) {
+	if cfg.cursorKey == "" {
+		return nil, false, nil
+	}
+
+	// A dry run and a rehearsal persist nothing, and the cursor is part of
+	// "nothing". Saying so is better than silently ignoring the flag.
+	if cfg.dryRun || cfg.rehearse {
+		fmt.Println("NOTE: --cursor-key is inert under --dry-run/--rehearse; nothing will be persisted.")
+		return nil, false, nil
+	}
+
+	store := &CursorStore{Pool: pool, Key: cfg.cursorKey, Timeout: cfg.statementTO}
+
+	prog, err := store.Load(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w\n(is devops/migrations/31-backfill-cursor.sql applied, and can this user write %s?)", err, CursorTable)
+	}
+
+	switch {
+	case cfg.start.Set:
+		if prog.Found {
+			fmt.Printf("NOTE: --start-hsh/--start-userid override the stored cursor (%s).\n", prog.Cursor)
+		}
+	case prog.Done:
+		fmt.Printf("ALREADY DONE: %s key=%s records a completed run -- %d rows across %d batches.\n",
+			CursorTable, cfg.cursorKey, prog.Updated, prog.Batches)
+		fmt.Println("Nothing to do. Pass --start-hsh/--start-userid to run anyway.")
+		return nil, true, nil
+	case prog.Cursor.Set:
+		cfg.start = prog.Cursor
+		fmt.Printf("RESUMING from the stored cursor: %s (%d rows across %d batches so far)\n",
+			prog.Cursor, prog.Updated, prog.Batches)
+	}
+
+	// Totals are cumulative across restarts; the Runner only counts its own.
+	store.BaseBatches = prog.Batches
+	store.BaseUpdated = prog.Updated
+
+	// Prove the sink WRITES before any work depends on it. Load only proved it
+	// reads, and SELECT and UPSERT are different privileges.
+	if err := store.Save(ctx, cfg.start, 0, 0, false); err != nil {
+		return nil, false, fmt.Errorf("%w\n(the cursor table is readable but not writable by this user)", err)
+	}
+
+	return store, false, nil
 }

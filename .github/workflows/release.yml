@@ -27,6 +27,10 @@ jobs:
       - name: Resolve build context and image name
         id: resolve
         run: |
+          # DOCKERFILE is normally derived, not set: every service but one keeps
+          # its Dockerfile at <context>/Dockerfile. Cleared here so a stale value
+          # can never leak between branches of the case.
+          DOCKERFILE=""
           case "${{ steps.parse.outputs.service }}" in
             replybot)       CTX=replybot           ; IMG=replybot         ;;
             dashboard)      CTX=dashboard-server   ; IMG=dashboard        ;;
@@ -43,6 +47,13 @@ jobs:
             message-worker) CTX=message-worker     ; IMG=message-worker   ;;
             media-proxy)    CTX=media-proxy        ; IMG=media-proxy      ;;
             smoke-echo)     CTX=smoke-echo         ; IMG=smoke-echo       ;;
+            # The one service whose context is not its own directory. The
+            # backfill reads its extraction rule from devops/sql/*-expr.sql at
+            # startup, and Docker cannot reach above its context -- so the
+            # context is devops/ and the Dockerfile has to be named explicitly.
+            # See the header of devops/backfill/Dockerfile for why the SQL is
+            # not simply copied in beside the Go.
+            backfill)       CTX=devops             ; IMG=backfill        ; DOCKERFILE=devops/backfill/Dockerfile ;;
             *)
               echo "Unknown service '${{ steps.parse.outputs.service }}' — add it to .github/workflows/release.yml" >&2
               exit 1
@@ -50,6 +61,7 @@ jobs:
           esac
           echo "context=$CTX" >> "$GITHUB_OUTPUT"
           echo "image=$IMG"   >> "$GITHUB_OUTPUT"
+          echo "dockerfile=${DOCKERFILE:-$CTX/Dockerfile}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -62,6 +74,10 @@ jobs:
       - uses: docker/build-push-action@v5
         with:
           context: ${{ steps.resolve.outputs.context }}
+          # Defaults to <context>/Dockerfile for every service, which is what
+          # the action assumed implicitly before this line existed -- so adding
+          # it changes nothing for any of them.
+          file: ${{ steps.resolve.outputs.dockerfile }}
           push: true
           tags: ghcr.io/vlab-research/${{ steps.resolve.outputs.image }}:${{ steps.parse.outputs.version }}
           cache-from: type=gha
