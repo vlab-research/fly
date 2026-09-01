@@ -132,3 +132,41 @@ func UpdateQuery(acctExpr, platExpr string, lower, upper Cursor) (string, []inte
 	)
 	return q, args
 }
+
+// --- The durable resume cursor (devops/migrations/31-backfill-cursor.sql) ---
+//
+// The cursor is printed on every batch, which was enough for a 25-minute run
+// driven by hand. A 41-hour Job needs it to outlive the pod, so it is also
+// written to a table. Still pure: these build the statements, store.go runs
+// them.
+
+// CursorTable is the one place the table name is written. It is interpolated
+// rather than parameterized because a table name cannot be a placeholder --
+// which is exactly why it is a constant and never anything caller-supplied.
+const CursorTable = "chatroach.backfill_cursor"
+
+// CursorLoadQuery reads back a saved position. The key is parameterized; only
+// the constant table name reaches the SQL text.
+func CursorLoadQuery(key string) (string, []interface{}) {
+	return "SELECT hsh, userid, batches, rows_updated, done FROM " + CursorTable +
+			" WHERE cursor_key = $1",
+		[]interface{}{key}
+}
+
+// CursorSaveQuery upserts the position after a batch commits.
+//
+// `hsh`/`userid` are NULL for an unset cursor, which is a real state -- "the run
+// has started but no batch has finished" -- and distinct from a genuine row at
+// hsh 0. Progress is written as an UPSERT rather than an UPDATE so the first
+// batch of a fresh run does not need a separate INSERT to have somewhere to go.
+func CursorSaveQuery(key string, cur Cursor, batches int, updated int64, done bool) (string, []interface{}) {
+	var hsh, userid interface{}
+	if cur.Set {
+		hsh, userid = cur.Hsh, cur.UserID
+	}
+
+	return "UPSERT INTO " + CursorTable +
+			" (cursor_key, hsh, userid, batches, rows_updated, done, updated_at)" +
+			" VALUES ($1, $2, $3, $4, $5, $6, now())",
+		[]interface{}{key, hsh, userid, int64(batches), updated, done}
+}

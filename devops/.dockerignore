@@ -1,0 +1,8 @@
+# The build context for devops/backfill/Dockerfile is this whole directory,
+# because the backfill's SQL rule lives in devops/sql. Everything else in here
+# is charts, dashboards and alert rules that no image needs -- and, on a
+# developer's machine, possibly gitignored .env files. Send only what is built.
+*
+!backfill/
+!sql/
+backfill/backfill

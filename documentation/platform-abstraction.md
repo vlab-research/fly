@@ -2,7 +2,18 @@
 
 ## Status: Platform Abstraction Complete (Messenger & WhatsApp)
 
-**Scope:** Everything described in this document is implemented on the `feature/whatsapp-platform-keying` branch. On `main`, replybot still emits Facebook-native payloads (`type: 'native'`) and message-worker forwards them without translation — there is no platform abstraction on main.
+**Scope:** Everything described in this document is **live in production** as of the
+Phase 1.3 deploy, 2026-08-25 — replybot v0.0.221 and message-worker v0.1.22, with
+the full nine-service stack at staging parity. See `planning/multi-platform-plan.md`.
+
+> **Corrected 2026-08-26.** This line previously read: *"implemented on the
+> `feature/whatsapp-platform-keying` branch. On `main`, replybot still emits
+> Facebook-native payloads (`type: 'native'`) and message-worker forwards them
+> without translation — there is no platform abstraction on main."* That was true
+> when written and had been false since 1.3 shipped. It mattered more than an
+> ordinary stale line: `CLAUDE.md` instructs every agent to read `documentation/`
+> as ground truth *before* looking at code, so this one actively taught readers
+> that production had no platform abstraction.
 
 The platform abstraction layer is fully implemented and tested for both Messenger and WhatsApp platforms. This document describes what was done, the current architecture, and the account ID keying model that unifies multi-platform routing.
 

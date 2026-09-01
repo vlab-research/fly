@@ -21,6 +21,10 @@ type Runner struct {
 	Rehearse  bool
 	Timeout   time.Duration
 	Log       func(string)
+
+	// Sink persists the cursor after every committed batch. nil disables it,
+	// which is the default and is what every local run uses.
+	Sink CursorSink
 }
 
 // Result reports where a run stopped and why. `Cursor` is always the last
@@ -70,12 +74,38 @@ func (r *Runner) Run(ctx context.Context, start Cursor, maxBatches int) (Result,
 
 		if !hasUpper {
 			res.Done = true
+			r.save(ctx, res)
 			return res, nil
 		}
 		res.Cursor = upper
+		r.save(ctx, res)
 	}
 
 	return res, nil
+}
+
+// save records the position a restart should resume from.
+//
+// It runs AFTER the batch has committed, never before: a cursor written ahead of
+// its batch would skip that batch's rows on a restart, and a skipped row is
+// never revisited. One batch stale is safe -- `AND account_id IS NULL` makes
+// redoing it a no-op -- so lagging is the correct direction to fail in.
+//
+// A write failure is logged, not returned. The batch is already durable and the
+// cursor is still on stdout, so aborting a 41-hour run over a bookkeeping row
+// would cost far more than the degraded recovery it prevents. The failure that
+// actually matters -- a missing table or a missing grant -- is caught by
+// CursorStore.Load at startup, before any work is done.
+func (r *Runner) save(ctx context.Context, res Result) {
+	// A dry run and a rehearsal persist nothing by definition, and that has to
+	// include the cursor: a rehearsal that advanced the saved position would
+	// make a later real run skip every range it rolled back.
+	if r.Sink == nil || r.DryRun || r.Rehearse {
+		return
+	}
+	if err := r.Sink.Save(ctx, res.Cursor, res.Batches, res.Updated, res.Done); err != nil {
+		r.logf("WARNING: could not persist the resume cursor (the run continues; recover from the log line above): %v", err)
+	}
 }
 
 func (r *Runner) boundary(ctx context.Context, cur Cursor) (Cursor, bool, error) {

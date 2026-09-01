@@ -87,6 +87,33 @@ When using subagents, pick the right type:
 
 **Documentation rule**: After any exploration, always run a separate `explore` agent pass to update `documentation/` or the relevant `<app>/README.md` with new findings before moving to implementation.
 
+## Work Currently In Flight
+
+**Read this before starting anything in `planning/`.** That directory holds 200+
+documents, most of them finished work; `ls` is not a useful index. This section
+names the one live thread so you do not have to find it by luck.
+
+### Multi-platform / conversation identity migration — IN PROGRESS
+
+Getting every conversation onto `(platform, account_id, user_id)`. Also called
+the **multiplatform** migration, the **conversation-identity** rollout, or the
+**account_id** migration — all the same work.
+
+| you want | read |
+|---|---|
+| **where we are, what is next** | **`planning/multi-platform-plan.md`** — AUTHORITATIVE for order and status. Start here, always. |
+| the production backfill (Phase 1.5) | `planning/backfill-in-cluster-job.md` — "YOU ARE HERE", plus completion and failure runbooks |
+| hazards, gates, traps | `planning/conversation-identity.md` §5 |
+| the wire contract | `planning/event-envelope-contract.md`, `documentation/event-envelope.md` |
+| Phase 3.2 (`account_id` NOT NULL) | `planning/messages-account-not-null-todo.md` |
+
+**As of 2026-08-26:** Phase 1 is complete except 1.5, and 1.5 — the ~44-hour
+production backfill of 107M rows — is RUNNING. It is unattended; the plan says
+what to do when it ends. Do not delete anything in this cluster before Phase 3
+lands; `multi-platform-plan.md` § "Doc hygiene" says what already went and why.
+
+When this migration finishes, delete this section.
+
 ## Documentation Locations
 
 | Location | Purpose | Contains |
