@@ -7,7 +7,11 @@ const producer = new Kafka.Producer({
   'request.required.acks': 1,
   'socket.keepalive.enable': true,
   'queue.buffering.max.messages': 100000,
-  'queue.buffering.max.ms': 1000,
+  // linger.ms — was 1000, ~1s of the measured 1669ms delivery floor. 10 rather
+  // than librdkafka's 5ms default is just headroom: a turn's commands are
+  // produced microseconds apart (publishCommands) and batch under any value.
+  // VIR-36 tracks the retry-ordering guarantee that batching currently masks.
+  'queue.buffering.max.ms': 10,
   'batch.num.messages': 1000000
 }, {}, {});
 
