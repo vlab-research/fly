@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // SyntheticEvent is the payload POSTed to hermes /synthetic endpoint.
@@ -32,10 +33,16 @@ type HTTPSyntheticPoster struct {
 	botserver string
 }
 
+// Bounds the POST to botserver, which runs inside the burrow worker goroutine
+// on every send failure. Unbounded, a hung botserver stalls the worker past
+// max.poll.interval.ms (300s) and wedges the consumer — the dinersclub
+// 2026-08-17 failure. 10s fits under that alongside 3x30s of send attempts.
+const syntheticPostTimeout = 10 * time.Second
+
 // NewHTTPSyntheticPoster creates a new SyntheticPoster for sending events to hermes.
 func NewHTTPSyntheticPoster(botserver string) SyntheticPoster {
 	return &HTTPSyntheticPoster{
-		client:    &http.Client{},
+		client:    &http.Client{Timeout: syntheticPostTimeout},
 		botserver: botserver,
 	}
 }
