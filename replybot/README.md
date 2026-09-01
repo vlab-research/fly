@@ -109,6 +109,48 @@ payload, raw }`) before the state machine sees them. The machine
 
 The `lib/chat-log/publisher.js` module publishes chat log entries to a Kafka topic for every visible message in a conversation (both bot echoes and user messages). This feeds the `chat_log` database table via a downstream scribble sink.
 
+## Outbound command publishing and the producer's Kafka config
+
+`lib/index.js`'s `processor()` is the whole outbound side, and it does more work than the
+name `publishCommands` suggests. For every event that produces a report, the sequence is
+fully serial and fully awaited, **in this order**:
+
+```
+publishReport (HTTP POST to hermes /synthetic)   -- index.js:98
+  → publishState (Kafka produce, state topic)    -- index.js:101
+  → stateStore.updateState (Redis SETEX)         -- index.js:102
+  → publishResponses (Kafka produce)             -- index.js:105, conditional
+  → publishPayment (Kafka produce)                -- index.js:108, conditional
+  → publishCommands (Kafka produce, commands topic) -- index.js:111
+```
+
+`publishCommands` runs **last**, not first — every send-message/handoff command sits
+behind a hermes round trip, a Redis write, and up to two other Kafka produce calls before
+its own produce call is even reached.
+
+**`issued_at`** (`lib/typewheels/transition.js:79`/`:92`, inside `buildCommands`) is
+stamped *after* the state machine has already computed the response (`getForm`, `act`,
+`responseVals` all run first in `actionsResponses`), so replybot's own decision-making
+time is not part of `ts - issued_at` as measured downstream. Everything in the chain above
+is, though.
+
+**`lib/producer.js`** configures the shared `node-rdkafka` producer used by every
+`produce()` call (state/response/payment/commands topics alike). `node-rdkafka` is an
+**indirect** dependency — pulled in via `@vlab-research/botspine`, not listed directly in
+`package.json` — and wraps librdkafka (bundled version pinned by the `node-rdkafka` release,
+currently 2.3.0), not kafkajs, so its config keys are librdkafka's native names.
+
+The one setting worth knowing before touching this file: **`queue.buffering.max.ms` is
+explicitly set to `1000`** — librdkafka's alias for `linger.ms`, overridden here to 200×
+the library default (5ms). At low message rates a message can sit in the local producer
+queue for close to the full second before librdkafka flushes it to the broker, because
+nothing in this codebase calls `.flush()` or wires up a delivery-report callback to force
+or observe an earlier send — batching is entirely implicit, governed by this config. This
+is a measured, deliberate contributor to the outbound command latency floor; see
+`planning/latency-floor-producer.md` for the full investigation (producer-side half of a
+two-sided measurement of `message-worker`'s command-processing latency, alongside
+`documentation/message-worker-deployment.md` and `planning/message-worker-command-lag.md`).
+
 Notes on specific shapes:
 
 - **Payload parsing** — Messenger delivers `quick_reply`, `postback`, and
