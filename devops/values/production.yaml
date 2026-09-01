@@ -47,7 +47,8 @@ versionBotserver: &vbotserver v0.0.12
 # backfill racing its own writer). v0.0.5 is a clean descendant of v0.0.3-wa,
 # so the WhatsApp work is retained -- and it drops the -wa suffix, as the note
 # above asks. vstag has run v0.0.5 since 2026-08-23 with all 5.3 gates at zero.
-versionHermes: &vhermes v0.0.5
+# v0.0.7: Kafka producer linger 1000ms -> 5ms.
+versionHermes: &vhermes v0.0.7
 # ############################################################################
 # MUST be >= v0.0.221 -- this file no longer sets CHATBASE_BACKEND.
 #
@@ -65,7 +66,8 @@ versionHermes: &vhermes v0.0.5
 # If you ever need to roll replybot back below v0.0.221, you MUST restore
 # CHATBASE_BACKEND=@vlab-research/chatbase-postgres to replybot.env here.
 # ############################################################################
-versionReplybot: &vreplybot v0.0.221
+# v0.0.223: Kafka producer linger 1000ms -> 10ms.
+versionReplybot: &vreplybot v0.0.223
 # Bumped v0.0.6 -> v0.0.9 together with the repository move below: ghcr holds
 # only v0.0.8/v0.0.9, so the registry change CANNOT ship without the version
 # change or the pull 404s. Behaviour change to announce: an *invalid*
@@ -135,7 +137,8 @@ versionExodus: &vexodus v0.2.5
 # Blocked query keys on fb_error_code and a lookup miss has none. A production
 # conversation was stranded permanently on 2026-08-25. They now fall through to
 # STATE_ACTIONS -> ERROR, which dean's Errored query retries with backoff.
-versionMessageWorker: &vmessageworker v0.1.22
+# v0.1.23: bounds the synthetic POST to botserver, which had no timeout.
+versionMessageWorker: &vmessageworker v0.1.23
 versionMediaProxy: &vmediaproxy v0.0.1
 # One-shot, not a service: the Phase 1.5 messages backfill
 # (planning/backfill-in-cluster-job.md). Kept here anyway so its image is
