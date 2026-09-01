@@ -79,13 +79,8 @@ spec:
             runbook_url: "{{ $runbook }}#kafkaconsumerdrainslobreach"
             dashboard: "Kafka Consumer Health"
       {{- if $warnDrain }}
-        {{- /*
-          Optional early-warning band for groups whose paging SLO is far enough
-          above normal that breaching it is already an incident. The band is
-          EXCLUSIVE (> warn AND <= crit) so exactly one drain alert fires at a
-          time — AlertManager has a single flat Slack receiver with no severity
-          routing, so an inclusive band would double-post one problem.
-        */}}
+        {{- /* Exclusive band (> warn AND <= crit) so only one drain alert fires
+               at a time: AlertManager has no severity routing yet. */}}
         - alert: KafkaConsumerDrainSLOWarning
           expr: |
             (kafka:consumergroup_drain_seconds{group_id="{{ .group }}", topic_name="{{ .topic }}"} > {{ $warnDrain }})

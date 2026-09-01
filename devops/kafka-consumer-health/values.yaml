@@ -38,12 +38,8 @@ groups:
   # Prod message-worker is live (replicaCount 3), so this row is active and
   # correct. If it is ever scaled back to 0, this row will fire a permanent
   # ConsumerGroupAbsent — remove the row in the same change that scales it down.
-  #
-  # warnDrainSeconds added 2026-08-31: in that day's spike drain peaked at 114s
-  # and the 300s SLO never fired, while p99 delivery hit 32s on the SOLE
-  # outbound path. 300s stays the paging threshold; drain sat above 60s for
-  # ~45 minutes, so 60 at the 10m `for` would have signalled while there was
-  # still time to act.
+  # warnDrainSeconds gives an early signal well before the 300s paging SLO,
+  # which is slack enough to stay silent through real user-visible delay.
   - { env: production, group: vlab-prod-message-worker, topic: vlab-prod-commands,    drainSeconds: 300,  warnDrainSeconds: 60, severity: critical }
   - { env: production, group: scribble-messages,        topic: vlab-prod-chat-events, drainSeconds: 600,  severity: warning }
   - { env: production, group: scribble-states,          topic: vlab-prod-state,       drainSeconds: 600,  severity: warning }
