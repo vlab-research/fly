@@ -25,9 +25,7 @@ impl KafkaProducer {
             .set("message.send.max.retries", "10")
             .set("socket.keepalive.enable", "true")
             .set("queue.buffering.max.messages", "100000")
-            // linger.ms — was 1000, which added ~1s to every event since nothing
-            // here triggers an early flush (no awaited delivery report,
-            // batch.num.messages is 1000000). 5 is librdkafka's own default.
+            // linger.ms. 1000 added ~1s to every event; 5 is librdkafka's default.
             .set("queue.buffering.max.ms", "5")
             .set("batch.num.messages", "1000000")
             // Explicit murmur2_random to match librdkafka/Java default and node-rdkafka behavior

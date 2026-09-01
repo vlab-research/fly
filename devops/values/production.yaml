@@ -1012,12 +1012,7 @@ message-worker:
   # production with zero senders. Do not lower this to save a pod.
   #
   # Throughput comes from NUM_WORKERS (24, see below), not from replicas.
-  # Sending is IO-bound — the pod waits on graph.facebook.com — so capacity is
-  # concurrent in-flight HTTP calls. 3 x 24 = 72.
-  #
-  # 3 as of 2026-08-31, up from 2: at 2 x 8 = 16 the worker saturated during
-  # the spike below, consuming at its 26.4/sec ceiling while CPU sat at 17% of
-  # limit. Starved of concurrency, not CPU — hence workers, not a resource bump.
+  # Sending is IO-bound, so capacity is concurrent in-flight calls: 3 x 24 = 72.
   #
   # Both levers preserve ordering as of burrow v0.1.5. Commands are keyed by
   # user_id (replybot/lib/index.js), so a user sits on one partition, owned by
@@ -1031,11 +1026,6 @@ message-worker:
   # utility-message campaign drove ~520 commands of lag and multi-minute
   # delivery delays for live surveys in other studies, because ONE serial
   # consumer (1 pod x 1 worker) drained a six-partition topic.
-  #
-  # Second event 2026-08-31 21:40-23:20 UTC: ~1,800 users on one page (fraud,
-  # but a free load test). Lag peaked at 2,880 / 114s drain — under the 300s
-  # SLO, so nothing alerted, while p99 delivery hit 32s. Lag was even across
-  # all six partitions, so this was flat capacity shortfall, not key skew.
   replicaCount: 3
   image:
     repository: ghcr.io/vlab-research/message-worker
@@ -1121,15 +1111,8 @@ message-worker:
     # 8 as of 2026-08-20, after smoke testing the concurrent path in vstag
     # (v0.1.19, NUM_WORKERS=8, sends delivered in order on one partition).
     #
-    # 24 as of 2026-08-31, raised against a measured send rate: the spike
-    # pinned the pool at 26.4 sends/sec on 16 in-flight calls, so one slot
-    # sustains ~1.7/sec and 3 x 24 = 72 puts the ceiling near 115/sec.
-    #
-    # Still under the code default of 100 because per-worker queues are
-    # JobQueueSize / NumWorkers and burrow's poll loop is single-threaded, so a
-    # backed-up worker stalls the whole pod's polling. This takes per-worker
-    # depth from 125 to 41 — raise JobQueueSize alongside NumWorkers, not
-    # NumWorkers alone.
+    # Not higher: per-worker queues are JobQueueSize / NumWorkers and burrow's
+    # poll loop is single-threaded, so a backed-up worker stalls the whole pod.
     value: "24"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"

@@ -33,10 +33,8 @@ type HTTPSyntheticPoster struct {
 	botserver string
 }
 
-// Bounds the POST to botserver, which runs inside the burrow worker goroutine
-// on every send failure. Unbounded, a hung botserver stalls the worker past
-// max.poll.interval.ms (300s) and wedges the consumer — the dinersclub
-// 2026-08-17 failure. 10s fits under that alongside 3x30s of send attempts.
+// Runs in the worker goroutine on every send failure. Unbounded, a hung
+// botserver stalls the consumer past max.poll.interval.ms and wedges it.
 const syntheticPostTimeout = 10 * time.Second
 
 // NewHTTPSyntheticPoster creates a new SyntheticPoster for sending events to hermes.
