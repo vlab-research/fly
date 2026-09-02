@@ -104,7 +104,8 @@ versionScribble: &vscribble v0.0.34
 # The v0.0.45..v0.0.46 range is payment-recovery work only (classify.go,
 # metrics.go, the bounded provider client). dingconnect.go is untouched, so the
 # Generic Secrets concern that held dinersclub at v0.0.43-wa in PR #147 does
-# not apply here -- and dingconnect is not in DINERSCLUB_PROVIDERS anyway.
+# not apply here -- and dingconnect was not in DINERSCLUB_PROVIDERS at the time
+# of that bump. (It is now, as of 2026-09-02; see the env block below.)
 # v0.0.46 -> v0.0.48: carries 36808aa5, the envelope.
 #
 # WHY THIS IS NOT OPTIONAL -- reproduced on production 2026-08-25. dinersclub is
@@ -284,8 +285,20 @@ dinersclub:
       value: "15s"
     - name: DINERSCLUB_POOL_SIZE
       value: "2"
+    # dingconnect enabled 2026-09-02. Config-only, no image change: the
+    # provider has shipped compiled since v0.0.45 and prod already runs v0.0.48,
+    # but getProvider refuses any name absent from this list, so the code was
+    # unreachable. Construction is lazy and the credential is a per-user Generic
+    # Secret read at payout (secrets.go), so adding the name cannot crash-loop
+    # the pod, and no study pays through it until one sets payment.provider.
+    #
+    # NOTE: DINERSCLUB_PROVIDER_TIMEOUT below does NOT bound this provider --
+    # dingconnect.go builds its own 90s context from dingconnect.DefaultTimeout.
+    # That is deliberate for transfers (a 15s cut risks money moving after we
+    # stop listening), but it means one hung transfer holds a worker for 90s
+    # against DINERSCLUB_POOL_SIZE=2.
     - name: DINERSCLUB_PROVIDERS
-      value: "fake,reloadly,giftcard,http"
+      value: "fake,reloadly,giftcard,http,dingconnect"
     # Must match dinersclub.metrics.port below -- the Service targets the
     # container port by name, but the process binds whatever this says.
     - name: DINERSCLUB_METRICS_PORT
