@@ -67,7 +67,10 @@ versionHermes: &vhermes v0.0.7
 # CHATBASE_BACKEND=@vlab-research/chatbase-postgres to replybot.env here.
 # ############################################################################
 # v0.0.223: Kafka producer linger 1000ms -> 10ms.
-versionReplybot: &vreplybot v0.0.223
+# v0.0.224: resolves the WhatsApp choice-list button label from the form's
+#   Messages (borrowed key block.dropdown.hint) into question metadata.
+#   Pairs with message-worker v0.1.25 -- neither half does anything alone.
+versionReplybot: &vreplybot v0.0.224
 # Bumped v0.0.6 -> v0.0.9 together with the repository move below: ghcr holds
 # only v0.0.8/v0.0.9, so the registry change CANNOT ship without the version
 # change or the pull 404s. Behaviour change to announce: an *invalid*
@@ -157,7 +160,9 @@ versionExodus: &vexodus v0.2.5
 # v0.1.24: WhatsApp list rows carry the option text as a row description,
 #   recovered from the question body. WhatsApp-only -- the Messenger
 #   translator is untouched, and the WhatsApp path is still dormant here.
-versionMessageWorker: &vmessageworker v0.1.24
+# v0.1.25: renders that list button from replybot's metadata, falling back to
+#   "Choose". Pairs with replybot v0.0.224.
+versionMessageWorker: &vmessageworker v0.1.25
 versionMediaProxy: &vmediaproxy v0.0.1
 # One-shot, not a service: the Phase 1.5 messages backfill
 # (planning/backfill-in-cluster-job.md). Kept here anyway so its image is

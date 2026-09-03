@@ -38,7 +38,7 @@ versionHermes: &vhermes v0.0.5
 #
 # Production stays on v0.0.219 until this soaks 24h. See
 # planning/conversation-identity.md §5.
-versionReplybot: &vreplybot v0.0.221
+versionReplybot: &vreplybot v0.0.224
 versionLinksniffer: &vlinksniffer v0.0.9
 versionDean: &vdean v0.0.47
 versionScribble: &vscribble v0.0.34
@@ -50,7 +50,7 @@ versionDinersclub: &vdinersclub v0.0.49
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 versionExodus: &vexodus v0.2.5
-versionMessageWorker: &vmessageworker v0.1.24
+versionMessageWorker: &vmessageworker v0.1.25
 # Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
 # gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
 # does not exist in ghcr.io yet") is retired.
