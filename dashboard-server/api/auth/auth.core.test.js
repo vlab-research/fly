@@ -314,4 +314,10 @@ describe('auth.core: makeTtlCache', () => {
   it('is configured with a short TTL, so a revoked key dies quickly', () => {
     CREDENTIAL_CACHE_TTL_MS.should.be.at.most(60 * 1000);
   });
+
+  it('lets a survey key reach typeform, which is where survey content lives', () => {
+    // GET /typeform/form is how you check a formid before registering it.
+    isAuthorized(['surveys:read'], 'GET', '/typeform/form').should.equal(true);
+    isAuthorized(['responses:read'], 'GET', '/typeform/form').should.equal(false);
+  });
 });

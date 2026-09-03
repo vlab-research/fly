@@ -62,6 +62,15 @@ const READ_METHODS = ['GET', 'HEAD', 'OPTIONS'];
  */
 const ROUTE_RESOURCES = {
   surveys: 'surveys',
+  /*
+   * Typeform is where survey content is authored, so it belongs to `surveys`
+   * rather than to `credentials`: a survey key must be able to GET
+   * /typeform/form to check a formid before registering it, which is the step
+   * that catches a bad id before it becomes a silently broken survey. It reads
+   * and spends only the caller's own typeform_token, which stays unreadable
+   * through /credentials.
+   */
+  typeform: 'surveys',
   responses: 'responses',
   exports: 'exports',
   media: 'media',

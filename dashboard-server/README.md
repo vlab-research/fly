@@ -10,45 +10,198 @@ Backend service to serve data to dashboard client.
 
 ### Authentication
 
-JWT-based authentication with two modes, implemented in `middleware/auth.js`:
+Everything under `/api/v1` goes through `middleware/auth.js`, which tries two
+verifiers in order and stops at the first that accepts the bearer token:
 
-- **Client (dashboard) auth**: JWT tokens issued by Auth0. The React SPA obtains a Bearer token from Auth0 and sends it with every request.
-- **Server-to-server auth**: HS256-signed JWTs for internal service communication (e.g., export callbacks).
+1. **Auth0 RS256** (`config.JWT`) — the dashboard SPA's token, verified against
+   Auth0's JWKS. Nothing below applies to it: it is unscoped and always full
+   access for the account it names.
+2. **HS256 against `AUTH0_DASHBOARD_SECRET`** (`config.SERVER_JWT`) — everything
+   else. This is the API-key path, and `checkServerToken` runs afterwards.
+
+The functional core of the API-key half is `api/auth/auth.core.js` — pure,
+clock-injected, no IO. `middleware/auth.js` is the verification shell and
+`api/auth/auth.routes.js` the minting/revoking shell. Schema:
+`devops/migrations/32-api-token-hardening.sql`.
+
+#### Three kinds of HS256 token
+
+They are all signed with the same secret and are distinguishable only by their
+claims. Every rule below exists because of one of them.
+
+| Kind | Claims | Lookup | Scopes |
+|---|---|---|---|
+| **API key** (minted after migration 32) | `email`, `https://vlab.digital/token-name`, `jti`, optional `https://vlab.digital/scopes`, `exp` | `credentials` row by `jti` | honoured |
+| **Legacy API key** (minted before it) | `email`, token-name, **no** `jti`, no scopes, no `exp` | `credentials` row by `(email, name)` | none → unrestricted |
+| **Internal service JWT** (replybot, hermes) | replybot signs `{}`, hermes signs `{iat, exp}` | none — no name, no jti | none → unrestricted |
+
+The third row is why two things that look like bugs are deliberate and must not
+be "fixed":
+
+- **`exp` is not required by the verifier.** Internal service JWTs carry none.
+- **An absent scopes claim means UNRESTRICTED, not "no permissions."** Internal
+  JWTs carry none, and neither does any key minted before VIR-37.
+
+> **The signing secret is shared with replybot and hermes.**
+> `AUTH0_DASHBOARD_SECRET` is deployed to all three, so anything holding it can
+> mint a token this server treats as an unscoped internal service call.
+> Splitting it is the real fix and was deliberately deferred: separating the
+> secrets is a cross-service deploy-coordination problem, not a code change.
+> Until it happens, scoping is a control on *researcher* keys, not a trust
+> boundary against the other services.
+
+#### Validity is positive: the row is the credential
+
+The token is never stored, so there is nothing to compare it against and no
+denylist. Instead **a key is live iff its `credentials` row is live**, and the
+`jti` claim is what ties the two together. Revocation is a `DELETE` of the row
+(which is why migration 32 had to add a `DELETE` grant).
+
+`credentials.api_token_jti` is a `STORED` computed column over `details->>'jti'`
+with a partial unique index, so the verifier's lookup is an index-only seek
+rather than a JSONB scan. It is derived — the application only ever writes
+`details`.
+
+Because the jti is fresh per mint, revoking a key and creating a new one with
+the same name does **not** resurrect the old token. That guarantee does not hold
+for legacy keys, which match on `(email, name)`: reusing a revoked legacy key's
+name re-validates the old token. Reissuing the key is the fix.
+
+**Minting** — `POST /api/v1/auth/api-token` with `{name, scopes?}`, returning
+`{name, token, scopes, expiresAt}` with `201`. The token is shown once and never
+again. New keys get a **90-day `exp`** (`API_TOKEN_TTL_SECONDS`); existing keys
+are untouched and never expire. Name collisions are `400` (`UNIQUE(entity, key)`
+on `credentials`, and that uniqueness is *global*, not per user).
+
+**Revocation** — `DELETE /api/v1/auth/api-token?name=<name>` (the name may also
+be sent in the body). By name rather than by token, because the name is the only
+handle a researcher durably has — and a `?token=` parameter would put the secret
+in a URL that morgan logs. The delete is scoped to the caller's email in SQL, so
+a globally-unique key name can still only be revoked by its owner. `404` if no
+such key.
+
+**Attenuation** — a key may only mint a key no more powerful than itself
+(`canGrantScopes`). Requesting *no* scopes is a request for full access, so it
+is checked as `*`; otherwise any key holding `auth:write` could mint an unscoped
+one and the scheme would be decoration.
+
+#### The 30-second credential cache
+
+`middleware/auth.js` holds a process-local TTL cache (`CREDENTIAL_CACHE_TTL_MS`,
+30s) of cache-key → `{email, scopes}`, caching **misses as well as hits** so that
+replaying random jtis is not one database read per request.
+
+Consequences:
+
+- Revocation takes effect **immediately on the replica that served the DELETE**
+  (it evicts both the jti and the name key) and **within 30 seconds everywhere
+  else**. In a multi-replica deployment a revoked key stays usable on the other
+  pods for up to that window.
+- A database error during lookup **fails closed** with `503`, not `401`.
+
+#### Scopes
+
+A scope is `<resource>:<action>`. Actions are `read`, `write` and `*`; `write`
+implies `read` on the same resource. The bare scope `*` means everything. The
+action a request needs is derived from its method — `GET`/`HEAD`/`OPTIONS` are
+`read`, everything else is `write`.
+
+The resource is derived from the **first path segment under `/api/v1`**
+(`ROUTE_RESOURCES` in `auth.core.js`):
+
+| Path segment | Resource | Covers |
+|---|---|---|
+| `/surveys` | `surveys` | survey CRUD/settings, plus `/surveys/:surveyName/states` and `/surveys/:surveyName/health` |
+| `/responses` | `responses` | respondent answers — deliberately **not** folded into `surveys`, so a key can read study structure without reading people's answers |
+| `/exports` | `exports` | |
+| `/media` | `media` | |
+| `/credentials`, `/facebook`, `/whatsapp` | `credentials` | all three write the same table |
+| `/message-templates` | `templates` | |
+| `/tickets` | `tickets` | |
+| `/users` | `users` | including `/users/:userId/bails` and `/bail-events` |
+| `/platform` | `platform` | |
+| `/auth` | `auth` | key management. Never implicitly granted by any other scope |
+
+`/typeform` maps to `surveys` rather than to `credentials`: Typeform is where
+survey content is authored, so a survey key must be able to `GET /typeform/form`
+to check a `formid` before registering it — the step that catches a bad id before
+it becomes a silently broken survey. It reads and spends only the caller's own
+`typeform_token`, which stays unreadable through `/credentials`.
+
+A segment absent from `ROUTE_RESOURCES` fails closed, so a *scoped* key gets
+`403` on it. Unscoped keys, legacy keys, internal JWTs and Auth0 tokens are
+unaffected. **Any new top-level route must be added to `ROUTE_RESOURCES` to be
+reachable by a scoped key.** The one exception is `/mcp`, which is delegated —
+see below.
+
+Unknown scopes are rejected at mint time rather than ignored (`validateScopes`),
+because a typo like `surveys:reed` that silently denied everything would be
+indistinguishable from a broken key. A `403` response names the required scope
+and the scopes the key actually holds.
+
+The `credentials` row wins over the token's claim when it has scopes
+(`effectiveScopes`), so a key can be *narrowed* by editing its row without
+reissuing it. The mint path writes both sides identically, so they only diverge
+if someone edits the row by hand.
+
+#### `/mcp` and delegated authorization
+
+`/mcp` is a JSON-RPC tunnel: one `POST` reaches every tool and the tool name is
+in the **body**, invisible to a path-based map. Giving it an `mcp:*` resource
+would have been worse than useless — a `surveys:read` key could not call
+`list_surveys` while an `mcp:write` key could call every tool there is.
+
+So `/mcp` is listed in `DELEGATED_RESOURCES` instead. The middleware lets any
+authenticated key through, leaves the caller's scopes on **`req.apiScopes`**, and
+`TOOL_SCOPES` in `api/mcp/mcp.tools.js` enforces the real scope per tool. That
+table is the only scope check an MCP call gets, and a tool with no entry in it is
+denied rather than allowed.
+
+Consequences worth knowing:
+
+- A `surveys:read` key can call `list_surveys` and nothing else; the four write
+  tools need `surveys:write`.
+- **`mcp:write` is not a mintable scope** — `mcp` is not a resource, so
+  `validateScopes` rejects it.
+- A scope refusal comes back as an MCP *tool error* (a normal result with
+  `isError`), not a transport `403`, so the model can read why and stop retrying.
 
 ### User Scoping and Authorization
 
-All queries filter by `req.user.email` so that users only see their own surveys and data. This is the primary access-control mechanism.
+All queries filter by `req.user.email` so that users only see their own surveys
+and data. This is the primary access-control mechanism, and for survey writes it
+is now the *only* one — ownership is enforced inside the SQL statement rather
+than by a middleware, so there is no window between the check and the write.
 
-For survey-specific endpoints, there are two authorization middleware patterns:
+`PUT /surveys/:surveyid/settings` is the worked example. `Survey.update`
+(`queries/surveys/survey.queries.js`) turns the settings upsert into an
+`INSERT … SELECT` gated on `surveys JOIN users WHERE users.email = $4`: when the
+survey is not the caller's, the SELECT yields no row, nothing is written, no
+`ON CONFLICT` fires and `undefined` comes back. The controller answers **`404`,
+not `403`** — a survey that is not yours and a survey that does not exist give
+the same answer, so the response never confirms someone else's survey id. A
+`surveyid` that is not a UUID is answered `404` too, ahead of the `::UUID` cast
+that would otherwise 500.
 
-**1. `validateSurveyAccess`** - Validates access to a single survey by shortcode or ID:
+> Before VIR-37 this endpoint had no ownership check at all: any authenticated
+> caller who knew a survey's UUID could overwrite its timeouts and `off_time`.
 
-```javascript
-const validateSurveyAccess = async (req, res, next) => {
-  const { email } = req.user;
-  const surveys = await Survey.retrieve({ email });
-  const survey = surveys.find(s => s.shortcode === surveyId || s.id === surveyId);
-  if (!survey) return res.status(403);
-  req.survey = survey;
-  next();
-};
-```
+Two request-scoped guards remain, both for **path-parameter** routes where the
+handler needs the resolved object:
 
-**2. `validateSurveyNameAccess`** - Validates access to all forms under a survey_name:
+**`validateSurveyNameAccess`** (`api/states/states.controller.js`, exported and
+mounted by `api/states/states.routes.js` and `api/health/health.routes.js`) —
+loads the caller's surveys, keeps those matching `req.params.surveyName`, and
+`403`s if none do. It sets `req.surveyEmail`, `req.surveyName` and
+`req.surveyShortcodes` (deduped), which the states and health queries take as a
+pre-filter so the lateral version-resolution join does not scan the whole
+`states` table.
 
-```javascript
-const validateSurveyNameAccess = async (req, res, next) => {
-  const { email } = req.user;
-  const { surveyName } = req.params;
-  const surveys = await Survey.retrieve({ email });
-  const matchingSurveys = surveys.filter(s => s.survey_name === surveyName);
-  if (matchingSurveys.length === 0) return res.status(403);
-  req.surveyShortcodes = matchingSurveys.map(s => s.shortcode); // All shortcodes for this survey_name
-  next();
-};
-```
+**`validateUserAccess`** (`api/bails/bails.controller.js`) — the same shape for
+`/users/:userId/bails` and `/users/:userId/bail-events`.
 
-This pattern is used when a "survey" (identified by `survey_name`) can contain multiple forms (shortcodes), and the endpoint needs access to data across all forms.
+> There is no `validateSurveyAccess`. Earlier revisions of this README described
+> one; it does not exist anywhere in the code and never did under that name.
 
 ### Route Structure
 
@@ -61,7 +214,8 @@ This pattern is used when a "survey" (identified by `survey_name`) can contain m
 | `/typeform` | Typeform integration |
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
-| `/auth` | Authentication endpoints |
+| `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
+| `/mcp` | MCP server — `POST` only, Streamable HTTP, five survey tools. Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware |
 | `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
@@ -83,6 +237,66 @@ A messaging credential's `key` **is** the platform account id (`facebook_page` �
 page id, `whatsapp_business` → phone_number_id), and those ids are globally unique
 across messaging entities, so a token can be resolved from an account id alone
 without knowing the platform. See `message-worker/tokenstore.go`.
+
+### MCP server (`api/mcp/`)
+
+A Model Context Protocol server exposing survey creation and versioning to AI
+agents. Mounted at **`POST /api/v1/mcp`** — inside the same JWT middleware as
+every other route, so an MCP client authenticates with `Authorization: Bearer
+<api key>` exactly like a REST client and `req.user.email` is the identity every
+tool scopes on. **There is no MCP-specific authentication and there must never
+be one**: a second way to say who you are is a second way to get it wrong.
+Authorization is the delegated-scope arrangement described under
+"Authentication". The agent-facing contract — request shapes, arguments, failure
+modes — is `documentation/agent-api.md`.
+
+**Stateless Streamable HTTP.** `StreamableHTTPServerTransport` with
+`sessionIdGenerator: undefined` (which is what selects stateless mode) and
+`enableJsonResponse: true`, one transport and one `Server` per request. Sessions
+were rejected because a session id pins a client to the pod that issued it, which
+is wrong behind a load balancer with more than one replica; the JSON response
+was chosen over SSE because nothing here streams partial results and a
+long-lived event stream through a buffering ingress is a hang rather than an
+error. `GET` and `DELETE` answer `405` with `Allow: POST` — a stateless server
+has nothing to stream unprompted and no session to delete.
+
+The express body parser has already drained the request, so the parsed body is
+handed to `transport.handleRequest` explicitly; without that the transport waits
+forever on a stream that has already ended.
+
+**Functional core, imperative shell:**
+
+| File | Role |
+|---|---|
+| `mcp.core.js` | Pure. The five tool definitions (name, description, JSON Schema), the server instructions, a small JSON Schema validator, and every decision function — `summariseSurveys`, `resolvePreviousVersion`, `buildVersionRequest`, `mergeSettings`, `buildSurveyRecord`, result shaping. No IO, no clock |
+| `mcp.tools.js` | Dispatch. `TOOL_SCOPES` (the per-tool scope check), one thin async handler per tool, and `runTool`, which turns every failure into a tool error rather than letting it escape as a transport error |
+| `mcp.service.js` | The shell: database and Typeform IO |
+| `mcp.typeform.js` | `createForm` — the one Typeform call the dashboard has never needed, since `utils/typeform/` only ever read |
+| `mcp.server.js` | Builds one `Server` per request, bound to one email + scope set |
+| `mcp.routes.js` | Transport wiring |
+
+The **tool descriptions live in the pure core deliberately**: for an MCP server
+the descriptions are not documentation about the product, they *are* the product
+surface, so they are data that can be diffed and asserted on. That is also why
+the low-level `Server` is used rather than `McpServer` — the high-level helper
+would require the schemas as zod, which is code rather than a contract.
+
+**A tool error is a normal result with `isError` set**, never a thrown exception
+or an HTTP error: a model can read a tool error and correct itself, whereas a
+transport failure is just a dead turn. `mcp.service.js` throws `ToolFailure`
+(marked `expected`) for anything an agent can act on; everything else is logged
+and reported as a generic internal error, because unexpected messages leak
+internals.
+
+**`registerSurveyVersion` is `survey.controller.js#postOne` extracted**, so the
+tools and `POST /api/v1/surveys` share one implementation of what a survey
+version is. It is extracted rather than imported because the controller's
+version is welded to `(req, res)`. It differs from the controller in two places,
+both fixing bugs rather than inventing behaviour: `translation_conf` defaults to
+`{}` (the controller dereferences it before checking it exists, so a missing one
+is a `TypeError`), and it checks that Typeform actually returned a form — a
+missing form comes back as a 404 *body*, not a throw, and would otherwise be
+stored verbatim as the survey's content.
 
 ### Media
 
@@ -646,7 +860,23 @@ The states API tests (`api/states/states.test.js`) verify:
 
 ## Build
 
-The Dockerfile is pinned to `node:14-bullseye` and installs deps with `npm i`. Two things to know before touching it:
+The Dockerfile is pinned to **`node:18-bullseye`** and installs deps with
+**`npm ci`**. Both of those are the resolution of a pair of problems that used to
+constrain each other, and the history is worth keeping because the failure modes
+were confusing:
 
-- **Don't use `node:14-stretch`.** Debian stretch is EOL and Docker stopped updating it, so that tag is stuck at Node ≤14.17. The `require('util/types')` subpath needs Node ≥14.18 (it's pulled in by current `pg` transitives), and on stretch the container crashes at startup with `Cannot find module 'util/types'`. The `bullseye` tag tracks the latest 14.x (currently 14.21.x) and has the subpath.
-- **Don't switch to `npm ci` without also bumping Node.** Node 14 ships npm 6, and the committed `package-lock.json` is lockfile v2, which npm 6 can't parse (`Cannot read property '@cubejs-backend/postgres-driver' of undefined`). `npm i` is the workaround until someone upgrades Node — replybot's Node 12 → 22 LTS bump (`replybot-v0.0.192`) is the template for that work. The downside of `npm i` is that builds re-resolve dependencies, so a transitive bump can cause runtime surprises like the `util/types` one.
+- **Node had to move off 14.** `node:14-stretch` is stuck at Node ≤14.17 because
+  Debian stretch is EOL, and `require('util/types')` — pulled in by current `pg`
+  transitives — needs ≥14.18, so the container crashed at startup with
+  `Cannot find module 'util/types'`. `node:14-bullseye` fixed that, and Node 18
+  supersedes it (`10a20832`).
+- **`npm ci` needs npm ≥7.** Node 14 ships npm 6, which cannot parse the
+  committed lockfile-v2 `package-lock.json` (`Cannot read property
+  '@cubejs-backend/postgres-driver' of undefined`), so `npm i` was the
+  workaround for as long as the image was on 14 (`6d74c89e`). Node 18 ships
+  npm 9, so the build is deterministic again — **don't revert to `npm i`**, it
+  re-resolves dependencies on every build and that is what produced the
+  `util/types` surprise in the first place.
+
+`@modelcontextprotocol/sdk` (added by VIR-37) requires Node ≥18, so the image
+cannot go back below 18 either.

@@ -32,7 +32,12 @@ async function createApiToken(req, res) {
   // Attenuation: a key may only mint a key no more powerful than itself.
   // Without this, a scoped key holding auth:write could mint an unscoped one
   // and scoping would be decoration.
-  const callerScopes = scopesFromClaims(req.user)
+  //
+  // req.apiScopes is what the middleware actually authorized this request with,
+  // which is the credentials row's scopes when they differ from the token's.
+  // Reading the claim instead would let a key narrowed by editing its row keep
+  // minting at its original breadth.
+  const callerScopes = req.apiScopes !== undefined ? req.apiScopes : scopesFromClaims(req.user)
   if (!canGrantScopes(callerScopes, validated.scopes)) {
     return res.status(403).json({ error: 'You cannot grant scopes beyond those of the key you are using' })
   }

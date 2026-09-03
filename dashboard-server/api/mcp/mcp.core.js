@@ -390,7 +390,10 @@ const TOOLS = [
           description:
             'Translation configuration, validated against formcentral before the survey is ' +
             'created. Either {"self": true} for a form that is its own translation source, ' +
-            'or {"destination": "<shortcode>"} to translate into another form. Never both. ' +
+            'or {"destination": "<survey version id>"} to translate into another form. The ' +
+            'destination is the UUID `id` of a survey version (what list_surveys returns ' +
+            'as `id`), NOT a shortcode and NOT a survey_name — formcentral casts it to ' +
+            'UUID and rejects anything else. Never pass both keys. ' +
             'Omit entirely for a monolingual survey.',
         },
       },
