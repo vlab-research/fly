@@ -116,8 +116,8 @@ describe('Survey queries', () => {
 
       const offTime = "2023-06-26T18:17:03.054Z"
       // Update both survey2 and survey3 (both have shortcode "123")
-      await Survey.update({ surveyid: createdSurvey2.id, timeouts: undefined, off_time: offTime })
-      await Survey.update({ surveyid: createdSurvey3.id, timeouts: undefined, off_time: offTime })
+      await Survey.update({ surveyid: createdSurvey2.id, email: 'test2@vlab.com', timeouts: undefined, off_time: offTime })
+      await Survey.update({ surveyid: createdSurvey3.id, email: 'test2@vlab.com', timeouts: undefined, off_time: offTime })
 
       const rows = await Survey.retrieve({ email: 'test2@vlab.com' });
       rows.length.should.be.equal(3);
@@ -155,7 +155,7 @@ describe('Survey queries', () => {
       const createdSurvey = await Survey.create(survey);
 
       const offTime = "2023-06-26T18:17:03.054Z"
-      const update = await Survey.update({ surveyid: createdSurvey.id, timeouts: undefined, off_time: offTime })
+      const update = await Survey.update({ surveyid: createdSurvey.id, email: user2.email, timeouts: undefined, off_time: offTime })
 
       update.surveyid.should.eql(createdSurvey.id)
       update.off_time.toISOString().should.equal(offTime)
@@ -184,16 +184,47 @@ describe('Survey queries', () => {
       const createdSurvey = await Survey.create(survey);
 
       const offTime1 = "2023-06-26T18:17:03.054Z"
-      await Survey.update({ surveyid: createdSurvey.id, timeouts: undefined, off_time: offTime1 })
+      await Survey.update({ surveyid: createdSurvey.id, email: user2.email, timeouts: undefined, off_time: offTime1 })
 
       const offTime2 = "2023-06-26T18:17:03.054Z"
       const timeouts = [{ foo: 'bar' }]
-      const update = await Survey.update({ surveyid: createdSurvey.id, timeouts: timeouts, off_time: offTime2 })
+      const update = await Survey.update({ surveyid: createdSurvey.id, email: user2.email, timeouts: timeouts, off_time: offTime2 })
 
       update.off_time.toISOString().should.equal(offTime2)
       // timeouts is stored as JSON string in the database
       const storedTimeouts = typeof update.timeouts === 'string' ? JSON.parse(update.timeouts) : update.timeouts;
       storedTimeouts.should.eql(timeouts)
+    });
+    it('refuses to write settings for a survey belonging to someone else', async () => {
+      const owner = await User.create({ email: 'owner@vlab.com' });
+      await User.create({ email: 'intruder@vlab.com' });
+
+      const createdSurvey = await Survey.create({
+        created: new Date(),
+        formid: 'test-form',
+        form: '{"form": "form detail"}',
+        messages: '{"foo": "bar"}',
+        shortcode: 'foo',
+        userid: owner.id,
+        title: 'Test Survey',
+        metadata: '{}',
+        survey_name: 'Test',
+        translation_conf: '{}'
+      });
+
+      const mine = "2023-06-26T18:17:03.054Z"
+      await Survey.update({ surveyid: createdSurvey.id, email: 'owner@vlab.com', timeouts: undefined, off_time: mine })
+
+      const theirs = "2030-01-01T00:00:00.000Z"
+      const attempt = await Survey.update({ surveyid: createdSurvey.id, email: 'intruder@vlab.com', timeouts: [{ foo: 'bar' }], off_time: theirs })
+
+      expect(attempt).to.be.undefined;
+
+      // and the owner's settings are untouched
+      const [{ off_time, timeouts }] = (await vlabPool.query(
+        'SELECT off_time, timeouts FROM survey_settings WHERE surveyid = $1', [createdSurvey.id])).rows;
+      off_time.toISOString().should.equal(mine);
+      expect(timeouts).to.be.null;
     });
   });
 });

@@ -4,6 +4,9 @@ const { Survey, User, Credential } = require('../../queries');
 const { SurveyUtil } = require('../../utils');
 const { TypeformUtil } = require('../../utils');
 
+// Guards the ::UUID cast in Survey.update, which would otherwise 500 on junk.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 exports.postOne = async (req, res) => {
   try {
     // add more keys
@@ -91,7 +94,18 @@ exports.putSettings = async (req, res) => {
     const { surveyid } = req.params;
     const { timeouts, off_time } = req.body;
 
-    const settings = await Survey.update({ surveyid, timeouts, off_time })
+    if (!UUID.test(surveyid)) {
+      return res.status(404).json({ error: 'No such survey.' });
+    }
+
+    const settings = await Survey.update({ surveyid, email, timeouts, off_time })
+
+    // 404, not 403: a survey that is not yours and a survey that does not exist
+    // are the same answer, so this never confirms someone else's survey id.
+    if (!settings) {
+      return res.status(404).json({ error: 'No such survey.' });
+    }
+
     res.status(200).send(settings);
 
   } catch (err) {

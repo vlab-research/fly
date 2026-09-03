@@ -46,6 +46,7 @@
   "dependencies": {
     "@cubejs-backend/postgres-driver": "^0.10.35",
     "@cubejs-backend/server-core": "^0.10.41",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@vlab-research/client-cursor-stream": "^0.1.1",
     "base-64": "^1.0.0",
     "cors": "2.8.5",
