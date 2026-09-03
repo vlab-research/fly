@@ -139,7 +139,10 @@ versionExodus: &vexodus v0.2.5
 # conversation was stranded permanently on 2026-08-25. They now fall through to
 # STATE_ACTIONS -> ERROR, which dean's Errored query retries with backoff.
 # v0.1.23: bounds the synthetic POST to botserver, which had no timeout.
-versionMessageWorker: &vmessageworker v0.1.23
+# v0.1.24: WhatsApp list rows carry the option text as a row description,
+#   recovered from the question body. WhatsApp-only -- the Messenger
+#   translator is untouched, and the WhatsApp path is still dormant here.
+versionMessageWorker: &vmessageworker v0.1.24
 versionMediaProxy: &vmediaproxy v0.0.1
 # One-shot, not a service: the Phase 1.5 messages backfill
 # (planning/backfill-in-cluster-job.md). Kept here anyway so its image is
