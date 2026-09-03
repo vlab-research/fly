@@ -464,6 +464,36 @@ switch — `translateMessengerText` handles `webview`, `notify` and
 `notification_messages`; the WhatsApp side handles `webview` (the other two are
 Messenger-only concepts, see *One-Time Notifications* below).
 
+#### Choice questions → list row descriptions
+
+A labelled question stores bare codes as its choice labels (`A`, `B`) and the
+full option text in the title, appended by upload-typeform as
+`question\n\nA. Full text`. On Messenger that is sufficient: the quick-reply
+button is the code and the question body is on screen beside it. On WhatsApp the
+choice list opens *over* the conversation, so the body is no longer visible and a
+row reading only `A` gives the respondent nothing to choose on.
+
+`translateWhatsAppList` therefore fills each row's `description` with that
+option's text, recovered from the question body via `trans.ExtractLabels` — the
+same parser upload-typeform builds with and scribble translates with, rather than
+a fourth copy of the regex. An explicit `Option.Description` wins when set;
+a description equal to the row title is suppressed, so an unlabelled question
+(`Male`/`Female`) does not render the same string twice.
+
+Descriptions are clipped to `WhatsAppRowDescriptionMaxChars` (72) at a word
+boundary, with the ellipsis budgeted inside the cap. Unlike `display_text` below,
+an over-long description does **not** fail the send: it is supporting text and
+the full wording remains readable in the message body, so stranding the
+respondent over it would cost more than it saves.
+
+Verified against the live Cloud API on 2026-09-03 — until then nothing had ever
+populated `WhatsAppRow.Description`, and the interactive caps were undocumented
+here. Confirmed in that pass: row `description` renders; `sections[].title` and a
+non-English `action.button` are both accepted (fly hardcodes `"Choose"`, so a
+non-English survey shows an English button); and **message body text renders
+WhatsApp markup (`*bold*`, `_italic_`) while row titles and descriptions do not**
+— emphasis in a label shows literal asterisks.
+
 #### webview → `cta_url`
 
 `webview` is the generic "send the user off-platform, optionally wait for an
