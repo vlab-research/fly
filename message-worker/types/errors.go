@@ -35,3 +35,13 @@ var (
 // STATE_ACTIONS error the researcher can see and fix, rather than an opaque
 // delivery failure.
 const WhatsAppCTAButtonTextMaxChars = 20
+
+// WhatsAppRowDescriptionMaxChars is the Cloud API's ceiling on a list row's
+// description — the secondary line under the row title, which carries the full
+// option text on WhatsApp.
+//
+// Unlike the cta_url cap above this one is not enforced by failing the send: a
+// description is supporting text, and clipping it costs a few words at the end
+// of a line the respondent can still read in full in the message body. Failing
+// the whole question over it would strand the respondent for no gain.
+const WhatsAppRowDescriptionMaxChars = 72

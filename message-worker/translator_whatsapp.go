@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vlab-research/fly/message-worker/types"
+	"github.com/vlab-research/trans"
 )
 
 // TranslateToWhatsApp translates a platform-agnostic message to WhatsApp format
@@ -276,12 +277,88 @@ func translateWhatsAppButtons(msg types.MessageContent) (types.WhatsAppMessage, 
 	}, nil
 }
 
+// optionText maps a choice code to its full option text, recovered from the
+// question body.
+//
+// A labelled question carries bare codes as its choice labels ("A", "B") and
+// the full option text in the title, appended by upload-typeform as
+// "question\n\nA. Full text\nB. Full text". On Messenger that is all a
+// respondent needs: the quick-reply button is the code and the body is on
+// screen beside it. On WhatsApp the choice list opens over the conversation and
+// the body is no longer visible, so a bare "A" gives the respondent nothing to
+// choose on -- which is what the row description is for.
+//
+// trans.ExtractLabels is the canonical parser for that format and is already
+// what upload-typeform builds with and scribble translates with; re-implementing
+// the regex here would be a fourth copy free to drift from the other three.
+//
+// Returns nil when the body carries no labelled options -- an unlabelled
+// question ("Male\nFemale") has its text in the label already and needs no
+// description.
+func optionText(questionText string) map[string]string {
+	answers, err := trans.ExtractLabels(questionText)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(answers))
+	for _, a := range answers {
+		out[a.Response] = strings.TrimSpace(a.Value)
+	}
+	return out
+}
+
+// ellipsis marks a clipped description. One rune rather than three dots,
+// because it is spent from the same budget as the text it replaces.
+const ellipsis = "…"
+
+// clipToWords shortens s to at most max runes, preferring a word boundary and
+// marking the cut with an ellipsis.
+//
+// Meta caps a list row description at WhatsAppRowDescriptionMaxChars and we do
+// not rely on it to clip for us. A plain slice cuts mid-word -- a 79-character
+// option ended up as "...school or institutional ca" in testing -- so back up to
+// the last space when one is available in the final quarter of the budget,
+// rather than stranding a fragment.
+//
+// The ellipsis is budgeted INSIDE max, not appended after it: the result must
+// still fit the cap, and the point of trimming trailing punctuation first is so
+// the mark does not land on "word ,…".
+func clipToWords(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return ellipsis
+	}
+	r := []rune(s)[:max-1]
+	if i := strings.LastIndex(string(r), " "); i > max*3/4 {
+		r = []rune(string(r)[:i])
+	}
+	return strings.TrimRight(string(r), " ,;:/-") + ellipsis
+}
+
 func translateWhatsAppList(msg types.MessageContent) (types.WhatsAppMessage, error) {
+	text := optionText(*msg.QuestionText)
+
 	rows := make([]types.WhatsAppRow, len(msg.Options))
 	for i, opt := range msg.Options {
 		rows[i] = types.WhatsAppRow{
 			ID:    opt.ValueAsString(),
 			Title: opt.Label,
+		}
+		// An explicit description from the form wins; otherwise fall back to the
+		// option text in the body. Either way the row, not just the code, says
+		// what it is.
+		desc := ""
+		if opt.Description != nil {
+			desc = *opt.Description
+		} else if text != nil {
+			desc = text[opt.ValueAsString()]
+		}
+		// A description equal to the title is noise, not help -- an unlabelled
+		// question renders the same string twice.
+		if desc != "" && desc != opt.Label {
+			rows[i].Description = clipToWords(desc, types.WhatsAppRowDescriptionMaxChars)
 		}
 	}
 

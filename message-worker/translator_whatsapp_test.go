@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/vlab-research/fly/message-worker/types"
 )
@@ -473,6 +474,109 @@ func TestTranslateToWhatsAppWebview(t *testing.T) {
 			wantJSON, _ := json.Marshal(tt.want)
 			if string(gotJSON) != string(wantJSON) {
 				t.Errorf("TranslateToWhatsApp() = %s, want %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+// TestTranslateWhatsAppListDescriptions covers the list row description, which
+// carries the full option text on WhatsApp.
+//
+// It is separate from TestTranslateToWhatsApp because the cases assert on the
+// description specifically: on Messenger a bare "A" quick reply sits beside a
+// visible question body, but on WhatsApp the choice list opens OVER the
+// conversation, so a row that says only "A" leaves the respondent nothing to
+// choose on. These assert that the text is recovered from the body, clipped at
+// a word boundary, and suppressed when it would merely repeat the title.
+func TestTranslateWhatsAppListDescriptions(t *testing.T) {
+	listCmd := func(questionText string, opts []types.Option) types.SendMessageCommand {
+		return types.SendMessageCommand{
+			CommandID:      "cmd_desc",
+			ConversationID: "conv_1",
+			UserID:         "user_1",
+			Platform:       types.PlatformWhatsApp,
+			Message: types.MessageContent{
+				Type:         types.MessageTypeQuestion,
+				QuestionText: stringPtr(questionText),
+				Options:      opts,
+			},
+		}
+	}
+	coded := []types.Option{
+		{Value: json.RawMessage(`"A"`), Label: "A"},
+		{Value: json.RawMessage(`"B"`), Label: "B"},
+		{Value: json.RawMessage(`"C"`), Label: "C"},
+		{Value: json.RawMessage(`"D"`), Label: "D"},
+	}
+
+	tests := []struct {
+		name     string
+		cmd      types.SendMessageCommand
+		wantDesc []string
+	}{
+		{
+			// The real shape upload-typeform produces: bare codes as labels,
+			// full option text appended to the title.
+			name: "recovers option text from the labelled question body",
+			cmd: listCmd("Where did you get food from outside the home?\n\n"+
+				"A. Cafe or bakery\nB. Fast food\nC. Street vendor\nD. Canteen", coded),
+			wantDesc: []string{"Cafe or bakery", "Fast food", "Street vendor", "Canteen"},
+		},
+		{
+			// 79 chars: clipped at a word boundary with an ellipsis, never
+			// mid-word, and the result stays inside the 72-char cap.
+			name: "clips an over-long description at a word boundary",
+			cmd: listCmd("Where?\n\nA. Restaurant / sit-down restaurant / workplace, "+
+				"school or institutional cafeteria\nB. Cafe\nC. Stall\nD. Home", coded),
+			wantDesc: []string{
+				"Restaurant / sit-down restaurant / workplace, school or institutional…",
+				"Cafe", "Stall", "Home",
+			},
+		},
+		{
+			// An unlabelled question already carries its text in the label, so a
+			// description would render the same string twice.
+			name: "omits descriptions for an unlabelled question",
+			cmd: listCmd("What is your gender?", []types.Option{
+				{Value: json.RawMessage(`"Male"`), Label: "Male"},
+				{Value: json.RawMessage(`"Female"`), Label: "Female"},
+				{Value: json.RawMessage(`"Other"`), Label: "Other"},
+				{Value: json.RawMessage(`"Prefer not to say"`), Label: "Prefer not to say"},
+			}),
+			wantDesc: []string{"", "", "", ""},
+		},
+		{
+			// An explicit description from the form wins over the derived one.
+			name: "prefers an explicit description",
+			cmd: listCmd("Where?\n\nA. Cafe\nB. Fast food\nC. Stall\nD. Canteen",
+				[]types.Option{
+					{Value: json.RawMessage(`"A"`), Label: "A", Description: stringPtr("Authored")},
+					{Value: json.RawMessage(`"B"`), Label: "B"},
+					{Value: json.RawMessage(`"C"`), Label: "C"},
+					{Value: json.RawMessage(`"D"`), Label: "D"},
+				}),
+			wantDesc: []string{"Authored", "Fast food", "Stall", "Canteen"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := TranslateToWhatsApp(tt.cmd)
+			if err != nil {
+				t.Fatalf("TranslateToWhatsApp() error = %v", err)
+			}
+			rows := got.Interactive.Action.Sections[0].Rows
+			if len(rows) != len(tt.wantDesc) {
+				t.Fatalf("got %d rows, want %d", len(rows), len(tt.wantDesc))
+			}
+			for i, want := range tt.wantDesc {
+				if rows[i].Description != want {
+					t.Errorf("row %d description = %q, want %q", i, rows[i].Description, want)
+				}
+				if n := utf8.RuneCountInString(rows[i].Description); n > types.WhatsAppRowDescriptionMaxChars {
+					t.Errorf("row %d description is %d chars, over the %d cap",
+						i, n, types.WhatsAppRowDescriptionMaxChars)
+				}
 			}
 		})
 	}
