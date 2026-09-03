@@ -46,7 +46,7 @@ versionScribble: &vscribble v0.0.34
 # /metrics. v0.0.45 was cut from bc0ec780 (2026-08-01), which PREDATES the
 # timeout work -- so the image and these values move together, never separately:
 # on the old image the metrics Service would point at a port nothing binds.
-versionDinersclub: &vdinersclub v0.0.48
+versionDinersclub: &vdinersclub v0.0.49
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 versionExodus: &vexodus v0.2.5
