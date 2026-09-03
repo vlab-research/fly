@@ -80,6 +80,23 @@ Examples: a provider 5xx is `transient`; `INSUFFICIENT_BALANCE` and
 `AUTH_ERROR` are `precondition`; a bad number, `IMPOSSIBLE_AMOUNT` and an
 operator refusal are `permanent`.
 
+**One payment point produces exactly one classified Result, however many
+provider calls it took.** DingConnect can try several operators for one payment
+(see `dinersclub/README.md`, "Cascade contract"); the candidates are an internal
+detail, and only the outcome that ends the resolution is classified, recorded in
+the ledger, and delivered. Per-candidate outcomes ride along on the Result's
+`resolution` block for debugging rather than becoming payment events of their
+own — otherwise one payment point would inflate the metrics and the
+`payment-recovery` tooling N-fold.
+
+> **A live gap for DingConnect.** `classify.go`'s DingConnect rows use invented
+> SCREAMING_SNAKE names the provider never emits — it passes DingConnect's
+> PascalCase codes through verbatim. So `InsufficientBalance` from DingConnect is
+> **not** classified `precondition` and is sent to the respondent, releasing them
+> from the wait and ending dean's ability to pay them on top-up: the §3 failure
+> mode, reintroduced for one provider. Live since 2026-09-02, tracked as
+> **VIR-41**. `RateLimited` is already pinned.
+
 **An unrecognised code is `permanent`**, i.e. it is sent, i.e. it behaves
 exactly as every failure behaved before classification existed. Silence is the
 new behaviour and applies only where we can name the reason. The code is counted
@@ -172,6 +189,16 @@ That is what happened on 2026-08-17.
 `FindOperator` + `Topup`, and `AutoFallback` can add a second `Topup` on a
 refusal — so an attempt costs up to 3× the per-call timeout. That is why the
 per-call ceiling must be much smaller than the budget containing it.
+
+**DingConnect is bounded differently, and deliberately so.** It ignores
+`DINERSCLUB_PROVIDER_TIMEOUT` and uses the client's 90s `DefaultTimeout`, because
+cutting a transfer short risks money moving after we stop listening. Since
+VIR-40 one DingConnect payment can make several calls — an `AccountLookup`, a
+cached `GetProducts`, and on the discovery path several `SendTransfer`s, all
+inside `go-dingconnect`'s `Pay` — so dinersclub passes **one shared 90s context
+for the whole resolution** rather than one deadline per call. A cascading payment therefore costs no more wall clock than a single one
+did, and none of the values above move. If that deadline is ever made per-call,
+N sequential 90s sends reproduce the 2026-08-17 shape exactly.
 
 Worst case for a batch at `POOL_SIZE == BATCH_SIZE` (messages run concurrently,
 so a batch costs about what one message costs) is ~180s, leaving headroom under

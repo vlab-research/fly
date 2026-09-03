@@ -83,6 +83,13 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"PAYMENT_FAILED", 0, RecoveryPermanent},
 		{"DUPLICATE_REFERENCE", 0, RecoveryPermanent},
 
+		// DingConnect amount resolution (VIR-40). All permanent: a retry sends
+		// the same stale pin, and silence would hide the drift.
+		{"PIN_DRIFT", 0, RecoveryPermanent},
+		{"AMOUNT_CURRENCY_MISMATCH", 0, RecoveryPermanent},
+		{"NO_PIN_FOR_OPERATOR", 0, RecoveryPermanent},
+		{"RateLimited", 0, RecoveryPermanent},
+
 		// The fake provider's fixture code (facebot/testrunner,
 		// forms/gk3gt9ag.json). Not production data -- it is here so the
 		// integration test's payment-failure flow rests on a decision rather
@@ -144,6 +151,27 @@ func TestClassifyResultIgnoresSuccessfulResults(t *testing.T) {
 	})
 	assert.True(t, known)
 	assert.Equal(t, RecoveryPrecondition, got)
+}
+
+// TestRateLimitedIsNeverRetried pins the guarantee, not the code.
+//
+// RateLimited must never be retried, because DingConnect returns it both for
+// transport throttling and for a per-account-number fraud rule, and the response
+// does not distinguish them. cascadeDecide enforces half of that by never
+// advancing past it; this table enforces the other half.
+//
+// The half this test guards is the easy one to lose. DC.payout wraps
+// provider.Payout in backoff.Retry and re-invokes it WHOLESALE, so classifying
+// RateLimited as transient would replay the entire discovery cascade from the
+// first candidate -- undoing the in-cascade stop one layer up and hammering a
+// possibly-flagged number. The client library's own Retryable() says true here;
+// we deliberately disagree, and dinersclub never calls it.
+func TestRateLimitedIsNeverRetried(t *testing.T) {
+	got, known := Classify("RateLimited")
+	assert.True(t, known, "RateLimited must be pinned, not left to the unknown-code default")
+	assert.NotEqual(t, RecoveryTransient, got,
+		"RateLimited must never be transient: backoff.Retry would replay the whole cascade")
+	assert.Equal(t, RecoveryPermanent, got)
 }
 
 // TestInsufficientBalanceIsNeverSent is the regression test for the incident
