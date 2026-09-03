@@ -122,7 +122,22 @@ versionScribble: &vscribble v0.0.34
 # is exactly the W1 hazard in planning/multi-platform-plan.md: assume-messenger
 # is correct ONLY while Messenger is the only live transport. It passes on
 # Messenger and fails on WhatsApp, so a Messenger-only test cannot catch it.
-versionDinersclub: &vdinersclub v0.0.48
+# v0.0.48 -> v0.0.49: carries VIR-40 -- dingconnect payments are configured by
+# DELIVERED amount + tolerance, not by an authored (sku_code, send_value) pair,
+# with the resolution moved into go-dingconnect v0.3.0.
+#
+# Nothing in this rollout is required by an existing study: every payment block
+# in production today names sku_code/send_value, and that form is unchanged and
+# still resolves without touching the catalogue. The new path activates only for
+# a block that declares `amount`. So this is safe to roll ahead of the LAC
+# instrument that needs it, and carries no migration for anyone else.
+#
+# It also pins RateLimited as PERMANENT in classify.go. That was previously
+# reaching the unknown-code default, which happened to be the same answer -- the
+# layers agreed by accident. dinersclub never consults the client library's
+# Retryable(), which calls RateLimited retryable; retrying it re-sends to a
+# number that may have tripped a per-account fraud rule.
+versionDinersclub: &vdinersclub v0.0.49
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
