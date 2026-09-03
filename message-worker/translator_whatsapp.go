@@ -340,6 +340,20 @@ func clipToWords(s string, max int) string {
 func translateWhatsAppList(msg types.MessageContent) (types.WhatsAppMessage, error) {
 	text := optionText(*msg.QuestionText)
 
+	// The button that opens the choice sheet is respondent-facing, so it is
+	// per-language rather than a constant here. Replybot resolves it from the
+	// form's own Messages and passes it through as metadata; see the comment on
+	// LIST_BUTTON_LABEL in replybot/lib/generic-translator.js for why the key it
+	// reads is a borrowed one. Hardcoded, this showed an English "Choose" on
+	// every list question of an otherwise Spanish survey.
+	//
+	// Empty means no translation, so fall back rather than send a blank button,
+	// which WhatsApp rejects.
+	listButton := metadataString(metadataMap(msg.Metadata), "listButtonText")
+	if listButton == "" {
+		listButton = "Choose"
+	}
+
 	rows := make([]types.WhatsAppRow, len(msg.Options))
 	for i, opt := range msg.Options {
 		rows[i] = types.WhatsAppRow{
@@ -370,7 +384,7 @@ func translateWhatsAppList(msg types.MessageContent) (types.WhatsAppMessage, err
 				Text: *msg.QuestionText,
 			},
 			Action: types.WhatsAppAction{
-				Button: "Choose",
+				Button: listButton,
 				Sections: []types.WhatsAppSection{
 					{
 						Rows: rows,

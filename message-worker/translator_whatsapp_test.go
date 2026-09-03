@@ -581,3 +581,74 @@ func TestTranslateWhatsAppListDescriptions(t *testing.T) {
 		})
 	}
 }
+
+// TestTranslateWhatsAppListButton covers the label on the button that opens the
+// choice sheet. It is respondent-facing, so a Spanish survey showing "Choose"
+// reads as an untranslated survey; the string comes from the form's Messages
+// (label.button.list) via replybot, carried here as metadata.
+func TestTranslateWhatsAppListButton(t *testing.T) {
+	cmd := func(metadata string) types.SendMessageCommand {
+		c := types.SendMessageCommand{
+			CommandID:      "cmd_btn",
+			ConversationID: "conv_1",
+			UserID:         "user_1",
+			Platform:       types.PlatformWhatsApp,
+			Message: types.MessageContent{
+				Type:         types.MessageTypeQuestion,
+				QuestionText: stringPtr("¿Dónde conseguiste comida?\n\nA. Cafetería\nB. Puesto\nC. Casa\nD. Otro"),
+				Options: []types.Option{
+					{Value: json.RawMessage(`"A"`), Label: "A"},
+					{Value: json.RawMessage(`"B"`), Label: "B"},
+					{Value: json.RawMessage(`"C"`), Label: "C"},
+					{Value: json.RawMessage(`"D"`), Label: "D"},
+				},
+			},
+		}
+		if metadata != "" {
+			c.Message.Metadata = json.RawMessage(metadata)
+		}
+		return c
+	}
+
+	tests := []struct {
+		name string
+		cmd  types.SendMessageCommand
+		want string
+	}{
+		{
+			// No Messages entry: existing forms keep today's behaviour exactly.
+			name: "defaults to Choose when unset",
+			cmd:  cmd(`{"ref":"q21"}`),
+			want: "Choose",
+		},
+		{
+			name: "uses the form's localised label",
+			cmd:  cmd(`{"ref":"q21","listButtonText":"Elegir"}`),
+			want: "Elegir",
+		},
+		{
+			// An empty string is not a translation -- fall back rather than
+			// sending a blank button, which WhatsApp rejects.
+			name: "falls back when the label is empty",
+			cmd:  cmd(`{"ref":"q21","listButtonText":""}`),
+			want: "Choose",
+		},
+		{
+			name: "defaults when there is no metadata at all",
+			cmd:  cmd(""),
+			want: "Choose",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := TranslateToWhatsApp(tt.cmd)
+			if err != nil {
+				t.Fatalf("TranslateToWhatsApp() error = %v", err)
+			}
+			if got.Interactive.Action.Button != tt.want {
+				t.Errorf("list button = %q, want %q", got.Interactive.Action.Button, tt.want)
+			}
+		})
+	}
+}

@@ -833,3 +833,47 @@ describe('translateTypeformField', () => {
     })
   })
 })
+
+describe('list button label', () => {
+  // The button that opens a WhatsApp choice list is respondent-facing, so it is
+  // per-language and comes from the form's Messages. The key is Typeform's
+  // block.dropdown.hint, borrowed because Typeform rejects any messages
+  // key outside its own catalogue -- see the comment on LIST_BUTTON_LABEL.
+  const listField = {
+    type: 'multiple_choice',
+    ref: 'q21',
+    title: '¿Dónde conseguiste comida?\n\nA. Cafetería\nB. Puesto',
+    properties: { choices: [{ label: 'A' }, { label: 'B' }] }
+  }
+  const ctxWith = messages => ({
+    form: { custom_messages: messages },
+    user: { id: 'u' },
+    page: { id: 'p' },
+    platform: 'whatsapp'
+  })
+
+  it('carries the label from the borrowed Messages key', () => {
+    const res = translateTypeformField(listField, ctxWith({ 'block.dropdown.hint': 'Elegir' }))
+    res.metadata.listButtonText.should.equal('Elegir')
+  })
+
+  // Absent, message-worker keeps its own "Choose", so every existing form is
+  // unaffected by this path.
+  it('omits the label when Messages does not define one', () => {
+    const res = translateTypeformField(listField, ctxWith({}))
+    should.not.exist(res.metadata.listButtonText)
+  })
+
+  it('does not throw when the form carries no custom_messages', () => {
+    const res = translateTypeformField(listField, { form: {}, user: { id: 'u' }, page: { id: 'p' } })
+    should.not.exist(res.metadata.listButtonText)
+  })
+
+  it('leaves the rest of the translated question untouched', () => {
+    const res = translateTypeformField(listField, ctxWith({ 'block.dropdown.hint': 'Elegir' }))
+    res.type.should.equal('question')
+    res.question_text.should.equal(listField.title)
+    res.options.length.should.equal(2)
+    res.metadata.ref.should.equal('q21')
+  })
+})

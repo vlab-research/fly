@@ -540,7 +540,47 @@ function translateUtilityMessage(field) {
   return translateTextField(field)
 }
 
+// Label for the button that opens a WhatsApp choice list. Respondent-facing and
+// therefore per-language, so it belongs with the form's own Messages rather than
+// hardcoded in a platform renderer, where a Spanish survey shows an English
+// "Choose" on every list question.
+//
+// The key is Typeform's `block.dropdown.hint`, borrowed rather than
+// named for what we use it for. Typeform validates the messages payload against
+// its OWN fixed key set and rejects the whole payload with NOT_ALLOWED_PROPERTY
+// on anything else -- so one invented key costs you every other message on the
+// form. Carrying a custom string therefore means borrowing an allowed key we do
+// not otherwise use, which is the same trick `label.error.emailAddress` already
+// plays in the lac instrument (it holds an ad-entry prompt, not an email error).
+// A dropdown is Typeform's own choice list, so this is the closest borrow
+// available; nothing in fly reads it for its nominal purpose. Of the free keys
+// it also has the smallest ceiling (64 chars, measured against the API), which
+// suits a value WhatsApp caps at 20 anyway and leaves the roomier 100-255 char
+// slots for borrows that need the space.
+//
+// message-worker cannot read Messages itself -- they live on the form object
+// here, and it only ever sees a SendMessageCommand -- so the resolved string
+// travels as question metadata, which is already passed through untouched.
+const LIST_BUTTON_LABEL = 'block.dropdown.hint'
+
 function translateTypeformField(field, ctx) {
+  const res = _translateTypeformField(field, ctx)
+
+  // Questions only: it is the choice list's button, and nothing else renders one.
+  // Absent from Messages, message-worker keeps its own default, so existing
+  // forms are unaffected.
+  if (res && res.type === 'question') {
+    const messages = (ctx && ctx.form && ctx.form.custom_messages) || {}
+    const label = messages[LIST_BUTTON_LABEL]
+    if (label) {
+      res.metadata = { ...res.metadata, listButtonText: label }
+    }
+  }
+
+  return res
+}
+
+function _translateTypeformField(field, ctx) {
   switch (field.type) {
     case 'short_text':
     case 'long_text':
