@@ -104,6 +104,33 @@ var (
 		Help: "1 while dinersclub is running. Exists so the absence of a scrape is distinguishable from the absence of payments.",
 	}, func() float64 { return 1 })
 
+	// pinDrift counts DingConnect payments rejected because a pinned SKU no
+	// longer matches the intent the survey declared.
+	//
+	// This is the counter behind the alert, and the design assumes it almost
+	// never fires: SKUs and commission rates move a few times a year, which is
+	// why a hard failure on drift is affordable. If it starts firing regularly
+	// the assumption was wrong, and the answer is on_drift: "resolve" (deferred
+	// out of v1), not a wider tolerance.
+	pinDrift = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dinersclub_dingconnect_pin_drift_total",
+		Help: "DingConnect payments failed because a pinned sku_code no longer satisfies the declared amount. Each one needs the pin re-researched.",
+	}, []string{"reason"})
+
+	// deliveredOutOfWindow counts transfers that COMPLETED but delivered an
+	// amount outside the declared window.
+	//
+	// The realised TransferRecord price is the only thing that knows what
+	// actually landed, so this is the sole true detector of the failure the
+	// declared-intent design exists to prevent: a commission rate moving so the
+	// transfer succeeds while paying the respondent the wrong incentive. It
+	// cannot fail the payment -- the money has already moved -- so it is a
+	// counter and a loud log, and it should be zero.
+	deliveredOutOfWindow = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dinersclub_dingconnect_delivered_out_of_window_total",
+		Help: "Completed DingConnect transfers whose realised delivered amount differed from what the catalogue predicted.",
+	})
+
 	// processingFaults counts failures that are ours rather than a payment's:
 	// a malformed Kafka message, a database that will not answer, a botserver
 	// that never accepted the Result.
@@ -150,6 +177,16 @@ func recordResult(pe *PaymentEvent, res *Result) {
 
 // _ keeps the always-on gauge referenced at package scope.
 var _ = up
+
+// recordPinDrift files a DingConnect pin that no longer satisfies its intent.
+func recordPinDrift(reason string) {
+	pinDrift.WithLabelValues(reason).Inc()
+}
+
+// recordDeliveredOutOfWindow files a completed transfer that paid the wrong amount.
+func recordDeliveredOutOfWindow() {
+	deliveredOutOfWindow.Inc()
+}
 
 // recordFault files a fault in dinersclub itself.
 func recordFault(stage string) {

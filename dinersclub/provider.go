@@ -58,6 +58,11 @@ type Result struct {
 	Error          *PaymentError    `json:"error,omitempty"`
 	PaymentDetails *json.RawMessage `json:"payment_details,omitempty"`
 	Response       *json.RawMessage `json:"response,omitempty"`
+	// Resolution records how a dingconnect payment chose its product, so a
+	// cascade over several candidates stays ONE payment event while remaining
+	// debuggable per respondent. omitempty: absent for every other provider and
+	// for dingconnect's explicit sku_code path.
+	Resolution *DingConnectResolution `json:"resolution,omitempty"`
 }
 
 type Provider interface {

@@ -216,7 +216,7 @@ blocking is what caused the 2026-08-17 incident.
 | `reloadly.go` | Reloadly mobile topup provider |
 | `giftcards.go` | Reloadly gift card provider |
 | `http_provider.go` | Generic HTTP provider for arbitrary APIs |
-| `dingconnect.go` | DingConnect mobile topup provider (global API key, instant mode) |
+| `dingconnect.go` | DingConnect provider. A **thin adapter**: unmarshal vlab's payment block, call `go-dingconnect`, map the outcome onto `Result` and metrics |
 | `classify.go` | **Pure** mapping from provider error code to recovery class. Decides whether a failure is sent at all |
 | `metrics.go` | Prometheus collectors and the `/metrics` endpoint |
 
@@ -369,7 +369,281 @@ VALUES ('user-uuid', 'dingconnect', 'prod-key', '{"api_key": "dc_live_xxxxx..."}
 
 The `key` field allows multiple DingConnect accounts per user (e.g., 'prod', 'staging', 'test'). The `details` JSON must contain an `api_key` field with the DingConnect API key from your account.
 
-**Payment Details Structure** (JSON in PaymentEvent.Details):
+#### Configuring a payment: declare the intent, pin the resolution
+
+A DingConnect `sku_code` identifies **one operator's** product, and its
+`send_value` is a USD amount whose delivered value differs per operator because
+commission rates differ. All three of these deliver ARS 1,000:
+
+| Operator | SKU | send_value |
+|---|---|---|
+| Claro | `CLAR5046` | $0.79 |
+| Movistar | `TFAR58291` | $0.85 |
+| Personal | `PRAR13725` | $0.93 |
+
+So a bare `send_value` is an uninterpretable magic number: nothing records what
+it was *for*, which means nothing can check it. **If a commission rate moves,
+$0.79 is still a valid send value — the transfer completes, the result says
+success, and the respondent silently receives ARS 800.** Declaring the intent is
+what makes the pinned number verifiable; that is the entire reason both exist.
+
+```json
+{
+  "id": "p1",
+  "account_number": "{{field:phone|e164}}",
+  "distributor_ref": "ar_{{field:phone|e164}}_p1",
+
+  "amount": 1000,
+  "amount_currency": "ARS",
+  "tolerance": 200,
+
+  "operators": {
+    "CLAR": {"sku_code": "CLAR5046",  "send_value": 0.79},
+    "TFAR": {"sku_code": "TFAR58291", "send_value": 0.85},
+    "PRAR": {"sku_code": "PRAR13725", "send_value": 0.93}
+  }
+}
+```
+
+| field | meaning |
+|---|---|
+| `amount` | **Minimum delivered** — a floor on `Price.ReceiveValue`, not on spend |
+| `amount_currency` | **Required**, and validated against the product's `ReceiveCurrencyIso` |
+| `tolerance` | Headroom **on the delivered amount**, matching Reloadly's `TopupJob.Tolerance`. **Optional, defaults to `0`** — see the warning below |
+| `operators` | Optional pin, keyed by operator code (case-insensitive). Looked up, not iterated |
+| `operator` | Optional; names the operator directly and skips detection |
+| `on_drift` | Optional, `"fail"` (the default and only implemented value) |
+| `account_number`, `distributor_ref` | Required on every path |
+| `send_currency_iso`, `id`, `settings` | Optional, unchanged |
+
+**The window is on delivered value, not spend.** A study cares that every
+respondent receives the same incentive, not that every payment costs the same.
+
+**`amount_currency` is never inferred from the country.** DingConnect's receive
+currency is not always local (`2ANG44349` receives USD), so inferring it would
+let a catalogue change deliver 1,000 of the wrong unit while reporting success.
+
+**Order is deliberately not expressible in `operators`.** A phone number belongs
+to exactly one operator, so there is nothing to arbitrate — the map is a lookup
+table, and `AccountLookup` returning several items is a data quirk, not a choice.
+
+> ### ⚠️ `tolerance` defaults to zero, and zero means exact match
+>
+> Omitting `tolerance` makes the window `[amount, amount]` — the delivered value
+> must equal `amount` **exactly**. That is rarely what an author means, and it
+> is fragile in a way that is easy to miss:
+>
+> **Some currencies round the delivered value down to a whole unit.** In
+> Bolivia, receive values round down to whole bolivianos. A pin sitting on a
+> rounding boundary can therefore flip to `PinOutOfWindow` and **hard-fail the
+> payment on a rounding artefact rather than a real commission change** — and
+> the failure is permanent, so the respondent is told their payment failed.
+>
+> dinersclub logs a loud warning for any payment declaring `tolerance: 0` and
+> pays anyway. **It does not invent a non-zero default**, deliberately: widening
+> a window the researcher never declared would pay an amount they never asked
+> for, which is exactly the automagic this design exists to remove. Set a
+> tolerance that covers at least one rounding step unless an exact match is
+> genuinely intended.
+
+#### How a payment resolves
+
+1. **Operator known** (from `operator`, or from `AccountLookup`) **and pinned** →
+   verify the pin against the intent, send once. This is the common path and it
+   costs **one POST**.
+2. **Operator known, `operators` present, no entry for it** → fails naming both
+   the detected operator and the ones you pinned (`NO_PIN_FOR_OPERATOR`).
+3. **Operator known, no `operators` map** → resolve from the catalogue: the
+   cheapest `SendValue` whose delivered value lands in
+   `[amount, amount + tolerance]`. A fixed SKU qualifies only if its single value
+   lands in the window; a range SKU is solved for and clamped to its bounds.
+4. **Detection inconclusive** (lookup failed, returned nothing, or returned
+   several operators) **and pins present** → *discovery*: try the pinned
+   candidates until one accepts the number. Exactly one of them is the number's
+   operator; sending is what settles it.
+5. **Detection inconclusive and no pins** → `COULD_NOT_AUTO_DETECT_OPERATOR`.
+
+Nothing that satisfies the window → `IMPOSSIBLE_AMOUNT`, naming the window and
+what was available. **The delivered amount is never outside the window.**
+
+#### Drift
+
+**A contract violation:** the pinned SKU no longer exists, or its delivered value
+at the pinned `send_value` no longer falls inside the window. Either is a hard,
+loud failure that increments `dinersclub_dingconnect_pin_drift_total`, and **no
+money moves** — drift is caught before the send.
+
+**Not drift:** a pin that still satisfies the window but is no longer the
+cheapest option. It is honoured silently. A pin overridden over pennies is not a
+pin, and payments would become nondeterministic for no benefit.
+
+`on_drift: "resolve"` — re-resolving to a different SKU instead of failing — is
+**deliberately not implemented**. It is machinery for a case we expect to be
+rare, and it reintroduces the "did something silently change my incentive?" risk
+the rest of this design removes. Deferring is safe because it is purely
+additive: `on_drift` already defaults to `"fail"`, so adding it later needs no
+migration.
+
+#### Cascade contract (the discovery path)
+
+| Outcome | Behaviour |
+|---|---|
+| Success | Return immediately |
+| `RechargeNotAllowed` | Wrong operator for this number — try the next candidate |
+| `AccountNumberInvalid` | The number itself is bad — stop; no other SKU will help |
+| `RateLimited` | **Stop. Never retried, never advanced past** — may be a per-account fraud rule |
+| Transport fault / timeout | Stop. We do not know whether money moved; advancing risks paying twice |
+| Unrecognised code | Stop and surface it |
+| All candidates exhausted | Return the **last real failure**, never a synthetic code |
+
+**Advance is an allow-list and stop is the default**, in `cascadeDecide`
+(`dingconnect_resolve.go`). That is what makes a newly-introduced DingConnect
+code unable to cause a send nobody designed. A stop code **anywhere** in the
+`ErrorCodes` array wins — `Codes[0]` is never read, because DingConnect can
+return `RateLimited` alongside `RechargeNotAllowed`.
+
+`RechargeNotAllowed` is documented against "product/send amount", not explicitly
+against operator mismatch. **It is unconfirmed** as the wrong-operator signal.
+Because it is only the *advance* signal, being wrong about it degrades discovery
+into a single attempt rather than sending money anywhere it should not go.
+
+#### `distributor_ref`
+
+Every **single-send** path (explicit SKU, verified pin, catalogue resolution)
+uses the authored `distributor_ref` unchanged. Only **discovery** derives a
+per-candidate `<ref>_<sku_code>`, so candidate 2 is not rejected as a duplicate
+of candidate 1.
+
+Derivation is deterministic and keyed on the **path, not the candidate count**,
+so a payment already parked in production keeps the exact reference it was first
+submitted under when dean re-drives it. A derived ref longer than 64 characters
+is rejected up front rather than truncated — a mangled ref is unsearchable in
+DingConnect's own transfer records.
+
+#### Catalogue cache
+
+Pin verification is a **local lookup**, not a round trip: `go-dingconnect` caches
+the product catalogue for 6 hours per client. Because `Auth` builds one client
+per researcher credential, that cache is scoped to a single DingConnect account
+— commission rates are a property of the distributor account, so sharing a
+catalogue across accounts would price one researcher's payment with another's
+rates. Effective lifetime is the shorter of the library's TTL and how long
+`main.go`'s auth cache keeps the provider alive.
+
+#### Where this logic lives
+
+**Amount resolution is `go-dingconnect`'s, not dinersclub's** (v0.3.0+,
+`payment.go`). Operator detection, catalogue fetch and caching, amount selection,
+pin verification, the advance/stop cascade and `DistributorRef` derivation are
+all library behaviour, and their tests live there.
+
+That split is the rule stated at the top of `dingconnect.go` and in the
+library's own `CLAUDE.md`: *all wire-format knowledge and error-code semantics
+belong in the client*. It was briefly broken — an earlier version of this work
+put the whole cascade here — and moved.
+
+| `go-dingconnect` | `dinersclub` |
+|---|---|
+| operator detection, catalogue fetch + cache | unmarshalling the snake_case payment block |
+| amount selection, pin verification | `Auth` and Generic Secrets |
+| the advance/stop cascade policy | mapping outcomes onto `Result`/`PaymentError` |
+| `DistributorRef` derivation | `classify.go` recovery classes, Prometheus metrics |
+
+`resolutionReasonToCode` in `dingconnect.go` **is** that boundary: the library
+reports a `ResolutionReason` in its own vocabulary and owns no metrics registry;
+dinersclub decides what each one means for a respondent and what to count. A
+reason added upstream arrives here unmapped and is logged loudly rather than
+silently renamed.
+
+**Features**:
+- **Instant mode only**: Synchronous processing - transfers are completed within 90 seconds
+- **Per-user API key**: Credentials stored in database per user and key (matching Reloadly pattern)
+- **90-second timeout for the WHOLE resolution**: lookup, catalogue fetch and every send share one deadline, so a discovery cascade costs no more wall clock than a single payment. See "Why provider calls have a hard timeout"
+- **Error code passthrough**: Returns DingConnect error codes directly
+
+**Error codes**: DingConnect's own codes are passed through **verbatim**, in
+PascalCase, exactly as `go-dingconnect/errors.go` defines them — the code that
+reaches the respondent's `md.e_payment_dingconnect_error_code` is
+`AccountNumberInvalid`, not a normalised name.
+
+| code | meaning |
+|---|---|
+| `InsufficientBalance` | The researcher's DingConnect wallet is empty |
+| `AccountNumberInvalid` | The number is not a valid account for this product |
+| `RechargeNotAllowed` | The product cannot top this number up (usually the wrong operator) |
+| `RateLimited` | Throttled, **or** a per-account fraud rule was breached |
+| `DuplicateTransactionPrevented` | This `distributor_ref` was already used — the idempotency guard working |
+| `AuthenticationFailed` | The API key is wrong or revoked |
+| `TransientProviderError`, `ProviderError` | Operator-side failure |
+
+> **An earlier version of this section listed six SCREAMING_SNAKE codes
+> (`INSUFFICIENT_BALANCE`, `INVALID_ACCOUNT_NUMBER`, `INVALID_SKU_CODE`,
+> `PROVIDER_UNAVAILABLE`, `PROVIDER_TIMED_OUT`, `DUPLICATE_REFERENCE`) that this
+> provider has never emitted.** They were invented, and `classify.go` still
+> carries rows for five of them that are therefore unreachable — which means
+> DingConnect's real codes fall to the unknown-code default. Tracked as a
+> companion ticket **VIR-41**; `RateLimited` is the one row already fixed here,
+> because the never-retry guarantee depends on it.
+
+#### What a survey can branch on
+
+A failed payment carries **two independent signals**, and they answer different
+questions. Do not conflate them:
+
+| key | means |
+|---|---|
+| `e_payment_dingconnect_error_code` | **DingConnect refused**, or a transfer failed |
+| `e_payment_dingconnect_resolution_reason` | **we refused to send**, and no money moved |
+
+"We would not pay you because our configuration is out of date" is a different
+thing to tell a respondent than "your operator declined the top-up". They are
+separate fields so a survey author never has to memorise which string came from
+which side of the wire.
+
+`resolution_reason` carries the `go-dingconnect` value **verbatim**. The full
+value space:
+
+| `resolution_reason` | meaning | maps to `error_code` |
+|---|---|---|
+| `PinSkuMissing` | the pinned `sku_code` is gone from the catalogue | `PIN_DRIFT` |
+| `PinOutOfWindow` | the pin no longer delivers inside the window | `PIN_DRIFT` |
+| `CurrencyMismatch` | the product's `ReceiveCurrencyIso` is not `amount_currency` | `AMOUNT_CURRENCY_MISMATCH` |
+| `NoPinForOperator` | an operator was detected but is not in `operators` | `NO_PIN_FOR_OPERATOR` |
+| `OperatorNotDetermined` | no operator resolved and nothing pinned to try | `COULD_NOT_AUTO_DETECT_OPERATOR` |
+| `ImpossibleAmount` | nothing in the catalogue delivers inside the window | `IMPOSSIBLE_AMOUNT` |
+| `InvalidRequest` | the payment block itself is not coherent | `INVALID_PAYMENT_DETAILS` |
+
+**Every one of these means no money moved.** A respondent seeing any of them was
+not paid and was not partially paid.
+
+The rest of the resolution block is available too:
+`e_payment_dingconnect_resolution_{path,operator,country,sku_code,send_value,expected_delivered,delivered,currency}`.
+
+**`expected_delivered` vs `delivered`** is worth branching on or auditing:
+`expected_delivered` is what the catalogue predicted, `delivered` is what the
+transfer actually reported. A gap between them means a payment **succeeded**
+while paying an amount the catalogue did not predict — the exact failure the
+declared-intent design exists to catch. It is also counted by
+`dinersclub_dingconnect_delivered_out_of_window_total`, but it lives on the
+payment record so a researcher can see it per respondent rather than only in
+aggregate.
+
+Codes produced by resolution itself, before any transfer is sent:
+
+| code | meaning |
+|---|---|
+| `PIN_DRIFT` | The pinned SKU is gone, or no longer delivers in-window |
+| `AMOUNT_CURRENCY_MISMATCH` | The product's `ReceiveCurrencyIso` is not `amount_currency` |
+| `NO_PIN_FOR_OPERATOR` | An operator was detected but the block pins no entry for it |
+| `IMPOSSIBLE_AMOUNT` | Nothing in the catalogue delivers inside the window |
+| `COULD_NOT_AUTO_DETECT_OPERATOR` | No operator resolved and nothing pinned to try |
+
+**Explicit SKU (the escape hatch)**: `sku_code` + `send_value` still works
+exactly as before and is sent as authored, with no intent to verify against.
+Mutually exclusive with `amount`/`operators` — supplying both is rejected,
+because there is no honest precedence rule between them and it is what "I tried
+to share one `send_value` across several operators" looks like in JSON.
+
 ```json
 {
   "id": "optional_payment_id",
@@ -381,32 +655,6 @@ The `key` field allows multiple DingConnect accounts per user (e.g., 'prod', 'st
   "settings": [{"name": "setting1", "value": "value1"}]
 }
 ```
-
-**Required Fields**:
-- `sku_code` (string): Product SKU from DingConnect GetProducts endpoint
-- `account_number` (string): Target phone number or account identifier
-- `distributor_ref` (string): Unique ID for deduplication (e.g., `userid-phone` or `timestamp-uuid`). DingConnect uses this to prevent duplicate charges for the same transfer submitted multiple times.
-- `send_value` (number): Amount to transfer (must be positive)
-
-**Optional Fields**:
-- `send_currency_iso` (string): Currency code (defaults to USD if not provided)
-- `id` (string): Payment ID for tracking
-- `settings` (array): Provider-specific settings
-
-**Features**:
-- **Instant mode only**: Synchronous processing - transfers are completed within 90 seconds
-- **Per-user API key**: Credentials stored in database per user and key (matching Reloadly pattern)
-- **90-second timeout**: Hard timeout for SendTransfer requests
-- **Error code passthrough**: Returns DingConnect error codes directly
-
-**Error codes** (returned from DingConnect API):
-- `INSUFFICIENT_BALANCE`: Account balance too low for the transfer
-- `INVALID_ACCOUNT_NUMBER`: Phone number format invalid
-- `INVALID_SKU_CODE`: Product SKU not found or disabled
-- `PROVIDER_UNAVAILABLE`: Mobile operator is down
-- `PROVIDER_TIMED_OUT`: Request to operator exceeded 90 seconds
-- `DUPLICATE_REFERENCE`: Same distributor_ref submitted twice
-- Other codes passed through as-is for display to user
 
 **Enabled via**:
 ```bash
@@ -808,7 +1056,17 @@ observability: it makes the silent path unaccountable and blinds every alert in
 | `dinersclub_unclassified_error_codes_total` | `provider`, `code` | which rows are missing from `recoveryByCode` |
 | `dinersclub_payment_duration_seconds` | `provider`, `outcome` | are we anywhere near the Kafka poll budget |
 | `dinersclub_processing_faults_total` | `stage` | is dinersclub itself broken (replaces "the pod restarted") |
+| `dinersclub_dingconnect_pin_drift_total` | `reason` | a pinned SKU stopped satisfying its declared amount; the pin needs re-researching |
+| `dinersclub_dingconnect_delivered_out_of_window_total` | — | a transfer COMPLETED but paid an amount the catalogue did not predict |
 | `dinersclub_up` | — | is anyone scraping this at all |
+
+The last two are the DingConnect amount contract. `pin_drift` should be near
+zero — the design assumes SKUs and commission rates move a few times a year, and
+that is what makes hard-failing on drift affordable. If it fires regularly the
+assumption was wrong, and the answer is `on_drift: "resolve"`, not a wider
+tolerance. `delivered_out_of_window` should be **exactly** zero: it fires only
+after money has moved, so it cannot fail the payment, and it is the sole true
+detector of a respondent silently receiving the wrong incentive.
 
 `recovery != "permanent"` is precisely the set of failures the respondent was
 never told about.

@@ -144,6 +144,26 @@ var recoveryByCode = map[string]Recovery{
 	"TRANSACTION_REFUSED_BY_OPERATOR":    RecoveryPermanent, // 2
 	"RECIPIENT_REACHED_MAX_TOPUP_NUMBER": RecoveryPermanent, // 15
 
+	// DingConnect's rate limit. PERMANENT, WHICH CONTRADICTS THE CLIENT
+	// LIBRARY ON PURPOSE.
+	//
+	// (*dingconnect.Error).Retryable() returns true for RateLimited, reading it
+	// as transport throttling. It is right about its own question ("could an
+	// identical request succeed?") and wrong for ours ("should we send it
+	// again?"): DingConnect returns this code both for genuine throttling AND
+	// for a per-account-number fraud rule being breached, and the response does
+	// not say which. Hammering a flagged number is the outcome we must never
+	// risk, so the ambiguity resolves to "stop".
+	//
+	// THIS ROW IS HALF OF A GUARANTEE. The other half is cascadeDecide, which
+	// never advances past RateLimited. Both halves are needed: DC.payout's
+	// backoff.Retry re-invokes Payout wholesale, so classifying this transient
+	// would replay the entire discovery cascade from the first candidate --
+	// undoing the in-cascade stop one layer up. dinersclub never calls
+	// Retryable(); worker retry runs off this table alone. See
+	// planning/dingconnect-amount-resolution.md §8.
+	"RateLimited": RecoveryPermanent,
+
 	// The survey's payment configuration cannot pay this person. The amount
 	// is still impossible on the next attempt.
 	"IMPOSSIBLE_AMOUNT":                  RecoveryPermanent, // 271
@@ -152,6 +172,15 @@ var recoveryByCode = map[string]Recovery{
 	"INVALID_AMOUNT_FOR_OPERATOR":        RecoveryPermanent, // 41
 	"INVALID_INPUT_PROVIDED":             RecoveryPermanent, // 129
 	"INVALID_SKU_CODE":                   RecoveryPermanent, // dingconnect
+
+	// The DingConnect payment block declared an amount the catalogue can no
+	// longer honour. All three are the researcher's to fix, and all three are
+	// PERMANENT because a retry sends the same stale configuration -- parking
+	// someone for dean's 14 days would hide the very drift these exist to make
+	// loud. See planning/dingconnect-amount-resolution.md.
+	"PIN_DRIFT":                RecoveryPermanent, // pinned sku gone, or out of window
+	"AMOUNT_CURRENCY_MISMATCH": RecoveryPermanent, // product delivers a different currency
+	"NO_PIN_FOR_OPERATOR":      RecoveryPermanent, // operator detected, not pinned
 
 	// Malformed on our side of the wire. A retry sends the same bad bytes.
 	"INVALID_PAYMENT_DETAILS":   RecoveryPermanent, // 20
