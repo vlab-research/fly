@@ -1,8 +1,7 @@
 'use strict';
 
-const { Survey, User, Credential } = require('../../queries');
-const { SurveyUtil } = require('../../utils');
-const { TypeformUtil } = require('../../utils');
+const { Survey } = require('../../queries');
+const { registerSurveyVersion, NO_TYPEFORM_CREDENTIAL } = require('./survey.service');
 
 // Guards the ::UUID cast in Survey.update, which would otherwise 500 on junk.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,45 +20,33 @@ exports.postOne = async (req, res) => {
         );
     }
 
-    // TODO: this is silly, get userid via db query
-    const user = await User.user({ email });
-    if (!user)
-      return res.status(404).json({ error: `User ${email} does not exist!` });
-    const { id: userid } = user;
-
-    const cred = await Credential.getOne({ email, entity: 'typeform_token', key: TypeformUtil.makeKey(email) });
-    const token = cred.details.access_token;
-
-    const form = await TypeformUtil.TypeformForm(token, formid);
-    const messages = await TypeformUtil.TypeformMessages(token, formid);
-
-    // check if translation is possible with formcentral
-    const err = await SurveyUtil.validateTranslation({ form, translation_conf })
-    if (err) {
-      return res.status(400).send('Translation config not valid. Error: ' + err)
-    }
-
-    const created = new Date();
-
-    // add good stuff here
-    const survey = {
+    const result = await registerSurveyVersion({
+      email,
       formid,
-      created,
-      messages,
-      title,
-      userid, // TODO: change userid for teamid
-      form,
       shortcode,
       survey_name,
+      title,
       metadata,
       translation_conf,
-    };
+    });
 
-    SurveyUtil.validate(survey);
-    const createdSurvey = await Survey.create(survey);
+    if (result.noAccount) {
+      return res.status(404).json({ error: `User ${email} does not exist!` });
+    }
 
-    res.status(201).send(createdSurvey);
+    if (result.missingCredential) {
+      return res.status(400).send(NO_TYPEFORM_CREDENTIAL);
+    }
+
+    res.status(201).send(result.survey);
   } catch (err) {
+    // A SurveyFailure is the caller's own bad input and its message is safe to
+    // return; anything else is ours and must not be echoed.
+    if (err && err.expected) {
+      console.error(err.message);
+      return res.status(400).send(err.message);
+    }
+
     console.error(err);
     res.status(500).send(err);
   }

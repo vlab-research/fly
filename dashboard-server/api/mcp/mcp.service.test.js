@@ -83,9 +83,16 @@ function load(overrides = {}) {
     },
   };
 
-  const service = proxyquire('./mcp.service', {
+  // survey.service is stubbed through the same fakes so its own transitive
+  // requires never reach the real queries module.
+  const surveyService = proxyquire('../surveys/survey.service', {
     '../../queries': queries,
     '../../utils': utils,
+  });
+
+  const service = proxyquire('./mcp.service', {
+    '../../queries': queries,
+    '../surveys/survey.service': surveyService,
     './mcp.typeform': typeform,
   });
 
@@ -93,138 +100,6 @@ function load(overrides = {}) {
 }
 
 const find = (calls, name) => calls.find(c => c.name === name);
-
-describe('mcp.service: Typeform credential', () => {
-  it('looks the token up by the same key the dashboard writes it under', async () => {
-    const { service, calls } = load();
-    await service.typeformToken({ email: EMAIL });
-
-    expect(find(calls, 'Credential.getOne').args).to.eql({
-      email: EMAIL,
-      entity: 'typeform_token',
-      key: `${EMAIL}:typeform`,
-    });
-  });
-
-  it('returns the token when the credential is there, and null when it is not', async () => {
-    expect(await load().service.typeformToken({ email: EMAIL })).to.equal('tf-token');
-    expect(await load({ credential: null }).service.typeformToken({ email: EMAIL })).to.equal(null);
-  });
-
-  it('treats a credential row with no access_token as no credential', async () => {
-    const { service } = load({ credential: { details: {} } });
-    expect(await service.typeformToken({ email: EMAIL })).to.equal(null);
-  });
-});
-
-describe('mcp.service: registerSurveyVersion', () => {
-  const args = {
-    email: EMAIL,
-    formid: 'f1',
-    shortcode: 'sc',
-    survey_name: 'Study',
-    title: 'Screener',
-    now: new Date('2026-03-01T00:00:00Z'),
-  };
-
-  it('writes the row the REST create path writes', async () => {
-    const { service, calls } = load();
-    const out = await service.registerSurveyVersion(args);
-
-    expect(out.ok).to.equal(true);
-    expect(find(calls, 'Survey.create').args).to.eql({
-      formid: 'f1',
-      form: VALID_FORM,
-      messages: '{}',
-      title: 'Screener',
-      userid: 'user-1',
-      shortcode: 'sc',
-      survey_name: 'Study',
-      metadata: {},
-      translation_conf: {},
-      created: args.now,
-    });
-  });
-
-  // The controller passes req.body's translation_conf straight through, and
-  // validateTranslation dereferences it — so an omitted value is a TypeError
-  // there. Defaulting it is the difference between a 500 and a survey.
-  it('defaults translation_conf to {} instead of dereferencing undefined', async () => {
-    const { service, calls } = load();
-    await service.registerSurveyVersion(args);
-
-    expect(find(calls, 'SurveyUtil.validateTranslation').args.translation_conf).to.eql({});
-  });
-
-  it('reports a missing Typeform credential without touching the database', async () => {
-    const { service, calls } = load({ credential: null });
-    const out = await service.registerSurveyVersion(args);
-
-    expect(out).to.eql({ ok: false, missingCredential: true });
-    expect(find(calls, 'Survey.create')).to.equal(undefined);
-  });
-
-  /*
-   * Typeform answers an unknown form id with a 404 BODY rather than an error,
-   * and TypeformForm returns res.text() unconditionally. Without this check the
-   * error blob is stored verbatim as a survey definition and the failure only
-   * surfaces later, to a participant, as a broken conversation.
-   */
-  it('refuses to store a Typeform response that is not a form', async () => {
-    const { service, calls } = load({
-      form: JSON.stringify({ code: 'FORM_NOT_FOUND', description: 'Non existing form' }),
-    });
-
-    let error;
-    try {
-      await service.registerSurveyVersion(args);
-    } catch (e) {
-      error = e;
-    }
-
-    expect(error.expected).to.equal(true);
-    expect(error.message).to.match(/Typeform has no form with id "f1"/);
-    expect(find(calls, 'Survey.create')).to.equal(undefined);
-  });
-
-  it('refuses unparseable Typeform output', async () => {
-    const { service } = load({ form: '<html>502</html>' });
-    let error;
-    try {
-      await service.registerSurveyVersion(args);
-    } catch (e) {
-      error = e;
-    }
-    expect(error.message).to.match(/unreadable form/);
-  });
-
-  it('surfaces a formcentral translation rejection as an expected failure', async () => {
-    const { service, calls } = load({ translationError: 'no such destination shortcode' });
-    let error;
-    try {
-      await service.registerSurveyVersion({ ...args, translation_conf: { destination: 'x' } });
-    } catch (e) {
-      error = e;
-    }
-
-    expect(error.expected).to.equal(true);
-    expect(error.message).to.match(/no such destination shortcode/);
-    expect(find(calls, 'Survey.create')).to.equal(undefined);
-  });
-
-  it('reports an unknown researcher rather than writing an orphan row', async () => {
-    const { service, calls } = load({ user: null });
-    let error;
-    try {
-      await service.registerSurveyVersion(args);
-    } catch (e) {
-      error = e;
-    }
-
-    expect(error.expected).to.equal(true);
-    expect(find(calls, 'Survey.create')).to.equal(undefined);
-  });
-});
 
 describe('mcp.service: updateSettings', () => {
   const surveys = [

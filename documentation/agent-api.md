@@ -217,7 +217,7 @@ Creates one new survey version.
 | `survey_name` | string | **yes** | Checked in the controller's early guard |
 | `shortcode` | string | **yes** | Early guard, then `joi.string().required()` |
 | `formid` | string | **yes** | Early guard, then `joi.string().alphanum().required()` — the Typeform form id |
-| `title` | string | **effectively yes** | *Not* in the early guard, but `joi.string().required()` in `dashboard-server/utils/surveys/survey.util.js`. Omitting it fails — as a **500**, not a 400 |
+| `title` | string | **effectively yes** | *Not* in the early guard, but `joi.string().required()` in `dashboard-server/utils/surveys/survey.util.js`. Omitting it is a `400` |
 | `metadata` | object | **effectively yes** | joi treats it as optional, but the column is `JSONB NOT NULL`; see the note below |
 | `translation_conf` | object | **effectively yes** | Dereferenced before it is validated; see the note below |
 
@@ -247,28 +247,30 @@ the rest.
 |---|---|---|
 | `survey_name`, `formid` or `shortcode` missing | `400` | text, literally: `Missing shit!: formid: <formid>, shortcode: <shortcode>` |
 | No `users` row for the token's email | `404` | `{"error": "User <email> does not exist!"}` |
-| **No `typeform_token` credential** | `500` | `Credential.getOne` returns `undefined`, and `cred.details` throws. Not a 400 |
-| `translation_conf` omitted | `500` | `TypeError` inside `validateTranslation` |
-| `translation_conf` sets **both** `self` and `destination` | `500` | thrown `cant translation both to a destination and to self!` |
-| formcentral rejects the translation mapping | `400` | text: `Translation config not valid. Error: <formcentral's body>` |
-| `title` missing, or a joi type violation (`formid` not alphanumeric, `shortcode` not a string) | `500` | thrown `Config validation error: ...` |
-| `metadata` omitted | `500` | NOT NULL violation (inferred) |
+| No `typeform_token` credential | `400` | text: `No Typeform account is connected to this Fly account. ...` |
+| **Typeform has no such form**, or the token cannot read it | `400` | text: `Typeform has no form with id "<formid>" ...`, quoting Typeform's response |
+| Typeform returns something unparseable | `400` | text: `Typeform returned an unreadable form for "<formid>": ...` |
+| Typeform request throws (network, auth) | `400` | text: `Could not read Typeform form "<formid>": <message>` |
+| formcentral rejects the translation mapping | `400` | text: `translation_conf is not valid: <formcentral's body>` |
+| `title` missing, or a joi type violation (`formid` not alphanumeric, `shortcode` not a string) | `400` | text: `Config validation error: ...` |
+| `translation_conf` sets **both** `self` and `destination` | `500` | thrown from `SurveyUtil.validateTranslation`, which is not a caller-safe failure and so is not echoed |
 
-> **Every `500` here has an empty body.** The handler is
-> `res.status(500).send(err)`, and an `Error` object JSON-stringifies to `{}`
-> because its properties are not enumerable. The real message only exists in the
-> server's `console.error` output. Treat a `500` from this endpoint as "one of
-> the rows above", not as "the server is broken".
+`translation_conf` and `metadata` may both be omitted; each defaults to `{}`.
 
-> **A wrong `formid` returns `201`.** `TypeformUtil.TypeformForm` never checks
-> `res.ok` (`dashboard-server/utils/typeform/typeform.util.js`) — it returns
-> `res.text()` whatever the status. A 404 from Typeform is a JSON error body,
-> which is a valid string and a valid JSON cast, so it is stored as the survey's
-> form and the create succeeds. The survey then fails at conversation time
-> instead. **Verify the form id against `GET /api/v1/typeform/form` before
-> posting**, and sanity-check that the `title` in the response is the form you
-> meant. The one case that catches this early is a survey with translation
-> enabled, because formcentral then rejects the mapping with a 400.
+> **A `400` from this endpoint carries a real message.** The create path
+> distinguishes failures that are the caller's own — those are returned
+> verbatim — from internal ones, which are logged and answered with an empty
+> `500` body (`res.status(500).send(err)` serialises an `Error` to `{}`). So a
+> `400` tells you what to fix; a `500` means read the server log.
+
+> **Historical note.** Before VIR-37 this endpoint answered a missing
+> `typeform_token`, an omitted `translation_conf`, an omitted `metadata` and any
+> joi violation with an empty `500`, and — worse — answered a *wrong `formid`*
+> with `201`, storing Typeform's 404 error body verbatim as the survey's form so
+> that the survey only failed later, at conversation time. Both paths now run
+> through one shared implementation, so an id Typeform does not know is a `400`
+> at create time. Verifying with `GET /api/v1/typeform/form` first is still the
+> cheapest way to be sure you have the form you meant.
 
 ---
 
@@ -499,7 +501,7 @@ The keys are read by `dashboard-server/utils/surveys/survey.util.js` and by
 | `{"self": true}` | The form translates against itself |
 | `{"destination": "<survey id UUID>"}` | Translate into the structure of that survey **version id** (not a shortcode, not a survey_name) |
 
-Setting both is a hard error (a 500, per §3). On create, the dashboard validates
+Setting both is a hard error (a 500, per §3 — it is thrown rather than reported). On create, the dashboard validates
 the pair by POSTing `{form, ...translation_conf}` to formcentral's
 `/translators`, which builds a by-`ref` field mapping between the two forms and
 returns `404` if the destination id does not exist or `400` if the mapping
@@ -686,10 +688,6 @@ reported generically.
 
 Marked here rather than guessed at.
 
-- **`metadata` omitted → NOT NULL violation** is *inferred*, not observed. It
-  follows from `metadata JSONB NOT NULL` with no default applied to an explicit
-  bind, plus `pg` binding `undefined` as `NULL`. The failure class (a 500) is
-  certain from the controller; the specific error is not verified at runtime.
 - **API keys and internal service JWTs share one signing secret**
   (`AUTH0_DASHBOARD_SECRET`, also deployed to replybot and hermes). This is why
   the verifier cannot require `exp` and why an absent scopes claim has to mean

@@ -268,9 +268,9 @@ forever on a stream that has already ended.
 
 | File | Role |
 |---|---|
-| `mcp.core.js` | Pure. The five tool definitions (name, description, JSON Schema), the server instructions, a small JSON Schema validator, and every decision function — `summariseSurveys`, `resolvePreviousVersion`, `buildVersionRequest`, `mergeSettings`, `buildSurveyRecord`, result shaping. No IO, no clock |
+| `mcp.core.js` | Pure. The five tool definitions (name, description, JSON Schema), the server instructions, a small JSON Schema validator, and every decision function — `summariseSurveys`, `resolvePreviousVersion`, `buildVersionRequest`, `mergeSettings`, result shaping. No IO, no clock |
 | `mcp.tools.js` | Dispatch. `TOOL_SCOPES` (the per-tool scope check), one thin async handler per tool, and `runTool`, which turns every failure into a tool error rather than letting it escape as a transport error |
-| `mcp.service.js` | The shell: database and Typeform IO |
+| `mcp.service.js` | The shell: Typeform authoring and the `survey_settings` read-modify-write. **Creating a survey version is not here** — see below |
 | `mcp.typeform.js` | `createForm` — the one Typeform call the dashboard has never needed, since `utils/typeform/` only ever read |
 | `mcp.server.js` | Builds one `Server` per request, bound to one email + scope set |
 | `mcp.routes.js` | Transport wiring |
@@ -283,20 +283,31 @@ would require the schemas as zod, which is code rather than a contract.
 
 **A tool error is a normal result with `isError` set**, never a thrown exception
 or an HTTP error: a model can read a tool error and correct itself, whereas a
-transport failure is just a dead turn. `mcp.service.js` throws `ToolFailure`
-(marked `expected`) for anything an agent can act on; everything else is logged
+transport failure is just a dead turn. The service layer throws a failure marked `expected` for anything an agent can act on; everything else is logged
 and reported as a generic internal error, because unexpected messages leak
 internals.
 
-**`registerSurveyVersion` is `survey.controller.js#postOne` extracted**, so the
-tools and `POST /api/v1/surveys` share one implementation of what a survey
-version is. It is extracted rather than imported because the controller's
-version is welded to `(req, res)`. It differs from the controller in two places,
-both fixing bugs rather than inventing behaviour: `translation_conf` defaults to
-`{}` (the controller dereferences it before checking it exists, so a missing one
-is a `TypeError`), and it checks that Typeform actually returned a form — a
-missing form comes back as a 404 *body*, not a throw, and would otherwise be
-stored verbatim as the survey's content.
+#### Creating a survey version is one shared function
+
+`api/surveys/survey.service.js#registerSurveyVersion` is the single
+implementation, called by both `POST /api/v1/surveys` and the
+`create_survey` / `create_survey_version` tools. It lives under `api/surveys/`
+rather than `api/mcp/` because it is a survey operation that MCP happens to
+call: the dependency runs `mcp -> surveys` and never back.
+
+It knows nothing about `req`/`res`. Callers map its outcome onto their own
+protocol — the controller onto status codes, the dispatcher onto tool errors —
+and the two kinds of failure are the whole contract: a `SurveyFailure` (marked
+`expected`) is the caller's own bad input and its message is safe to return
+verbatim; anything else is ours and must never be echoed, because unexpected
+messages leak internals.
+
+Sharing it fixed two bugs that had been live in the REST path:
+`translation_conf` now defaults to `{}` (the old controller dereferenced it
+before checking it existed, so omitting it was a `TypeError` and a 500), and the
+Typeform response is checked for an actual form — a missing form comes back as a
+404 *body* rather than a throw, and used to be stored verbatim as the survey's
+content, surfacing only later as a broken participant conversation.
 
 ### Media
 

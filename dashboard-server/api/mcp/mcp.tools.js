@@ -52,6 +52,7 @@ const {
   validateFormSpec,
   buildTypeformCreatePayload,
   NO_TYPEFORM_CREDENTIAL,
+  NO_FLY_ACCOUNT,
 } = core;
 
 // Everything a tool says about a survey it just wrote. `version` is computed
@@ -124,6 +125,7 @@ const TOOL_HANDLERS = {
     }
 
     const result = await service.registerSurveyVersion({ email, ...args });
+    if (result.noAccount) return toolError(NO_FLY_ACCOUNT);
     if (result.missingCredential) return toolError(NO_TYPEFORM_CREDENTIAL);
 
     return toolResult({
@@ -143,6 +145,7 @@ const TOOL_HANDLERS = {
 
     const request = buildVersionRequest(resolved.previous, args);
     const result = await service.registerSurveyVersion({ email, ...request });
+    if (result.noAccount) return toolError(NO_FLY_ACCOUNT);
     if (result.missingCredential) return toolError(NO_TYPEFORM_CREDENTIAL);
 
     return toolResult({

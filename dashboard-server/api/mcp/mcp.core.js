@@ -644,36 +644,8 @@ function buildTypeformCreatePayload({ title, fields, hidden, thankyou_screens, w
 // Survey shaping.
 // ---------------------------------------------------------------------------
 
-/*
- * The row `Survey.create` expects. Kept here rather than inline in the shell so
- * that "what a survey version is made of" is one testable expression shared by
- * create_survey and create_survey_version.
- */
-function buildSurveyRecord({
-  formid,
-  form,
-  messages,
-  title,
-  userid,
-  shortcode,
-  survey_name,
-  metadata,
-  translation_conf,
-  created,
-}) {
-  return {
-    formid,
-    form,
-    messages,
-    title,
-    userid,
-    shortcode,
-    survey_name,
-    metadata: metadata || {},
-    translation_conf: translation_conf || {},
-    created,
-  };
-}
+// Shared with POST /surveys; re-exported so MCP callers have one import.
+const { buildSurveyRecord } = require('../surveys/survey.core');
 
 const byCreatedDesc = (a, b) => new Date(b.created) - new Date(a.created);
 
@@ -831,6 +803,10 @@ const NO_TYPEFORM_CREDENTIAL = [
   'authorisation) and then retry. Nothing was created.',
 ].join(' ');
 
+const NO_FLY_ACCOUNT =
+  'This key authenticates, but no Fly account exists for its email — the key has ' +
+  'outlived its account, so nothing can be created with it.';
+
 module.exports = {
   // constants / data
   TOOLS,
@@ -840,6 +816,7 @@ module.exports = {
   DEFAULT_THANKYOU_SCREENS,
   MAX_CHOICES,
   NO_TYPEFORM_CREDENTIAL,
+  NO_FLY_ACCOUNT,
 
   // schema + validation
   validateAgainstSchema,
