@@ -37,3 +37,21 @@ spec:
           value: "http://gbv-facebot"
         - name: NUM_WORKERS
           value: "10"
+        - name: KAFKA_GROUP_ID
+          value: "dev-message-worker"
+        # Every retry knob is required; there are no defaults in the code, so a
+        # missing one fails at startup rather than silently taking a value
+        # nobody chose. See requiredEnv in message-worker/config.go.
+        - name: MESSENGER_RETRY_CODES
+          value: "1200,551"
+        - name: WHATSAPP_RETRY_CODES
+          value: "131056"
+        - name: MAX_RETRY_ATTEMPTS
+          value: "3"
+        - name: INITIAL_BACKOFF_MS
+          value: "100"
+        - name: MAX_BACKOFF_MS
+          value: "1000"
+        - name: MAX_RETRY_ELAPSED
+          # Short in dev: a long ladder just makes local failures slow to see.
+          value: "5s"

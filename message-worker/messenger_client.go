@@ -24,16 +24,7 @@ func NewMessengerClient(baseURL string, tokenStore TokenStore) *MessengerClient 
 		baseURL:    baseURL,
 		tokenStore: tokenStore,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
-		retryCodes: defaultMessengerRetryCodes(),
 	}
-}
-
-// defaultMessengerRetryCodes is the Graph API error codes worth retrying.
-//
-// 1200 is a temporary send failure and 551 is "this person isn't available
-// right now", both of which clear on their own.
-func defaultMessengerRetryCodes() map[int]bool {
-	return map[int]bool{1200: true, 551: true}
 }
 
 // WithRetryCodes replaces the set of Graph API error codes treated as

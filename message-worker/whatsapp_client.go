@@ -27,26 +27,7 @@ func NewWhatsAppClient(baseURL string, tokenStore TokenStore) *WhatsAppClient {
 		baseURL:    baseURL,
 		tokenStore: tokenStore,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
-		retryCodes: defaultWhatsAppRetryCodes(),
 	}
-}
-
-// defaultWhatsAppRetryCodes is the Cloud API error codes worth retrying in the
-// worker.
-//
-// 131056 only, by default. It is the (business account, consumer account) pair
-// rate limit: scoped to ONE recipient, with a cooldown measured at under 90
-// seconds. Because commands are keyed by user_id and burrow processes a key on
-// one worker at a time, retrying it in place cannot contend with itself and
-// delays no other recipient.
-//
-// The account-wide limits -- 4, 80007, 130429 -- are deliberately absent.
-// Retrying those per message across every worker is a thundering herd: each
-// backs off independently and they all return together, re-tripping the limit.
-// Those, and the long-lived ones (131048 spam, 131057 maintenance), belong to
-// dean's blocked sweep, which retries on a schedule rather than in place.
-func defaultWhatsAppRetryCodes() map[int]bool {
-	return map[int]bool{131056: true}
 }
 
 // WithRetryCodes replaces the set of Cloud API error codes treated as
