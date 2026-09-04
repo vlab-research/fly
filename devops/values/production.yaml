@@ -379,8 +379,33 @@ dean:
     value: "NETWORK,INTERNAL,STATE_ACTIONS"
   - name: DEAN_ERROR_INTERVAL
     value: "48 hours"
+  # WhatsApp rate-limit / throttling codes, added 2026-09-03 (131056) and
+  # 2026-09-04 (the rest). All are transient by definition. The send fails,
+  # replybot marks the participant BLOCKED with a null next_retry, and without
+  # an entry here nothing ever resumes them. Unlike the FIELD_NOT_FOUND case
+  # noted above, none of these can be permanent, so they cannot burn
+  # DEAN_RETRY_MAX_ATTEMPTS against something that can never succeed. The
+  # blocked sweep runs inside the `respondings` CronJob below, every 30 min.
+  #
+  #      4  App-level Graph API throttle, "Application request limit reached".
+  #  80007  WhatsApp Business Account rate limit. Companion to 80006, already here.
+  # 130429  Cloud API message throughput exceeded -- our own send rate, not a
+  #         property of the recipient, so it can strand many participants at once.
+  # 131048  Spam rate limit: sending restricted because previous messages were
+  #         blocked or flagged. Lifts when quality recovers. Retrying costs
+  #         nothing extra -- a restricted send never reaches a recipient, so it
+  #         cannot itself be flagged -- and picks the participant back up when
+  #         the restriction clears.
+  # 131056  (Business Account, Consumer Account) pair rate limit: WhatsApp
+  #         throttling one business number to one consumer number. Seen in
+  #         production on the LAC Healthy Diets pilot; cleared in a few minutes.
+  # 131057  Business Account in maintenance mode, e.g. a throughput upgrade.
+  #
+  # Deliberately NOT here: 133016 (registration attempt limit -- applies to
+  # registering a number, never to a send), and 368 / 131031 / 130497, which are
+  # policy restrictions rather than throttles and are not self-clearing.
   - name: DEAN_FB_CODES
-    value: "2022,613,-1,190,80006,551"
+    value: "2022,613,-1,190,80006,551,4,80007,130429,131048,131056,131057"
   - name: DEAN_BLOCKED_INTERVAL
     value: "120 hours"
   - name: DEAN_RESPONDING_INTERVAL
