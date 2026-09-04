@@ -239,56 +239,71 @@ on the other.
 This is the constraint that bounds any in-worker retry or backoff scheme; see
 `planning/`-adjacent work on WhatsApp error 131056 for a worked example.
 
-### Status: fixed in burrow v0.1.6, adopted here
+### Status: fixed in burrow, adopted here
 
-Everything above describes burrow `v0.1.5`. `message-worker` moved to `v0.1.6`,
-which fixes all of it (see `burrow/PARTITION_TRACKING.md`):
+Everything above describes burrow `v0.1.5`. `message-worker` runs `v0.2.0`,
+which fixes all of it:
 
 | the problem above | how it was fixed |
 |---|---|
 | a gap on one partition blocks commits on the other | offsets are tracked per partition; there is no global sequence |
-| ~10 queued commands stop the whole pod polling | queues are per partition, and a full queue pauses that partition instead of blocking the poll loop |
-| raising `NUM_WORKERS` shrinks buffers and makes it worse | `NumWorkers` is per partition, so its buffer does not shrink as the fleet grows |
-| the rebalance callback is never attached | `main.go` now calls `pool.Subscribe`; subscribing the consumer directly cannot attach it |
+| ~10 queued commands stop the whole pod polling | work is claimed by key, not by a queue bound to a worker, so a slow key holds one worker and blocks nothing |
+| raising `NUM_WORKERS` shrinks buffers and makes it worse | `QueueSizePerWorker` is per worker and is not divided by anything |
+| the rebalance callback is never attached | `main.go` calls `pool.Subscribe`; subscribing the consumer directly cannot attach it |
 | a slow message widens the redelivery window | a stalled partition no longer holds back the others' commits |
 
-`max.poll.interval.ms` is now set explicitly in the consumer `ConfigMap` at
+`max.poll.interval.ms` is set explicitly in the consumer `ConfigMap` at
 librdkafka's own default of 300000ms — a no-op in value, but the eviction budget
-is now a number someone chose rather than one inherited silently.
+is now a number someone chose.
 
-#### `NUM_WORKERS` means something different now — read this before tuning it
+#### Ordering needs no configuration
 
-It is workers **per assigned partition**, not per pod. Effective send
-concurrency is `NUM_WORKERS x partitions-per-pod x pods`:
+Commands are keyed by `user_id`. Burrow processes a key on at most one worker at
+a time, so a user's messages reach the platform in the order replybot produced
+them, whatever `NUM_WORKERS` is set to. The v0.1.5-era `KeyAffinity` flag is
+gone; there is no longer a setting to forget.
 
-| env | value | partitions/pod | pods | in flight (was, v0.1.5) |
-|---|---|---|---|---|
-| production | 24 | 2 (6 partitions / 3 pods) | 3 | **144** (72) |
-| staging | 8 | 6 (6 partitions / 1 pod) | 1 | **48** (8) |
+Because nothing is bound to a worker, `NUM_WORKERS` can also be changed freely.
+The old warning about only changing it on a planned restart — it remapped which
+worker served which key — no longer applies.
 
-Both were left at their previous numbers, so both roughly doubled or more. That
-is deliberate:
+#### `NUM_WORKERS` is pool-wide
+
+It is this pod's worker count, full stop. It was briefly per-partition in
+`v0.1.6`; in `v0.2.0` it is pool-wide again and does not move with partition
+assignment, so a scale-down no longer concentrates concurrency onto one pod.
+
+| env | value | pods | in flight |
+|---|---|---|---|
+| production | 48 | 3 | **144** |
+| staging | 48 | 1 | **48** |
+
+Both were raised so fleet-wide concurrency stays where `v0.1.6` put it, which
+was itself a deliberate increase over `v0.1.5`'s 72. Two reasons:
 
 - **A retry ladder parks a worker for its whole duration.** Headroom is what
-  stops one parked user from costing every other user their throughput. Raising
-  send concurrency is the point of having fixed the poll-loop stall.
+  stops one parked user from costing every other user their throughput.
 - **It does not widen 131056 exposure.** That error is a
-  *(business account, consumer account)* **pair** rate limit — scoped to one
-  recipient. Sends to different users never contend for it. Commands are keyed
-  by `user_id`, so one user already sits on one partition and one worker,
-  serialized. Extra workers add parallelism only *across* users. The trigger is
-  one user generating events faster than the cooldown, not the fleet sending
-  faster in aggregate.
+  *(business account, consumer account)* **pair** rate limit, scoped to one
+  recipient. Sends to different users never contend for it, and a single user is
+  already serialized onto one worker. The trigger is one user generating events
+  faster than the cooldown, not the fleet sending faster in aggregate.
 
-The multiplier moves with partition assignment, which makes **scale-down the
-thing to watch, not scale-up**: at one pod, that pod owns all six partitions and
-runs 144 workers by itself. Check the CPU limit before scaling down.
+#### Backpressure
 
-`Stats.PartitionsPaused` is the new backpressure signal. A value that stays
-above zero means producers are outrunning that partition's workers. The old
-advice to raise `JobQueueSize` when the poll loop stalls no longer applies — and
-was backwards anyway, since per-worker buffers were `JobQueueSize / NumWorkers`,
-so raising `NUM_WORKERS` shrank them.
+The pool buffers at most `QueueSizePerWorker x NUM_WORKERS` jobs — 10 × 48 = 480
+per pod. Beyond that the poll loop waits.
+
+That bound is a real overload signal: reaching it means every worker is busy
+*and* the buffer behind them is full. One slow key cannot cause it, because a
+slow key holds one worker and leaves the rest free.
+
+Keep the depth small. Buffered jobs are uncommitted offsets, redelivered on any
+crash or rebalance — and here redelivery means re-sending to real people. Kafka
+already holds them durably for 31 days.
+
+`Stats.JobsQueued` sitting at the bound means saturation; `Stats.KeysPending`
+shows how many distinct users have work outstanding.
 
 ## Token Store Compatibility
 
