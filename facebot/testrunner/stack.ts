@@ -457,6 +457,21 @@ export async function startStack(): Promise<Stack> {
     // small margin keeps it usable; pinning it here stops a future default
     // change from quietly turning the by-id tests into by-url tests.
     MEDIA_HANDLE_MARGIN: '1h',
+    // Retry configuration. Every one of these is REQUIRED by
+    // message-worker/config.go -- there are no defaults, so a missing one exits
+    // at startup and this container never logs 'starting message processing'.
+    // If that wait strategy ever times out, read the container's own log first:
+    // LoadConfigFromEnv names every missing variable.
+    //
+    // Deliberately short. Production spans the ~88.6s WhatsApp 131056 cooldown,
+    // which would add minutes per failing send here; the suite is testing that
+    // retries happen, not how long they take.
+    MESSENGER_RETRY_CODES: '1200,551',
+    WHATSAPP_RETRY_CODES: '131056',
+    MAX_RETRY_ATTEMPTS: '3',
+    INITIAL_BACKOFF_MS: '50',
+    MAX_BACKOFF_MS: '200',
+    MAX_RETRY_ELAPSED: '2s',
   };
 
   const messageWorker = await new GenericContainer(messageWorkerImageName)
