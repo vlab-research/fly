@@ -109,14 +109,20 @@ func main() {
 	clients := make(map[types.PlatformType]messageworker.MessageSender)
 
 	// Create Messenger client with proper Facebook Graph API integration
-	messengerClient := messageworker.NewMessengerClient(config.FacebookGraphURL, tokenStore)
+	messengerClient := messageworker.NewMessengerClient(config.FacebookGraphURL, tokenStore).
+		WithRetryCodes(config.MessengerRetryCodes)
 	clients[types.PlatformMessenger] = messengerClient
-	logger.Info("registered Messenger client", zap.String("url", config.FacebookGraphURL))
+	logger.Info("registered Messenger client",
+		zap.String("url", config.FacebookGraphURL),
+		zap.Ints("retry_codes", config.MessengerRetryCodes))
 
 	// Create WhatsApp client (real Cloud API HTTP client)
-	whatsappClient := messageworker.NewWhatsAppClient(config.WhatsAppGraphURL, tokenStore)
+	whatsappClient := messageworker.NewWhatsAppClient(config.WhatsAppGraphURL, tokenStore).
+		WithRetryCodes(config.WhatsAppRetryCodes)
 	clients[types.PlatformWhatsApp] = whatsappClient
-	logger.Info("registered WhatsApp client", zap.String("url", config.WhatsAppGraphURL))
+	logger.Info("registered WhatsApp client",
+		zap.String("url", config.WhatsAppGraphURL),
+		zap.Ints("retry_codes", config.WhatsAppRetryCodes))
 
 	// Create stub clients for platforms not yet implemented
 	clients[types.PlatformInstagram] = messageworker.NewInstagramClient()
@@ -128,8 +134,25 @@ func main() {
 	logger.Info("platform clients initialized", zap.Int("platforms", len(clients)))
 
 	// Create worker with business logic
-	worker := messageworker.NewWorker(clients, eventProducer, config.BotserverURL, logger)
-	logger.Info("worker initialized with botserver", zap.String("botserver_url", config.BotserverURL))
+	// Retry behaviour comes from configuration. Until now Config read
+	// MAX_RETRY_ATTEMPTS, INITIAL_BACKOFF_MS and MAX_BACKOFF_MS and then
+	// dropped them: NewWorker took DefaultRetryConfig unconditionally, so
+	// setting those variables did nothing.
+	retryConfig := messageworker.RetryConfig{
+		MaxAttempts:    config.MaxRetryAttempts,
+		InitialBackoff: time.Duration(config.InitialBackoffMS) * time.Millisecond,
+		MaxBackoff:     time.Duration(config.MaxBackoffMS) * time.Millisecond,
+		MaxElapsed:     config.MaxRetryElapsed,
+	}
+
+	worker := messageworker.NewWorker(clients, eventProducer, config.BotserverURL, logger).
+		WithRetryConfig(retryConfig)
+	logger.Info("worker initialized with botserver",
+		zap.String("botserver_url", config.BotserverURL),
+		zap.Int("retry_max_attempts", retryConfig.MaxAttempts),
+		zap.Duration("retry_initial_backoff", retryConfig.InitialBackoff),
+		zap.Duration("retry_max_backoff", retryConfig.MaxBackoff),
+		zap.Duration("retry_max_elapsed", retryConfig.MaxElapsed))
 
 	// Media handle layer (planning/media-abstraction.md). A lookup failure here
 	// must not stop the worker from starting -- the handle layer is an

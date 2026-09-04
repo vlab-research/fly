@@ -305,6 +305,36 @@ already holds them durably for 31 days.
 `Stats.JobsQueued` sitting at the bound means saturation; `Stats.KeysPending`
 shows how many distinct users have work outstanding.
 
+### Retry: what retries where
+
+Two mechanisms retry a failed send, and they own different error codes.
+
+**In the worker, in place.** `WHATSAPP_RETRY_CODES` (default `131056`) lists the
+Cloud API codes retried inside `processFunc`, bounded by `MAX_RETRY_ATTEMPTS`,
+`INITIAL_BACKOFF_MS`, `MAX_BACKOFF_MS` and `MAX_RETRY_ELAPSED`. All four are read
+together and the tightest bound wins; `MAX_RETRY_ELAPSED` is the real control,
+because under a doubling delay the attempt count is a poor proxy for elapsed
+time.
+
+Only 131056 by default. It is the *(business account, consumer account)* pair
+rate limit — scoped to **one recipient**, with a cooldown measured at ≤88.6s.
+Retrying it in place is safe because commands are keyed by `user_id` and burrow
+processes a key on one worker at a time, so the retry cannot contend with itself
+and delays no other recipient.
+
+**In dean, on a schedule.** `DEAN_FB_CODES` covers the rest: the account-wide
+throughput limits (4, 80007, 130429) and the long-lived ones (131048 spam,
+131057 maintenance). Retrying account-wide limits per message across every
+worker is a thundering herd — each worker backs off independently and they all
+return together to re-trip the limit. Those want a scheduled sweep, which is
+what dean's `respondings` CronJob (`*/30`) provides.
+
+The split is deliberate: **per-recipient limits retry in place, account-wide and
+long-lived limits retry on a schedule.**
+
+Note the two lists disagree on purpose, and both are environment variables — if
+you move a code from one to the other, move it out of the list it was in.
+
 ## Token Store Compatibility
 
 Message Worker queries the same `credentials` table as Replybot for Facebook page tokens:

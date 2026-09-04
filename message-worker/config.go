@@ -54,6 +54,18 @@ type Config struct {
 	InitialBackoffMS int
 	MaxBackoffMS     int
 
+	// MaxRetryElapsed caps total time spent retrying one send. Zero means only
+	// MaxRetryAttempts bounds it. Under exponential backoff the attempt count
+	// is a poor proxy for elapsed time, so size against the downstream
+	// cooldown with this and let attempts fall out.
+	MaxRetryElapsed time.Duration
+
+	// MessengerRetryCodes and WhatsAppRetryCodes are the vendor error codes
+	// retried in the worker, per platform. Both are required: see the
+	// validation in LoadConfig for why they have no defaults.
+	MessengerRetryCodes []int
+	WhatsAppRetryCodes  []int
+
 	// Error reporting
 	BotserverURL string // For reporting errors to botserver /synthetic endpoint
 
@@ -97,9 +109,12 @@ func LoadConfigFromEnv() (*Config, error) {
 		InstagramAPIKey: os.Getenv("INSTAGRAM_API_KEY"),
 
 		// Retry defaults
-		MaxRetryAttempts: getEnvAsInt("MAX_RETRY_ATTEMPTS", 3),
-		InitialBackoffMS: getEnvAsInt("INITIAL_BACKOFF_MS", 100),
-		MaxBackoffMS:     getEnvAsInt("MAX_BACKOFF_MS", 1000),
+		MaxRetryAttempts:    getEnvAsInt("MAX_RETRY_ATTEMPTS", 3),
+		InitialBackoffMS:    getEnvAsInt("INITIAL_BACKOFF_MS", 100),
+		MaxBackoffMS:        getEnvAsInt("MAX_BACKOFF_MS", 1000),
+		MaxRetryElapsed:     getEnvAsDuration("MAX_RETRY_ELAPSED", 0),
+		WhatsAppRetryCodes:  getEnvAsIntSlice("WHATSAPP_RETRY_CODES"),
+		MessengerRetryCodes: getEnvAsIntSlice("MESSENGER_RETRY_CODES"),
 
 		// Error reporting
 		BotserverURL: os.Getenv("BOTSERVER_URL"),
@@ -109,30 +124,8 @@ func LoadConfigFromEnv() (*Config, error) {
 		MediaHandleMargin: getEnvAsDuration("MEDIA_HANDLE_MARGIN", time.Hour),
 	}
 
-	// Validate required config
-	if config.DatabaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL is required for token lookup")
-	}
-
-	if config.BotserverURL == "" {
-		return nil, fmt.Errorf("BOTSERVER_URL is required for error reporting")
-	}
-
-	// KAFKA_GROUP_ID has no default on purpose. One Kafka cluster is shared by
-	// production and staging, so the consumer group MUST be env-scoped
-	// (vlab-prod-message-worker / vlab-staging-message-worker) to match the
-	// vlab-<env>-* topic convention. Consumer-group alerting in
-	// devops/kafka-consumer-health/values.yaml is keyed on the exact group name,
-	// so a bare fallback like "message-worker" would let a deploy that forgot
-	// this variable start up healthy-looking while joining a group that NOTHING
-	// alerts on — and message-worker is the sole outbound send path. Failing
-	// loudly at startup is strictly safer than a plausible-looking default.
-	if config.KafkaGroupID == "" {
-		return nil, fmt.Errorf(
-			"KAFKA_GROUP_ID is required and must be env-scoped, e.g. " +
-				"vlab-prod-message-worker or vlab-staging-message-worker; " +
-				"it must also have a matching row in " +
-				"devops/kafka-consumer-health/values.yaml or the group will run unmonitored")
+	if err := requireEnv(); err != nil {
+		return nil, err
 	}
 
 	return config, nil
@@ -181,4 +174,108 @@ func parseCommaSeparated(s string) []string {
 		}
 	}
 	return result
+}
+
+// getEnvAsIntSlice reads a comma-separated list of integers, e.g.
+// WHATSAPP_RETRY_CODES="131056,130429". Whitespace around entries is ignored.
+// An entry that is not an integer is skipped rather than failing startup: a
+// typo in one code should not stop the worker from sending.
+//
+// An unset variable yields an empty list, indistinguishable here from an empty
+// one. Callers that need the distinction check os.LookupEnv themselves; see the
+// required-config validation in LoadConfig.
+func getEnvAsIntSlice(key string) []int {
+	raw := os.Getenv(key)
+
+	out := []int{}
+	for _, field := range strings.Split(raw, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		n, err := strconv.Atoi(field)
+		if err != nil {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// requiredVar is an environment variable the service refuses to start without.
+type requiredVar struct {
+	name string
+
+	// emptyIsValid marks variables where "" is a meaningful setting rather than
+	// an omission -- the retry code lists, where empty means "retry nothing".
+	// For those, presence is what is checked, not content.
+	emptyIsValid bool
+
+	why string
+}
+
+// requiredEnv is the set of variables that must be set explicitly.
+//
+// Nothing here has a default, deliberately. A default that is merely plausible
+// lets a misconfigured deploy start up looking healthy, and this service has
+// produced that failure repeatedly: retry limits that were read and then
+// discarded, a graph URL quietly falling back to a sunset API version, error
+// classification borrowed from the wrong platform. In every case the default
+// was the reason nobody noticed.
+//
+// The bar for living here: if getting it wrong is silent, it is required.
+var requiredEnv = []requiredVar{
+	{name: "DATABASE_URL", why: "token lookup"},
+	{name: "BOTSERVER_URL", why: "error reporting to the state machine"},
+	{
+		name: "KAFKA_GROUP_ID",
+		why: "must be env-scoped (vlab-prod-message-worker / vlab-staging-message-worker): " +
+			"one Kafka cluster is shared by production and staging, and consumer-group " +
+			"alerting in devops/kafka-consumer-health/values.yaml is keyed on the exact " +
+			"name, so a plausible fallback would join an unmonitored group",
+	},
+	{
+		name:         "WHATSAPP_RETRY_CODES",
+		emptyIsValid: true,
+		why: "WhatsApp Cloud API error codes to retry in the worker, comma-separated " +
+			"(e.g. \"131056\", the per-recipient pair rate limit). Empty disables " +
+			"in-worker retries. Account-wide limits belong in dean's DEAN_FB_CODES",
+	},
+	{
+		name:         "MESSENGER_RETRY_CODES",
+		emptyIsValid: true,
+		why: "Messenger Graph API error codes to retry in the worker, comma-separated " +
+			"(e.g. \"1200,551\"). Empty disables in-worker retries",
+	},
+	{name: "MAX_RETRY_ATTEMPTS", why: "cap on retry attempts per send"},
+	{name: "INITIAL_BACKOFF_MS", why: "first retry delay"},
+	{name: "MAX_BACKOFF_MS", why: "ceiling on any single retry delay"},
+	{
+		name: "MAX_RETRY_ELAPSED",
+		why: "total time budget across retries, e.g. \"120s\". Under a doubling delay " +
+			"the attempt count is a poor proxy for elapsed time, so size this against " +
+			"the downstream cooldown and let the attempt count fall out",
+	},
+}
+
+// requireEnv reports every missing variable at once.
+//
+// All of them, not the first: a deploy that is missing three variables should
+// learn that in one restart rather than three.
+func requireEnv() error {
+	var missing []string
+
+	for _, v := range requiredEnv {
+		value, present := os.LookupEnv(v.name)
+		if !present || (!v.emptyIsValid && strings.TrimSpace(value) == "") {
+			missing = append(missing, fmt.Sprintf("  %s — %s", v.name, v.why))
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("missing required environment variable(s):\n%s",
+		strings.Join(missing, "\n"))
 }
