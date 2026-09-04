@@ -77,17 +77,25 @@ func main() {
 		"group.id":           config.KafkaGroupID,
 		"auto.offset.reset":  config.KafkaAutoOffsetReset,
 		"enable.auto.commit": false, // Burrow handles commits
+
+		// Explicit rather than inherited, so the eviction budget is a number
+		// someone chose. This is librdkafka's own default; it is spelled out
+		// because it is the clock that decides whether a slow send becomes a
+		// rebalance. Burrow v0.1.6 pauses a saturated partition instead of
+		// blocking the poll loop, so this should no longer be reachable --
+		// which is exactly why a silent default would be the wrong thing to
+		// rely on.
+		"max.poll.interval.ms": 300000,
 	})
 	if err != nil {
 		logger.Fatal("failed to create kafka consumer", zap.Error(err))
 	}
 	defer consumer.Close()
 
-	// Subscribe to command topic
-	err = consumer.SubscribeTopics([]string{config.KafkaCommandTopic}, nil)
-	if err != nil {
-		logger.Fatal("failed to subscribe to topics", zap.Error(err))
-	}
+	// NOTE: the topic subscription happens through the burrow pool further
+	// down, not here. Subscribing the consumer directly leaves burrow's
+	// rebalance callback unattached, and it has no way to attach it after the
+	// fact -- see the pool.Subscribe call below.
 
 	// Create Kafka producer for events
 	eventProducer, err := messageworker.NewKafkaProducer(
@@ -145,6 +153,19 @@ func main() {
 		zap.Duration("media_handle_margin", config.MediaHandleMargin))
 
 	// Create Burrow pool for concurrent processing.
+	//
+	// As of burrow v0.1.6 the pool runs one sub-pool PER ASSIGNED PARTITION,
+	// so NumWorkers is per partition, not per pod. This pod's send concurrency
+	// is NUM_WORKERS x partitions assigned to it, and the assignment moves with
+	// the group -- a scale-down concentrates partitions and therefore raises
+	// per-pod concurrency.
+	//
+	// NUM_WORKERS was deliberately NOT lowered to compensate. The retry ladder
+	// parks a worker for the length of the ladder, so the extra concurrency is
+	// the headroom that keeps one parked user from costing others their
+	// throughput. It does not widen 131056 exposure: that is a per-recipient
+	// pair limit, and key affinity already serializes any one user onto one
+	// worker. See devops/values/production.yaml.
 	burrowConfig := burrow.DefaultConfig(logger)
 	burrowConfig.NumWorkers = config.NumWorkers
 	burrowConfig.CommitInterval = 5 * time.Second
@@ -165,6 +186,17 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to create burrow pool", zap.Error(err))
 	}
+
+	// Subscribe THROUGH THE POOL. burrow's rebalance callback is private, so
+	// consumer.SubscribeTopics(topic, nil) -- which is what this did until
+	// v0.1.6 -- left it unattached: the pool never learned that partitions
+	// changed hands, so it did not commit what it had finished before losing
+	// one, and every rolling deploy replayed the uncommitted window as
+	// duplicate sends to real people.
+	if err := pool.Subscribe([]string{config.KafkaCommandTopic}); err != nil {
+		logger.Fatal("failed to subscribe to topics", zap.Error(err))
+	}
+	logger.Info("subscribed to command topic", zap.String("topic", config.KafkaCommandTopic))
 
 	// Setup graceful shutdown
 	sigChan := make(chan os.Signal, 1)

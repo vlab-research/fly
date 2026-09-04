@@ -172,7 +172,14 @@ up stalls polling for the whole pod — including workers sitting idle. See
 6 replicas is maximum useful parallelism — a 7th pod idles. Going beyond that
 means adding partitions first.
 
-Production runs 6 replicas as of 2026-08-17.
+Production runs **3 replicas** (`devops/values/production.yaml:1093`, confirmed
+against the live deployment 2026-09-04) against a 6-partition topic, so each pod
+owns **2 partitions**. That is deliberate: more partitions than consumers means
+headroom to scale pods without repartitioning, which would remap key to
+partition and break the per-key ordering that key affinity exists to provide.
+
+> An earlier version of this line said "6 replicas as of 2026-08-17" and treated
+> 6 as the tuned state. That was stale.
 
 ### Rebalance replays duplicate sends
 
@@ -189,6 +196,99 @@ owner, and those commands send twice. With `CommitInterval: 5s` that is up to
 This predates multi-replica operation (a single pod already replayed on every
 deploy), but rebalances are more frequent now. The fix belongs in the `burrow`
 repo: expose the callback so `SubscribeTopics` can pass it instead of `nil`.
+
+### A slow send stalls commits for the whole pod
+
+The three levers above assume `ProcessCommand` returns quickly. It is worth
+stating what breaks when it does not, because the answer is not "that one
+message is late."
+
+Burrow's `SequenceTracker` assigns **one monotonic sequence across all
+partitions**, and `FindCommittableOffset` (`gap.go:6-15`) walks forward from the
+last committed sequence and stops at the first unprocessed one. So a single
+worker blocked in `processFunc` (`pool.go:153`) holds a gap open, and **no
+offsets commit behind it, on any partition, until it returns.**
+
+Combined with the unwired rebalance callback above, that turns the duplicate-send
+window from `CommitInterval` (5s) into however long the slowest in-flight command
+takes. A rolling deploy during a 3-minute stall re-sends 3 minutes of traffic.
+
+Two further thresholds follow, in order:
+
+| after | what happens | why |
+|---|---|---|
+| ~10 queued commands for one worker | the **whole pod** stops polling | per-worker buffers are `JobQueueSize / NumWorkers` (`pool.go:75`) = 1000/100 = 10; `pollLoop` blocks on the send at `pool.go:206`, and polling is single-threaded (`pool.go:118`) |
+| 5 minutes without polling | consumer evicted, rebalance | `max.poll.interval.ms` is not set in the consumer `ConfigMap` (`main.go:75-80`), so librdkafka's 300000ms default applies |
+
+Note the second row's interaction with `NUM_WORKERS`: because per-worker buffers
+are `JobQueueSize / NumWorkers` and `JobQueueSize` stays at burrow's default
+1000, **raising `NUM_WORKERS` shrinks each buffer and makes the poll stall
+arrive sooner.** Raise `JobQueueSize` alongside it, or the extra workers make
+this failure mode worse rather than better.
+
+burrow's `KEY_AFFINITY.md` calls the poll stall low-risk on the grounds that "a
+single user cannot receive enough commands to fill a buffer." That holds while
+processing is fast. It is not one user's commands that fill a buffer — it is
+every user id hashing to the same worker index.
+
+One further consequence of the global tracker, which matters at 2 partitions per
+pod: the stall is not confined to the partition that caused it. Burrow assigns a
+single sequence across every assigned partition, so a gap on one blocks commits
+on the other.
+
+This is the constraint that bounds any in-worker retry or backoff scheme; see
+`planning/`-adjacent work on WhatsApp error 131056 for a worked example.
+
+### Status: fixed in burrow v0.1.6, adopted here
+
+Everything above describes burrow `v0.1.5`. `message-worker` moved to `v0.1.6`,
+which fixes all of it (see `burrow/PARTITION_TRACKING.md`):
+
+| the problem above | how it was fixed |
+|---|---|
+| a gap on one partition blocks commits on the other | offsets are tracked per partition; there is no global sequence |
+| ~10 queued commands stop the whole pod polling | queues are per partition, and a full queue pauses that partition instead of blocking the poll loop |
+| raising `NUM_WORKERS` shrinks buffers and makes it worse | `NumWorkers` is per partition, so its buffer does not shrink as the fleet grows |
+| the rebalance callback is never attached | `main.go` now calls `pool.Subscribe`; subscribing the consumer directly cannot attach it |
+| a slow message widens the redelivery window | a stalled partition no longer holds back the others' commits |
+
+`max.poll.interval.ms` is now set explicitly in the consumer `ConfigMap` at
+librdkafka's own default of 300000ms — a no-op in value, but the eviction budget
+is now a number someone chose rather than one inherited silently.
+
+#### `NUM_WORKERS` means something different now — read this before tuning it
+
+It is workers **per assigned partition**, not per pod. Effective send
+concurrency is `NUM_WORKERS x partitions-per-pod x pods`:
+
+| env | value | partitions/pod | pods | in flight (was, v0.1.5) |
+|---|---|---|---|---|
+| production | 24 | 2 (6 partitions / 3 pods) | 3 | **144** (72) |
+| staging | 8 | 6 (6 partitions / 1 pod) | 1 | **48** (8) |
+
+Both were left at their previous numbers, so both roughly doubled or more. That
+is deliberate:
+
+- **A retry ladder parks a worker for its whole duration.** Headroom is what
+  stops one parked user from costing every other user their throughput. Raising
+  send concurrency is the point of having fixed the poll-loop stall.
+- **It does not widen 131056 exposure.** That error is a
+  *(business account, consumer account)* **pair** rate limit — scoped to one
+  recipient. Sends to different users never contend for it. Commands are keyed
+  by `user_id`, so one user already sits on one partition and one worker,
+  serialized. Extra workers add parallelism only *across* users. The trigger is
+  one user generating events faster than the cooldown, not the fleet sending
+  faster in aggregate.
+
+The multiplier moves with partition assignment, which makes **scale-down the
+thing to watch, not scale-up**: at one pod, that pod owns all six partitions and
+runs 144 workers by itself. Check the CPU limit before scaling down.
+
+`Stats.PartitionsPaused` is the new backpressure signal. A value that stays
+above zero means producers are outrunning that partition's workers. The old
+advice to raise `JobQueueSize` when the poll loop stalls no longer applies — and
+was backwards anyway, since per-worker buffers were `JobQueueSize / NumWorkers`,
+so raising `NUM_WORKERS` shrank them.
 
 ## Token Store Compatibility
 
