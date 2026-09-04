@@ -856,23 +856,22 @@ message-worker:
   - name: FACEBOOK_GRAPH_URL
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
-    # Burrow workers PER ASSIGNED PARTITION as of v0.1.6 (was per pod).
+    # Burrow's worker count for this pod. Pool-wide as of burrow v0.2.0; it was
+    # briefly per-partition in v0.1.6.
     #
-    # Held at 8 across the upgrade. Staging runs replicaCount: 1 against a
-    # 6-partition commands topic, so this one pod owns all six:
+    # 48, raised from 8, to hold concurrency where v0.1.6 put it. Staging runs
+    # replicaCount: 1 against a 6-partition commands topic, so it owned all six:
     #
-    #   v0.1.5   8 per pod                        =  8 in flight
-    #   v0.1.6   8 per partition x 6 partitions   = 48 in flight
+    #   v0.1.5   8 per pod                       =  8 in flight
+    #   v0.1.6   8 per partition x 6 partitions  = 48 in flight
+    #   v0.2.0   48 per pod                      = 48 in flight
     #
-    # Deliberate. Staging is now the SHARPER test of the v0.1.6 topology than
-    # production: one pod owning six partitions runs six independent sub-pools
-    # with their own workers, queues and pause/resume, which is the 6:1
-    # concentration production only reaches on a scale-down to a single
-    # replica. It was already the sharper test of key affinity, for the same
-    # reason — in-process workers are the only parallelism here.
+    # One pod at 48 workers over 6 partitions is a genuine test of the v0.2.0
+    # dispatch: many keys, one shared worker set, and the pool-wide bound
+    # (QueueSizePerWorker x NUM_WORKERS) exercised on a single node.
     #
     # See documentation/message-worker-deployment.md §Scaling.
-    value: "8"
+    value: "48"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"
   - name: INITIAL_BACKOFF_MS

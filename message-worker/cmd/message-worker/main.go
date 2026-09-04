@@ -79,12 +79,8 @@ func main() {
 		"enable.auto.commit": false, // Burrow handles commits
 
 		// Explicit rather than inherited, so the eviction budget is a number
-		// someone chose. This is librdkafka's own default; it is spelled out
-		// because it is the clock that decides whether a slow send becomes a
-		// rebalance. Burrow v0.1.6 pauses a saturated partition instead of
-		// blocking the poll loop, so this should no longer be reachable --
-		// which is exactly why a silent default would be the wrong thing to
-		// rely on.
+		// someone chose. This is librdkafka's own default; it is the clock
+		// that decides whether a slow send becomes a rebalance.
 		"max.poll.interval.ms": 300000,
 	})
 	if err != nil {
@@ -93,9 +89,7 @@ func main() {
 	defer consumer.Close()
 
 	// NOTE: the topic subscription happens through the burrow pool further
-	// down, not here. Subscribing the consumer directly leaves burrow's
-	// rebalance callback unattached, and it has no way to attach it after the
-	// fact -- see the pool.Subscribe call below.
+	// down, not here. See the pool.Subscribe call below.
 
 	// Create Kafka producer for events
 	eventProducer, err := messageworker.NewKafkaProducer(
@@ -154,45 +148,35 @@ func main() {
 
 	// Create Burrow pool for concurrent processing.
 	//
-	// As of burrow v0.1.6 the pool runs one sub-pool PER ASSIGNED PARTITION,
-	// so NumWorkers is per partition, not per pod. This pod's send concurrency
-	// is NUM_WORKERS x partitions assigned to it, and the assignment moves with
-	// the group -- a scale-down concentrates partitions and therefore raises
-	// per-pod concurrency.
+	// Ordering is inherent as of burrow v0.2.0. Commands are keyed by user_id
+	// (replybot/lib/index.js), and burrow processes a key on at most one worker
+	// at a time -- so a user's messages reach the platform in the order the
+	// state machine produced them, and a question cannot overtake the statement
+	// that sets it up. There is no flag to forget to set.
 	//
-	// NUM_WORKERS was deliberately NOT lowered to compensate. The retry ladder
-	// parks a worker for the length of the ladder, so the extra concurrency is
-	// the headroom that keeps one parked user from costing others their
-	// throughput. It does not widen 131056 exposure: that is a per-recipient
-	// pair limit, and key affinity already serializes any one user onto one
-	// worker. See devops/values/production.yaml.
+	// NUM_WORKERS is pool-wide and is pure concurrency: workers are bound to
+	// nothing, so its value cannot change which worker sees which key.
 	burrowConfig := burrow.DefaultConfig(logger)
 	burrowConfig.NumWorkers = config.NumWorkers
 	burrowConfig.CommitInterval = 5 * time.Second
 	burrowConfig.CommitBatchSize = 1000
 
-	// REQUIRED whenever NumWorkers > 1. Commands are keyed by user_id
-	// (replybot/lib/index.js), and a user's messages must reach the platform in
-	// the order the state machine produced them — a question must not overtake
-	// the statement that sets it up. Without this, burrow hands consecutive
-	// messages to whichever worker is free and the pair can invert.
-	//
-	// Enabled unconditionally rather than only for NumWorkers > 1: it is a
-	// no-op at 1 worker, and making it conditional would mean a later bump of
-	// NUM_WORKERS silently reintroduces the reordering bug.
-	burrowConfig.KeyAffinity = true
+	// Buffered work is uncommitted, and redelivery here means re-sending to
+	// real people, so keep the bound small. 10 x NUM_WORKERS jobs may wait;
+	// beyond that the poll loop waits, which means every worker is busy and
+	// the buffer behind them is full.
+	burrowConfig.QueueSizePerWorker = 10
 
 	pool, err := burrow.NewPool(consumer, burrowConfig)
 	if err != nil {
 		logger.Fatal("failed to create burrow pool", zap.Error(err))
 	}
 
-	// Subscribe THROUGH THE POOL. burrow's rebalance callback is private, so
-	// consumer.SubscribeTopics(topic, nil) -- which is what this did until
-	// v0.1.6 -- left it unattached: the pool never learned that partitions
-	// changed hands, so it did not commit what it had finished before losing
-	// one, and every rolling deploy replayed the uncommitted window as
-	// duplicate sends to real people.
+	// Subscribe THROUGH THE POOL. burrow's rebalance callback is private and
+	// cannot be supplied from outside, so consumer.SubscribeTopics(topic, nil)
+	// leaves the pool blind to rebalances: it would not commit what it had
+	// finished before losing a partition, and every rolling deploy would
+	// replay the uncommitted window as duplicate sends to real people.
 	if err := pool.Subscribe([]string{config.KafkaCommandTopic}); err != nil {
 		logger.Fatal("failed to subscribe to topics", zap.Error(err))
 	}

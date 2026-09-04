@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/vlab-research/botparty v0.0.0-20200917171250-abbbd36eb095
-	github.com/vlab-research/burrow v0.1.6
+	github.com/vlab-research/burrow v0.2.0
 	github.com/vlab-research/trans v0.0.12
 	go.uber.org/zap v1.27.0
 )
