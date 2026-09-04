@@ -60,6 +60,9 @@ type Config struct {
 	// cooldown with this and let attempts fall out.
 	MaxRetryElapsed time.Duration
 
+	// MessengerRetryCodes are the Graph API error codes retried in the worker.
+	MessengerRetryCodes []int
+
 	// WhatsAppRetryCodes are the Cloud API error codes retried in the worker.
 	// Defaults to 131056 alone -- the per-recipient pair rate limit. See
 	// defaultWhatsAppRetryCodes for why the account-wide limits are excluded.
@@ -108,11 +111,12 @@ func LoadConfigFromEnv() (*Config, error) {
 		InstagramAPIKey: os.Getenv("INSTAGRAM_API_KEY"),
 
 		// Retry defaults
-		MaxRetryAttempts:   getEnvAsInt("MAX_RETRY_ATTEMPTS", 3),
-		InitialBackoffMS:   getEnvAsInt("INITIAL_BACKOFF_MS", 100),
-		MaxBackoffMS:       getEnvAsInt("MAX_BACKOFF_MS", 1000),
-		MaxRetryElapsed:    getEnvAsDuration("MAX_RETRY_ELAPSED", 0),
-		WhatsAppRetryCodes: getEnvAsIntSlice("WHATSAPP_RETRY_CODES", []int{131056}),
+		MaxRetryAttempts:    getEnvAsInt("MAX_RETRY_ATTEMPTS", 3),
+		InitialBackoffMS:    getEnvAsInt("INITIAL_BACKOFF_MS", 100),
+		MaxBackoffMS:        getEnvAsInt("MAX_BACKOFF_MS", 1000),
+		MaxRetryElapsed:     getEnvAsDuration("MAX_RETRY_ELAPSED", 0),
+		WhatsAppRetryCodes:  getEnvAsIntSlice("WHATSAPP_RETRY_CODES", []int{131056}),
+		MessengerRetryCodes: getEnvAsIntSlice("MESSENGER_RETRY_CODES", []int{1200, 551}),
 
 		// Error reporting
 		BotserverURL: os.Getenv("BOTSERVER_URL"),

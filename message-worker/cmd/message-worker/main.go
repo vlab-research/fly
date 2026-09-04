@@ -109,9 +109,12 @@ func main() {
 	clients := make(map[types.PlatformType]messageworker.MessageSender)
 
 	// Create Messenger client with proper Facebook Graph API integration
-	messengerClient := messageworker.NewMessengerClient(config.FacebookGraphURL, tokenStore)
+	messengerClient := messageworker.NewMessengerClient(config.FacebookGraphURL, tokenStore).
+		WithRetryCodes(config.MessengerRetryCodes)
 	clients[types.PlatformMessenger] = messengerClient
-	logger.Info("registered Messenger client", zap.String("url", config.FacebookGraphURL))
+	logger.Info("registered Messenger client",
+		zap.String("url", config.FacebookGraphURL),
+		zap.Ints("retry_codes", config.MessengerRetryCodes))
 
 	// Create WhatsApp client (real Cloud API HTTP client)
 	whatsappClient := messageworker.NewWhatsAppClient(config.WhatsAppGraphURL, tokenStore).

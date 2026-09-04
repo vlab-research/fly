@@ -16,6 +16,7 @@ type MessengerClient struct {
 	baseURL    string
 	tokenStore TokenStore
 	httpClient *http.Client
+	retryCodes map[int]bool
 }
 
 func NewMessengerClient(baseURL string, tokenStore TokenStore) *MessengerClient {
@@ -23,7 +24,32 @@ func NewMessengerClient(baseURL string, tokenStore TokenStore) *MessengerClient 
 		baseURL:    baseURL,
 		tokenStore: tokenStore,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		retryCodes: defaultMessengerRetryCodes(),
 	}
+}
+
+// defaultMessengerRetryCodes is the Graph API error codes worth retrying.
+//
+// 1200 is a temporary send failure and 551 is "this person isn't available
+// right now", both of which clear on their own.
+func defaultMessengerRetryCodes() map[int]bool {
+	return map[int]bool{1200: true, 551: true}
+}
+
+// WithRetryCodes replaces the set of Graph API error codes treated as
+// retriable. An empty or nil set disables code-based retries; HTTP status
+// classification is unaffected.
+func (c *MessengerClient) WithRetryCodes(codes []int) *MessengerClient {
+	set := make(map[int]bool, len(codes))
+	for _, code := range codes {
+		set[code] = true
+	}
+	c.retryCodes = set
+	return c
+}
+
+func (c *MessengerClient) isRetriable(code int) bool {
+	return c.retryCodes[code]
 }
 
 type FacebookSendRequest struct {
@@ -180,7 +206,7 @@ func (c *MessengerClient) parseFacebookError(fbErr *FacebookError) *PlatformErro
 	return &PlatformError{
 		StatusCode: fbErr.Code,
 		Message:    fbErr.Message,
-		Retriable:  isRetriableFacebookError(fbErr.Code),
+		Retriable:  c.isRetriable(fbErr.Code),
 	}
 }
 
@@ -189,17 +215,6 @@ func isRetriableHTTPStatus(statusCode int) bool {
 	case 408, 429:
 		return true
 	case 500, 502, 503, 504:
-		return true
-	default:
-		return false
-	}
-}
-
-func isRetriableFacebookError(code int) bool {
-	switch code {
-	case 1200:
-		return true
-	case 551:
 		return true
 	default:
 		return false

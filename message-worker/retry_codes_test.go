@@ -125,3 +125,33 @@ func TestRetryWithBackoff_MaxElapsedZeroMeansAttemptsOnly(t *testing.T) {
 	assert.True(t, errors.Is(err, alwaysFails) || err != nil)
 	assert.Equal(t, 4, attempts, "with no budget, MaxAttempts is the only bound")
 }
+
+// TestMessengerRetryCodes covers the Messenger side of the same contract.
+// Both platforms classify their own vendor error codes, and both are
+// configurable -- neither borrows the other's list.
+func TestMessengerRetryCodes(t *testing.T) {
+	client := NewMessengerClient("http://unused", NewStaticTokenStore("t"))
+
+	assert.True(t, client.isRetriable(1200), "temporary send failure")
+	assert.True(t, client.isRetriable(551), "recipient temporarily unavailable")
+	assert.False(t, client.isRetriable(131056),
+		"a WhatsApp code must not be retriable on Messenger; the lists are separate")
+
+	client = client.WithRetryCodes([]int{613})
+	assert.True(t, client.isRetriable(613))
+	assert.False(t, client.isRetriable(1200), "WithRetryCodes replaces, it does not merge")
+}
+
+// TestRetryCodes_PlatformsDoNotShareAList guards the defect this replaced:
+// whatsapp_client.go used to call isRetriableFacebookError, so WhatsApp was
+// classified by Messenger's codes and no WhatsApp rate limit was retriable.
+func TestRetryCodes_PlatformsDoNotShareAList(t *testing.T) {
+	wa := NewWhatsAppClient("http://unused", NewStaticTokenStore("t"))
+	fb := NewMessengerClient("http://unused", NewStaticTokenStore("t"))
+
+	assert.True(t, wa.isRetriable(131056))
+	assert.False(t, fb.isRetriable(131056))
+
+	assert.True(t, fb.isRetriable(1200))
+	assert.False(t, wa.isRetriable(1200))
+}

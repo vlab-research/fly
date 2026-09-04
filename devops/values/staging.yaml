@@ -900,6 +900,15 @@ message-worker:
   - name: MAX_RETRY_ELAPSED
     # Total time budget across all attempts. The real bound; see above.
     value: "120s"
+  - name: MESSENGER_RETRY_CODES
+    # Graph API error codes retried in the worker, for Messenger. 1200 is a
+    # temporary send failure, 551 is "recipient unavailable right now"; both
+    # clear on their own.
+    #
+    # Separate from WHATSAPP_RETRY_CODES on purpose: the two platforms use
+    # different code spaces, and whatsapp_client.go used to borrow this list,
+    # which is why no WhatsApp rate limit was ever retried.
+    value: "1200,551"
   - name: WHATSAPP_RETRY_CODES
     # Cloud API error codes retried in the worker. Comma-separated; empty
     # disables in-worker code retries entirely.
