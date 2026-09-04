@@ -19,6 +19,7 @@ type WhatsAppClient struct {
 	baseURL    string
 	tokenStore TokenStore
 	httpClient *http.Client
+	retryCodes map[int]bool
 }
 
 func NewWhatsAppClient(baseURL string, tokenStore TokenStore) *WhatsAppClient {
@@ -26,7 +27,47 @@ func NewWhatsAppClient(baseURL string, tokenStore TokenStore) *WhatsAppClient {
 		baseURL:    baseURL,
 		tokenStore: tokenStore,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		retryCodes: defaultWhatsAppRetryCodes(),
 	}
+}
+
+// defaultWhatsAppRetryCodes is the Cloud API error codes worth retrying in the
+// worker.
+//
+// 131056 only, by default. It is the (business account, consumer account) pair
+// rate limit: scoped to ONE recipient, with a cooldown measured at under 90
+// seconds. Because commands are keyed by user_id and burrow processes a key on
+// one worker at a time, retrying it in place cannot contend with itself and
+// delays no other recipient.
+//
+// The account-wide limits -- 4, 80007, 130429 -- are deliberately absent.
+// Retrying those per message across every worker is a thundering herd: each
+// backs off independently and they all return together, re-tripping the limit.
+// Those, and the long-lived ones (131048 spam, 131057 maintenance), belong to
+// dean's blocked sweep, which retries on a schedule rather than in place.
+func defaultWhatsAppRetryCodes() map[int]bool {
+	return map[int]bool{131056: true}
+}
+
+// WithRetryCodes replaces the set of Cloud API error codes treated as
+// retriable. An empty or nil set disables code-based retries entirely; HTTP
+// status classification is unaffected.
+func (c *WhatsAppClient) WithRetryCodes(codes []int) *WhatsAppClient {
+	set := make(map[int]bool, len(codes))
+	for _, code := range codes {
+		set[code] = true
+	}
+	c.retryCodes = set
+	return c
+}
+
+// isRetriable reports whether a Cloud API error code should be retried.
+//
+// WhatsApp gets its own classification rather than borrowing Messenger's:
+// isRetriableFacebookError knows 1200 and 551, both Messenger-era codes, and
+// no WhatsApp rate-limit code at all.
+func (c *WhatsAppClient) isRetriable(code int) bool {
+	return c.retryCodes[code]
 }
 
 // WhatsAppSendRequest is the Cloud API send envelope. It embeds the translated
@@ -118,7 +159,7 @@ func (c *WhatsAppClient) SendMessage(ctx context.Context, platformAccountID, use
 		return nil, &PlatformError{
 			StatusCode: waResp.Error.Code,
 			Message:    waResp.Error.Message,
-			Retriable:  isRetriableFacebookError(waResp.Error.Code),
+			Retriable:  c.isRetriable(waResp.Error.Code),
 		}
 	}
 
@@ -135,7 +176,7 @@ func (c *WhatsAppClient) parseHTTPError(statusCode int, body []byte) *PlatformEr
 		return &PlatformError{
 			StatusCode: waResp.Error.Code,
 			Message:    waResp.Error.Message,
-			Retriable:  isRetriableFacebookError(waResp.Error.Code),
+			Retriable:  c.isRetriable(waResp.Error.Code),
 		}
 	}
 	return &PlatformError{

@@ -872,12 +872,48 @@ message-worker:
     #
     # See documentation/message-worker-deployment.md §Scaling.
     value: "48"
+  # Retry ladder. These four are read together; changing one without the
+  # others usually changes nothing, because whichever bound is tightest wins.
+  #
+  # Sized against the measured WhatsApp 131056 cooldown of <= 88.6s. Under a
+  # doubling delay the attempt count is a poor proxy for elapsed time, so the
+  # ladder is bounded by MAX_RETRY_ELAPSED and the attempt count is set high
+  # enough not to bind:
+  #
+  #   attempt   1   2    3    4   5   6    7    8    9   10   11   12    13    14
+  #   at (s)    0  0.2  0.6  1.4  3  6.2  12.6 25.4 40.4 55.4 70.4 85.4 100.4 115.4
+  #
+  # Attempts 13 and 14 land after the cooldown, which is the point. A shorter
+  # budget looks reasonable and never succeeds: cap 30s / budget 95s gives 10
+  # attempts ending at 81s, entirely inside the cooldown.
+  #
+  # A parked worker costs one worker of NUM_WORKERS and delays no other
+  # recipient -- burrow v0.2.0 processes a key on one worker at a time, so a
+  # rate-limited user cannot contend with themselves or block anyone else.
+  # That is what makes a ladder this long affordable.
   - name: MAX_RETRY_ATTEMPTS
-    value: "3"
+    value: "15"
   - name: INITIAL_BACKOFF_MS
-    value: "100"
+    value: "200"
   - name: MAX_BACKOFF_MS
-    value: "1000"
+    value: "15000"
+  - name: MAX_RETRY_ELAPSED
+    # Total time budget across all attempts. The real bound; see above.
+    value: "120s"
+  - name: WHATSAPP_RETRY_CODES
+    # Cloud API error codes retried in the worker. Comma-separated; empty
+    # disables in-worker code retries entirely.
+    #
+    # 131056 only -- the (business account, consumer account) PAIR rate limit,
+    # scoped to one recipient.
+    #
+    # The account-wide limits (4, 80007, 130429) are deliberately excluded:
+    # retrying those per message across every worker is a thundering herd, as
+    # each backs off independently and they all return together to re-trip the
+    # limit. Those, and the long-lived ones (131048 spam, 131057 maintenance),
+    # belong to dean's blocked sweep via DEAN_FB_CODES, which retries on a
+    # schedule instead.
+    value: "131056"
 
   # ---- Media handle layer (planning/media-abstraction.md §8.5, §9.2) --------
   # When off, the worker never queries media_handle: legacy attachment_id

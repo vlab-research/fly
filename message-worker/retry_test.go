@@ -87,8 +87,10 @@ func TestRetryWithBackoff_NonRetriableError(t *testing.T) {
 	if err != expectedErr {
 		t.Errorf("Expected error %v, got %v", expectedErr, err)
 	}
-	if finalAttempts != 3 {
-		t.Errorf("Expected 3 as final attempts count, got %d", finalAttempts)
+	// The reported count is what actually happened, not the configured limit.
+	// This previously asserted 3 while checking the function ran once.
+	if finalAttempts != 1 {
+		t.Errorf("Expected 1 as final attempts count, got %d", finalAttempts)
 	}
 	if attempts != 1 {
 		t.Errorf("Function should be called once (non-retriable), was called %d times", attempts)

@@ -54,6 +54,17 @@ type Config struct {
 	InitialBackoffMS int
 	MaxBackoffMS     int
 
+	// MaxRetryElapsed caps total time spent retrying one send. Zero means only
+	// MaxRetryAttempts bounds it. Under exponential backoff the attempt count
+	// is a poor proxy for elapsed time, so size against the downstream
+	// cooldown with this and let attempts fall out.
+	MaxRetryElapsed time.Duration
+
+	// WhatsAppRetryCodes are the Cloud API error codes retried in the worker.
+	// Defaults to 131056 alone -- the per-recipient pair rate limit. See
+	// defaultWhatsAppRetryCodes for why the account-wide limits are excluded.
+	WhatsAppRetryCodes []int
+
 	// Error reporting
 	BotserverURL string // For reporting errors to botserver /synthetic endpoint
 
@@ -97,9 +108,11 @@ func LoadConfigFromEnv() (*Config, error) {
 		InstagramAPIKey: os.Getenv("INSTAGRAM_API_KEY"),
 
 		// Retry defaults
-		MaxRetryAttempts: getEnvAsInt("MAX_RETRY_ATTEMPTS", 3),
-		InitialBackoffMS: getEnvAsInt("INITIAL_BACKOFF_MS", 100),
-		MaxBackoffMS:     getEnvAsInt("MAX_BACKOFF_MS", 1000),
+		MaxRetryAttempts:   getEnvAsInt("MAX_RETRY_ATTEMPTS", 3),
+		InitialBackoffMS:   getEnvAsInt("INITIAL_BACKOFF_MS", 100),
+		MaxBackoffMS:       getEnvAsInt("MAX_BACKOFF_MS", 1000),
+		MaxRetryElapsed:    getEnvAsDuration("MAX_RETRY_ELAPSED", 0),
+		WhatsAppRetryCodes: getEnvAsIntSlice("WHATSAPP_RETRY_CODES", []int{131056}),
 
 		// Error reporting
 		BotserverURL: os.Getenv("BOTSERVER_URL"),
@@ -181,4 +194,33 @@ func parseCommaSeparated(s string) []string {
 		}
 	}
 	return result
+}
+
+// getEnvAsIntSlice reads a comma-separated list of integers, e.g.
+// WHATSAPP_RETRY_CODES="131056,130429". Whitespace around entries is ignored.
+// An entry that is not an integer is skipped rather than failing startup: a
+// typo in one code should not stop the worker from sending.
+//
+// Setting the variable to an empty string yields an empty list, which is how a
+// caller disables the behaviour entirely -- distinct from leaving it unset,
+// which takes the default.
+func getEnvAsIntSlice(key string, defaultValue []int) []int {
+	raw, ok := os.LookupEnv(key)
+	if !ok {
+		return defaultValue
+	}
+
+	out := []int{}
+	for _, field := range strings.Split(raw, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		n, err := strconv.Atoi(field)
+		if err != nil {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }

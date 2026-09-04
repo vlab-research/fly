@@ -80,6 +80,15 @@ func NewWorker(clients map[types.PlatformType]MessageSender, producer EventProdu
 // WithMediaStore enables the media handle layer. A Worker without one sends
 // all media by URL -- the handle layer is an optimisation, never a
 // requirement.
+// WithRetryConfig replaces the worker's retry behaviour. Without it the worker
+// uses DefaultRetryConfig, which is what main.go did before the retry
+// environment variables were wired through -- they were read into Config and
+// then ignored.
+func (w *Worker) WithRetryConfig(config RetryConfig) *Worker {
+	w.config = config
+	return w
+}
+
 func (w *Worker) WithMediaStore(store MediaStore, use bool, margin time.Duration) *Worker {
 	w.mediaStore = store
 	w.mediaHandleUse = use
