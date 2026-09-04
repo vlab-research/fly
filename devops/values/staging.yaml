@@ -50,7 +50,7 @@ versionDinersclub: &vdinersclub v0.0.49
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 versionExodus: &vexodus v0.2.5
-versionMessageWorker: &vmessageworker v0.1.25
+versionMessageWorker: &vmessageworker v0.1.27
 # Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
 # gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
 # does not exist in ghcr.io yet") is retired.

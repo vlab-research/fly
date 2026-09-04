@@ -162,7 +162,7 @@ versionExodus: &vexodus v0.2.5
 #   translator is untouched, and the WhatsApp path is still dormant here.
 # v0.1.25: renders that list button from replybot's metadata, falling back to
 #   "Choose". Pairs with replybot v0.0.224.
-versionMessageWorker: &vmessageworker v0.1.25
+versionMessageWorker: &vmessageworker v0.1.27
 versionMediaProxy: &vmediaproxy v0.0.1
 # One-shot, not a service: the Phase 1.5 messages backfill
 # (planning/backfill-in-cluster-job.md). Kept here anyway so its image is
