@@ -1076,11 +1076,15 @@ message-worker:
   # production with zero senders. Do not lower this to save a pod.
   #
   # Throughput comes from NUM_WORKERS (24, see below), not from replicas.
-  # Sending is IO-bound, so capacity is concurrent in-flight calls: 3 x 24 = 72.
+  # Sending is IO-bound, so capacity is concurrent in-flight calls. As of
+  # burrow v0.1.6 NUM_WORKERS is per PARTITION, so that is
+  # 24 x 2 partitions per pod x 3 pods = 144, up from v0.1.5's 24 x 3 = 72.
+  # The rise is deliberate; see NUM_WORKERS below.
   #
-  # Both levers preserve ordering as of burrow v0.1.5. Commands are keyed by
+  # Both levers preserve ordering as of burrow v0.1.6. Commands are keyed by
   # user_id (replybot/lib/index.js), so a user sits on one partition, owned by
-  # one pod; key-affinity dispatch then pins that user to one worker inside it.
+  # one pod; key-affinity dispatch then pins that user to one worker inside
+  # that partition's sub-pool.
   #
   # The useful ceiling is 6 (the partition count of vlab-prod-commands) — a 7th
   # pod would idle. This ran at 6 for three days after the incident below and
@@ -1163,20 +1167,43 @@ message-worker:
     # means every WhatsApp send fails while Messenger keeps working.
     value: "https://graph.facebook.com/v25.0"
   - name: NUM_WORKERS
-    # The burrow pool's goroutine count (code default 100).
+    # Burrow workers PER ASSIGNED PARTITION as of v0.1.6 (was per pod).
+    #
+    # Held at 24 across the upgrade, which RAISES fleet-wide send concurrency:
+    #
+    #   v0.1.5   24 per pod        x 3 pods               =  72 in flight
+    #   v0.1.6   24 per partition  x 2 partitions x 3 pods = 144 in flight
+    #
+    # That rise is wanted, not tolerated. A worker is occupied for as long as
+    # its send takes, and the WhatsApp retry ladder deliberately parks one for
+    # tens of seconds. Headroom is what keeps a parked worker from costing
+    # other users their throughput.
+    #
+    # It does not increase 131056 exposure. That error is a
+    # (business account, consumer account) PAIR rate limit — it is scoped to a
+    # single recipient, so sends to different users never contend for it.
+    # Commands are keyed by user_id, so one user already sits on one partition
+    # and one worker, serialized; more workers add parallelism only across
+    # DIFFERENT users. The trigger is one user generating events faster than
+    # the cooldown, not the fleet sending faster in aggregate.
     #
     # Raising this was UNSAFE before burrow v0.1.5: dispatch went through one
     # shared channel with no key affinity, so N>1 let two commands for the SAME
     # user send concurrently and arrive out of order — a survey question before
-    # its own preamble. v0.1.5 routes by hash(user_id) to a fixed worker, so
-    # same-user commands stay FIFO while different users run in parallel, and
-    # message-worker sets KeyAffinity unconditionally.
+    # its own preamble. Key affinity fixed that, and v0.1.6 makes it tighter
+    # still: a key can no longer share a worker with keys from unrelated
+    # partitions.
     #
-    # 8 as of 2026-08-20, after smoke testing the concurrent path in vstag
-    # (v0.1.19, NUM_WORKERS=8, sends delivered in order on one partition).
+    # The multiplier moves with partition assignment, so a scale-down
+    # CONCENTRATES it: at 1 pod that pod owns all 6 partitions and runs 144
+    # workers by itself. Check the CPU limit above before scaling down.
     #
-    # Not higher: per-worker queues are JobQueueSize / NumWorkers and burrow's
-    # poll loop is single-threaded, so a backed-up worker stalls the whole pod.
+    # The old warning here — "per-worker queues are JobQueueSize / NumWorkers
+    # and burrow's poll loop is single-threaded, so a backed-up worker stalls
+    # the whole pod" — no longer applies, and was backwards anyway: raising
+    # NUM_WORKERS SHRANK each buffer. In v0.1.6 queues are per partition and a
+    # full queue pauses that partition instead of blocking the poll loop. Watch
+    # burrow's PartitionsPaused stat instead.
     value: "24"
   - name: MAX_RETRY_ATTEMPTS
     value: "3"
