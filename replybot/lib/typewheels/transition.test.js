@@ -10,12 +10,8 @@ process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
 
 describe('machine.run', () => {
 
-  // The HISTORY_LIMIT capped state (statestore.js cappedState) is USER_BLOCKED
-  // with NO md. That is safe only if every event a capped conversation can
-  // receive no-ops before actionsResponses, whose `!newState.md` check throws
-  // untagged (STATE_ACTIONS) and would convert the capped state into an ERROR
-  // that dean retries every 30 minutes. Pin the realistic arrivals: inbound
-  // text, a postback, and a late read/delivery watermark for a pre-cap message.
+  // The capped state has no md, so every arrival must no-op before
+  // actionsResponses, which throws on a missing md.
   describe('a USER_BLOCKED state with no md (the HISTORY_LIMIT capped state)', () => {
     const capped = {
       state: 'USER_BLOCKED', qa: [], forms: [],

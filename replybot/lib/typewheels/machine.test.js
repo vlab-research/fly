@@ -330,17 +330,8 @@ describe('getCurrentForm', () => {
   })
 
 
-  // md is asserted here because BLOCK_USER's RESET rebuilds from
-  // _initialState(): forms is carried across explicitly and md used to be
-  // dropped on the floor. A blocked participant with no md is a landmine --
-  // the next event that wakes them merges into `undefined`, producing a truthy
-  // husk with no startTime that passes transition.js's `!md` guard and then
-  // throws in getForm. See documentation/states-debugging.md.
-  //
-  // NO pointer is asserted, deliberately. The pointer is what made blocks
-  // evaporate: a Redis-miss refold starts at START from the pointer, where the
-  // block cannot re-establish itself. A block is now a plain transition that
-  // the fold rebuilds from the full log. See planning/block-without-pointer-plan.md.
+  // No pointer, deliberately: the pointer is what made blocks evaporate on
+  // refold. md is asserted because a blocked user without it husks in getForm.
   it('Gets ignores texts after block_user, but keeps forms and md, sets no pointer', () => {
 
     const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
@@ -358,12 +349,7 @@ describe('getCurrentForm', () => {
     state1.md.should.have.property('startTime')
   })
 
-  // The START guard is gone. It existed to make a pointer-truncated refold (which
-  // starts at START and re-includes the block event, see states-debugging.md on
-  // the floored pointer) a no-op -- and that no-op is exactly what erased blocks.
-  // Blocking a START user is now a real block. It is also how the ~13.5k rows
-  // blocked under the old code, whose stored pointer still truncates their FIRST
-  // refold, land on USER_BLOCKED rather than a live START.
+  // No START guard: it is what let a pointer-truncated refold erase the block.
   it('block_user on a START state is a real block', () => {
     const state = getState([synthetic({ type: 'block_user', value: null })])
     state.state.should.equal('USER_BLOCKED')
@@ -376,10 +362,7 @@ describe('getCurrentForm', () => {
     state1.qa.should.eql([])
   })
 
-  // THE durability property. With no pointer, a Redis-miss refold replays the
-  // whole log from scratch: the block lands on the real live state and every
-  // event after it no-ops, so the refold reproduces the live blocked state
-  // exactly -- md and forms intact -- rather than the husk the pointer produced.
+  // The durability property: a from-scratch refold reproduces the live blocked state.
   it('a full refold from scratch of a log with post-block events lands on USER_BLOCKED with md and forms', () => {
     const postbackAfterBlock = { ...multipleChoice, timestamp: 30 }
     const externalAfterBlock = {
@@ -406,10 +389,7 @@ describe('getCurrentForm', () => {
     should.not.exist(refolded.pointer)
   })
 
-  // Unblock is unchanged: a hand-injected restore_state overwrites the blocked
-  // state and sets ITS OWN pointer, so a later refold starts at the restore and
-  // never replays the block. That pointer is derivable from the event alone,
-  // which is what makes it sound where BLOCK_USER's was not.
+  // Unblock is unchanged: restore_state sets its own pointer.
   it('restore_state after a block restores the snapshot and carries a pointer (the unblock path)', () => {
     const snapshot = { state: 'QOUT', question: 'q2', qa: [['q1', 'yes']], forms: ['FOO'], md: { startTime: 100 } }
     const log = [
@@ -527,9 +507,7 @@ describe('getCurrentForm', () => {
     state1.md.should.not.have.property('e_handover_metadata')
   })
 
-  // The one inbound event class that had no USER_BLOCKED guard and produced a
-  // non-noop action, which routes into actionsResponses. Harmless for a blocked
-  // user with md; fatal for the HISTORY_LIMIT capped state, which has none.
+  // Watermarks would otherwise reach actionsResponses, fatal for the md-less capped state.
   it('Ignores read/delivery WATERMARK events after block_user', () => {
     const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
     const blocked = getState(log)

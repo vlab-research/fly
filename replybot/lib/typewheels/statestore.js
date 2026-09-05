@@ -8,18 +8,10 @@ const { parseEvent } = require('../event-normalizer')
 // count of events. Nothing else may use this string.
 const TUPLE_MISSING_TAG = 'CONVERSATION_TUPLE_MISSING'
 
-// Greppable tag for "this conversation's history is over the cap and we refused
-// to fold it". Emitted once per overflow, i.e. once per Redis miss on a capped
-// conversation, never per event: the capped state is cached like any other. It
-// also lands in `states.error_tag` via the stored column, so capped users are
-// distinguishable from ordinary blocked ones in SQL. Nothing else may use this
-// string.
+// Greppable tag for "history over the cap, not folded". Once per overflow.
 const HISTORY_LIMIT_TAG = 'HISTORY_LIMIT'
 
-// STATE_STORE_LIMIT caps how many archived events we will fold on a cache miss.
-// Read at call time, not module load, so tests can set it. Unset is unlimited:
-// `+undefined` is NaN, NaN is falsy, and chatbase.get() applies its SQL limit
-// under `if (limit)`, so an unset value skips both the limit and the cap check.
+// Read at call time so tests can set it. Unset => NaN => unlimited.
 function historyLimit() {
   return +process.env.STATE_STORE_LIMIT
 }
@@ -47,30 +39,14 @@ function isNamed(conv) {
   return !!(conv && conv.platform && conv.account)
 }
 
-// The cap decision, on the RAW rows chatbase returned, before the current event
-// is appended by _resolve. We ask chatbase for limit + 1 rows, so "all of them
-// came back" -- strictly more than `limit` -- means the pointer-truncated history
-// exceeds the cap. Exactly `limit` archived events folds normally.
-//
-// Only account-scoped replays are capped. The unscoped no-account path already
-// reads across every account the participant ever messaged and is documented as
-// degraded; capping it would fire on the wrong conversation's history.
-//
-// Whether the current event is already archived (replybot and scribble consume
-// in parallel) moves the boundary by one event. Harmless.
+// We fetch limit + 1 rows; all of them coming back means over the cap.
+// Unscoped (account null) replays are never capped.
 function isCapped(rows, limit, account) {
   return account !== null && !!limit && rows.length > limit
 }
 
-// The state a capped conversation gets instead of a fold. USER_BLOCKED because
-// the machine already no-ops everything in it and dean already skips it, so no
-// new guard sites; the error tag is what tells a capped user apart from a
-// blocked one. No md, and that is safe: every USER_BLOCKED handler returns
-// before actionsResponses, the only place that dereferences md.
-//
-// A returned state rather than a thrown error because the processor's catch only
-// logs: nothing would be persisted or cached, and the next event would repeat
-// the oversized read. Fail loud has to leave a mark.
+// Returned instead of a fold when over the cap. USER_BLOCKED so the machine
+// no-ops everything; no md is safe there. See replybot/README.md.
 function cappedState(limit, event) {
   return {
     ..._initialState(),
@@ -142,11 +118,8 @@ class StateStore {
   //
   // A null account replays every account for this user, interleaved.
   //
-  // Returns { events } on the normal path, or { capped: true, limit } when the
-  // pointer-truncated history exceeds STATE_STORE_LIMIT (see isCapped). The
-  // pointer filter lives inside chatbase.get's query, so a restored or reset
-  // user's history starts at their pointer -- that is the escape hatch from a
-  // cap. Logs exactly one HISTORY_LIMIT line per overflow.
+  // Returns { events }, or { capped: true, limit } when the history exceeds
+  // STATE_STORE_LIMIT.
   async _getEvents(conv, user, event) {
     const account = (conv && conv.account) || null
     const limit = historyLimit()

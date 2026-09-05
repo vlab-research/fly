@@ -328,18 +328,8 @@ describe('StateStore', () => {
     })
   })
 
-  // -------------------------------------------------------------------------
-  // The history cap.
-  //
-  // A block no longer sets a pointer, so a blocked user's refold reads their
-  // whole (short) log. What the pointer was standing in for -- an unbounded log
-  // -- gets its own honest mechanism: with STATE_STORE_LIMIT=N we ask chatbase
-  // for N + 1 rows, and if all N + 1 come back we do not fold. We return a
-  // USER_BLOCKED state tagged HISTORY_LIMIT, log one greppable line, and let the
-  // processor cache it like any other state, so the oversized read happens once
-  // per Redis miss rather than once per event. A human restores or resets the
-  // conversation, which sets a pointer and cuts the history off.
-  // -------------------------------------------------------------------------
+  // With STATE_STORE_LIMIT=N we fetch N + 1 rows; all N + 1 coming back means
+  // we return a capped USER_BLOCKED state instead of folding. See replybot/README.md.
   describe('history cap (HISTORY_LIMIT)', () => {
     const N = 3
     const rows = n => Array.from({ length: n }, (_, i) => `event${i + 1}`)
@@ -398,9 +388,6 @@ describe('StateStore', () => {
       expect(lines[0]).to.include(`"limit":${N}`)
     })
 
-    // The cap counts the RAW rows, before _resolve appends the current event.
-    // Whether the current event is archived yet moves the boundary by one; it
-    // must not make N archived rows + the current event count as N + 1.
     it('counts archived rows only, not the current event', async () => {
       mockDb.get.resolves(rows(N))
       const state = await stateStore.getState(conv('messenger', PAGE_A), 'user123', 'eventNotInArchive')
@@ -414,9 +401,6 @@ describe('StateStore', () => {
       expect(state.error.tag).to.equal(HISTORY_LIMIT_TAG)
     })
 
-    // The unscoped path reads across every account the participant ever
-    // messaged, so its row count is not this conversation's history. It keeps
-    // today's behaviour: fold the oldest N rows, uncapped.
     it('an unscoped replay (account null) is never capped', async () => {
       const warn = sinon.spy(console, 'warn')
       mockDb.get.resolves(rows(N + 1))
@@ -435,8 +419,6 @@ describe('StateStore', () => {
       expect(state.error).to.be.undefined
     })
 
-    // The whole point of returning a state rather than throwing: it is cached, so
-    // the N + 1 read happens once per Redis miss, not once per event.
     it('the capped state round-trips through updateState and is served from Redis without touching the db', async () => {
       mockDb.get.resolves(rows(N + 1))
       mockRedis.setex.resolves('OK')

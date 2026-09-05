@@ -423,14 +423,8 @@ function exec(state, nxt) {
     }
 
     case 'WATERMARK': {
-      // A blocked participant is sent nothing, so a watermark can only refer to
-      // a pre-block message and recording it buys nothing. Letting it through
-      // is not free: the WATERMARK action falls into actionsResponses, which
-      // throws on a state with no md -- and the HISTORY_LIMIT capped state
-      // (statestore.js) is USER_BLOCKED with no md by design. Without this
-      // guard one late read receipt would turn a capped conversation into an
-      // ERROR that dean retries forever. Nothing outside this case reads the
-      // read/delivery marks.
+      // Must no-op: the capped state (statestore.js) has no md, and a
+      // WATERMARK action would reach actionsResponses and throw on it.
       if (state.state === 'USER_BLOCKED') return _noop()
 
       const { type, mark } = getWatermark(nxt)
@@ -515,29 +509,9 @@ function exec(state, nxt) {
     }
 
     case 'BLOCK_USER': {
-      // A block is a plain transition: no START guard and NO pointer.
-      //
-      // The pointer used to be set here, and that is what made blocks
-      // evaporate. A Redis-miss refold starts at START from the pointer, and
-      // USER_BLOCKED is only reachable from a live state, so the block landed
-      // on START and was lost (formerly no-op'd by a guard here; now it would
-      // simply produce a USER_BLOCKED with no md or forms). With no pointer the
-      // refold replays the whole log, reaches the real state, applies the block
-      // and no-ops everything after it, so state = fold(log) holds again.
-      // Blocked users have short logs (a few thousand events at most, vprod
-      // 2026-09-05), and the unbounded-log concern the pointer was standing in
-      // for is handled honestly by StateStore's HISTORY_LIMIT cap.
-      //
-      // Blocking a START user is a real block, deliberately: it is what dean
-      // intended and it is how the already-blocked population (whose stored
-      // pointer still truncates their first refold) lands on USER_BLOCKED
-      // rather than a live START. See planning/block-without-pointer-plan.md.
-      //
-      // md is carried across for the same reason forms is: apply()'s RESET
-      // rebuilds from _initialState(), so anything not named here is lost.
-      // Dropping md leaves a blocked participant with no startTime, and the
-      // next event that wakes them merges into `undefined` and produces a
-      // husk that throws in getForm. See documentation/states-debugging.md.
+      // No pointer and no START guard, deliberately: a pointer here is what
+      // made blocks evaporate on refold. forms and md must be carried because
+      // RESET rebuilds from _initialState(). See replybot/README.md.
       return {
         action: 'RESET',
         stateUpdate: { state: "USER_BLOCKED", forms: state.forms, md: state.md }
