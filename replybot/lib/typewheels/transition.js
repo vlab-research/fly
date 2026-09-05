@@ -136,7 +136,20 @@ class Machine {
         }
       }
 
-      if (output.action === 'RESET') {
+      if (output.action === 'RESET' || output.action === 'RESTORE_STATE') {
+
+        // Publish a report, but do nothing else: the state is reset/restored, so
+        // there are no messages and no responses. For RESTORE_STATE this also
+        // deliberately skips the getPageToken/getForm/getUser IO in
+        // actionsResponses -- the snapshot is self-contained, so no form lookup
+        // is needed and nothing is sent to the participant.
+        //
+        // Without this arm a RESTORE_STATE falls into actionsResponses, where
+        // the `!newState.md` guard throws and getForm(page, shortcode,
+        // md.startTime) is exactly the lookup a damaged md fails on -- erroring
+        // the participant the restore was rescuing. It was dropped by 675c31bd,
+        // in a commit whose message claims it was preserved; see
+        // planning/replybot-restore-state-transition-regression.md.
         return {
           publish: true,
           timestamp,
