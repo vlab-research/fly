@@ -39,6 +39,10 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"504", 0, RecoveryTransient},
 		{"429", 0, RecoveryTransient},
 		{"HTTP_REQUEST_FAILED", 0, RecoveryTransient},
+		// Not a provider code at all: dinersclub's own, for a payment the
+		// circuit breaker declined to attempt. Transient is the contract that
+		// makes the breaker safe rather than an outage -- see breaker.go.
+		{"CIRCUIT_OPEN", 0, RecoveryTransient},
 		{"PROVIDER_UNAVAILABLE", 0, RecoveryTransient},
 		{"PROVIDER_TIMED_OUT", 0, RecoveryTransient},
 

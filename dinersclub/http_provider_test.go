@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"net/http"
 	"net/http/httptest"
@@ -400,4 +401,50 @@ func TestHttpProviderPayout_GeneratesErrorForUserBadRequest(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, false, res.Success)
 	assert.Equal(t, "BAD_HTTP_REQUEST", res.Error.Code)
+}
+
+// The provider must cut a call at DINERSCLUB_PROVIDER_TIMEOUT, not at the 60s
+// this file used to hardcode.
+//
+// VIR-44: the hardcoded deadline was four times the configured ceiling and
+// equal to the whole of DINERSCLUB_RETRY_PROVIDER, so one hung call could
+// consume the entire retry budget. With POOL_SIZE == BATCH_SIZE == 2 that is
+// the whole throughput of the service, and an endpoint dropping SYNs stalled
+// payments for every study on the platform for 11 minutes.
+func TestHttpProviderHonoursConfiguredTimeout(t *testing.T) {
+	served := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-served // never answers within the test's lifetime
+	}))
+	defer func() { close(served); ts.Close() }()
+
+	p := &HttpProvider{
+		client:  &http.Client{Timeout: 50 * time.Millisecond},
+		timeout: 50 * time.Millisecond,
+		secrets: map[string]string{},
+	}
+
+	details := json.RawMessage(`{"id":"p1","method":"POST","url":"` + ts.URL + `"}`)
+	event := &PaymentEvent{Userid: "u1", Pageid: "pg1", Provider: "http", Details: &details}
+
+	start := time.Now()
+	res, err := p.Payout(event)
+	elapsed := time.Since(start)
+
+	assert.Nil(t, err)
+	assert.NotNil(t, res)
+	assert.False(t, res.Success)
+	assert.Equal(t, "HTTP_REQUEST_FAILED", res.Error.Code)
+	assert.Less(t, elapsed, 5*time.Second,
+		"the call must be cut at the configured timeout, not at the old hardcoded 60s")
+}
+
+// A provider built without a configured timeout must degrade to bounded, never
+// to a deadline already in the past. Every test in this file builds one.
+func TestHttpProviderZeroTimeoutFallsBackRatherThanFailingInstantly(t *testing.T) {
+	p := &HttpProvider{}
+	assert.Equal(t, defaultProviderTimeout, p.requestTimeout())
+
+	p = &HttpProvider{timeout: 15 * time.Second}
+	assert.Equal(t, 15*time.Second, p.requestTimeout())
 }

@@ -131,6 +131,25 @@ var (
 		Help: "Completed DingConnect transfers whose realised delivered amount differed from what the catalogue predicted.",
 	})
 
+	// breakerTrips counts circuit openings: one increment is one target we
+	// stopped calling. Paired with breakerSkips below, which counts the
+	// payments that opening then deferred to dean.
+	//
+	// These are the accountability for the breaker in exactly the way
+	// paymentResults is the accountability for a withheld failure -- a skipped
+	// payment writes nothing to the respondent's state either. A rising
+	// breakerSkips with a flat breakerTrips is one endpoint down for a long
+	// time; the reverse is a flapping one.
+	breakerTrips = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dinersclub_circuit_breaker_trips_total",
+		Help: "Circuit breaker openings by payment target. Each one is an endpoint we stopped calling after consecutive transport failures.",
+	}, []string{"provider", "host"})
+
+	breakerSkips = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dinersclub_circuit_breaker_skips_total",
+		Help: "Payments not attempted because the target's circuit was open. Each one is withheld and left for dean to re-drive.",
+	}, []string{"provider", "host"})
+
 	// processingFaults counts failures that are ours rather than a payment's:
 	// a malformed Kafka message, a database that will not answer, a botserver
 	// that never accepted the Result.
@@ -222,4 +241,18 @@ func serveMetrics(port int) {
 	if err := srv.ListenAndServe(); err != nil {
 		log.Printf("DinersClub metrics server stopped: %v", err)
 	}
+}
+
+// recordBreakerTrip files one circuit opening.
+func recordBreakerTrip(key string, cooldown time.Duration) {
+	provider, host := splitBreakerKey(key)
+	breakerTrips.WithLabelValues(provider, host).Inc()
+	log.Printf("DinersClub opened the circuit for %s (host %q) for %s: consecutive failures to reach it. Payments to this target are withheld and left for dean until it closes.",
+		provider, host, cooldown)
+}
+
+// recordBreakerSkip files one payment deferred by an open circuit.
+func recordBreakerSkip(key string) {
+	provider, host := splitBreakerKey(key)
+	breakerSkips.WithLabelValues(provider, host).Inc()
 }

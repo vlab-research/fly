@@ -344,7 +344,12 @@ VALUES ('user-123', 'secrets', 'bearer_token', '{"value": "token_xyz789"}');
 - **Response path extraction**: Use JSONPath to extract specific fields from response (e.g., `transaction.id` or `errors.0.message`)
 - **Error message extraction**: Extract error message from response using JSONPath
 - **Flexible methods**: Supports GET, POST, PUT, DELETE, PATCH
-- **60-second timeout**: All requests have 60-second hard timeout
+- **Bounded by `DINERSCLUB_PROVIDER_TIMEOUT`**: like every other provider except
+  DingConnect. This used to read "60-second timeout", which was true of the code
+  and wrong about the system: 60s is four times the configured ceiling and equal
+  to the whole of `DINERSCLUB_RETRY_PROVIDER`, so one hung call could eat the
+  entire retry budget and the documented worst case was not achievable. Fixed
+  with VIR-44
 
 **Error codes**:
 - MISSING_SECRET: Template placeholder for non-existent secret
@@ -705,6 +710,8 @@ DINERSCLUB_PROVIDERS=fake,reloadly,giftcard,http,dingconnect
 | DINERSCLUB_RETRY_BOTSERVER | - | Yes | Max **elapsed** duration to retry botserver calls with exponential backoff |
 | DINERSCLUB_PROVIDER_TIMEOUT | 30s | No | Hard timeout on a **single** outbound provider HTTP call. Not the same thing as the retry budgets — see below. Production sets 15s |
 | DINERSCLUB_METRICS_PORT | 9090 | No | Port for `/metrics`. Must match `dinersclub.metrics.port` in `devops/values/<env>.yaml`, which is what the Service targets |
+| DINERSCLUB_BREAKER_THRESHOLD | 3 | No | Consecutive failures to **reach** a target before we stop calling it. See "The circuit breaker" |
+| DINERSCLUB_BREAKER_COOLDOWN | 5m | No | How long a target's circuit stays open |
 | BACK_OFF_RANDOM_FACTOR | 0.5 | No | Randomization factor for backoff (0.0 to 1.0) |
 
 ### These are a budget, not independent knobs
@@ -741,6 +748,62 @@ error code classified `transient` is retried inside `RETRY_PROVIDER` as well;
 60s buys roughly two real attempts. Before that, a declined payment came back as
 `(Result, nil)` and the budget never saw it, so a provider answering 503s burned
 straight through the queue telling every respondent their payment had failed.
+
+### The circuit breaker
+
+The budget above bounds **one** payment. It does not stop the next payment
+paying the same cost, which is a different failure and the one that actually
+took production down.
+
+On 2026-09-05 00:01-00:12 UTC dinersclub consumed nothing for 11 minutes
+(VIR-44). An endpoint belonging to one study was dropping SYNs, so every payment
+to it ran to its deadline before failing — and with `POOL_SIZE == BATCH_SIZE ==
+2`, two such payments *are* the entire throughput of the service. Payments for
+every other study queued behind a host that was never going to answer. Bounding
+the call caps each failure; it does not stop them arriving back to back.
+
+`breaker.go` keeps a per-target circuit. After `DINERSCLUB_BREAKER_THRESHOLD`
+consecutive failures to reach a target it opens for
+`DINERSCLUB_BREAKER_COOLDOWN`, and payments to that target are skipped at a cost
+of roughly nothing.
+
+**The target, not the provider.** The key is `provider|host`, where the host
+comes from the optional `TargetHost` interface. Only the HTTP provider
+implements it, because only it points somewhere different per study; reloadly,
+giftcard and dingconnect each talk to one fixed host for everyone, so the
+provider name alone is already the right granularity for them.
+
+**Only a failure to reach the target counts** (`transportFailed`): a system
+fault with no verdict at all, or `HTTP_REQUEST_FAILED`. A decline — an empty
+wallet, a bad number, an operator refusal, any 4xx or 5xx — is proof the host is
+alive and answering, and it *resets* the circuit. This is the line to be careful
+about: counting declines would open the circuit on a healthy provider and stop
+paying people for a reason that has nothing to do with reachability.
+`INSUFFICIENT_BALANCE` alone is 34% of all recorded payment failures.
+
+**A skipped payment is withheld, never failed.** It becomes a `CIRCUIT_OPEN`
+Result, which `classify.go` maps to `transient`, which `deliver` withholds — so
+the respondent stays parked in `WAIT_EXTERNAL_EVENT` exactly as if the call had
+been made and had timed out, and dean re-drives them for up to 14 days. The
+breaker never costs anyone their payment; it defers it to the layer built to
+outlast an outage. If `CIRCUIT_OPEN` is ever reclassified as `permanent`, the
+throughput protection silently becomes a payment outage.
+
+**Where it is checked matters.** `Job` consults the breaker *before* `payout`,
+not inside it. A circuit-open signal raised inside `payout` would be a transient
+result, and `payout` wraps transient results in `backoff.Retry` — so the message
+would sleep its way through the whole `RETRY_PROVIDER` budget making no calls at
+all, replacing a slow failure with an equally slow one.
+
+State is in-memory and per-process, which is sufficient at `replicaCount: 1` and
+is a performance hint rather than a correctness invariant: losing it on restart
+costs one extra round of `THRESHOLD` slow failures and nothing else.
+
+`dinersclub_circuit_breaker_trips_total` and `_skips_total` are the
+accountability, in the same way `dinersclub_payment_results_total` is the
+accountability for a withheld failure — a skipped payment writes nothing to the
+respondent's state either. Rising skips with flat trips is one endpoint down for
+a long time; the reverse is a flapping one.
 
 > The 300s ceiling is no longer the thing holding the design together — nothing
 > should block long enough to approach it. It is a backstop, and the fact that

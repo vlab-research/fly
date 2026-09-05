@@ -58,6 +58,11 @@ Three consequences that shape every design decision below:
 dinersclub executes fast and keeps the line moving; dean owns persistence; the
 respondent is involved only when they hold information nobody else does.
 
+The circuit breaker (§7) is that rule applied to the one failure still being
+handled in the wrong layer: an endpoint that is simply down is an *outage*, and
+outages belong to dean. dinersclub's job is to notice quickly and get out of the
+way, not to keep dialling.
+
 **At-least-once is deliberate.** Better to pay someone twice than not at all:
 they completed the survey, and a duplicate topup is a cost overrun while a
 missed payment is a broken promise. Duplicate suppression is a platform-side
@@ -79,6 +84,11 @@ encode who retries, who is alerted, or what state the respondent ends up in.
 Examples: a provider 5xx is `transient`; `INSUFFICIENT_BALANCE` and
 `AUTH_ERROR` are `precondition`; a bad number, `IMPOSSIBLE_AMOUNT` and an
 operator refusal are `permanent`.
+
+`CIRCUIT_OPEN` is the one code that is not a provider's: it is dinersclub
+declining to make the call, because the endpoint has stopped answering (§7). It
+is `transient`, and that is a contract rather than a judgement — the breaker can
+only defer a payment to dean if the Result is withheld.
 
 **One payment point produces exactly one classified Result, however many
 provider calls it took.** DingConnect can try several operators for one payment
@@ -160,6 +170,8 @@ only application service in this repo that Prometheus scrapes.
 | `dinersclub_payment_results_total{provider,outcome,recovery,code}` | the ledger: every attempt, once |
 | `dinersclub_unclassified_error_codes_total{provider,code}` | which rows are missing from the classifier |
 | `dinersclub_payment_duration_seconds{provider,outcome}` | are we anywhere near the Kafka poll budget |
+| `dinersclub_circuit_breaker_trips_total{provider,host}` | which payment endpoints stopped answering |
+| `dinersclub_circuit_breaker_skips_total{provider,host}` | how many payments that deferred to dean |
 | `dinersclub_processing_faults_total{stage}` | is dinersclub itself broken (replaces "the pod restarted") |
 | `dinersclub_up` | is anyone scraping this at all |
 
@@ -182,6 +194,8 @@ That is what happened on 2026-08-17.
 | knob | value | why |
 |---|---|---|
 | `DINERSCLUB_PROVIDER_TIMEOUT` | 15s | hard ceiling on **one** outbound call |
+| `DINERSCLUB_BREAKER_THRESHOLD` | 3 | consecutive failures to *reach* a target before we stop calling it |
+| `DINERSCLUB_BREAKER_COOLDOWN` | 5m | how long we stop for |
 | `DINERSCLUB_RETRY_PROVIDER` | 60s | elapsed budget **across** attempts (~2 real attempts) |
 | `DINERSCLUB_RETRY_BOTSERVER` | 60s | same, for delivering the Result |
 
@@ -208,6 +222,37 @@ re-checked against that ceiling.**
 The retry budget now applies to declined payments, not only to system faults: a
 `transient` provider error code is retried inside it rather than handed straight
 to the respondent.
+
+### The budget bounds one payment; the breaker bounds the queue
+
+Everything above caps what **one** message costs. It says nothing about the next
+message costing the same, which is a different failure and the one that took
+production down on 2026-09-05 (VIR-44): dinersclub consumed nothing for 11
+minutes while an endpoint belonging to one study dropped SYNs. At `POOL_SIZE ==
+BATCH_SIZE == 2`, two payments to a dead host *are* the entire throughput of the
+service, so every other study's payments queued behind it. One study's dead
+endpoint starved payments platform-wide.
+
+`dinersclub/breaker.go` keeps a circuit per **target** — `provider|host`, so one
+study's endpoint going down does not stop another study paying through the same
+provider. After `BREAKER_THRESHOLD` consecutive failures to reach a target it
+opens for `BREAKER_COOLDOWN` and payments to it are skipped for free.
+
+Two properties make this safe rather than an outage of its own:
+
+- **Only unreachability counts.** A decline — empty wallet, bad number, operator
+  refusal, any 4xx or 5xx — is the host *answering*, and it resets the circuit.
+  Counting declines would open the circuit on a healthy provider and stop paying
+  people for a reason unrelated to reachability; `INSUFFICIENT_BALANCE` alone is
+  34% of recorded failures.
+- **A skipped payment is withheld, not failed.** It carries `CIRCUIT_OPEN`,
+  classified `transient`, so §1's rule applies unchanged: nothing is sent, the
+  respondent stays parked, dean re-drives for up to 14 days. Nobody loses a
+  payment; it is deferred to the layer built to outlast an outage, which is §2's
+  rule.
+
+The gap this closes is the one the note below always implied: an endpoint that
+is down is exactly the thing that "should have been deferred to dean instead."
 
 ## 8. Known gaps
 

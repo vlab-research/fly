@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // Event describes the synthetic event type and value.
@@ -33,9 +34,26 @@ type HTTPPoster struct {
 }
 
 // NewHTTPPoster creates a new Poster for sending synthetic events to hermes.
-func NewHTTPPoster(botserver string) Poster {
+//
+// The timeout is not optional. &http.Client{} has none, and http.NewRequest
+// below carries no context either, so before VIR-44 a hermes that accepted the
+// connection and then never answered held a pool worker forever. DINERSCLUB_
+// RETRY_BOTSERVER does not help: as config.go says of its sibling, backoff only
+// consults MaxElapsedTime BETWEEN attempts and so cannot bound an attempt that
+// never returns. Being in-cluster makes that unlikely, not impossible, and an
+// unbounded call is the one failure the 300s Kafka poll deadline cannot survive.
+//
+// It reuses DINERSCLUB_PROVIDER_TIMEOUT rather than adding a knob. hermes is
+// not a payment provider, so the name is a slight stretch, but one number that
+// is always set beats a second number nobody remembers to tune -- and a POST to
+// an in-cluster service has no business taking longer than a call to an
+// external provider does.
+func NewHTTPPoster(botserver string, timeout time.Duration) Poster {
+	if timeout <= 0 {
+		timeout = defaultProviderTimeout
+	}
 	return &HTTPPoster{
-		client:    &http.Client{},
+		client:    &http.Client{Timeout: timeout},
 		botserver: botserver,
 	}
 }

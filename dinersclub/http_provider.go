@@ -19,12 +19,33 @@ import (
 
 type HttpProvider struct {
 	client  *http.Client
+	timeout time.Duration
 	pool    *pgxpool.Pool
 	secrets map[string]string
 }
 
 func NewHttpProvider(pool *pgxpool.Pool) (Provider, error) {
-	return &HttpProvider{client: http.DefaultClient, pool: pool, secrets: map[string]string{}}, nil
+	cfg := getConfig()
+
+	// Same unbounded-client trap as the reloadly and giftcard providers, with
+	// one extra twist: this one LOOKED bounded. The request below carried a
+	// hardcoded 60s context, so http.DefaultClient's missing timeout was
+	// masked -- but 60s is four times DINERSCLUB_PROVIDER_TIMEOUT and equal to
+	// the whole of DINERSCLUB_RETRY_PROVIDER, so one attempt could consume the
+	// entire retry budget and a second could start just under the wire and run
+	// another 60s. The README's budget line (RETRY_PROVIDER + 3x
+	// PROVIDER_TIMEOUT) was simply not true for this provider. See VIR-44.
+	//
+	// The client timeout and the per-request context now carry the same value.
+	// That is redundant on purpose: the context is what actually bounds the
+	// call today, and the client timeout is what bounds the next request
+	// somebody adds here without one.
+	return &HttpProvider{
+		client:  &http.Client{Timeout: cfg.ProviderTimeout},
+		timeout: cfg.ProviderTimeout,
+		pool:    pool,
+		secrets: map[string]string{},
+	}, nil
 }
 
 func (p *HttpProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, error) {
@@ -67,6 +88,20 @@ type HttpPaymentDetails struct {
 	Headers      map[string]string `json:"headers"`
 	ErrorMessage string            `json:"errorMessage"`
 	ResponsePath string            `json:"responsePath"`
+}
+
+// requestTimeout is the per-call ceiling, with a guard on the zero value.
+//
+// A bare &HttpProvider{...} -- which every test in http_provider_test.go builds,
+// and which any future caller may -- would otherwise pass 0 to
+// context.WithTimeout, i.e. a deadline already in the past, failing every
+// request before it was sent. An unconfigured provider must degrade to bounded,
+// never to broken.
+func (p *HttpProvider) requestTimeout() time.Duration {
+	if p.timeout <= 0 {
+		return defaultProviderTimeout
+	}
+	return p.timeout
 }
 
 func (p *HttpProvider) Interpolate(s string) (string, error) {
@@ -140,7 +175,7 @@ func (p *HttpProvider) Payout(event *PaymentEvent) (*Result, error) {
 
 	b := strings.NewReader(body)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), p.requestTimeout())
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, order.Method, url, b)
 	if err != nil {

@@ -60,3 +60,15 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 	}
 	return
 }
+
+// newTestBreaker builds the breaker a DC needs, from the same config the real
+// one uses. Tests that do not care about circuit breaking get the production
+// policy rather than a disabled one, so a change that would trip the breaker
+// during an ordinary test shows up as a test failure instead of passing here
+// and surprising us in vprod.
+func newTestBreaker(cfg *Config) *Breaker {
+	return NewBreaker(breakerConfig{
+		Threshold: cfg.BreakerThreshold,
+		Cooldown:  cfg.BreakerCooldown,
+	})
+}

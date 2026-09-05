@@ -102,7 +102,17 @@ var recoveryByCode = map[string]Recovery{
 	"429": RecoveryTransient,
 
 	// We never reached the provider, so we know nothing about the payment.
-	"HTTP_REQUEST_FAILED":  RecoveryTransient,
+	"HTTP_REQUEST_FAILED": RecoveryTransient,
+
+	// CIRCUIT_OPEN is dinersclub declining to make the call at all, because
+	// the last DINERSCLUB_BREAKER_THRESHOLD attempts on this target failed to
+	// reach it (breaker.go). Transient is not a guess here, it is the entire
+	// contract: the breaker exists to defer these payments to dean, and it can
+	// only do that if deliver() withholds them and leaves the respondent
+	// parked. Reclassifying this row as permanent would silently convert the
+	// throughput protection into a payment outage.
+	"CIRCUIT_OPEN": RecoveryTransient,
+
 	"PROVIDER_UNAVAILABLE": RecoveryTransient, // dingconnect: operator down
 	"PROVIDER_TIMED_OUT":   RecoveryTransient, // dingconnect: operator slow
 

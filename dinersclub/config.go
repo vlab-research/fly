@@ -37,12 +37,29 @@ type Config struct {
 	// have a hard timeout").
 	ProviderTimeout time.Duration `env:"DINERSCLUB_PROVIDER_TIMEOUT" envDefault:"30s"`
 
+	// Circuit breaker over payment targets (VIR-44). Consecutive failures to
+	// REACH a target before we stop trying, and for how long. Declines never
+	// count -- see breaker.go, transportFailed.
+	//
+	// Both defaulted rather than required, for the same reason as the timeout
+	// above: an unset environment must still get the protection. Tripping is
+	// cheap to get wrong in the safe direction, because a skipped payment is
+	// withheld rather than failed, so the respondent stays parked and dean
+	// re-drives them for up to 14 days.
+	BreakerThreshold int           `env:"DINERSCLUB_BREAKER_THRESHOLD" envDefault:"3"`
+	BreakerCooldown  time.Duration `env:"DINERSCLUB_BREAKER_COOLDOWN" envDefault:"5m"`
+
 	// Port for the /metrics endpoint. Defaulted rather than required because
 	// the test binary and local runs should not have to know about it, and a
 	// service that refuses to start over a metrics port would be a worse
 	// trade than one that cannot be scraped.
 	MetricsPort int `env:"DINERSCLUB_METRICS_PORT" envDefault:"9090"`
 }
+
+// defaultProviderTimeout mirrors the envDefault on ProviderTimeout above. It is
+// the fallback for a provider constructed without config -- see
+// HttpProvider.requestTimeout.
+const defaultProviderTimeout = 30 * time.Second
 
 func getConfig() *Config {
 	cfg := Config{}

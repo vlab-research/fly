@@ -22,6 +22,7 @@ type DC struct {
 	poster      Poster
 	cache       *ristretto.Cache
 	getProvider GetProvider
+	breaker     *Breaker
 }
 
 type GetProvider func(pool *pgxpool.Pool, event *PaymentEvent) (Provider, error)
@@ -123,6 +124,20 @@ func invalidProviderResult(pe *PaymentEvent) *Result {
 	t := fmt.Sprintf("payment:%v", pe.Provider)
 	res := &Result{Type: t, Success: false, Timestamp: time.Now().UTC(), Error: err}
 	return res
+}
+
+// circuitOpenResult is the verdict for a payment we declined to attempt.
+//
+// It is a normal failure Result carrying CIRCUIT_OPEN, which classify.go maps
+// to transient, which deliver() withholds -- so the respondent stays parked in
+// WAIT_EXTERNAL_EVENT exactly as they would have if we had made the call and it
+// had timed out. The only difference is that it cost no time. That equivalence
+// is the reason the breaker is safe: see breaker.go.
+func circuitOpenResult(pe *PaymentEvent) *Result {
+	message := fmt.Sprintf("Payments to this %s endpoint are paused after repeated failures to reach it; the payment will be retried automatically.", pe.Provider)
+	err := &PaymentError{message, "CIRCUIT_OPEN", nil}
+	t := fmt.Sprintf("payment:%v", pe.Provider)
+	return &Result{Type: t, Success: false, Timestamp: time.Now().UTC(), Error: err}
 }
 
 func authError(pe *PaymentEvent, e error) *Result {
@@ -290,12 +305,34 @@ func (dc *DC) Job(pe *PaymentEvent) error {
 		return dc.deliver(pe, authError(pe, e))
 	}
 
+	// The breaker is consulted HERE, outside payout, and that placement is
+	// load-bearing. A "circuit is open" signal raised inside payout would be a
+	// transient result, and payout wraps transient results in backoff.Retry --
+	// so the message would sleep its way through the full RETRY_PROVIDER budget
+	// making no calls at all, replacing a slow failure with an equally slow
+	// one and defeating the entire point. Ahead of payout it costs nothing.
+	key := breakerKey(pe, provider)
+	if !dc.breaker.Allow(key) {
+		recordBreakerSkip(key)
+		return dc.deliver(pe, circuitOpenResult(pe))
+	}
+
 	res, err := dc.payout(provider, pe)
 	if err != nil {
 		// No verdict at all -- every attempt was a system fault. Nothing is
 		// sent, so the respondent stays parked and dean re-drives.
+		dc.breaker.RecordFailure(key)
 		recordFault("payout")
 		return err
+	}
+
+	// Only a failure to REACH the target counts against the target. A decline
+	// is proof it is alive and answering, and clears the breaker -- see
+	// transportFailed.
+	if transportFailed(res, nil) {
+		dc.breaker.RecordFailure(key)
+	} else {
+		dc.breaker.RecordSuccess(key)
 	}
 
 	return dc.deliver(pe, res)
@@ -363,14 +400,19 @@ func checkError(err error) {
 func main() {
 	cfg := getConfig()
 	pool := getPool(cfg)
-	poster := NewHTTPPoster(cfg.Botserver)
+	poster := NewHTTPPoster(cfg.Botserver, cfg.ProviderTimeout)
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
 		BufferItems: cfg.CacheBufferItems,
 	})
 	handle(err)
-	dc := &DC{cfg, pool, poster, cache, getProvider}
+	breaker := NewBreaker(breakerConfig{
+		Threshold: cfg.BreakerThreshold,
+		Cooldown:  cfg.BreakerCooldown,
+	})
+
+	dc := &DC{cfg, pool, poster, cache, getProvider, breaker}
 
 	// Metrics are how a withheld failure stays accountable -- see metrics.go.
 	go serveMetrics(cfg.MetricsPort)

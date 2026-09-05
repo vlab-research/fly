@@ -18,7 +18,7 @@ import (
 func getDC(ts *httptest.Server) *DC {
 	cfg := getConfig()
 	pool := getPool(cfg)
-	poster := NewHTTPPoster(ts.URL)
+	poster := NewHTTPPoster(ts.URL, 0)
 	cache, _ := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
@@ -26,7 +26,7 @@ func getDC(ts *httptest.Server) *DC {
 		Metrics:     true,
 	})
 	cache.Clear()
-	return &DC{cfg, pool, poster, cache, getProvider}
+	return &DC{cfg, pool, poster, cache, getProvider, newTestBreaker(cfg)}
 }
 
 func TestDinersClub(t *testing.T) {
@@ -243,7 +243,7 @@ func TestDinersClubErrorsWhenProviderNotListed(t *testing.T) {
 	cfg := getConfig()
 	cfg.Providers = []string{}
 	pool := getPool(cfg)
-	poster := NewHTTPPoster(ts.URL)
+	poster := NewHTTPPoster(ts.URL, 0)
 	cache, _ := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
@@ -251,7 +251,7 @@ func TestDinersClubErrorsWhenProviderNotListed(t *testing.T) {
 		Metrics:     true,
 	})
 	cache.Clear()
-	dc := &DC{cfg, pool, poster, cache, getProvider}
+	dc := &DC{cfg, pool, poster, cache, getProvider, newTestBreaker(cfg)}
 	err := dc.Process(msgs)
 	assert.Nil(t, err)
 }
@@ -278,7 +278,7 @@ func TestDinersClubErrorsOnMissingUser(t *testing.T) {
 
 	cfg := getConfig()
 	pool := getPool(cfg)
-	poster := NewHTTPPoster(ts.URL)
+	poster := NewHTTPPoster(ts.URL, 0)
 	cache, _ := ristretto.NewCache(&ristretto.Config{
 		NumCounters: cfg.CacheNumCounters,
 		MaxCost:     cfg.CacheMaxCost,
@@ -292,7 +292,7 @@ func TestDinersClubErrorsOnMissingUser(t *testing.T) {
 		}
 		return NewFakeProvider(getUser, auth)
 	}
-	dc := &DC{cfg, pool, poster, cache, getProvider}
+	dc := &DC{cfg, pool, poster, cache, getProvider, newTestBreaker(cfg)}
 	err := dc.Process(msgs)
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Error(), "User not found for page id: invalid-page")

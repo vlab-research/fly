@@ -204,9 +204,10 @@ func TestAuthFailureIsWithheld(t *testing.T) {
 	dc := &DC{
 		cfg,
 		getPool(cfg),
-		NewHTTPPoster(ts.URL),
+		NewHTTPPoster(ts.URL, 0),
 		cache,
 		getProvider,
+		newTestBreaker(cfg),
 	}
 
 	err := dc.Process(makeMessages([]string{`{
