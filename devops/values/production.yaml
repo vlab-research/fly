@@ -140,7 +140,7 @@ versionScribble: &vscribble v0.0.34
 # layers agreed by accident. dinersclub never consults the client library's
 # Retryable(), which calls RateLimited retryable; retrying it re-sends to a
 # number that may have tripped a per-account fraud rule.
-versionDinersclub: &vdinersclub v0.0.49
+versionDinersclub: &vdinersclub v0.0.50
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
