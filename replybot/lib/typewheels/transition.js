@@ -3,7 +3,7 @@ const { eventPlatform } = require('./utils')
 const { getForm } = require('./ourform')
 const { responseVals } = require('../responses/responser')
 const { parseEvent } = require('../event-normalizer')
-const { iowrap, MachineIOError } = require('../errors')
+const { iowrap, MachineIOError, MissingMetadataError } = require('../errors')
 const util = require('util')
 const Cacheman = require('cacheman')
 const crypto = require('crypto')
@@ -44,8 +44,17 @@ class Machine {
     const upd = output && update(output)
     const shortcode = newState.forms.slice(-1)[0]
 
-    if (!newState.md) {
-      throw new Error(`User without metadata: ${userId}. State: ${util.inspect(newState, null, 8)}`)
+    // The startTime test is half the guard, not a bonus. A husk -- `md` merged
+    // into `undefined`, so `{}` or `{e_handover_metadata: ...}` -- is truthy and
+    // used to sail past a bare `!newState.md`, dying one line later in getForm's
+    // arity check, where iowrap relabels it INTERNAL. That reported a damaged
+    // conversation record as a platform fault: it paged the on-call and sat in
+    // DEAN_ERROR_TAGS, so dean redid it every 30 minutes forever and rebuilt the
+    // same husk each time. Both shapes are the same fault and both are terminal
+    // -- nothing regenerates md -- so both get MISSING_METADATA, which no
+    // consumer retries. See documentation/states-debugging.md.
+    if (!newState.md || !newState.md.startTime) {
+      throw new MissingMetadataError(`User without metadata: ${userId}. State: ${util.inspect(newState, null, 8)}`)
     }
     const { startTime } = newState.md
 
@@ -156,7 +165,12 @@ class Machine {
           user,
           page,
           platform,
-          newState
+          newState,
+          // BLOCK_USER asks for its trimmed state to be written back into the
+          // log as a restore_state event, so a later re-fold starts AT the
+          // snapshot rather than after the block with nothing to derive from.
+          // The decision is the machine's (pure); the POST is index.js's.
+          ...(output.snapshot ? { snapshot: true } : {})
         }
       }
 

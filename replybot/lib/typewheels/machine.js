@@ -505,6 +505,11 @@ function exec(state, nxt) {
     }
 
     case 'BLOCK_USER': {
+      // Nothing to block and nothing to preserve: a block on a conversation that
+      // does not exist must not manufacture a USER_BLOCKED state out of an empty
+      // fold. Kept as-is -- with the snapshot below, START is no longer reachable
+      // during a re-fold of a blocked participant, because the fold now starts at
+      // the snapshot rather than after the block.
       if (state.state === 'START') {
         return _noop()
       }
@@ -516,7 +521,31 @@ function exec(state, nxt) {
         // Dropping md leaves a blocked participant with no startTime, and the
         // next event that wakes them merges into `undefined` and produces a
         // husk that throws in getForm. See documentation/states-debugging.md.
-        stateUpdate: { state: "USER_BLOCKED", pointer: nxt.timestamp, forms: state.forms, md: state.md }
+        stateUpdate: { state: "USER_BLOCKED", pointer: nxt.timestamp, forms: state.forms, md: state.md },
+
+        // Ask the shell to write the resulting state back into the log as a
+        // `restore_state` event.
+        //
+        // Carrying forms/md through stateUpdate only repairs the LIVE state. The
+        // pointer advance -- which is the whole point of the reset, since it is
+        // what makes shedding a spammer's 30k events stick -- means a later Redis
+        // miss re-folds from AFTER this event. There is no block_user left to
+        // replay and nothing to derive forms/md from, so the block evaporates and
+        // the messages the participant sent after it, correctly no-op'd live, now
+        // take effect and blank-start them. Every one of the five users blocked on
+        // 2026-06-20 had escaped this way by the time it was measured.
+        //
+        // Leaving the pointer put is not the alternative: replaying 30k spam
+        // events in order to then trim them is precisely the OOM the pointer
+        // exists to prevent. So the event has to CARRY the state rather than
+        // derive it -- which is exactly what restore_state already does for the
+        // manual unblocks, giving blocking and unblocking one mechanism with
+        // different payloads. See planning/blocked-user-durability-handoff.md,
+        // "Recommended approach: snapshot-in-log".
+        //
+        // ONLY BLOCK_USER SETS THIS. RESTORE_STATE must never set it, or every
+        // snapshot would emit the next one and the log would grow without bound.
+        snapshot: true
       }
     }
 

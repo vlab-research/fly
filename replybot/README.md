@@ -116,17 +116,25 @@ name `publishCommands` suggests. For every event that produces a report, the seq
 fully serial and fully awaited, **in this order**:
 
 ```
-publishReport (HTTP POST to hermes /synthetic)   -- index.js:98
-  → publishState (Kafka produce, state topic)    -- index.js:101
-  → stateStore.updateState (Redis SETEX)         -- index.js:102
-  → publishResponses (Kafka produce)             -- index.js:105, conditional
-  → publishPayment (Kafka produce)                -- index.js:108, conditional
-  → publishCommands (Kafka produce, commands topic) -- index.js:111
+publishReport (HTTP POST to hermes /synthetic)      -- machine_report
+  → publishState (Kafka produce, state topic)
+  → stateStore.updateState (Redis SETEX)
+  → publishResponses (Kafka produce)                -- conditional
+  → publishPayment (Kafka produce)                  -- conditional
+  → publishCommands (Kafka produce, commands topic)
+  → publishSnapshot (HTTP POST to hermes /synthetic) -- restore_state, conditional
 ```
 
-`publishCommands` runs **last**, not first — every send-message/handoff command sits
+`publishCommands` runs late, not first — every send-message/handoff command sits
 behind a hermes round trip, a Redis write, and up to two other Kafka produce calls before
 its own produce call is even reached.
+
+`publishSnapshot` runs **last**, and that placement is load-bearing. It fires only when
+`report.snapshot` is set (a `block_user`, see "Blocking is durable" below) and everything
+above it is what makes the block take effect *now*; the snapshot only makes the block
+survive a Redis miss *later*. The handler's `catch` abandons the rest of the sequence, so
+posting the snapshot earlier would let a hermes outage take the state write down with it —
+trading a durable block for no block at all.
 
 **`issued_at`** (`lib/typewheels/transition.js:79`/`:92`, inside `buildCommands`) is
 stamped *after* the state machine has already computed the response (`getForm`, `act`,
@@ -191,6 +199,20 @@ the pipeline depends on: `startTime` (needed by `getForm` to resolve the form ve
 was a quick_reply or a "Get Started" postback. All five paths then shared the same
 `state.state === 'START'` check.
 
+The guard now reads `!newState.md || !newState.md.startTime`, so a husk is caught at the
+guard rather than inside `getForm`. That is only a better *diagnosis* — `getForm` rejects a
+falsy timestamp anyway (`ourform.js:29`), so no conversation that used to work now fails.
+What changes is the tag: it throws `MissingMetadataError` (`lib/errors.js`) with tag
+`MISSING_METADATA` instead of falling to `STATE_ACTIONS` (no `md` at all) or being
+relabelled `INTERNAL` by `iowrap` (the husk). Both of those are platform-fault tags — they
+page the on-call and sit in `DEAN_ERROR_TAGS`, so dean redid the state every 30 minutes
+forever and rebuilt the identical husk each time. `md` is only ever *created* by
+`getMetadata()` (`utils.js`) on a referral or by `_stitch` (`machine.js`), both of which
+always set `startTime`; every other write *merges*. So a conversation that has lost it
+cannot regenerate it, no retry can help, and the honest classification is a data fault.
+`MISSING_METADATA` is outside every consumer's platform allow-list, so nothing retries it
+and nobody is paged. See `documentation/study-error-alerting.md` § "Error Taxonomy".
+
 ### A SYNTHETIC event may not blank-start
 
 Sharing that check across all five was one path too many. `_handleExternalEvent` has two
@@ -234,9 +256,51 @@ An exodus `BAILOUT` at `START` is **not** refused: it names its own form, so it 
 through `FALLBACK_FORM`, and exodus has no re-sweep.
 
 Note all of this covers users who arrive without a conversation. A user who *had* one and lost
-their `md` — `block_user` drops it — is damaged rather than new, and is not blank-started:
-that would append the fallback form and silently reassign a real participant mid-survey.
+their `md` is damaged rather than new, and is not blank-started: that would append the
+fallback form and silently reassign a real participant mid-survey. Those states now carry
+`MISSING_METADATA` (above) instead of paging as a platform fault.
 See `planning/blocked-user-durability-handoff.md`.
+
+### Blocking is durable: the snapshot in the log
+
+`BLOCK_USER` returns a `RESET` that keeps `forms` and `md`, drops the bloat dean blocked for
+(`qa`, `externalEvents`), and advances `pointer` to the block event. **The pointer advance is
+the point** — it is what makes shedding a spammer's 30k events stick, because a Redis miss
+re-folds from `message_pointer`, not from the start of the conversation.
+
+It is also what used to make blocks evaporate. `chatbase.get()` truncates at
+`message_pointer <= m.timestamp`, so once the 24h Redis TTL lapsed the re-fold began *after*
+the block: no `block_user` left to replay, no referral to rebuild `md` from, and
+`BLOCK_USER`'s own `state === 'START'` guard meant the block could not reproduce itself from
+an empty fold. The participant came back unblocked — and worse, the messages they sent after
+the block, correctly no-op'd while it held, now took effect and blank-started them.
+
+Leaving the pointer put is not the alternative: replaying 30k spam events in order to then
+trim them is precisely the OOM the pointer exists to prevent. So the **event carries the
+state** instead. `exec()`'s `BLOCK_USER` sets `snapshot: true` on its output; `run()` passes
+that out on the report; `publishSnapshot` (`lib/index.js`) POSTs the trimmed `newState` to
+hermes' `/synthetic` as a `restore_state`. A later re-fold starts *at* that event and
+rehydrates `USER_BLOCKED` with `forms` and `md` intact, from `_initialState()`, without
+replaying anything before it.
+
+This is the same mechanism as a manual unblock, with a different payload — blocking and
+unblocking are now one thing. Three properties hold it together:
+
+- **Only `BLOCK_USER` sets `snapshot`.** Processing a `restore_state` must never ask for
+  another, or each block would emit an unbounded chain. Tested at both levels
+  (`machine.test.js`, `transition.test.js`).
+- **Nothing reaches the participant.** Both `RESET` and `RESTORE_STATE` short-circuit
+  `run()` before `actionsResponses`, so no form is looked up and no message is built.
+- **`RESTORE_STATE` is unconditional.** It must land identically whether the fold starts
+  from the live `USER_BLOCKED` state or cold from `START` at `message_pointer`; gating it on
+  the incoming state would break exactly the durability it exists to provide.
+
+The `state === 'START'` no-op in `BLOCK_USER` stays: a block on a conversation that does not
+exist must not manufacture a `USER_BLOCKED` state out of an empty fold. With the snapshot in
+place, `START` is no longer reachable during a blocked participant's re-fold at all.
+
+**Not in this fix:** the states blocked before it shipped have no snapshot in their log and
+stay armed. Draining them is a one-off emission of `restore_state` events, not a code change.
 
 ### A FORM-LESS entry may not re-enter a live conversation
 
@@ -637,6 +701,12 @@ the system.
   "event":      { "type": "machine_report", "value": { /* the report */ } }
 }
 ```
+
+Replybot posts one other event type, rarely: `publishSnapshot` sends a `restore_state`
+carrying `{ "state": <report.newState> }` after a `block_user` (see "Blocking is durable"
+above). Both go through the same `postSynthetic` helper, so the envelope rules below apply
+identically to both. `restore_state` was previously only ever injected by hand for
+recovery; replybot is now also a producer of it.
 
 All three are **required** by the event envelope contract
 (`documentation/event-envelope.md`); the request carries `X-Vlab-Poster: replybot`.

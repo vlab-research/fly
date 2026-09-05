@@ -170,6 +170,141 @@ describe('machine.run', () => {
     })
   })
 
+  // A conversation whose md is gone is a damaged record, not a platform outage.
+  // Untagged it became STATE_ACTIONS -- paged the on-call -- or, for the truthy
+  // husk that slipped past the old `!md` guard, INTERNAL via getForm's arity
+  // check. Both sit in DEAN_ERROR_TAGS, so dean redid them every 30 minutes
+  // forever, rebuilding the identical husk each time.
+  describe('a conversation with no usable metadata carries its own tag', () => {
+
+    // md is never regenerated -- only getMetadata() creates it, on a referral or
+    // a stitch -- so this state cannot heal, and nothing should retry it.
+    it('returns MISSING_METADATA when md is absent', async () => {
+      const m = new Machine()
+      m.getForm = async () => { throw new Error('getForm must not be reached without md') }
+
+      // A watermark keeps md untouched (apply spreads state), so newState.md is
+      // genuinely undefined rather than merged into a husk.
+      const report = await m.run({ state: 'QOUT', question: 'a', qa: [], forms: ['FOO'] }, USER_ID, read)
+
+      report.error.tag.should.equal('MISSING_METADATA')
+      report.error.message.should.match(/User without metadata/)
+      report.publish.should.be.true
+    })
+
+    // The production shape: `{ ...undefined, ...eventMetadata }` is truthy and
+    // used to pass the guard, then die in getForm as INTERNAL.
+    it('returns MISSING_METADATA for a truthy husk with no startTime', async () => {
+      const m = new Machine()
+      m.getForm = async () => { throw new Error('getForm must not be reached with a husk') }
+
+      const husk = { state: 'QOUT', question: 'a', qa: [], forms: ['FOO'], md: { e_handover_metadata: 'new message' } }
+      const report = await m.run(husk, USER_ID, read)
+
+      report.error.tag.should.equal('MISSING_METADATA')
+      report.error.tag.should.not.equal('INTERNAL')
+    })
+  })
+
+})
+
+// planning/blocked-user-durability-handoff.md, Gap 3. exec() decides that a
+// block owes a snapshot; run() carries the decision out to index.js, which does
+// the POST to botserver's /synthetic.
+describe('machine.run: block_user snapshots the blocked state', () => {
+
+  const blockUser = synthetic({ type: 'block_user', value: null }, { timestamp: 2000 })
+  const midSurvey = { state: 'QOUT', question: 'a', qa: [['a', 'yes']], forms: ['FOO'], md: { startTime: 100, form: 'FOO' } }
+
+  const blockedReport = () => {
+    const m = new Machine()
+    // Nothing about a block needs a form. If this runs, the block is doing IO.
+    m.getForm = async () => { throw new Error('getForm must not be called on a block') }
+    return m.run(midSurvey, USER_ID, blockUser)
+  }
+
+  it('asks the shell for a snapshot and sends nothing to the participant', async () => {
+    const report = await blockedReport()
+
+    report.publish.should.be.true
+    report.snapshot.should.be.true
+    report.newState.state.should.equal('USER_BLOCKED')
+    report.newState.forms.should.eql(['FOO'])
+    report.newState.md.should.have.property('startTime', 100)
+    report.newState.qa.should.eql([]) // the bloat is what the reset sheds
+    should.not.exist(report.commands)
+    should.not.exist(report.responses)
+    should.not.exist(report.error)
+  })
+
+  // THE LOOP GUARD, at the level that would actually loop: index.js posts a
+  // restore_state whenever report.snapshot is set, and that event comes back
+  // through run() like any other. If it asked for a snapshot too, each block
+  // would emit an unbounded chain of them.
+  it('the emitted snapshot does not ask for another one', async () => {
+    const report = await blockedReport()
+
+    // exactly what index.js posts, as botserver would hand it back
+    const snapshotEvent = synthetic(
+      { type: 'restore_state', value: { state: report.newState } },
+      { timestamp: 2001 }
+    )
+
+    const m = new Machine()
+    m.getForm = async () => { throw new Error('getForm must not be called on a restore') }
+    const second = await m.run(report.newState, USER_ID, snapshotEvent)
+
+    should.not.exist(second.snapshot)
+    should.not.exist(second.commands)
+    should.not.exist(second.error)
+    second.newState.state.should.equal('USER_BLOCKED')
+    second.newState.forms.should.eql(['FOO'])
+    second.newState.md.should.have.property('startTime', 100)
+    second.newState.pointer.should.equal(2001) // the pointer the re-fold starts at
+  })
+
+  it('asks for no snapshot when there is no conversation to block', async () => {
+    const m = new Machine()
+    const report = await m.run(_initialState(), USER_ID, blockUser)
+
+    report.publish.should.be.false // NONE: nothing happened
+    should.not.exist(report.snapshot)
+  })
+
+  // The wire shape, end to end through the real normalizer. index.js is not
+  // requireable from a test (it builds a SpineSupervisor at module load), so this
+  // is what stands in for it: the exact body publishSnapshot POSTs, transformed
+  // the way botserver's /synthetic handler transforms it, serialized the way
+  // Kafka carries it, and fed back through run(). A snapshot nested one level
+  // wrong here would restore an empty state and silently unblock the user.
+  it('round-trips through /synthetic and Kafka as a real restore_state', async () => {
+    const report = await blockedReport()
+
+    // replybot POSTs this (lib/index.js publishSnapshot -> postSynthetic)
+    const posted = {
+      user: USER_ID,
+      account_id: PAGE_ID,
+      platform: 'messenger',
+      event: { type: 'restore_state', value: { state: report.newState } }
+    }
+
+    // botserver stamps source + its own timestamp (server/handlers.js), then
+    // produces the JSON onto the events topic.
+    const onTheWire = JSON.stringify({ ...posted, source: 'synthetic', timestamp: 2001 })
+
+    const m = new Machine()
+    m.getForm = async () => { throw new Error('getForm must not be called on a restore') }
+    const restored = await m.run(_initialState(), USER_ID, onTheWire)
+
+    // A cold fold -- exactly what a Redis miss at message_pointer = 2001 does.
+    restored.newState.state.should.equal('USER_BLOCKED')
+    restored.newState.forms.should.eql(['FOO'])
+    restored.newState.md.should.have.property('startTime', 100)
+    restored.newState.pointer.should.equal(2001)
+    should.not.exist(restored.snapshot)
+    should.not.exist(restored.commands)
+    should.not.exist(restored.error)
+  })
 })
 
 describe('Machine integrated', () => {
@@ -273,7 +408,7 @@ describe('Machine integrated', () => {
 
     const event = text
 
-    const report = await m.run({ state: 'QOUT', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
+    const report = await m.run({ state: 'QOUT', md: { startTime: 1 }, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
     report.user.should.equal('bar')
 
@@ -413,7 +548,7 @@ describe('Machine integrated', () => {
 
     const state = {
       state: 'QOUT',
-      md: { platform: 'whatsapp', pageid: WA_PHONE_NUMBER_ID },
+      md: { startTime: 1, platform: 'whatsapp', pageid: WA_PHONE_NUMBER_ID },
       question: 'foo',
       qa: [],
       forms: ['someform']
@@ -447,7 +582,7 @@ describe('Machine integrated', () => {
       ]
     }, 'foo'])
 
-    const report = await m.run({ state: 'QOUT', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', text)
+    const report = await m.run({ state: 'QOUT', md: { startTime: 1 }, question: 'foo', qa: [], forms: ['someform'] }, 'bar', text)
 
     should.not.exist(report.error)
     should.exist(report.responses)
@@ -469,7 +604,7 @@ describe('Machine integrated', () => {
 
     const event = _echo(md)
 
-    const report = await m.run({ state: 'RESPONDING', md: {}, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
+    const report = await m.run({ state: 'RESPONDING', md: { startTime: 1 }, question: 'foo', qa: [], forms: ['someform'] }, 'bar', event)
 
     report.user.should.equal('bar')
 

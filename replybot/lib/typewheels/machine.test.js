@@ -545,6 +545,96 @@ describe('RESTORE_STATE (recovery event)', () => {
   })
 })
 
+// Gap 3 of planning/blocked-user-durability-handoff.md. A block trims the state
+// and advances the pointer past everything before it; a later Redis miss then
+// re-folds from AFTER the block_user, where there is nothing left to derive
+// forms/md from and BLOCK_USER's START guard means the block cannot even
+// reproduce itself. The event therefore has to CARRY the state. exec() only
+// decides that a snapshot is owed; index.js POSTs it.
+describe('BLOCK_USER asks for a state snapshot in the log', () => {
+
+  const blockUser = synthetic({ type: 'block_user', value: null })
+  const midSurvey = () => getState([referral, text, echo, multipleChoice])
+
+  // What the shell would post: exactly the state it also writes to Redis and
+  // the state topic.
+  const snapshotOf = (state, event = blockUser) => apply(state, exec(state, event))
+
+  it('flags the block for snapshotting', () => {
+    const output = exec(midSurvey(), blockUser)
+    output.action.should.equal('RESET')
+    output.snapshot.should.be.true
+  })
+
+  it('asks for nothing when there is no conversation to snapshot', () => {
+    // A block on a START state no-ops, so there is no state worth preserving and
+    // no snapshot to emit.
+    const output = exec(_initialState(), blockUser)
+    output.action.should.equal('NONE')
+    should.not.exist(output.snapshot)
+  })
+
+  // THE LOOP GUARD. Processing the snapshot must not ask for another one, or
+  // every block would emit an unbounded chain of restore_state events.
+  it('a restore_state never asks for a snapshot of its own', () => {
+    const snapshot = snapshotOf(midSurvey())
+    const restoreEvent = synthetic({ type: 'restore_state', value: { state: snapshot } }, { timestamp: 21 })
+
+    // from the live blocked state...
+    const live = exec(snapshot, restoreEvent)
+    live.action.should.equal('RESTORE_STATE')
+    should.not.exist(live.snapshot)
+
+    // ...and from the re-fold, which starts at the snapshot from START.
+    const refold = exec(_initialState(), restoreEvent)
+    refold.action.should.equal('RESTORE_STATE')
+    should.not.exist(refold.snapshot)
+  })
+
+  it('rehydrates USER_BLOCKED with forms and md when re-folded from the snapshot alone', () => {
+    const snapshot = snapshotOf(midSurvey())
+    const restoreEvent = synthetic({ type: 'restore_state', value: { state: snapshot } }, { timestamp: 21 })
+
+    // The bug: the pointer moved to the block, so a Redis miss re-folds a log
+    // that no longer contains the referral -- or the block_user itself.
+    getState([blockUser]).state.should.equal('START')
+
+    // The fix: the pointer moves to the snapshot instead, and the fold starts
+    // there. This is the exact log chatbase returns after the pointer advance.
+    const refolded = getState([restoreEvent])
+    refolded.state.should.equal('USER_BLOCKED')
+    refolded.forms.should.eql(['FOO'])
+    refolded.md.should.have.property('startTime')
+    refolded.pointer.should.equal(21)
+    refolded.qa.should.eql([]) // still trimmed: the snapshot is the trimmed state
+
+    // and the block still holds against everything that arrives afterwards
+    const after = getState([restoreEvent, { ...text, timestamp: 30 }, handover({ metadata: 'x' }, { timestamp: 31 })])
+    after.state.should.equal('USER_BLOCKED')
+    after.forms.should.eql(['FOO'])
+    after.md.should.have.property('startTime')
+    after.qa.should.eql([])
+  })
+
+  // Dean cannot produce this -- its Spammers query excludes USER_BLOCKED
+  // (dean/queries.go) -- but a hand-injected or replayed duplicate can. It must
+  // converge rather than compound: same state, a later pointer, one more
+  // snapshot. That is why the guard added here is on START and not on
+  // USER_BLOCKED: re-blocking an already-blocked participant is harmless, while
+  // refusing it would leave a stale pointer no snapshot ever refreshes.
+  it('is idempotent under a repeated block', () => {
+    const once = snapshotOf(midSurvey())
+    const twice = snapshotOf(once, synthetic({ type: 'block_user', value: null }, { timestamp: 40 }))
+
+    twice.state.should.equal('USER_BLOCKED')
+    twice.forms.should.eql(once.forms)
+    twice.md.should.eql(once.md)
+    twice.qa.should.eql([])
+    twice.pointer.should.equal(40)
+    exec(once, synthetic({ type: 'block_user', value: null }, { timestamp: 40 })).snapshot.should.be.true
+  })
+})
+
 describe('getState', () => {
 
   it('Gets start state with empty log', () => {

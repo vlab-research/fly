@@ -37,6 +37,37 @@ class RefDecodeError extends Error {
   }
 }
 
+// A conversation whose `md` is gone, or hollowed out into a husk with no
+// startTime. Same reasoning as RefDecodeError: it carries its own tag so it does
+// not land in the STATE_ACTIONS catch-all.
+//
+// This one is not a study fault either, though. `md` is only ever CREATED by
+// getMetadata() on a referral or a stitch; every other write MERGES, so once it
+// is lost `{ ...undefined, ...eventMetadata }` produces a truthy husk that no
+// later event can mend. The record is damaged and retrying cannot repair it --
+// which is precisely what INTERNAL (the tag iowrap put on the getForm arity
+// failure this used to become) told every consumer to do: page the on-call, and
+// let dean redo it every 30 minutes forever, reproducing the identical error.
+//
+// MISSING_METADATA sits outside all three platform allow-lists -- dean's
+// DEAN_ERROR_TAGS, dashboard-server's PLATFORM_ERROR_TAGS, and the
+// PlatformInternalErrors alert -- all of which default an unrecognized tag to
+// the non-platform side. So the participant lands in a visible, counted ERROR
+// state that nothing retries and nobody is woken for, which is the honest
+// description of a broken conversation record. Draining them is a backfill, not
+// a retry. See documentation/states-debugging.md, "Blocking a participant
+// destroys md", and documentation/study-error-alerting.md, "Error Taxonomy".
+class MissingMetadataError extends Error {
+  constructor(msg, details) {
+    super(msg)
+    this.tag = 'MISSING_METADATA'
+    this.details = details
+  }
+  get name() {
+    return this.constructor.name;
+  }
+}
+
 async function iowrap(msg, tag, fn, ...args) {
   try {
     const res = await fn(...args)
@@ -53,4 +84,4 @@ async function iowrap(msg, tag, fn, ...args) {
   }
 }
 
-module.exports = { MachineIOError, RefDecodeError, iowrap }
+module.exports = { MachineIOError, RefDecodeError, MissingMetadataError, iowrap }

@@ -10,7 +10,11 @@ const KAFKA_COMMANDS_TOPIC = process.env.KAFKA_COMMANDS_TOPIC || 'commands'
 // TODO: Add /ready endpoint that has await producerReady
 // and /health endpoint that checks kafka connection somehow!
 
-async function publishReport(report, conv) {
+// Post a synthetic event back into the conversation this report came from.
+// botserver stamps it with a fresh Date.now() before producing it, so it lands
+// in `messages` after the event that caused it -- which is what makes a snapshot
+// replayable at a pointer set to its own timestamp.
+async function postSynthetic(type, value, report, conv) {
   const url = process.env.BOTSERVER_URL
 
   // The envelope is the source for the conversation we post this report back into.
@@ -34,7 +38,7 @@ async function publishReport(report, conv) {
     user: report.user,
     account_id,
     platform,
-    event: { type: 'machine_report', value: report }
+    event: { type, value }
   }
 
   // TODO: secure!!
@@ -46,6 +50,22 @@ async function publishReport(report, conv) {
     },
     body: JSON.stringify(json),
   })
+}
+
+async function publishReport(report, conv) {
+  return postSynthetic('machine_report', report, report, conv)
+}
+
+// Write a blocked participant's trimmed state into their own event log, so a
+// re-fold that starts after the block_user lands on USER_BLOCKED with forms and
+// md intact instead of on an empty START. See machine.js's BLOCK_USER case for
+// why the state has to be carried rather than derived.
+//
+// The machine decides (exec sets `snapshot`); this only does the IO. The payload
+// is report.newState -- the same object published to the state topic and written
+// to Redis, so the log and the live state cannot disagree.
+async function publishSnapshot(report, conv) {
+  return postSynthetic('restore_state', { state: report.newState }, report, conv)
 }
 
 async function produce(topic, message, userid) {
@@ -109,6 +129,15 @@ function processor(machine, stateStore) {
       }
       if (report.commands && report.commands.length > 0) {
         await publishCommands(report.commands)
+      }
+
+      // Last, deliberately. Everything above is what makes the block take effect
+      // now; this only makes it survive a Redis miss later. Posting it first
+      // would let a botserver outage take the state write down with it (the
+      // catch below abandons the rest of the handler), trading a durable block
+      // for no block at all.
+      if (report.snapshot) {
+        await publishSnapshot(report, conv)
       }
 
     }
