@@ -13,6 +13,7 @@ router
   .use('/whatsapp', require('./whatsapp'))
   .use('/message-templates', require('./message-templates'))
   .use('/tickets', require('./tickets'))
+  .use('/mcp', require('./mcp'))
   .use('/auth', require('./auth/auth.routes'))
   .use('/users/:userId/bails', require('./bails'))
   .use('/surveys/:surveyName/states', require('./states'))

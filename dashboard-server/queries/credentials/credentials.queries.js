@@ -66,6 +66,71 @@ async function getOne ({email, entity, key}) {
   return rows[0]
 }
 
+/*
+ * The verifier's hot path: a token's jti -> the live row that authorises it.
+ *
+ * Served as an index-only read by migration 32's unique_api_token_jti, which is
+ * partial on `api_token_jti IS NOT NULL`, so the entity filter is already
+ * implied by the index and is stated only so the query reads correctly on its
+ * own.
+ *
+ * No row means the key was revoked. That is the whole mechanism: the token is
+ * never stored, so this row IS the credential.
+ */
+async function getApiTokenByJti ({jti}) {
+  const q = `
+    SELECT c.key, c.details, c.created, u.email
+    FROM credentials c
+    JOIN users u ON c.userid = u.id
+    WHERE c.entity = 'api_token'
+    AND c.api_token_jti = $1
+  `
+
+  const {rows} = await this.query(q, [jti])
+  return rows[0]
+}
+
+/*
+ * The same lookup for keys minted before migration 32: they carry a token-name
+ * claim but no jti. Newest row wins, matching `getOne`.
+ */
+async function getApiTokenByName ({email, name}) {
+  const q = `
+    SELECT c.key, c.details, c.created, u.email
+    FROM credentials c
+    JOIN users u ON c.userid = u.id
+    WHERE c.entity = 'api_token'
+    AND u.email = $1
+    AND c.key = $2
+    ORDER BY c.created DESC
+    LIMIT 1
+  `
+
+  const {rows} = await this.query(q, [email, name])
+  return rows[0]
+}
+
+/*
+ * Revocation. Scoped to the owner's email so that a key name — which
+ * UNIQUE(entity, key) makes globally unique across ALL users — can never be
+ * revoked by anyone but its owner.
+ *
+ * Deleting rather than flagging frees the name for reuse; migration 32 explains
+ * why that is safe, and why it needed a DELETE grant.
+ */
+async function deleteApiToken ({email, name}) {
+  const q = `
+    DELETE FROM credentials
+    WHERE entity = 'api_token'
+    AND key = $2
+    AND userid = (SELECT id FROM users WHERE email = $1)
+    RETURNING key, details
+  `
+
+  const {rows} = await this.query(q, [email, name])
+  return rows[0]
+}
+
 // TURN INTO UPSERT?
 async function update ({entity, key, details, email}) {
   const q = `
@@ -106,5 +171,8 @@ module.exports = {
     get: get.bind(pool),
     getOne: getOne.bind(pool),
     getMessagingAccounts: getMessagingAccounts.bind(pool),
+    getApiTokenByJti: getApiTokenByJti.bind(pool),
+    getApiTokenByName: getApiTokenByName.bind(pool),
+    deleteApiToken: deleteApiToken.bind(pool),
   }),
 };

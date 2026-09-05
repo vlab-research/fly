@@ -44,14 +44,24 @@ async function retrieve({ email }) {
   return rows;
 }
 
-async function update({ surveyid, timeouts, off_time }) {
+/*
+ * Ownership is enforced in the statement rather than in a middleware, so there
+ * is no window between the check and the write. The SELECT yields no row when
+ * the survey is not the caller's, so the INSERT writes nothing and no
+ * ON CONFLICT fires — someone else's settings are untouched and `undefined`
+ * comes back. Callers turn that into a 404.
+ */
+async function update({ surveyid, email, timeouts, off_time }) {
   const UPDATE_SETTINGS = `INSERT INTO survey_settings(surveyid, timeouts, off_time)
-                        VALUES($1, $2, $3)
+                        SELECT $1::UUID, $2::JSON, $3::TIMESTAMPTZ
+                        FROM surveys s
+                        JOIN users ON s.userid = users.id
+                        WHERE s.id = $1::UUID AND users.email = $4
                         ON CONFLICT(surveyid)
-                        DO UPDATE SET timeouts = $2, off_time= $3
+                        DO UPDATE SET timeouts = $2::JSON, off_time = $3::TIMESTAMPTZ
                         RETURNING *`;
 
-  const values = [surveyid, JSON.stringify(timeouts), off_time];
+  const values = [surveyid, JSON.stringify(timeouts), off_time, email];
   const { rows } = await this.query(UPDATE_SETTINGS, values);
   return rows[0];
 }
