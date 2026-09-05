@@ -20,7 +20,7 @@ exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
-versionDashboard: &vdashboard v0.0.72
+versionDashboard: &vdashboard v0.0.73
 versionBotserver: &vbotserver v0.0.12
 # Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
 # suffix guards WhatsApp work from reaching production, and WhatsApp is in

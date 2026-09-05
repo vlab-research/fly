@@ -37,7 +37,7 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 #
 # The remaining services below still carry -wa and were out of scope for both
 # changes; swap each to a clean tag as it next changes.
-versionDashboard: &vdashboard v0.0.72
+versionDashboard: &vdashboard v0.0.73
 versionBotserver: &vbotserver v0.0.12
 # v0.0.3-wa -> v0.0.5: carries 36808aa5 "feat(envelope): every event carries
 # platform and account_id" -- the PRODUCER side of the conversation-identity
