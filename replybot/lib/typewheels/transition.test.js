@@ -9,6 +9,37 @@ process.env.FALLBACK_FORM = 'fallback'
 process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
 
 describe('machine.run', () => {
+
+  // The HISTORY_LIMIT capped state (statestore.js cappedState) is USER_BLOCKED
+  // with NO md. That is safe only if every event a capped conversation can
+  // receive no-ops before actionsResponses, whose `!newState.md` check throws
+  // untagged (STATE_ACTIONS) and would convert the capped state into an ERROR
+  // that dean retries every 30 minutes. Pin the realistic arrivals: inbound
+  // text, a postback, and a late read/delivery watermark for a pre-cap message.
+  describe('a USER_BLOCKED state with no md (the HISTORY_LIMIT capped state)', () => {
+    const capped = {
+      state: 'USER_BLOCKED', qa: [], forms: [],
+      error: { tag: 'HISTORY_LIMIT', message: 'history exceeds 10000 events', ts: 1 }
+    }
+
+    const arrivals = { text, multipleChoice, qr, read, delivery, echo }
+
+    for (const [name, ev] of Object.entries(arrivals)) {
+      it(`no-ops a ${name} event without touching getForm and keeps the capped state`, async () => {
+        const m = new Machine()
+        let getFormCalls = 0
+        m.getForm = async () => { getFormCalls++; return [{}, 'survey'] }
+
+        const report = await m.run(capped, USER_ID, JSON.stringify({ ...ev, timestamp: 5000 }))
+
+        should.not.exist(report.error)
+        report.publish.should.be.false
+        report.newState.should.eql(capped)
+        getFormCalls.should.equal(0)
+      })
+    }
+  })
+
   it('returns STATE_TRANSITION error if transition throws', async () => {
 
     const m = new Machine()

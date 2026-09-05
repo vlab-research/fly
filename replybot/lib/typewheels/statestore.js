@@ -1,14 +1,28 @@
 const Redis = require('ioredis')
 const parse = require('parse-duration')
-const { getState } = require('./machine')
+const { getState, _initialState } = require('./machine')
 const { parseEvent } = require('../event-normalizer')
-
-const STATE_STORE_LIMIT = process.env.STATE_STORE_LIMIT; // can be undefined
 
 // Greppable tag for "we could not name this conversation". Emitted exactly once
 // per event -- from getState, never also from updateState -- so the count is a
 // count of events. Nothing else may use this string.
 const TUPLE_MISSING_TAG = 'CONVERSATION_TUPLE_MISSING'
+
+// Greppable tag for "this conversation's history is over the cap and we refused
+// to fold it". Emitted once per overflow, i.e. once per Redis miss on a capped
+// conversation, never per event: the capped state is cached like any other. It
+// also lands in `states.error_tag` via the stored column, so capped users are
+// distinguishable from ordinary blocked ones in SQL. Nothing else may use this
+// string.
+const HISTORY_LIMIT_TAG = 'HISTORY_LIMIT'
+
+// STATE_STORE_LIMIT caps how many archived events we will fold on a cache miss.
+// Read at call time, not module load, so tests can set it. Unset is unlimited:
+// `+undefined` is NaN, NaN is falsy, and chatbase.get() applies its SQL limit
+// under `if (limit)`, so an unset value skips both the limit and the cap check.
+function historyLimit() {
+  return +process.env.STATE_STORE_LIMIT
+}
 
 function _resolve(li, e) {
   if (!e) return li
@@ -31,6 +45,38 @@ function makeKey(platform, account, user) {
 // them re-creates the bug on a cache hit.
 function isNamed(conv) {
   return !!(conv && conv.platform && conv.account)
+}
+
+// The cap decision, on the RAW rows chatbase returned, before the current event
+// is appended by _resolve. We ask chatbase for limit + 1 rows, so "all of them
+// came back" -- strictly more than `limit` -- means the pointer-truncated history
+// exceeds the cap. Exactly `limit` archived events folds normally.
+//
+// Only account-scoped replays are capped. The unscoped no-account path already
+// reads across every account the participant ever messaged and is documented as
+// degraded; capping it would fire on the wrong conversation's history.
+//
+// Whether the current event is already archived (replybot and scribble consume
+// in parallel) moves the boundary by one event. Harmless.
+function isCapped(rows, limit, account) {
+  return account !== null && !!limit && rows.length > limit
+}
+
+// The state a capped conversation gets instead of a fold. USER_BLOCKED because
+// the machine already no-ops everything in it and dean already skips it, so no
+// new guard sites; the error tag is what tells a capped user apart from a
+// blocked one. No md, and that is safe: every USER_BLOCKED handler returns
+// before actionsResponses, the only place that dereferences md.
+//
+// A returned state rather than a thrown error because the processor's catch only
+// logs: nothing would be persisted or cached, and the next event would repeat
+// the oversized read. Fail loud has to leave a mark.
+function cappedState(limit, event) {
+  return {
+    ..._initialState(),
+    state: 'USER_BLOCKED',
+    error: { tag: HISTORY_LIMIT_TAG, message: `history exceeds ${limit} events`, ts: event.timestamp }
+  }
 }
 
 class StateStore {
@@ -95,12 +141,37 @@ class StateStore {
   // no platform still gets a correctly scoped replay.
   //
   // A null account replays every account for this user, interleaved.
+  //
+  // Returns { events } on the normal path, or { capped: true, limit } when the
+  // pointer-truncated history exceeds STATE_STORE_LIMIT (see isCapped). The
+  // pointer filter lives inside chatbase.get's query, so a restored or reset
+  // user's history starts at their pointer -- that is the escape hatch from a
+  // cap. Logs exactly one HISTORY_LIMIT line per overflow.
   async _getEvents(conv, user, event) {
     const account = (conv && conv.account) || null
-    const res = await this.db.get({ userid: user, account }, +STATE_STORE_LIMIT)
-    return _resolve(res, event)
+    const limit = historyLimit()
+    const res = await this.db.get({ userid: user, account }, limit ? limit + 1 : limit)
+
+    if (isCapped(res, limit, account)) {
+      console.warn(HISTORY_LIMIT_TAG, 'history exceeds cap, not folding; returning capped USER_BLOCKED state', JSON.stringify({
+        user,
+        platform: (conv && conv.platform) || null,
+        account,
+        limit
+      }))
+      return { capped: true, limit }
+    }
+
+    const events = _resolve(res, event)
       .map(parseEvent)
       .slice(0, -1)
+    return { events }
+  }
+
+  // Replay from the durable log: fold the events, or hand back the capped state.
+  async _replay(conv, user, event) {
+    const { events, capped, limit } = await this._getEvents(conv, user, event)
+    return capped ? cappedState(limit, parseEvent(event)) : getState(events)
   }
 
   // State up to but NOT including this event. All three key components come from
@@ -121,7 +192,7 @@ class StateStore {
         account: (conv && conv.account) || null,
         replay: (conv && conv.account) ? 'account-scoped' : 'unscoped'
       }))
-      return getState(await this._getEvents(conv, user, event))
+      return this._replay(conv, user, event)
     }
 
     const key = this._makeKey(conv.platform, conv.account, user)
@@ -129,8 +200,7 @@ class StateStore {
 
     if (cached) return JSON.parse(cached)
 
-    const events = await this._getEvents(conv, user, event)
-    return getState(events)
+    return this._replay(conv, user, event)
   }
 
   async updateState(conv, user, state) {
@@ -150,4 +220,4 @@ class StateStore {
   }
 }
 
-module.exports = { _resolve, StateStore, makeKey, isNamed, TUPLE_MISSING_TAG }
+module.exports = { _resolve, StateStore, makeKey, isNamed, isCapped, cappedState, TUPLE_MISSING_TAG, HISTORY_LIMIT_TAG }
