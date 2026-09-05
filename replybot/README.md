@@ -474,6 +474,66 @@ already-stuck participant is `devops/clear-state-cache.sh`, which matches
 envelope the cache key comes from. See the next section for that contract and for what
 happens when the account is unknown.
 
+### The pointer, and the history cap (`HISTORY_LIMIT`)
+
+State is `fold(log)`. Redis is an optimisation with a 24h idle TTL; on a miss the state is
+rebuilt from `messages`, truncated at `states.message_pointer`. The pointer is set in
+exactly **two** places, both in `exec()` (`lib/typewheels/machine.js`), and both are sound
+because the state after the pointer is derivable from the event alone:
+
+- the tester reset (`REFERRAL` carrying `REPLYBOT_RESET_SHORTCODE`) → `START`
+- `RESTORE_STATE` → the snapshot the event carries
+
+**A block is a plain transition and sets no pointer.** `BLOCK_USER` returns a RESET to
+`USER_BLOCKED` carrying `forms` and `md`, with no `START` guard: blocking a `START` user is a
+real block. The refold rebuilds it from the log like any other state — the block lands on
+the real live state and every event after it no-ops. It used to set the pointer, and that is
+what made blocks evaporate: a refold from the pointer starts at `START`, where a block could
+not re-establish itself, so the participant came back as a husk with no `md` (or, worse,
+blank-started `FALLBACK_FORM`). Blocked users have short logs — a few thousand events at
+most on vprod, 2026-09-05 — so the pointer bought nothing measurable. See
+`planning/block-without-pointer-plan.md` and `documentation/states-debugging.md`.
+
+What the pointer was standing in for — an unbounded log — has its own honest mechanism:
+
+- `STATE_STORE_LIMIT` (`devops/values/<env>.yaml`, **10000** in staging and production) is
+  how many archived events we will fold. Unset is unlimited: `+undefined` is `NaN`, and
+  `chatbase.get` applies its SQL limit under `if (limit)`, so an unset value skips both the
+  limit and the cap check.
+- With a limit `N`, `_getEvents` asks `chatbase.get` for `N + 1` rows. **The cap fires when
+  strictly more than `N` come back**, i.e. all `N + 1`. Exactly `N` archived events folds
+  normally. The check runs on the raw rows, before the current event is appended, and the
+  count is already pointer-truncated because the pointer filter is inside the same query — a
+  restored or reset user's history starts at their pointer, which is the escape hatch.
+- Only **account-scoped** replays are capped. The unscoped no-account fallback reads across
+  every account the participant ever messaged, so its row count is not this conversation's
+  history; it keeps the old behaviour (fold the oldest `N` rows) and is documented as
+  degraded above.
+- On overflow `_getEvents` does not fold. `getState` returns the **capped state**:
+
+  ```js
+  { state: 'USER_BLOCKED', qa: [], forms: [],
+    error: { tag: 'HISTORY_LIMIT', message: 'history exceeds 10000 events', ts: <event ts> } }
+  ```
+
+  `USER_BLOCKED` because the machine already no-ops everything in it and dean already skips
+  it, so there are no new guard sites and no new dean query. No `md`, which is safe because
+  every event a blocked conversation can receive no-ops before `actionsResponses`, the only
+  place that dereferences `md` — including `WATERMARK`, which gained a `USER_BLOCKED` guard
+  for exactly this reason (`transition.test.js` pins it). The tag surfaces through the stored
+  column `states.error_tag`, so capped conversations are distinguishable from ordinary
+  blocked ones in SQL.
+- `index.js` publishes and caches the capped state like any other, so the `N + 1` read
+  happens **once per Redis miss**, not once per event. It is a returned state rather than a
+  thrown error because the processor's catch only logs: nothing would be persisted, and the
+  next event would repeat the oversized read.
+- Exactly one greppable line per overflow, tagged `HISTORY_LIMIT`, carrying the conversation
+  tuple and `N`. Same discipline as `CONVERSATION_TUPLE_MISSING`.
+
+A capped conversation stays quiet until a human `restore_state`s or resets it, which sets a
+pointer and cuts the history off. `documentation/states-debugging.md` § "`HISTORY_LIMIT`" has
+the queries.
+
 ## Archived event log client (`lib/chatbase`)
 
 `lib/chatbase/chatbase.js` is the Postgres/CockroachDB client `StateStore` replays from
