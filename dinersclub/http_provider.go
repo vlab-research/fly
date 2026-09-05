@@ -24,7 +24,7 @@ type HttpProvider struct {
 }
 
 func NewHttpProvider(pool *pgxpool.Pool) (Provider, error) {
-	return &HttpProvider{client: http.DefaultClient, pool: pool, secrets: map[string]string{}}, nil
+	return &HttpProvider{client: &http.Client{Timeout: getConfig().ProviderTimeout}, pool: pool, secrets: map[string]string{}}, nil
 }
 
 func (p *HttpProvider) GetUserFromPaymentEvent(event *PaymentEvent) (*User, error) {

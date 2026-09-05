@@ -35,7 +35,7 @@ type HTTPPoster struct {
 // NewHTTPPoster creates a new Poster for sending synthetic events to hermes.
 func NewHTTPPoster(botserver string) Poster {
 	return &HTTPPoster{
-		client:    &http.Client{},
+		client:    &http.Client{Timeout: getConfig().ProviderTimeout},
 		botserver: botserver,
 	}
 }
