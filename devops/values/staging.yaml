@@ -38,7 +38,7 @@ versionHermes: &vhermes v0.0.5
 #
 # Production stays on v0.0.219 until this soaks 24h. See
 # planning/conversation-identity.md §5.
-versionReplybot: &vreplybot v0.0.224
+versionReplybot: &vreplybot v0.0.225
 versionLinksniffer: &vlinksniffer v0.0.9
 versionDean: &vdean v0.0.47
 versionScribble: &vscribble v0.0.34
