@@ -1,6 +1,6 @@
 const { expect } = require('chai')
 const sinon = require('sinon')
-const { StateStore, _resolve } = require('./statestore')
+const { StateStore, _resolve, isCapped, cappedState, HISTORY_LIMIT_TAG } = require('./statestore')
 
 // Conversation-keyed state cache.
 //
@@ -328,10 +328,142 @@ describe('StateStore', () => {
     })
   })
 
+  // With STATE_STORE_LIMIT=N we fetch N + 1 rows; all N + 1 coming back means
+  // we return a capped USER_BLOCKED state instead of folding. See replybot/README.md.
+  describe('history cap (HISTORY_LIMIT)', () => {
+    const N = 3
+    const rows = n => Array.from({ length: n }, (_, i) => `event${i + 1}`)
+    const current = JSON.stringify({
+      event_id: 'evt_current', user_id: 'user123', timestamp: 4242,
+      source: { type: 'messenger' }, event_type: 'text', payload: { text: 'hi' }
+    })
+
+    const taggedLines = spies => []
+      .concat(...spies.map(sp => sp.getCalls()))
+      .map(c => c.args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '))
+      .filter(l => l.includes(HISTORY_LIMIT_TAG))
+
+    let prevLimit
+    beforeEach(() => {
+      prevLimit = process.env.STATE_STORE_LIMIT
+      process.env.STATE_STORE_LIMIT = String(N)
+      mockRedis.get.resolves(null)
+    })
+    afterEach(() => {
+      if (prevLimit === undefined) delete process.env.STATE_STORE_LIMIT
+      else process.env.STATE_STORE_LIMIT = prevLimit
+    })
+
+    it('asks chatbase for N + 1 rows', async () => {
+      mockDb.get.resolves(rows(1))
+      await stateStore.getState(conv('messenger', PAGE_A), 'user123', current)
+      expect(mockDb.get.firstCall.args[1]).to.equal(N + 1)
+    })
+
+    it('exactly N archived events folds normally', async () => {
+      mockDb.get.resolves(rows(N))
+      const state = await stateStore.getState(conv('messenger', PAGE_A), 'user123', current)
+      expect(state.state).to.equal('START')
+      expect(state.error).to.be.undefined
+    })
+
+    it('N + 1 archived events => capped USER_BLOCKED state tagged HISTORY_LIMIT, no md, one log line', async () => {
+      const warn = sinon.spy(console, 'warn')
+      const error = sinon.spy(console, 'error')
+      const log = sinon.spy(console, 'log')
+      mockDb.get.resolves(rows(N + 1))
+
+      const state = await stateStore.getState(conv('messenger', PAGE_A), 'user123', current)
+
+      expect(state.state).to.equal('USER_BLOCKED')
+      expect(state.qa).to.eql([])
+      expect(state.forms).to.eql([])
+      expect(state.md).to.be.undefined
+      expect(state.error).to.eql({ tag: HISTORY_LIMIT_TAG, message: `history exceeds ${N} events`, ts: 4242 })
+
+      const lines = taggedLines([warn, error, log])
+      expect(lines.length, `expected exactly one ${HISTORY_LIMIT_TAG} line, got ${lines.length}`).to.equal(1)
+      expect(lines[0]).to.include('user123')
+      expect(lines[0]).to.include(PAGE_A)
+      expect(lines[0]).to.include(`"limit":${N}`)
+    })
+
+    it('counts archived rows only, not the current event', async () => {
+      mockDb.get.resolves(rows(N))
+      const state = await stateStore.getState(conv('messenger', PAGE_A), 'user123', 'eventNotInArchive')
+      expect(state.state).to.equal('START')
+    })
+
+    it('the account-present, platform-absent degraded path is capped too', async () => {
+      mockDb.get.resolves(rows(N + 1))
+      const state = await stateStore.getState(conv(undefined, PAGE_A), 'user123', current)
+      expect(state.state).to.equal('USER_BLOCKED')
+      expect(state.error.tag).to.equal(HISTORY_LIMIT_TAG)
+    })
+
+    it('an unscoped replay (account null) is never capped', async () => {
+      const warn = sinon.spy(console, 'warn')
+      mockDb.get.resolves(rows(N + 1))
+      const state = await stateStore.getState(null, 'user123', current)
+      expect(state.state).to.equal('START')
+      expect(state.error).to.be.undefined
+      expect(taggedLines([warn])).to.have.length(0)
+    })
+
+    it('STATE_STORE_LIMIT unset => falsy limit passed to chatbase, never capped', async () => {
+      delete process.env.STATE_STORE_LIMIT
+      mockDb.get.resolves(rows(50))
+      const state = await stateStore.getState(conv('messenger', PAGE_A), 'user123', current)
+      expect(mockDb.get.firstCall.args[1]).to.not.be.ok
+      expect(state.state).to.equal('START')
+      expect(state.error).to.be.undefined
+    })
+
+    it('the capped state round-trips through updateState and is served from Redis without touching the db', async () => {
+      mockDb.get.resolves(rows(N + 1))
+      mockRedis.setex.resolves('OK')
+      const c = conv('messenger', PAGE_A)
+
+      const capped = await stateStore.getState(c, 'user123', current)
+      await stateStore.updateState(c, 'user123', capped)
+
+      const written = mockRedis.setex.firstCall.args[2]
+      mockRedis.get.reset()
+      mockRedis.get.resolves(written)
+      mockDb.get.reset()
+
+      const again = await stateStore.getState(c, 'user123', current)
+      expect(again).to.deep.equal(capped)
+      expect(mockDb.get.called).to.be.false
+    })
+  })
+
   describe('close', () => {
     it('should disconnect Redis client', async () => {
       await stateStore.close()
       expect(mockRedis.disconnect.called).to.be.true
+    })
+  })
+})
+
+describe('isCapped', () => {
+  it('fires only when strictly more than limit rows came back, for a scoped replay, with a limit set', () => {
+    expect(isCapped(['a', 'b', 'c', 'd'], 3, PAGE_A)).to.be.true
+    expect(isCapped(['a', 'b', 'c'], 3, PAGE_A)).to.be.false
+    expect(isCapped(['a', 'b', 'c', 'd'], 3, null)).to.be.false
+    expect(isCapped(['a', 'b', 'c', 'd'], NaN, PAGE_A)).to.be.false
+    expect(isCapped(['a', 'b', 'c', 'd'], 0, PAGE_A)).to.be.false
+  })
+})
+
+describe('cappedState', () => {
+  it('is a USER_BLOCKED initial state carrying only the HISTORY_LIMIT error', () => {
+    const state = cappedState(10000, { timestamp: 77 })
+    expect(state).to.deep.equal({
+      state: 'USER_BLOCKED',
+      qa: [],
+      forms: [],
+      error: { tag: HISTORY_LIMIT_TAG, message: 'history exceeds 10000 events', ts: 77 }
     })
   })
 })

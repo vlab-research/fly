@@ -215,7 +215,7 @@ operation as a regression.
    a **researcher-authored webview query string**, so a stale or hardcoded page id produces an
    empty account-scoped replay every time, repeatably.
 3. **There is no memoization**, because the write is refused too. Every event re-scans up to
-   `STATE_STORE_LIMIT=30000` rows.
+   `STATE_STORE_LIMIT=10000` rows.
 
 **The symptom to recognise: a `305` conversation that appeared out of nowhere.** An empty replay
 reconstructs as `START`. Until 2026-08-17, a synthetic external event arriving in that state
@@ -292,8 +292,17 @@ inexplicably reset to `START`, this is the mechanism.
 
 ### Blocking a participant destroys `md`: the `getForm`/`INTERNAL` failure
 
-This is the platform's main source of `INTERNAL` errors. **Blocking a participant
-silently discards their `md`, and any later event that wakes them crashes on the
+> **Resolved 2026-09-05** by `fix/block-without-pointer`
+> (`planning/block-without-pointer-plan.md`). `BLOCK_USER` no longer sets a pointer and
+> no longer no-ops on `START`, so a block is a plain transition the refold rebuilds from
+> the full log, `md` and `forms` intact. What the pointer was standing in for — an
+> unbounded log — is now an explicit cap, `HISTORY_LIMIT`, described at the end of this
+> section. The mechanism below is kept as forensic history; the `INTERNAL`/`getForm`
+> signature it describes should stop appearing for blocked participants once the fix is
+> live and their cache entries have cycled once (§ "Draining the existing population").
+
+This was the platform's main source of `INTERNAL` errors. **Blocking a participant
+silently discarded their `md`, and any later event that woke them crashed on the
 missing `startTime`.**
 
 > **Framing note.** An earlier revision of this section blamed the Redis-miss re-fold.
@@ -473,24 +482,86 @@ LEFT JOIN chatroach.messages m
 WHERE s.userid = $1;
 ```
 
-**Fixing it.** `planning/blocked-user-durability-handoff.md` scopes the work as Gap 1
-(`BLOCK_USER` must carry `md: state.md` through its `stateUpdate`), Gap 2
-(`HANDOVER_EVENT` needs the `USER_BLOCKED` guard the other paths already have), and
-Gap 3 (block durability across re-folds). Three constraints on any fix:
+**How it was fixed.** `planning/blocked-user-durability-handoff.md` scoped the work as
+Gap 1 (`BLOCK_USER` carries `md: state.md` — shipped earlier), Gap 2 (`HANDOVER_EVENT`
+got the `USER_BLOCKED` guard — shipped earlier), and Gap 3 (block durability across
+re-folds). Gap 3 is the one this section is really about, and the fix is
+**`planning/block-without-pointer-plan.md`**: `BLOCK_USER` sets **no pointer** and has
+**no `START` guard**. With no pointer, a Redis-miss refold replays the whole log, the
+block lands on the real live state, and every post-block event no-ops — the refold
+reproduces the live blocked state exactly. Verified 2026-09-05 against
+`25877534695248989`/`758018254333043` (3,018 events, blocked five times): the new
+full refold lands on `USER_BLOCKED` with all 26 forms and the stored `md.startTime`,
+while the old pointer refold of the same log landed on `RESPONDING` in `fallback`.
 
-- **It must not special-case `HANDOVER_EVENT`** — 3 of 12 traced cases were triggered by
-  a plain `TEXT`/`MEDIA`, not a passback.
-- **It must not simply blank-start a blocked participant.** That appends the fallback
-  form and silently reassigns a real participant mid-survey — the reason `3de533a8`
-  deliberately scoped itself to `START` only.
-- **Gap 1 alone does not clear the existing 1,982.** They have already lost `md`; a
-  forward fix stops new ones but leaves the standing population armed. Draining it needs
-  a backfill, and the three `forms: []` participants are a separate origin that a
-  `BLOCK_USER` fix will not touch at all.
+Three constraints held: no special case for `HANDOVER_EVENT`; no blank-start of a
+blocked participant; and the fix drains the existing population **without a backfill**
+(next subsection). The snapshot-in-log alternative (PR #166) was abandoned — it needed
+a second HTTP round trip per block, ordering against botserver outages, a loop guard, a
+new error tag and a 11.5k-row backfill, and every refold still read the post-block spam.
 
 See `documentation/error-events.md` for the error-reporting side — in particular why
 `iowrap` relabels this deterministic input error as `INTERNAL` and pages the platform
 on-call.
+
+#### Draining the existing population
+
+Nothing is backfilled; the rows heal on their own Redis misses.
+
+- **~13.5k rows `USER_BLOCKED` with a pointer in `state_json`.** First Redis miss after
+  the deploy: the replay is still truncated at the old pointer, the block event lands on
+  `START`, and — the guard being gone — the state is `USER_BLOCKED` with empty `forms`
+  and no `md`, **and no pointer**. Scribble persists it with `message_pointer = NULL`.
+  Second Redis miss: full replay, block lands on the real state, `forms` and `md`
+  recovered. In between they are quiet and safe: every event a blocked conversation can
+  receive no-ops before `actionsResponses`.
+- **~165 rows already husked into `ERROR`** have no pointer today. First Redis miss:
+  full replay, block applies, `USER_BLOCKED` with `md`. Their Redis entry only refreshes
+  on a successful publish, so it expires within 24h of the deploy on its own.
+
+Watch `states.platform IS NULL` for `USER_BLOCKED` rows fall as they refold a second
+time, and `INTERNAL` errors from `getForm` on blocked users stop.
+
+### `HISTORY_LIMIT`: a conversation over the history cap
+
+With the pointer gone from blocks, an unbounded log is guarded honestly:
+`STATE_STORE_LIMIT` (**10000** in staging and production) caps how many archived
+events `StateStore` will fold on a cache miss. It asks `chatbase.get` for `N + 1`
+rows; if all `N + 1` come back the conversation is over the cap and **it is not
+folded**. The store returns a *capped state* instead — `USER_BLOCKED`, empty `qa` and
+`forms`, no `md`, and `error: { tag: 'HISTORY_LIMIT', message: 'history exceeds N
+events', ts }` — logs one line tagged `HISTORY_LIMIT` with the conversation tuple, and
+the processor caches it like any other state, so the oversized read happens once per
+Redis miss, not once per event. The machine no-ops everything in `USER_BLOCKED` and
+Dean skips it, so a capped conversation simply goes quiet. Only account-scoped replays
+are capped; the unscoped no-account fallback keeps its old behaviour. Full mechanics in
+`replybot/README.md` § "The pointer, and the history cap".
+
+Before the production rollout **36** conversations were above 10,000 events (vprod,
+2026-09-05); 14 were already above the old `30000` and were being silently folded from
+their oldest 30k events with nothing logging it. Expect the 36, then a trickle. A blocked
+spammer who keeps messaging will eventually cross the cap and flip from `USER_BLOCKED`
+with no tag to `USER_BLOCKED` with `HISTORY_LIMIT` — same behaviour, different label.
+
+**Finding them:**
+
+```sql
+SELECT userid, pageid, platform, current_form, updated,
+       state_json->'error'->>'message' AS message
+FROM chatroach.states
+WHERE error_tag = 'HISTORY_LIMIT'
+ORDER BY updated DESC;
+```
+
+and in the logs, `grep HISTORY_LIMIT` on replybot — exactly one line per overflow.
+
+**Restoring one.** If a capped conversation turns out to be a real participant, build a
+`restore_state` from their stored `state_json` (or from an offline fold of the tail of
+their log) and inject it through botserver's `POST /synthetic` as for any other
+recovery (`planning/restore-state-handover.md` has the mechanics). `RESTORE_STATE` sets
+its own pointer at the restore event, so the next refold starts there and the history
+before it no longer counts toward the cap. The tester reset shortcode does the same for
+a test participant.
 
 ## The RESPONDING/Echo Trap
 

@@ -839,7 +839,7 @@ replybot:
   - name: MOVIEHOUSE_URL
     value: "https://virtuallab-videos.netlify.app"
   - name: STATE_STORE_LIMIT
-    value: "30000"
+    value: "10000"
   - name: NUM_SPINES
     value: "6"
   - name: REDIS_HOST

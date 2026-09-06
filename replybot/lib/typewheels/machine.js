@@ -423,6 +423,10 @@ function exec(state, nxt) {
     }
 
     case 'WATERMARK': {
+      // Must no-op: the capped state (statestore.js) has no md, and a
+      // WATERMARK action would reach actionsResponses and throw on it.
+      if (state.state === 'USER_BLOCKED') return _noop()
+
       const { type, mark } = getWatermark(nxt)
       // ignore if mark already higher
       if (state[type] >= mark) return _noop()
@@ -505,18 +509,12 @@ function exec(state, nxt) {
     }
 
     case 'BLOCK_USER': {
-      if (state.state === 'START') {
-        return _noop()
-      }
-
+      // No pointer and no START guard, deliberately: a pointer here is what
+      // made blocks evaporate on refold. forms and md must be carried because
+      // RESET rebuilds from _initialState(). See replybot/README.md.
       return {
         action: 'RESET',
-        // md is carried across for the same reason forms is: apply()'s RESET
-        // rebuilds from _initialState(), so anything not named here is lost.
-        // Dropping md leaves a blocked participant with no startTime, and the
-        // next event that wakes them merges into `undefined` and produces a
-        // husk that throws in getForm. See documentation/states-debugging.md.
-        stateUpdate: { state: "USER_BLOCKED", pointer: nxt.timestamp, forms: state.forms, md: state.md }
+        stateUpdate: { state: "USER_BLOCKED", forms: state.forms, md: state.md }
       }
     }
 

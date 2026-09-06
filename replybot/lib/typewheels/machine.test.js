@@ -330,27 +330,84 @@ describe('getCurrentForm', () => {
   })
 
 
-  // md is asserted here because BLOCK_USER's RESET rebuilds from
-  // _initialState(): forms/pointer are carried across explicitly and md used to
-  // be dropped on the floor. A blocked participant with no md is a landmine --
-  // the next event that wakes them merges into `undefined`, producing a truthy
-  // husk with no startTime that passes transition.js's `!md` guard and then
-  // throws in getForm. See documentation/states-debugging.md.
-  it('Gets ignores texts after block_user, but keeps forms, pointer and md', () => {
+  // No pointer, deliberately: the pointer is what made blocks evaporate on
+  // refold. md is asserted because a blocked user without it husks in getForm.
+  it('Gets ignores texts after block_user, but keeps forms and md, sets no pointer', () => {
 
     const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
 
     const state = getState(log)
     state.forms.should.eql(['FOO'])
     state.state.should.equal('USER_BLOCKED')
-    state.pointer.should.equal(20)
+    should.not.exist(state.pointer)
     state.md.should.have.property('startTime')
 
     const state1 = getState([...log, text])
     state1.forms.should.eql(['FOO'])
     state1.state.should.equal('USER_BLOCKED')
-    state1.pointer.should.equal(20)
+    should.not.exist(state1.pointer)
     state1.md.should.have.property('startTime')
+  })
+
+  // No START guard: it is what let a pointer-truncated refold erase the block.
+  it('block_user on a START state is a real block', () => {
+    const state = getState([synthetic({ type: 'block_user', value: null })])
+    state.state.should.equal('USER_BLOCKED')
+    state.forms.should.eql([])
+    should.not.exist(state.pointer)
+
+    // and the machine stays blocked from there
+    const state1 = getState([synthetic({ type: 'block_user', value: null }), text, multipleChoice])
+    state1.state.should.equal('USER_BLOCKED')
+    state1.qa.should.eql([])
+  })
+
+  // The durability property: a from-scratch refold reproduces the live blocked state.
+  it('a full refold from scratch of a log with post-block events lands on USER_BLOCKED with md and forms', () => {
+    const postbackAfterBlock = { ...multipleChoice, timestamp: 30 }
+    const externalAfterBlock = {
+      source: { type: 'synthetic' },
+      event_type: 'synthetic_external',
+      timestamp: 31,
+      payload: { type: 'payment:complete', id: 'foo' }
+    }
+    const log = [
+      referral, text, echo, multipleChoice,
+      synthetic({ type: 'block_user', value: null }),
+      { ...text, timestamp: 29 }, postbackAfterBlock, externalAfterBlock
+    ]
+
+    const live = getState(log.slice(0, 5))
+    const refolded = getState(log)
+
+    refolded.state.should.equal('USER_BLOCKED')
+    refolded.forms.should.eql(['FOO'])
+    refolded.md.should.have.property('startTime')
+    refolded.md.should.eql(live.md)
+    refolded.qa.should.eql([])
+    should.not.exist(refolded.externalEvents)
+    should.not.exist(refolded.pointer)
+  })
+
+  // Unblock is unchanged: restore_state sets its own pointer.
+  it('restore_state after a block restores the snapshot and carries a pointer (the unblock path)', () => {
+    const snapshot = { state: 'QOUT', question: 'q2', qa: [['q1', 'yes']], forms: ['FOO'], md: { startTime: 100 } }
+    const log = [
+      referral, text, echo, multipleChoice,
+      synthetic({ type: 'block_user', value: null }),
+      { ...text, timestamp: 29 },
+      synthetic({ type: 'restore_state', value: { state: snapshot } }, { timestamp: 9999 })
+    ]
+
+    getState(log.slice(0, -1)).state.should.equal('USER_BLOCKED')
+
+    const state = getState(log)
+    state.state.should.equal('QOUT')
+    state.question.should.equal('q2')
+    state.qa.should.eql([['q1', 'yes']])
+    state.forms.should.eql(['FOO'])
+    state.md.should.eql({ startTime: 100 })
+    state.pointer.should.equal(9999)
   })
 
   it('Ignores POSTBACK events after block_user', () => {
@@ -448,6 +505,19 @@ describe('getCurrentForm', () => {
     should.not.exist(state1.externalEvents)
     state1.md.should.have.property('startTime')
     state1.md.should.not.have.property('e_handover_metadata')
+  })
+
+  // Watermarks would otherwise reach actionsResponses, fatal for the md-less capped state.
+  it('Ignores read/delivery WATERMARK events after block_user', () => {
+    const log = [referral, text, echo, multipleChoice, synthetic({ type: 'block_user', value: null })]
+    const blocked = getState(log)
+    blocked.state.should.equal('USER_BLOCKED')
+
+    exec(blocked, { ...read, timestamp: 30, payload: { ...read.payload, watermark: 1e15 } }).action.should.equal('NONE')
+    exec(blocked, { ...delivery, timestamp: 30, payload: { ...delivery.payload, watermark: 1e15 } }).action.should.equal('NONE')
+
+    const state1 = getState([...log, { ...read, timestamp: 30 }, { ...delivery, timestamp: 31 }])
+    state1.should.eql(blocked)
   })
 
   it('Changes form with new referral', () => {

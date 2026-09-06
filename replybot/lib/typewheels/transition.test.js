@@ -9,6 +9,33 @@ process.env.FALLBACK_FORM = 'fallback'
 process.env.REPLYBOT_RESET_SHORTCODE = 'reset'
 
 describe('machine.run', () => {
+
+  // The capped state has no md, so every arrival must no-op before
+  // actionsResponses, which throws on a missing md.
+  describe('a USER_BLOCKED state with no md (the HISTORY_LIMIT capped state)', () => {
+    const capped = {
+      state: 'USER_BLOCKED', qa: [], forms: [],
+      error: { tag: 'HISTORY_LIMIT', message: 'history exceeds 10000 events', ts: 1 }
+    }
+
+    const arrivals = { text, multipleChoice, qr, read, delivery, echo }
+
+    for (const [name, ev] of Object.entries(arrivals)) {
+      it(`no-ops a ${name} event without touching getForm and keeps the capped state`, async () => {
+        const m = new Machine()
+        let getFormCalls = 0
+        m.getForm = async () => { getFormCalls++; return [{}, 'survey'] }
+
+        const report = await m.run(capped, USER_ID, JSON.stringify({ ...ev, timestamp: 5000 }))
+
+        should.not.exist(report.error)
+        report.publish.should.be.false
+        report.newState.should.eql(capped)
+        getFormCalls.should.equal(0)
+      })
+    }
+  })
+
   it('returns STATE_TRANSITION error if transition throws', async () => {
 
     const m = new Machine()
