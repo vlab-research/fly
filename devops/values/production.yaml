@@ -1394,13 +1394,25 @@ mediaReconciler:
 #
 # AFTER IT COMPLETES: set this back to false, delete the Job, and record the
 # result in planning/multi-platform-plan.md. It must not be left armed.
+#
+# ALL OF THE ABOVE IS NOW HISTORICAL. The run completed 2026-08-29; this is
+# disarmed below and re-arming is inert (the cursor records done=t). The text
+# is kept because the `--set` trap and the Job-immutability trap apply to any
+# future one-shot Job added to this chart.
 # ###########################################################################
 messagesBackfill:
-  # ARMED 2026-08-26. The bounded first pass is done; this is the FULL RUN,
-  # ~44.6 hours. See maxBatches below. Capture the final log lines BEFORE
-  # setting this back to false -- the flip makes helm prune the Job and its
-  # pod, taking the logs with it.
-  enabled: true
+  # DISARMED 2026-09-04. The full run COMPLETED 2026-08-29 00:20:53 UTC:
+  # 5,351 batches, 106,931,189 rows, chatroach.backfill_cursor done=t.
+  #
+  # Safe to flip because the logs are already captured. They are committed at
+  # devops/backfill-logs/ (three surviving pods, the Job YAML and `describe`).
+  # Applying this prunes the Job and its pods and takes any remaining pod logs
+  # with it -- which is why the capture came first. See
+  # planning/backfill-in-cluster-job.md "YOU ARE HERE -- close-out, 2026-09-04".
+  #
+  # Re-arming would be inert anyway: the cursor row records done=t, so the tool
+  # exits immediately with ALREADY DONE rather than re-walking the table.
+  enabled: false
   image:
     repository: ghcr.io/vlab-research/backfill
     tag: *vbackfill
