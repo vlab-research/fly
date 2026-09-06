@@ -70,7 +70,7 @@ versionHermes: &vhermes v0.0.7
 # v0.0.224: resolves the WhatsApp choice-list button label from the form's
 #   Messages (borrowed key block.dropdown.hint) into question metadata.
 #   Pairs with message-worker v0.1.25 -- neither half does anything alone.
-versionReplybot: &vreplybot v0.0.225
+versionReplybot: &vreplybot v0.0.226
 # Bumped v0.0.6 -> v0.0.9 together with the repository move below: ghcr holds
 # only v0.0.8/v0.0.9, so the registry change CANNOT ship without the version
 # change or the pull 404s. Behaviour change to announce: an *invalid*
