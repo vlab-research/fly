@@ -468,16 +468,10 @@ describe('getCurrentForm', () => {
 
 })
 
-// The hand-injected recovery event. It is the ONLY way to put a participant's
-// state back, so its two properties -- overwrite unconditionally, advance the
-// pointer to itself -- have to hold both live (folding from USER_BLOCKED) and on
-// a Redis-miss reload (folding from START at message_pointer = this timestamp).
-// Coverage for it was deleted by 675c31bd along with the transition.js arm; see
-// planning/replybot-restore-state-transition-regression.md.
+// The recovery event: overwrites unconditionally and sets the pointer to itself,
+// both live and on a Redis-miss reload.
 describe('RESTORE_STATE (recovery event)', () => {
 
-  // A self-contained pre-block state snapshot, as produced by folding the
-  // participant's log offline with the block_user excluded.
   const P = {
     state: 'QOUT',
     question: 'q2',
@@ -495,7 +489,6 @@ describe('RESTORE_STATE (recovery event)', () => {
   it('restores the full snapshot from USER_BLOCKED and advances the pointer to the event timestamp', () => {
     const log = [referral, text, echo, multipleChoice, blockUser, restore()]
 
-    // sanity: the block trimmed qa away before the restore
     getState(log.slice(0, -1)).state.should.equal('USER_BLOCKED')
     getState(log.slice(0, -1)).qa.should.eql([])
 
@@ -505,13 +498,10 @@ describe('RESTORE_STATE (recovery event)', () => {
     state.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
     state.forms.should.eql(['FOO'])
     state.md.should.eql({ startTime: 100, seed: 42 })
-    state.pointer.should.equal(9999) // advanced to now, not P's original 500
+    state.pointer.should.equal(9999)
   })
 
   it('restores the full snapshot when folded from START (durability on Redis-miss reload)', () => {
-    // On reload chatbase starts the fold AT this event (message_pointer equals
-    // its timestamp), so the fold begins from _initialState() and must still
-    // land on P. Gating RESTORE_STATE on the incoming state would break this.
     const state = getState([restore()])
     state.state.should.equal('QOUT')
     state.question.should.equal('q2')
@@ -521,13 +511,11 @@ describe('RESTORE_STATE (recovery event)', () => {
   })
 
   it('does not survive as a stray field: starts from a clean initial state', () => {
-    // A field present pre-restore but absent from the snapshot must not leak
-    // through -- apply() rebuilds from _initialState(), not from the live state.
     const priorLog = [referral, text, echo, multipleChoice]
     const before = getState(priorLog)
-    should.exist(before.previousOutput) // RESPOND set it before the restore
+    should.exist(before.previousOutput)
     const state = getState([...priorLog, restore()])
-    should.not.exist(state.previousOutput) // gone: P had none
+    should.not.exist(state.previousOutput)
   })
 
   it('emits no outbound message on restore', () => {

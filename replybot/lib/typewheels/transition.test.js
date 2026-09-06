@@ -53,10 +53,7 @@ describe('machine.run', () => {
   })
 
 
-  // The property 675c31bd lost, and the only one that would have caught it:
-  // RESTORE_STATE must never reach actionsResponses. Its getForm lookup is keyed
-  // on md.startTime, which is precisely what is broken on a participant who needs
-  // restoring -- so the recovery tool would error the user it was rescuing.
+  // RESTORE_STATE must never reach actionsResponses (lost by 675c31bd).
   describe('RESTORE_STATE short-circuits run()', () => {
 
     const P = { state: 'QOUT', question: 'q2', qa: [['q1', 'yes']], forms: ['FOO'], md: { startTime: 100 }, pointer: 500 }
@@ -65,7 +62,6 @@ describe('machine.run', () => {
 
     it('publishes newState with no commands, no responses and no IO', async () => {
       const m = new Machine()
-      // If the short-circuit failed, actionsResponses would run and throw here.
       m.actionsResponses = () => { throw new Error('actionsResponses must not run for RESTORE_STATE') }
 
       const report = await m.run(blocked, USER_ID, restoreEvent)
@@ -79,9 +75,6 @@ describe('machine.run', () => {
       should.not.exist(report.error)
     })
 
-    // Concretely: no form lookup. A restore whose snapshot names a form that
-    // formcentral cannot resolve must still land, because the snapshot is
-    // self-contained and the form is only needed to talk to the participant.
     it('never calls getForm', async () => {
       const m = new Machine()
       let called = false
@@ -94,15 +87,12 @@ describe('machine.run', () => {
       report.newState.state.should.equal('QOUT')
     })
 
-    // Restoring must be silent: the participant is not told they were blocked,
-    // unblocked, or moved. act() has no RESTORE_STATE case, but the short-circuit
-    // is what guarantees we never even build a message context.
     it('sends nothing to the participant', async () => {
       const m = new Machine()
       const report = await m.run(blocked, USER_ID, restoreEvent)
       should.not.exist(report.commands)
       should.not.exist(report.payment)
-      should.not.exist(report.error) // a failed restore is not silent: it errors the user
+      should.not.exist(report.error)
     })
   })
 
