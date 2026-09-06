@@ -530,6 +530,38 @@ describe('getCondition', () => {
     f.getCondition({ form }, qa, '', { ...cond, op: 'not_contains' }).should.be.true
   })
 
+  it('works with contains when the answer looks like a number', () => {
+    // castValue would turn "1" into the number 1, which has no .includes.
+    const cond = {
+      op: 'contains',
+      vars: [{ type: 'field', value: 'baz' },
+      { type: 'constant', value: 'lachealthy' }]
+    }
+
+    const qa = [['baz', '1']]
+
+    f.getCondition({ form }, qa, '', cond).should.be.false
+    f.getCondition({ form }, qa, '', { ...cond, op: 'not_contains' }).should.be.true
+
+    const qa2 = [['baz', '12']]
+    const cond2 = { ...cond, vars: [cond.vars[0], { type: 'constant', value: '2' }] }
+    f.getCondition({ form }, qa2, '', cond2).should.be.true
+    f.getCondition({ form }, qa2, '', { ...cond2, op: 'not_contains' }).should.be.false
+  })
+
+  it('works with contains when the field was never answered', () => {
+    const cond = {
+      op: 'contains',
+      vars: [{ type: 'field', value: 'baz' },
+      { type: 'constant', value: 'bar' }]
+    }
+
+    const qa = [['other', 'bar']]
+
+    f.getCondition({ form }, qa, '', cond).should.be.false
+    f.getCondition({ form }, qa, '', { ...cond, op: 'not_contains' }).should.be.true
+  })
+
   it('works with missing values and equals', () => {
     const cond = {
       op: 'equal',

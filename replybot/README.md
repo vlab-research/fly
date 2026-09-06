@@ -346,6 +346,27 @@ what `errorOnset` exists for:
 Every transition reachable from `RESPONDING` either consumes `errorOnset` (into
 `error.ts` on `ERROR`/`BLOCKED`) or clears it, so it cannot leak.
 
+## Logic jump operators (`form.js` `getCondition`)
+
+A form's `logic` entries are evaluated by `getCondition` in
+`lib/typewheels/form.js`. Every operand (the participant's answer, a constant,
+a choice label, a hidden/metadata value) starts life as a string, so the
+operators fall into two families that treat it differently:
+
+| Family | Operators | Operands |
+|---|---|---|
+| typed comparison | `is`, `equal`, `is_not`, `not_equal`, `greater_than`, `lower_than`, `greater_equal_than`, `lower_equal_than`, `and`, `or` | passed through `castValue`: `parseNumber` first (unicode numerals, decimals), then `yaml.safeLoad` (booleans, strings) |
+| substring | `contains`, `not_contains` | **raw text**, coerced with `String()`; a missing answer contains nothing |
+
+The substring family deliberately skips `castValue`. Casting turns a
+`short_text` answer of `"1"` into the number `1`, which has no `.includes`, and
+`"1.0"` into `1`, which changes what the text contains. This crashed a
+production survey (`lacbo1es`, 2026-09-05) whose `sorry_click_ad` free-text
+field had `contains`-jumps guarding it: a participant typed `1`, the jump threw
+`a.includes is not a function`, and the conversation sat in `ERROR` under the
+`STATE_ACTIONS` tag until the fix shipped. Dean retries that tag, so
+conversations stuck this way recover on their own after a deploy.
+
 ## Repeats (`_gatherResponses`)
 
 Every re-send of a question — follow-up nudge, failed validation, repeat

@@ -257,9 +257,23 @@ const funs = {
   'equal': (a, b) => a === b,
   'is_not': (a, b) => a !== b,
   'not_equal': (a, b) => a !== b,
-  'contains': (a, b) => a !== undefined && a.includes(b),
-  'not_contains': (a, b) => a === undefined || !a.includes(b),
+  'contains': _contains,
+  'not_contains': (a, b) => !_contains(a, b),
 }
+
+// Substring test on the answer's text. Takes the RAW values, not castValue'd
+// ones: castValue turns a short_text answer of "1" into the number 1, which has
+// no .includes (a real production crash on a form whose contains-jump guarded a
+// free-text field), and turns "1.0" into 1, changing what the text contains. A
+// missing answer (null from getFieldValue, undefined from metadata) contains
+// nothing.
+function _contains(a, b) {
+  if (a === undefined || a === null) return false
+  return String(a).includes(String(b))
+}
+
+// Operators that compare text rather than typed values; they skip castValue.
+const stringOps = new Set(['contains', 'not_contains'])
 
 
 function getCondition(ctx, qa, ref, { op, vars }) {
@@ -273,7 +287,7 @@ function getCondition(ctx, qa, ref, { op, vars }) {
 
   // wrap in castValue to perform type-casting from form data (strings)
   // to js native types. parseNumber handles unicode numerals correctly.
-  const fn = (a, b) => f(castValue(a), castValue(b))
+  const fn = stringOps.has(op) ? f : (a, b) => f(castValue(a), castValue(b))
 
   // getChoiceValue needs to ref from the "field" type,
   // which it is always paired with....
