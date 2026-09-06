@@ -538,6 +538,71 @@ describe('getCurrentForm', () => {
 
 })
 
+// The recovery event: overwrites unconditionally and sets the pointer to itself,
+// both live and on a Redis-miss reload.
+describe('RESTORE_STATE (recovery event)', () => {
+
+  const P = {
+    state: 'QOUT',
+    question: 'q2',
+    qa: [['q1', 'yes'], ['q2', 'blue']],
+    forms: ['FOO'],
+    md: { startTime: 100, seed: 42 },
+    pointer: 500
+  }
+
+  const restore = (more = {}) =>
+    synthetic({ type: 'restore_state', value: { state: P } }, { timestamp: 9999, ...more })
+
+  const blockUser = synthetic({ type: 'block_user', value: null })
+
+  it('restores the full snapshot from USER_BLOCKED and advances the pointer to the event timestamp', () => {
+    const log = [referral, text, echo, multipleChoice, blockUser, restore()]
+
+    getState(log.slice(0, -1)).state.should.equal('USER_BLOCKED')
+    getState(log.slice(0, -1)).qa.should.eql([])
+
+    const state = getState(log)
+    state.state.should.equal('QOUT')
+    state.question.should.equal('q2')
+    state.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
+    state.forms.should.eql(['FOO'])
+    state.md.should.eql({ startTime: 100, seed: 42 })
+    state.pointer.should.equal(9999)
+  })
+
+  it('restores the full snapshot when folded from START (durability on Redis-miss reload)', () => {
+    const state = getState([restore()])
+    state.state.should.equal('QOUT')
+    state.question.should.equal('q2')
+    state.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
+    state.forms.should.eql(['FOO'])
+    state.pointer.should.equal(9999)
+  })
+
+  it('does not survive as a stray field: starts from a clean initial state', () => {
+    const priorLog = [referral, text, echo, multipleChoice]
+    const before = getState(priorLog)
+    should.exist(before.previousOutput)
+    const state = getState([...priorLog, restore()])
+    should.not.exist(state.previousOutput)
+  })
+
+  it('emits no outbound message on restore', () => {
+    const log = [referral, text, echo, multipleChoice, blockUser, restore()]
+    const { messages } = getMessage(log, form, { id: USER_ID }, { id: PAGE_ID })
+    messages.should.eql([])
+  })
+
+  it('produces a RESTORE_STATE output carrying the snapshot with the new pointer', () => {
+    const output = exec({ state: 'USER_BLOCKED', qa: [], forms: ['FOO'] }, restore())
+    output.action.should.equal('RESTORE_STATE')
+    output.stateUpdate.state.should.equal('QOUT')
+    output.stateUpdate.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
+    output.stateUpdate.pointer.should.equal(9999)
+  })
+})
+
 describe('getState', () => {
 
   it('Gets start state with empty log', () => {

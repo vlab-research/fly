@@ -136,7 +136,9 @@ class Machine {
         }
       }
 
-      if (output.action === 'RESET') {
+      if (output.action === 'RESET' || output.action === 'RESTORE_STATE') {
+        // Publish the new state and nothing else. RESTORE_STATE must not reach
+        // actionsResponses: its getForm lookup fails on the damaged md a restore exists to fix.
         return {
           publish: true,
           timestamp,

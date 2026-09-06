@@ -80,6 +80,49 @@ describe('machine.run', () => {
   })
 
 
+  // RESTORE_STATE must never reach actionsResponses (lost by 675c31bd).
+  describe('RESTORE_STATE short-circuits run()', () => {
+
+    const P = { state: 'QOUT', question: 'q2', qa: [['q1', 'yes']], forms: ['FOO'], md: { startTime: 100 }, pointer: 500 }
+    const restoreEvent = synthetic({ type: 'restore_state', value: { state: P } }, { timestamp: 9999 })
+    const blocked = { state: 'USER_BLOCKED', qa: [], forms: ['FOO'], md: { startTime: 100 } }
+
+    it('publishes newState with no commands, no responses and no IO', async () => {
+      const m = new Machine()
+      m.actionsResponses = () => { throw new Error('actionsResponses must not run for RESTORE_STATE') }
+
+      const report = await m.run(blocked, USER_ID, restoreEvent)
+
+      report.publish.should.be.true
+      report.newState.state.should.equal('QOUT')
+      report.newState.qa.should.eql([['q1', 'yes']])
+      report.newState.pointer.should.equal(9999)
+      should.not.exist(report.commands)
+      should.not.exist(report.responses)
+      should.not.exist(report.error)
+    })
+
+    it('never calls getForm', async () => {
+      const m = new Machine()
+      let called = false
+      m.getForm = async () => { called = true; throw new Error('getForm must not be called') }
+
+      const report = await m.run(blocked, USER_ID, restoreEvent)
+
+      called.should.be.false
+      should.not.exist(report.error)
+      report.newState.state.should.equal('QOUT')
+    })
+
+    it('sends nothing to the participant', async () => {
+      const m = new Machine()
+      const report = await m.run(blocked, USER_ID, restoreEvent)
+      should.not.exist(report.commands)
+      should.not.exist(report.payment)
+      should.not.exist(report.error)
+    })
+  })
+
   it('returns a report with commands if all goes well', async () => {
     const m = new Machine()
     m.transition = () => ({ newState: {}, output: {} })
