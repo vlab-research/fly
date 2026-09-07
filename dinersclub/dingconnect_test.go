@@ -101,7 +101,7 @@ const dingSuccessResponse = `{
 		"CommissionApplied": 5.00,
 		"StartedUtc": "2026-03-01T14:30:00Z",
 		"CompletedUtc": "2026-03-01T14:30:45Z",
-		"ProcessingState": "Completed",
+		"ProcessingState": "Complete",
 		"ReceiptText": "Success",
 		"AccountNumber": "14155552671"
 	},
@@ -355,7 +355,13 @@ func TestDingConnectPayout_OptionalFields(t *testing.T) {
 	assert.Equal(t, "123456", first["Value"])
 }
 
-// TestDingConnectPayout_OmitsOptionalFields keeps absent options off the wire.
+// TestDingConnectPayout_OmitsOptionalFields keeps absent options off the wire,
+// with one deliberate exception: ValidateOnly is ALWAYS sent. DingConnect
+// refuses a SendTransfer body without it (ResultCode 4, ParameterInvalid,
+// context "ValidateOnly"), which is what failed every real LAC payment on
+// 2026-09-07 while every validate-only test passed. go-dingconnect v0.3.1
+// sends it unconditionally; this test pins that a real payout carries
+// ValidateOnly: false rather than nothing.
 func TestDingConnectPayout_OmitsOptionalFields(t *testing.T) {
 	var gotBody map[string]interface{}
 	p := dingProvider(t, func(w http.ResponseWriter, r *http.Request) {
@@ -367,10 +373,13 @@ func TestDingConnectPayout_OmitsOptionalFields(t *testing.T) {
 	_, err := p.Payout(dingEvent(validDingDetails))
 	assert.Nil(t, err)
 
-	for _, k := range []string{"SendCurrencyIso", "Settings", "ValidateOnly"} {
+	for _, k := range []string{"SendCurrencyIso", "Settings"} {
 		_, present := gotBody[k]
 		assert.False(t, present, "%q must be omitted when not set", k)
 	}
+	v, present := gotBody["ValidateOnly"]
+	assert.True(t, present, "ValidateOnly must be present on every real send; DingConnect rejects its absence")
+	assert.Equal(t, false, v, "a real payout must send ValidateOnly: false")
 }
 
 // TestDingConnectPayout_ValidationErrors covers malformed survey configuration,
@@ -518,7 +527,7 @@ func TestDingConnectPayout_FailureWithoutErrorCodes(t *testing.T) {
 // reported as success.
 func TestDingConnectPayout_PartialResultIsNotSuccess(t *testing.T) {
 	p := dingProvider(t, dingRespond(200, `{
-		"TransferRecord": {"SkuCode": "S", "ProcessingState": "Completed", "AccountNumber": "1"},
+		"TransferRecord": {"SkuCode": "S", "ProcessingState": "Complete", "AccountNumber": "1"},
 		"ResultCode": 2, "ErrorCodes": [{"Code": "NearestMatch"}]
 	}`))
 

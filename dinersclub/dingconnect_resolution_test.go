@@ -131,7 +131,7 @@ func dingOK(sku string, receive float64, currency string) stubResp {
 			"TransferId": {"DistributorRef":"r","TransferRef":"DC1"},
 			"SkuCode": %q,
 			"Price": {"ReceiveValue": %v, "ReceiveCurrencyIso": %q, "SendCurrencyIso":"USD"},
-			"ProcessingState": "Completed"
+			"ProcessingState": "Complete"
 		},
 		"ResultCode": 1, "ErrorCodes": []
 	}`, sku, receive, currency)}

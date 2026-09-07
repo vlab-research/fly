@@ -16,7 +16,6 @@ require (
 	github.com/prometheus/client_golang v1.17.0
 	github.com/stretchr/testify v1.8.2
 	github.com/tidwall/gjson v1.14.0
-	github.com/vlab-research/botparty v0.0.0-20200917171250-abbbd36eb095
 	github.com/vlab-research/go-reloadly v0.0.23
 	github.com/vlab-research/spine v0.1.0
 )
@@ -52,7 +51,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
-	github.com/vlab-research/go-dingconnect v0.3.0
+	github.com/vlab-research/go-dingconnect v0.3.1
 	github.com/vlab-research/gotils v0.0.2 // indirect
 	golang.org/x/crypto v0.20.0 // indirect
 	golang.org/x/sys v0.17.0 // indirect
