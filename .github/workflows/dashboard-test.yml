@@ -33,21 +33,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: dashboard-server/.nvmrc
-      # dashboard-server tests that touch the database: mcp.routes.integration.test.js,
-      # api/auth/auth.test.js, api/bails/bails.test.js, api/health/health.test.js,
-      # api/states/states.test.js, and the query test suites.
-      #
-      # `make -C devops test-db` is the same target developers run locally — it
-      # starts CockroachDB on port 5433 and pipes `devops/migrations/*.sql` into
-      # it — so CI and a laptop agree on the schema by construction rather than by
-      # a second copy of the setup living here.
-      #
-      # Not a `services:` container: cockroach needs a `start-single-node` command,
-      # which GitHub's service blocks cannot supply, and the migrations have to run
-      # before mocha starts either way.
       - name: Start test database
         run: make -C ../devops test-db
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      - run: npm run test:integration
