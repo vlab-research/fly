@@ -140,7 +140,15 @@ versionScribble: &vscribble v0.0.34
 # layers agreed by accident. dinersclub never consults the client library's
 # Retryable(), which calls RateLimited retryable; retrying it re-sends to a
 # number that may have tripped a per-account fraud rule.
-versionDinersclub: &vdinersclub v0.0.50
+#
+# v0.0.50 -> v0.0.51: go-dingconnect v0.3.1. On v0.3.0 EVERY real DingConnect
+# transfer was refused (ParameterInvalid / ValidateOnly): the client omitted
+# ValidateOnly when false, and DingConnect requires the field. Three further
+# wire facts fixed in the same release: E.164's leading "+" is stripped from
+# the account number, the completed state is "Complete" (a paid transfer read
+# as failed on v0.3.0), and transfer history decodes. Measured 2026-09-07 with
+# real sends on the Bolivia and Argentina corridors. No env or config change.
+versionDinersclub: &vdinersclub v0.0.51
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
