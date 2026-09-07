@@ -1,0 +1,53 @@
+name: dashboard-test
+
+# `devops/migrations/**` is a trigger because some dashboard tests query a real
+# schema, so a migration can break this suite without touching a file under
+# `dashboard-server/`.
+#
+# `devops/values/production.yaml` is a trigger so the test runs whenever the
+# deployed dashboard version changes, ensuring the test suite can run against
+# the deployed tag.
+on:
+  pull_request:
+    paths:
+      - 'dashboard-server/**'
+      - 'devops/migrations/**'
+      - 'devops/values/production.yaml'
+      - '.github/workflows/dashboard-test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard-server/**'
+      - 'devops/migrations/**'
+      - 'devops/values/production.yaml'
+      - '.github/workflows/dashboard-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: dashboard-server/.nvmrc
+      # dashboard-server tests that touch the database: mcp.routes.integration.test.js,
+      # api/auth/auth.test.js, api/bails/bails.test.js, api/health/health.test.js,
+      # api/states/states.test.js, and the query test suites.
+      #
+      # `make -C devops test-db` is the same target developers run locally — it
+      # starts CockroachDB on port 5433 and pipes `devops/migrations/*.sql` into
+      # it — so CI and a laptop agree on the schema by construction rather than by
+      # a second copy of the setup living here.
+      #
+      # Not a `services:` container: cockroach needs a `start-single-node` command,
+      # which GitHub's service blocks cannot supply, and the migrations have to run
+      # before mocha starts either way.
+      - name: Start test database
+        run: make -C ../devops test-db
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:integration
