@@ -1,0 +1,40 @@
+name: dashboard-test
+
+# `devops/migrations/**` is a trigger because some dashboard tests query a real
+# schema, so a migration can break this suite without touching a file under
+# `dashboard-server/`.
+#
+# `devops/values/production.yaml` is a trigger so the test runs whenever the
+# deployed dashboard version changes, ensuring the test suite can run against
+# the deployed tag.
+on:
+  pull_request:
+    paths:
+      - 'dashboard-server/**'
+      - 'devops/migrations/**'
+      - 'devops/values/production.yaml'
+      - '.github/workflows/dashboard-test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard-server/**'
+      - 'devops/migrations/**'
+      - 'devops/values/production.yaml'
+      - '.github/workflows/dashboard-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: dashboard-server/.nvmrc
+      - name: Start test database
+        run: make -C ../devops test-db
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test

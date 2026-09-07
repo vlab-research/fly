@@ -846,6 +846,14 @@ API integration tests follow a consistent pattern (see `api/bails/bails.test.js`
 3. Delete test user
 4. Close database pool with `vlabPool.end()`
 
+### CI/CD
+
+Tests run automatically in GitHub Actions via `.github/workflows/dashboard-test.yml`
+on every pull request and push to main (filtered to relevant paths). The workflow:
+- Uses Node version from `.nvmrc`
+- Starts the test database with `make -C devops test-db`
+- Runs lint, unit tests, and integration tests
+
 ### States API Tests
 
 The states API tests (`api/states/states.test.js`) verify:
@@ -871,23 +879,19 @@ The states API tests (`api/states/states.test.js`) verify:
 
 ## Build
 
-The Dockerfile is pinned to **`node:18-bullseye`** and installs deps with
-**`npm ci`**. Both of those are the resolution of a pair of problems that used to
-constrain each other, and the history is worth keeping because the failure modes
-were confusing:
+The Dockerfile is pinned to **`node:22-bookworm`** and installs deps with
+**`npm ci`**. Node version is specified in `.nvmrc` and `package.json`'s
+`engines` field.
 
-- **Node had to move off 14.** `node:14-stretch` is stuck at Node ≤14.17 because
-  Debian stretch is EOL, and `require('util/types')` — pulled in by current `pg`
-  transitives — needs ≥14.18, so the container crashed at startup with
-  `Cannot find module 'util/types'`. `node:14-bullseye` fixed that, and Node 18
-  supersedes it (`10a20832`).
-- **`npm ci` needs npm ≥7.** Node 14 ships npm 6, which cannot parse the
-  committed lockfile-v2 `package-lock.json` (`Cannot read property
-  '@cubejs-backend/postgres-driver' of undefined`), so `npm i` was the
-  workaround for as long as the image was on 14 (`6d74c89e`). Node 18 ships
-  npm 9, so the build is deterministic again — **don't revert to `npm i`**, it
-  re-resolves dependencies on every build and that is what produced the
-  `util/types` surprise in the first place.
+**Node 22 requirement:** The MCP server (`api/mcp/`) uses
+`@modelcontextprotocol/sdk`, which calls `crypto.randomUUID()` via the
+Streamable HTTP transport. The global `crypto` object is only available from
+Node ≥19, which is why the runtime is pinned to 22. (This version matches
+replybot and provides stable LTS support.)
 
-`@modelcontextprotocol/sdk` (added by VIR-37) requires Node ≥18, so the image
-cannot go back below 18 either.
+**Build history:** The Dockerfile previously used `node:18-bullseye` before the
+MCP server was added (VIR-37). Earlier still, `node:14-stretch` was stuck at
+Node ≤14.17 because Debian stretch is EOL, and `require('util/types')` — pulled
+in by current `pg` transitives — needs ≥14.18. `npm ci` (as opposed to `npm i`)
+has been necessary since Node 14's npm 6 could not parse lockfile-v2; Node 22
+ships npm 10, keeping builds deterministic.
