@@ -26,6 +26,9 @@
     "url": "https://github.com/vlab-research/dashboard-server/issues"
   },
   "homepage": "https://github.com/vlab-research/dashboard-server#readme",
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "chai": "4.2.0",
     "chai-as-promised": "^7.1.1",
