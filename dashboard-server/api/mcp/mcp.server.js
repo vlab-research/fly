@@ -26,9 +26,12 @@ const { TOOLS, SERVER_INSTRUCTIONS } = require('./mcp.core');
 const { runTool } = require('./mcp.tools');
 
 const SERVER_INFO = {
+  // `name` is unchanged on purpose — clients have it in their config and
+  // renaming it buys nothing. The title dropped "Surveys" when the server
+  // stopped being only about surveys (planning/mcp-full-coverage-plan.md).
   name: 'vlab-fly-surveys',
-  title: 'Fly Surveys',
-  version: '0.1.0',
+  title: 'Fly',
+  version: '0.2.0',
 };
 
 function buildServer({ email, scopes = null }) {

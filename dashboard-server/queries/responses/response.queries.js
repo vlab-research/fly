@@ -191,6 +191,7 @@ async function formData(email, survey) {
 
 module.exports = {
   name: 'Response',
+  RequestError,
   _all,
   checkSurveyExists,
   checkUserExists,

@@ -1,6 +1,6 @@
 'use strict';
-const crypto = require('crypto');
-const { Exports } = require('../../queries');
+
+const { startExport, listExports } = require('./exports.service');
 
 function handle(err, res) {
   console.error(err);
@@ -15,8 +15,7 @@ exports.getAll = async (req, res) => {
       return res.status(400).send('No user, no responses!');
     }
 
-    const responses = await Exports.all(email);
-    res.status(200).send(responses.responses);
+    res.status(200).send(await listExports({ email }));
   } catch (err) {
     console.error(err);
     res.status(500).send(err);
@@ -36,8 +35,7 @@ exports.getBySurvey = async (req, res) => {
       return res.status(400).send('survey query parameter is required');
     }
 
-    const responses = await Exports.bySurvey(email, survey);
-    res.status(200).send(responses.responses);
+    res.status(200).send(await listExports({ email, survey_name: survey }));
   } catch (err) {
     console.error(err);
     res.status(500).send(err);
@@ -47,15 +45,11 @@ exports.getBySurvey = async (req, res) => {
 exports.generateExport = async (req, res) => {
   const { survey } = req.query;
   const { export_type, ...options } = req.body;
-
   const { email } = req.user;
-  const SOURCE_MAP = { chat_log: 'chat_log', full_messages: 'full_messages' };
-  const source = SOURCE_MAP[export_type] || 'responses';
-  const exportId = crypto.randomUUID();
 
   try {
-    await Exports.insert(exportId, email, survey, source, options);
-    return res.status(201).send({ status: 'success', export_id: exportId });
+    const { export_id } = await startExport({ email, survey_name: survey, export_type, options });
+    return res.status(201).send({ status: 'success', export_id });
   } catch (err) {
     handle(err, res);
   }

@@ -246,7 +246,7 @@ const TYPEFORM_FIELD_SCHEMA = {
   },
 };
 
-const TOOLS = [
+const SURVEY_TOOLS = [
   {
     name: 'list_surveys',
     description: [
@@ -509,6 +509,30 @@ const TOOLS = [
     },
   },
 ];
+
+// ---------------------------------------------------------------------------
+// The other areas. Each is its own array so tests and docs can assert per
+// area; the phases of planning/mcp-full-coverage-plan.md fill them in.
+// ---------------------------------------------------------------------------
+
+const MONITORING_TOOLS = [];
+const DATA_TOOLS = [];
+const TEMPLATE_TOOLS = [];
+const MEDIA_TOOLS = [];
+const BAIL_TOOLS = [];
+const TICKET_TOOLS = [];
+const ACCOUNT_TOOLS = [];
+
+const TOOLS = [].concat(
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
+);
 
 const toolByName = name => TOOLS.find(t => t.name === name) || null;
 
@@ -782,6 +806,43 @@ function mergeSettings(current, args) {
 }
 
 // ---------------------------------------------------------------------------
+// Bounded lists and redaction — the two decisions every list tool shares.
+// ---------------------------------------------------------------------------
+
+/*
+ * Every list a tool returns is bounded. The REST endpoints mostly are not
+ * (list_states has no maximum limit over REST), and an agent that asks for
+ * "everything" gets a context window full of rows. Absent or junk -> the
+ * default; anything above the cap -> the cap.
+ */
+function clampLimit(value, { default: fallback, max }) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) return fallback;
+  return Math.min(n, max);
+}
+
+/*
+ * A messaging credential row is `entity`, `key` (the platform account id) and
+ * a `details` blob that holds the access token. Nothing from `details` leaves
+ * this function except a display name, and the name is looked up by known
+ * keys rather than by copying the blob, so a future column cannot leak by
+ * accident. The recursive no-secret test in mcp.core.test.js is the contract.
+ */
+const DISPLAY_NAME_KEYS = ['name', 'verified_name', 'display_phone_number'];
+
+function redactCredential(row) {
+  const details = (row && row.details) || {};
+  const nameKey = DISPLAY_NAME_KEYS.find(k => typeof details[k] === 'string' && details[k]);
+
+  return {
+    entity: row.entity,
+    account_id: row.key,
+    name: nameKey ? details[nameKey] : null,
+    created: row.created || null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Result shaping.
 // ---------------------------------------------------------------------------
 
@@ -810,6 +871,14 @@ const NO_FLY_ACCOUNT =
 module.exports = {
   // constants / data
   TOOLS,
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
   SERVER_INSTRUCTIONS,
   VERSIONING_NOTE,
   IDENTIFIER_NOTE,
@@ -839,6 +908,10 @@ module.exports = {
   resolvePreviousVersion,
   buildVersionRequest,
   mergeSettings,
+
+  // bounded lists and redaction
+  clampLimit,
+  redactCredential,
 
   // results
   toolResult,

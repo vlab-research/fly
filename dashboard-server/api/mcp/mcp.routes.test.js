@@ -17,6 +17,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
 
 const { makeAPIToken } = require('../../utils/auth/auth.util');
+const { TOOLS } = require('./mcp.core');
 
 const EMAIL = 'researcher@test.org';
 
@@ -86,7 +87,7 @@ describe('MCP routes integration: crypto regression', () => {
     expect(body.result.serverInfo.name).to.equal('vlab-fly-surveys');
   });
 
-  it('lists tools and returns the five expected tool names', async () => {
+  it('lists every tool the core defines', async () => {
     const res = await request(app)
       .post('/api/v1/mcp')
       .set('Authorization', `Bearer ${authToken}`)
@@ -105,13 +106,9 @@ describe('MCP routes integration: crypto regression', () => {
     expect(body.result).to.have.property('tools');
 
     const toolNames = body.result.tools.map(t => t.name);
-    expect(toolNames).to.eql([
-      'list_surveys',
-      'create_typeform_form',
-      'create_survey',
-      'create_survey_version',
-      'update_survey_settings',
-    ]);
+    // The exact list is the core test's contract (TOOL_NAMES); this test is
+    // about the transport advertising whatever the core defines.
+    expect(toolNames).to.eql(TOOLS.map(t => t.name));
 
     // Verify each tool has a description and schema
     body.result.tools.forEach(tool => {

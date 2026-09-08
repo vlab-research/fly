@@ -32,6 +32,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
 
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+const { TOOLS } = require('./mcp.core');
 const {
   StreamableHTTPClientTransport,
 } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
@@ -226,13 +227,7 @@ describe('mcp transport: handshake', () => {
     const client = await connect();
     const { tools } = await client.listTools();
 
-    expect(tools.map(t => t.name)).to.eql([
-      'list_surveys',
-      'create_typeform_form',
-      'create_survey',
-      'create_survey_version',
-      'update_survey_settings',
-    ]);
+    expect(tools.map(t => t.name)).to.eql(TOOLS.map(t => t.name));
     tools.forEach(t => {
       expect(t.description, t.name).to.be.a('string');
       expect(t.inputSchema, t.name).to.include({ type: 'object' });

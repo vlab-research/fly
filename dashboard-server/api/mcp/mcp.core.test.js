@@ -12,8 +12,18 @@ const core = require('./mcp.core');
 
 const {
   TOOLS,
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
   SERVER_INSTRUCTIONS,
   MAX_CHOICES,
+  clampLimit,
+  redactCredential,
   validateAgainstSchema,
   validateToolArgs,
   toolByName,
@@ -34,15 +44,49 @@ const {
   invalidArgsError,
 } = core;
 
+/*
+ * Every tool the server advertises, by area, in order. Adding a tool means
+ * adding its name here — which is the point: the advertised surface is a
+ * contract, and this table is where a reviewer sees it change.
+ */
+const TOOL_NAMES = {
+  SURVEY_TOOLS: [
+    'list_surveys',
+    'create_typeform_form',
+    'create_survey',
+    'create_survey_version',
+    'update_survey_settings',
+  ],
+  MONITORING_TOOLS: [],
+  DATA_TOOLS: [],
+  TEMPLATE_TOOLS: [],
+  MEDIA_TOOLS: [],
+  BAIL_TOOLS: [],
+  TICKET_TOOLS: [],
+  ACCOUNT_TOOLS: [],
+};
+
+const AREAS = {
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
+};
+
 describe('mcp.core: tool definitions', () => {
-  it('exposes exactly the five tools, each with a name, description and schema', () => {
-    expect(TOOLS.map(t => t.name)).to.eql([
-      'list_surveys',
-      'create_typeform_form',
-      'create_survey',
-      'create_survey_version',
-      'update_survey_settings',
-    ]);
+  it('exposes exactly the expected tools, per area and in order', () => {
+    Object.entries(TOOL_NAMES).forEach(([area, names]) => {
+      expect(AREAS[area].map(t => t.name), area).to.eql(names);
+    });
+    expect(TOOLS.map(t => t.name)).to.eql([].concat(...Object.values(TOOL_NAMES)));
+  });
+
+  it('gives every tool a unique name, a description and an object schema', () => {
+    expect(new Set(TOOLS.map(t => t.name)).size).to.equal(TOOLS.length);
 
     TOOLS.forEach(tool => {
       expect(tool.description, tool.name).to.be.a('string');
@@ -510,5 +554,87 @@ describe('mcp.core: lookups and results', () => {
     expect(invalidArgsError(['a', 'b']).content[0].text).to.equal(
       'Invalid arguments:\n  - a\n  - b',
     );
+  });
+});
+
+describe('mcp.core: clampLimit', () => {
+  const bounds = { default: 50, max: 200 };
+
+  it('passes a sane value through', () => {
+    expect(clampLimit(10, bounds)).to.equal(10);
+    expect(clampLimit('25', bounds)).to.equal(25);
+  });
+
+  it('caps at the maximum rather than refusing', () => {
+    expect(clampLimit(5000, bounds)).to.equal(200);
+    expect(clampLimit(200, bounds)).to.equal(200);
+  });
+
+  it('falls back to the default on absent or junk input', () => {
+    [undefined, null, 0, -3, 'lots', 2.5, NaN].forEach(v => {
+      expect(clampLimit(v, bounds), String(v)).to.equal(50);
+    });
+  });
+});
+
+describe('mcp.core: redactCredential', () => {
+  const SECRET_KEYS = [
+    'access_token',
+    'token',
+    'secret',
+    'value',
+    'password',
+    'id_token',
+    'refresh_token',
+    'details',
+  ];
+
+  // Walks every nesting level: a secret two objects deep is still a leak.
+  const keysAtAnyDepth = value => {
+    if (!value || typeof value !== 'object') return [];
+    return Object.entries(value).flatMap(([k, v]) => [k].concat(keysAtAnyDepth(v)));
+  };
+
+  const row = {
+    entity: 'facebook_page',
+    key: '1234567890',
+    created: '2026-01-01T00:00:00Z',
+    details: {
+      id: '1234567890',
+      name: 'Health Study Page',
+      access_token: 'EAAB-super-secret',
+      nested: { token: 'also-secret', deeper: { secret: 'x' } },
+    },
+  };
+
+  it('keeps only the identity and a display name', () => {
+    expect(redactCredential(row)).to.eql({
+      entity: 'facebook_page',
+      account_id: '1234567890',
+      name: 'Health Study Page',
+      created: '2026-01-01T00:00:00Z',
+    });
+  });
+
+  // The whole reason this is a pure function with its own test.
+  it('leaks no secret-shaped key at any depth', () => {
+    const keys = keysAtAnyDepth(redactCredential(row));
+    SECRET_KEYS.forEach(k => expect(keys, k).to.not.include(k));
+  });
+
+  it('finds a WhatsApp display name and tolerates an empty blob', () => {
+    expect(
+      redactCredential({
+        entity: 'whatsapp_business',
+        key: '9876',
+        details: { verified_name: 'Clinic', display_phone_number: '+1 555 0100' },
+      }).name,
+    ).to.equal('Clinic');
+    expect(redactCredential({ entity: 'whatsapp_business', key: '9876' })).to.eql({
+      entity: 'whatsapp_business',
+      account_id: '9876',
+      name: null,
+      created: null,
+    });
   });
 });
