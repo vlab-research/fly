@@ -798,6 +798,12 @@ per-type limits, identical bytes return the existing asset with
 `deduplicated: true`, and platform pre-uploads run best-effort in the background.
 The result is the asset plus a `note`.
 
+Inline uploads ride inside the JSON-RPC body, so the MCP path has its own JSON
+parser sized to the media cap plus base64 overhead (`MCP_BODY_LIMIT_BYTES`,
+mounted in `server.js` ahead of the global 100 KB parser); the dashboard-api
+ingress allows 200 MB. A `content_base64` upload is therefore bounded by the
+per-type limits, same as multipart.
+
 The fetch is the one new surface. It is bounded by the largest per-type limit
 (100 MB), follows at most three redirects **by hand**, and refuses at every hop
 anything that is not public http(s): loopback, `*.svc`, `*.cluster.local`,

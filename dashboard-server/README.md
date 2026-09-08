@@ -283,6 +283,14 @@ The express body parser has already drained the request, so the parsed body is
 handed to `transport.handleRequest` explicitly; without that the transport waits
 forever on a stream that has already ended.
 
+**Body size.** `upload_media`'s `content_base64` is a string inside the JSON-RPC
+message, so the JSON parser's limit is the upload limit. `server.js` mounts
+`express.json({ limit: MCP_BODY_LIMIT_BYTES })` on `/api/v1/mcp` ahead of the
+global parser (default 100 KB); the constant is derived in `mcp.core.js` from
+the media cap (`MAX_UPLOAD_BYTES` × 4/3 plus 1 MB). The dashboard-api ingress
+annotation `proxy-body-size: 200m` in `devops/values/*.yaml` is what lets it
+through nginx.
+
 **Functional core, imperative shell:**
 
 | File | Role |

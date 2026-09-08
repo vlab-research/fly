@@ -38,6 +38,7 @@ const {
   shapeExportStarted,
   shapeResponsesPage,
   MAX_UPLOAD_BYTES,
+  MCP_BODY_LIMIT_BYTES,
   base64DecodedBytes,
   validateUploadSource,
   decodeBase64,
@@ -891,6 +892,11 @@ describe('mcp.core: templates and media', () => {
       expect(validateUploadSource({ content_base64: '' }).errors[0]).to.match(/not valid base64/);
       expect(validateUploadSource({ content_base64: 'hello world!' }).errors[0]).to.match(/not valid base64/);
     });
+  });
+
+  it('sizes the MCP JSON body to carry the largest upload as base64', () => {
+    expect(MCP_BODY_LIMIT_BYTES).to.be.above((MAX_UPLOAD_BYTES * 4) / 3);
+    expect(MCP_BODY_LIMIT_BYTES).to.be.below(MAX_UPLOAD_BYTES * 2);
   });
 
   it('decodes base64 and shapes the upload answer', () => {

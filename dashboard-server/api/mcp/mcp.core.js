@@ -1592,6 +1592,16 @@ function validateUploadSource(args) {
 
 const decodeBase64 = content => Buffer.from(String(content).replace(/\s+/g, ''), 'base64');
 
+/*
+ * The JSON body an upload_media call can be. Over REST a file travels as
+ * multipart and the JSON parser never sees it; over MCP `content_base64` is a
+ * string INSIDE the JSON-RPC message, so the parser's limit is the upload
+ * limit. Base64 is 4/3 of the bytes, plus one megabyte of envelope. server.js
+ * mounts a parser with this limit on the MCP path ahead of the global one,
+ * whose default is 100 KB.
+ */
+const MCP_BODY_LIMIT_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 1024 * 1024;
+
 function shapeUploadResult({ asset, deduplicated }) {
   return {
     ...asset,
@@ -1733,6 +1743,7 @@ module.exports = {
   // templates and media
   MESSAGING_ASSETS_NOTE,
   MAX_UPLOAD_BYTES,
+  MCP_BODY_LIMIT_BYTES,
   base64DecodedBytes,
   validateUploadSource,
   decodeBase64,

@@ -32,7 +32,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
 
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { TOOLS } = require('./mcp.core');
+const { TOOLS, MCP_BODY_LIMIT_BYTES } = require('./mcp.core');
 const {
   StreamableHTTPClientTransport,
 } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
@@ -167,6 +167,7 @@ const routes = proxyquire('./mcp.routes', { './mcp.server': mcpServer });
  */
 function makeApp() {
   return express()
+    .use('/api/v1/mcp', express.json({ limit: MCP_BODY_LIMIT_BYTES }))
     .use(express.json())
     .use('/api/v1', (req, res, next) => {
       const header = req.get('authorization') || '';
@@ -466,6 +467,15 @@ describe('mcp transport: tool calls', () => {
     });
     expect(seen.find(c => c.name === 'uploadAsset').args).to.eql({ email: EMAIL, filename: 'hello.txt', bytes: 5 });
     expect(JSON.parse(inline.content[0].text).url).to.equal('https://media/a/a2/hello.txt');
+
+    // A body the global 100 KB parser would refuse.
+    seen.length = 0;
+    const big = await client.callTool({
+      name: 'upload_media',
+      arguments: { filename: 'big.bin', content_base64: Buffer.alloc(2 * 1024 * 1024, 1).toString('base64') },
+    });
+    expect(big.isError).to.not.equal(true);
+    expect(seen[0].args.bytes).to.equal(2 * 1024 * 1024);
 
     seen.length = 0;
     const fetched = await client.callTool({
