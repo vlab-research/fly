@@ -7,6 +7,100 @@ exporter selects the backend via the `STORAGE_BACKEND` env var
 (`google` → GCS, `s3` → MinIO, unset → dev no-op). See
 `exporter/exporter/storage.py`.
 
+## Request and status contract
+
+Exports are initiated via `POST /api/v1/exports?survey=<name>` with the survey name as a query parameter.
+The response body structure and status polling shape depend on the export type.
+
+### Request bodies by export type
+
+All requests are `POST /api/v1/exports?survey=<name>` and return `201 { status: "success", export_id: <uuid> }`.
+
+#### `responses` (no `export_type`)
+
+```json
+{
+  "pivot": boolean,
+  "keep_final_answer": boolean,
+  "drop_duplicated_users": boolean,
+  "add_duration": boolean,
+  "drop_users_without": string,
+  "response_value": string,
+  "metadata": object
+}
+```
+
+When `export_type` is omitted, the export defaults to `"responses"` — one row per response event.
+
+#### `chat_log`
+
+```json
+{
+  "export_type": "chat_log",
+  "pivot": boolean,
+  "keep_final_answer": boolean,
+  "drop_duplicated_users": boolean,
+  "add_duration": boolean,
+  "drop_users_without": string,
+  "response_value": string,
+  "metadata": object
+}
+```
+
+A curated, deduplicated record of user-visible message exchanges.
+
+#### `full_messages`
+
+```json
+{
+  "export_type": "full_messages",
+  "event_groups": ["conversation", "referrals", "bails", "payments", "external_tracking", "retries", "system", "other"],
+  "include_raw_json": boolean,
+  "start_time": "2026-08-14T00:00:00Z",
+  "end_time": "2026-08-15T00:00:00Z"
+}
+```
+
+The raw stream of all classified events. Time bounds are optional; both default to unbounded. For details on the event classification model, see `documentation/full-messages-export.md`.
+
+### Status response: `GET /exports/status` and `/exports/status/survey?survey=<name>`
+
+Both endpoints return an array of export status rows, most recent first. Each row represents a single export attempt:
+
+```json
+[
+  {
+    "id": "550e8400-...",
+    "user_id": "<email>",
+    "survey_id": "<survey name>",
+    "status": "Completed",
+    "export_link": "https://storage.example.com/exports/...",
+    "source": "responses",
+    "options": { "pivot": true, ... },
+    "updated": "2026-08-14T12:30:45.123Z",
+    "retry_count": 0,
+    "locked_at": null,
+    "metadata": { ... }
+  }
+]
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | UUID | Unique export id, returned by the `POST` and used to track this export across resubmissions |
+| `user_id` | string | Caller's email |
+| `survey_id` | string | Survey name |
+| `status` | enum | One of: `Requested`, `Completed`, `Failed`. An export remains `Requested` until the exporter marks it otherwise. |
+| `export_link` | string | Presigned S3 download URL when `status === "Completed"`. The URL is valid for **7 hours** after the export finishes. Before completion or on failure, this is a placeholder like `"Not Found"`. |
+| `source` | string | The export type: `"responses"`, `"chat_log"`, or `"full_messages"` |
+| `options` | object | The request body (minus `export_type`) stored as-is for audit and resumption |
+| `updated` | timestamp | Last update time; used to identify stale exports for pruning |
+| `retry_count` | integer | Number of times the exporter has retried this export (normally 0 unless a transient failure occurred) |
+| `locked_at` | timestamp or null | When the exporter locked this row to begin processing; cleared when the status updates. Helps detect stalled jobs. |
+| `metadata` | object | Application metadata, if any |
+
+**Polling behavior:** Exports are async: the exporter polls `export_status` for `Requested` rows (`exporter/exporter/main.py`, migration 16); nothing is published to Kafka. Callers should poll `/exports/status` or `/exports/status/survey` every few seconds until the export reaches a terminal status (`Completed` or `Failed`) and the `export_link` is valid. A `Completed` export's presigned URL is valid for 7 hours, so downloads must happen within that window.
+
 ## Lifecycle: exports are temporary
 
 Exports are transient by design. After an export completes, the exporter hands

@@ -210,13 +210,13 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/responses` | Survey response data |
 | `/surveys` | Survey CRUD and settings |
 | `/users` | Account operations |
-| `/exports` | Async data export (via Kafka) |
+| `/exports` | Async data export: inserts an `export_status` row the exporter polls (no Kafka) |
 | `/typeform` | Typeform integration |
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
 | `/mcp` | MCP server — `POST` only, Streamable HTTP, five survey tools. Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
-| `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware |
+| `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
 | `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
@@ -224,6 +224,25 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/media` | Researcher media library — upload bytes, get back a permanent public URL. Platform-independent: no page selector, no connected-page requirement. See "Media endpoints" below |
 | `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
+| `/cubejs-api` | Cube.js analytics (see "Cube.js analytics" below) |
+
+### Cube.js analytics (`/cubejs-api`)
+
+The `/cubejs-api` endpoint provides aggregated analytics queries via Cube.js, mounted by
+`CubejsServerCore.initApp(app)` in `index.js` with `checkAuthMiddleware: auth`.
+
+**Cubes:**
+- `Responses` — measures: `count`, `uniqueUserCount`, `startTime`, `endTime`; dimensions: `formid`, `userid`, `flowid`, `timestamp`, `response`, `questionId`
+- `LastQuestions` — measure: `count`; dimensions: `formid`, `timestamp`, `response`, `questionRef`, `questionText`
+
+**Known limitation:** The endpoint is authenticated but **not scoped to the caller's surveys**.
+The cube SQL is `SELECT * FROM responses` with no email join and no `queryRewrite`, so the only
+survey filter is the `formid` dimension that the browser client supplies. Any Auth0 user or
+unscoped API key can read any survey's response data by providing another survey's id. Scoped
+API keys are refused only because `/cubejs-api` is not listed in `ROUTE_RESOURCES`, not because
+the endpoint itself enforces scoping. To restrict analytics to a caller's own surveys, a
+`queryRewrite` in the Cube config would be needed to inject an email-based filter, or the five
+analytics reports in the dashboard should be replaced with scoped REST queries.
 
 ### Credentials
 
@@ -765,6 +784,10 @@ Key aspects:
 - Type casting with `::int` for counts ensures proper integer types in results
 - Functions return raw query results or structured objects (e.g., `{ items, total }` for pagination)
 
+#### States Endpoints
+
+**`GET /surveys/:surveyName/states`** returns a paginated list of participants in any state, optionally filtered by state, error tag, form, or userid search. The `limit` parameter defaults to **50** and has **no maximum** — the caller can request any number of rows. The response includes a `total` count for pagination. API consumers should clamp the limit to a reasonable value and implement cursor/offset-based paging.
+
 #### States Query Module
 
 The `queries/states/` module provides three functions for querying participant state data: `summary`, `list`, and `detail`. All three are scoped to `(email, surveyName, shortcodes)` and apply the same scoping logic — see the docstring at the top of `queries/states/states.queries.js` for the full explanation.
@@ -802,7 +825,7 @@ off. All AlertManager failures are fail-soft (2s timeout, empty notices).
 ### External Integrations
 
 - **Cube.js**: Used for analytics aggregation on the dashboard
-- **Kafka**: Used for async export jobs; export requests are published to Kafka and results are delivered asynchronously
+- **Kafka**: not used by the dashboard for exports since migration 16; export requests are rows in `export_status` that the exporter polls
 - **Linear**: Support tickets (`/tickets`) are proxied to Linear's GraphQL API using a service-account API key (`LINEAR_API_KEY`) filing into a single team (`LINEAR_TEAM_ID`). Nothing is stored locally — "my tickets" is scoped by a `vlab-reporter:<email>` sentinel embedded in each issue description. See `documentation/tickets.md`.
 
 ## Testing

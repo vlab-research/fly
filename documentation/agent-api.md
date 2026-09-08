@@ -684,7 +684,55 @@ reported generically.
 
 ---
 
-## 10. Known gaps
+## 10. Reading response data: `GET /api/v1/responses`
+
+For agents that need to inspect individual responses (as opposed to bulk export), this endpoint provides cursor-paginated access to answers from a specific survey.
+
+### Request
+
+```
+GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>
+```
+
+| Parameter | Required | Default | Notes |
+|-----------|----------|---------|-------|
+| `survey` | **yes** | — | Survey name; must be one the caller owns |
+| `after` | no | null | Opaque cursor token from the previous response's `responses[n].token` field. Omit to start from the beginning. |
+| `pageSize` | no | 25 | Number of responses per page. Has no maximum in the API, but agents should clamp to a reasonable value (e.g. 500). |
+
+### Response — `200`
+
+```json
+{
+  "responses": [
+    {
+      "parent_surveyid": "550e8400-...",
+      "parent_shortcode": "hpvintro",
+      "surveyid": "550e8401-...",
+      "flowid": "flow-123",
+      "userid": "participant-abc",
+      "question_ref": "consent_q1",
+      "response": "Yes",
+      "timestamp": "2026-08-14T12:30:45.123Z",
+      "token": "eyJ0eXAiOi..."
+    },
+    ...
+  ]
+}
+```
+
+Each response object includes a **`token`** field — an opaque string that encodes the position in the stream.
+Pass this token as the `after` parameter in the next request to fetch the next page. The token is valid
+indefinitely, so a consumer can store it and resume paging later.
+
+**Ordering:** Results are ordered by `(timestamp, userid, question_ref)` and pagination is keyed off these
+three fields. Responses are therefore sorted by submission time, with ties broken by participant id and question.
+
+**Scoping:** All responses are scoped to the caller's email; the caller can only read responses from surveys they own.
+
+---
+
+## 11. Known gaps
 
 Marked here rather than guessed at.
 
