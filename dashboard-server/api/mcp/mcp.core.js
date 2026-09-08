@@ -60,9 +60,18 @@ const DATA_NOTE = [
   'scope, which is separate from surveys:read on purpose.',
 ].join(' ');
 
+const MESSAGING_ASSETS_NOTE = [
+  'MESSAGING ASSETS. Media uploaded with upload_media gets a permanent public URL',
+  'to reference from questions (see the `description` YAML of',
+  'create_typeform_form). Utility message templates are submitted to Meta and',
+  'must be approved before they can be sent; check status with',
+  'list_message_templates.',
+].join(' ');
+
 const SERVER_INSTRUCTIONS = [
   'This server creates, versions and monitors surveys on the Fly platform (vlab),',
-  'and exports and reads their response data.',
+  'exports and reads their response data, and manages the media and message',
+  'templates surveys send.',
   '',
   IDENTIFIER_NOTE,
   '',
@@ -85,6 +94,8 @@ const SERVER_INSTRUCTIONS = [
   MONITORING_NOTE,
   '',
   DATA_NOTE,
+  '',
+  MESSAGING_ASSETS_NOTE,
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -911,8 +922,232 @@ const DATA_TOOLS = [
     },
   },
 ];
-const TEMPLATE_TOOLS = [];
-const MEDIA_TOOLS = [];
+// ---------------------------------------------------------------------------
+// Templates and media.
+// ---------------------------------------------------------------------------
+
+// The pure half of media validation is the media core's; these are its limits
+// and its source-URL check, imported so the two tools cannot disagree with
+// the REST endpoint about what is accepted.
+const {
+  MEDIA_TYPE_LIMITS,
+  MAX_UPLOAD_BYTES,
+  checkSourceUrl,
+} = require('../media/media.core');
+
+const {
+  MAX_BODY_LENGTH: TEMPLATE_BODY_MAX,
+  MAX_BUTTONS: TEMPLATE_MAX_BUTTONS,
+  BUTTON_LABEL_MAX: TEMPLATE_BUTTON_LABEL_MAX,
+  VALID_STATUSES: TEMPLATE_STATUSES,
+} = require('../message-templates/message-templates.core');
+
+const TEMPLATE_ID_ARG = {
+  type: 'string',
+  minLength: 1,
+  description: 'The template `id` as list_message_templates reports it (a UUID, not the Meta id).',
+};
+
+const TEMPLATE_TOOLS = [
+  {
+    name: 'list_message_templates',
+    description: [
+      'List your utility message templates across every connected Messenger page and',
+      "WhatsApp number, with each one's approval status.",
+      '',
+      `Status is one of ${TEMPLATE_STATUSES.join(', ')}. PENDING rows are refreshed from`,
+      'Meta as part of this call, so calling it again is how you watch an approval',
+      'land. A REJECTED row carries `rejection_reason`. Only APPROVED templates can be',
+      'sent.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        account_id: {
+          type: 'string',
+          description:
+            'Optional: only templates of this messaging account (a page id or WhatsApp ' +
+            'phone_number_id, as list_messaging_accounts reports it). Omit for all.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_message_template',
+    description: [
+      'One utility message template by id, with its body, buttons, status and, if',
+      'rejected, the reason. A PENDING template is refreshed from Meta first.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      additionalProperties: false,
+      properties: { id: TEMPLATE_ID_ARG },
+    },
+  },
+
+  {
+    name: 'create_message_template',
+    description: [
+      'Submit a utility message template to Meta for approval on one of your',
+      'messaging accounts, and record it in Fly. Approval is asynchronous: the result',
+      'usually has status PENDING (custom utility templates often auto-approve within',
+      'seconds), and list_message_templates shows when it becomes APPROVED or REJECTED.',
+      '',
+      'Templates cannot be edited once approved — to change wording or buttons, delete',
+      'and create again. `name` must be snake_case and is unique per (account,',
+      `language). \`body\` is at most ${TEMPLATE_BODY_MAX} characters and may carry positional`,
+      'placeholders {{1}}, {{2}}, … which must be sequential from {{1}}; Meta requires one',
+      `sample value per placeholder in \`examples\`. Up to ${TEMPLATE_MAX_BUTTONS} quick-reply`,
+      `buttons, labels at most ${TEMPLATE_BUTTON_LABEL_MAX} characters and unique.`,
+      '',
+      "This creates something real in the researcher's Meta account.",
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['account_id', 'name', 'language', 'body'],
+      additionalProperties: false,
+      properties: {
+        account_id: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'The messaging account to create the template on: a Messenger page id or a ' +
+            'WhatsApp phone_number_id, as list_messaging_accounts reports it.',
+        },
+        name: {
+          type: 'string',
+          minLength: 1,
+          description: 'snake_case identifier: lowercase letters, digits and underscores only.',
+        },
+        language: {
+          type: 'string',
+          minLength: 1,
+          description: 'A Meta locale code such as "en_US", "es", "pt_BR", "hi".',
+        },
+        body: {
+          type: 'string',
+          minLength: 1,
+          description:
+            `The message text, at most ${TEMPLATE_BODY_MAX} characters, with optional ` +
+            'sequential {{1}}, {{2}} placeholders.',
+        },
+        buttons: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['label'],
+            additionalProperties: false,
+            properties: {
+              label: {
+                type: 'string',
+                minLength: 1,
+                description: `Button text, at most ${TEMPLATE_BUTTON_LABEL_MAX} characters.`,
+              },
+            },
+          },
+          description:
+            `Up to ${TEMPLATE_MAX_BUTTONS} quick-reply buttons. Omit for a text-only template.`,
+        },
+        examples: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'One sample value per {{N}} placeholder in `body`, in order. Required when ' +
+            'the body has placeholders, must be empty otherwise.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'delete_message_template',
+    description: [
+      'Deletes the template at Meta as well as in Fly; this cannot be undone.',
+      '',
+      'Any survey question that references the template by name will fail to send',
+      'after this. Deleting one row removes exactly one (account, name, language)',
+      'variant; sibling languages are untouched.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      additionalProperties: false,
+      properties: { id: TEMPLATE_ID_ARG },
+    },
+  },
+];
+
+const describeMediaLimits = () =>
+  Object.values(MEDIA_TYPE_LIMITS)
+    .map(l => `${l.humanName} (${l.acceptedFormats.join('/')}) up to ${l.maxBytes / (1024 * 1024)} MB`)
+    .join('; ');
+
+const MEDIA_TOOLS = [
+  {
+    name: 'list_media',
+    description: [
+      "List the researcher's media library: every uploaded asset with its permanent",
+      'public `url`, newest first.',
+      '',
+      'The url is what a survey question references (an `attachment` in the field',
+      'description YAML, or a webview/image URL). There is no delete: assets are',
+      'permanent because live surveys may reference them.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+
+  {
+    name: 'upload_media',
+    description: [
+      'Add a file to the media library and get back its permanent public URL. Pass',
+      'EXACTLY ONE of `source_url` (preferred: Fly fetches it) or `content_base64`',
+      '(the bytes inline, which makes the call a third larger than the file).',
+      '',
+      `Accepted: ${describeMediaLimits()}. The type is determined from the bytes, never`,
+      'from the filename or a declared MIME type, and PNGs must be 8-bit. Anything else',
+      'is refused with a message naming the format and what to convert to. Identical',
+      'bytes already in the library return the existing asset (`deduplicated: true`).',
+      '',
+      'source_url must be publicly reachable over http(s); redirects are followed',
+      'but nothing inside a private network is fetched.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['filename'],
+      additionalProperties: false,
+      properties: {
+        filename: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'The name to store and serve the file under, e.g. "welcome.png". It appears ' +
+            'in the URL and is shown to WhatsApp recipients of documents.',
+        },
+        source_url: {
+          type: 'string',
+          description: 'A public http(s) URL to fetch the file from.',
+        },
+        content_base64: {
+          type: 'string',
+          description: 'The file bytes, base64-encoded (standard alphabet, padding optional).',
+        },
+        mime_type: {
+          type: 'string',
+          description:
+            'Optional declared type, only used to tell audio from video inside an MP4 ' +
+            'container (e.g. "audio/mp4"). The real type is sniffed from the bytes.',
+        },
+      },
+    },
+  },
+];
 const BAIL_TOOLS = [];
 const TICKET_TOOLS = [];
 const ACCOUNT_TOOLS = [];
@@ -1301,6 +1536,74 @@ function shapeResponsesPage(rows, pageSize) {
 }
 
 // ---------------------------------------------------------------------------
+// Media shaping: where the bytes come from, and what an upload answers.
+// ---------------------------------------------------------------------------
+
+const BASE64_PATTERN = /^[A-Za-z0-9+/\s]*={0,2}\s*$/;
+
+// Decoded size of a base64 string without decoding it — the cap is checked
+// before a 130 MB string is turned into a 100 MB buffer.
+function base64DecodedBytes(content) {
+  const clean = String(content).replace(/\s+/g, '');
+  const padding = (clean.match(/=+$/) || [''])[0].length;
+  return Math.floor((clean.length * 3) / 4) - padding;
+}
+
+/*
+ * -> { ok: true, source: 'url', url } | { ok: true, source: 'base64', bytes }
+ * -> { ok: false, errors: [...] }
+ *
+ * Exactly one source, and neither one obviously over the cap, before any IO.
+ */
+function validateUploadSource(args) {
+  const hasUrl = args.source_url !== undefined;
+  const hasBytes = args.content_base64 !== undefined;
+
+  if (hasUrl === hasBytes) {
+    return {
+      ok: false,
+      errors: [
+        hasUrl
+          ? 'pass either source_url or content_base64, not both'
+          : 'pass either source_url (preferred) or content_base64',
+      ],
+    };
+  }
+
+  if (hasUrl) {
+    const check = checkSourceUrl(args.source_url);
+    return check.ok ? { ok: true, source: 'url', url: check.url } : { ok: false, errors: [check.error] };
+  }
+
+  const content = String(args.content_base64);
+  if (!content.trim() || !BASE64_PATTERN.test(content)) {
+    return { ok: false, errors: ['content_base64 is not valid base64'] };
+  }
+  const bytes = base64DecodedBytes(content);
+  if (bytes > MAX_UPLOAD_BYTES) {
+    const maxMB = (MAX_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
+    return {
+      ok: false,
+      errors: [`content_base64 decodes to ${(bytes / (1024 * 1024)).toFixed(1)} MB; the maximum is ${maxMB} MB`],
+    };
+  }
+  return { ok: true, source: 'base64', bytes };
+}
+
+const decodeBase64 = content => Buffer.from(String(content).replace(/\s+/g, ''), 'base64');
+
+function shapeUploadResult({ asset, deduplicated }) {
+  return {
+    ...asset,
+    deduplicated: !!deduplicated,
+    note: deduplicated
+      ? 'These exact bytes were already in the library; this is the existing asset.'
+      : 'The URL works immediately. Platform-side copies for faster sending are ' +
+        'created in the background and are never required.',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Bounded lists and redaction — the two decisions every list tool shares.
 // ---------------------------------------------------------------------------
 
@@ -1426,6 +1729,14 @@ module.exports = {
   shapeExportRow,
   shapeExportStarted,
   shapeResponsesPage,
+
+  // templates and media
+  MESSAGING_ASSETS_NOTE,
+  MAX_UPLOAD_BYTES,
+  base64DecodedBytes,
+  validateUploadSource,
+  decodeBase64,
+  shapeUploadResult,
 
   // bounded lists and redaction
   clampLimit,

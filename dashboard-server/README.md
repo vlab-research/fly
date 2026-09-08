@@ -215,14 +215,14 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
-| `/mcp` | MCP server — `POST` only, Streamable HTTP, thirteen tools (five survey, five monitoring, three data). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
+| `/mcp` | MCP server — `POST` only, Streamable HTTP, nineteen tools (five survey, five monitoring, three data, four template, two media). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
 | `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
 | `/platform/notices` | Platform-wide notices proxied from AlertManager (whitelisted alertnames, fail-soft) |
 | `/media` | Researcher media library — upload bytes, get back a permanent public URL. Platform-independent: no page selector, no connected-page requirement. See "Media endpoints" below |
-| `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
+| `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md`. Also the four `*_message_template` MCP tools |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
 | `/cubejs-api` | Cube.js analytics (see "Cube.js analytics" below) |
 
@@ -333,6 +333,8 @@ controller calls it, and `mcp.service.js` re-exports it:
 | `api/responses/response.service.js` | `getResponses` (a survey with no responses is an empty page, not a `RequestError`) | `GET /responses`, `get_responses` |
 | `api/bails/bails.service.js` | `resolveVlabUser` (get-or-create from email, so an agent never sees a user id), `expected`-marked wrappers over `utils/bails` | — |
 | `api/credentials/credential.service.js` | `listMessagingAccounts` (IO only; redaction is `mcp.core#redactCredential`, pure, with a recursive no-secret test) | — |
+| `api/message-templates/message-templates.service.js` | `makeService(deps)` → `createTemplate`, `listTemplates`, `getTemplate`, `deleteTemplate`; failures are `TemplateFailure` with the HTTP status. `makeHandlers(deps)` is the HTTP shell over it; `message-templates.deps.js` builds the real deps once | templates routes, the four `*_message_template` tools |
+| `api/media/media.service.js` | `makeService(deps)` → `uploadAsset` (returns the asset and a `fanOut` thunk), `listAssets`, `fanOutHandles`; `fetchSource`, the bounded, SSRF-guarded URL fetch. `media.deps.js` builds the real deps once | media routes, `list_media`, `upload_media` |
 
 Survey-scoped tools take a resolved survey — `{email, surveyName, shortcodes}`
 from `resolveSurvey` — rather than a bare name, so the ownership check cannot
@@ -354,12 +356,14 @@ asset/handle model (`planning/media-abstraction.md`; migration
 | File | Role |
 |---|---|
 | `api/media/media.core.js` | Pure decision layer — validation, hashing, keys, URLs, reconcile planning. No IO |
-| `api/media/media.controller.js` | The imperative shell: sequences IO, maps outcomes onto HTTP |
+| `api/media/media.service.js` | The imperative shell: `makeService(deps)` sequences validate → hash → dedupe → put → insert and hands back a `fanOut` thunk; `fetchSource` fetches a public URL under `MAX_UPLOAD_BYTES` with the SSRF guard (`checkSourceUrl`, `isPublicAddress` in the core) |
+| `api/media/media.controller.js` | HTTP over the service: status codes, respond-then-fan-out |
+| `api/media/media.deps.js` | The real deps (queries, S3 storage, platform upload), built once for routes and MCP |
 | `api/media/storage/index.js` | S3 client (`minio`), `{put, get, delete, publicUrl}` |
 | `api/media/media.platform-upload.js` | Pre-upload of bytes to Messenger / WhatsApp, producing a handle |
 | `api/media/media.reconcile.js` | The reconciler shell around `planReconcile` — reads state, bounds the work, executes, reports |
 | `scripts/media-reconcile.js` | CronJob entry point (`node scripts/media-reconcile.js`) |
-| `api/media/media.routes.js` | Multer wiring and the three endpoints |
+| `api/media/media.routes.js` | Multer wiring (cap = `MAX_UPLOAD_BYTES` from the core) and the two endpoints |
 | `queries/media/media.queries.js` | `media_asset` reads/writes and the `media_handle` upsert |
 | `queries/credentials` → `getMessagingAccounts` | The fan-out target set |
 
@@ -369,6 +373,11 @@ asset/handle model (`planning/media-abstraction.md`; migration
 |---|---|
 | `POST /media/upload` | multipart `file`. `201` with the new asset, or **`200` with the existing one** on a dedupe hit |
 | `GET /media` | The caller's assets, newest first |
+
+The same two operations are the MCP tools `list_media` and `upload_media`; the
+tool takes a `source_url` or `content_base64` instead of multipart and feeds the
+bytes into the same `uploadAsset`. See `documentation/agent-api.md` §9
+"Messaging asset tools".
 
 The response shape is `{id, filename, mediaType, mimeType, byteSize, created, url}`.
 **`url` is the whole product** — it is what a researcher pastes into a survey.

@@ -94,6 +94,11 @@ Route: `/message-templates`
 | Body | Up to 1024 characters. Uses `{{1}}`, `{{2}}`, etc. for positional parameters. |
 | Quick-reply buttons | Up to 3 buttons, label ≤ 20 chars, unique within the template. Optional — leave empty for text-only templates. |
 
+**Agents**: the same four operations are MCP tools — `list_message_templates`,
+`get_message_template`, `create_message_template`, `delete_message_template` —
+through `api/message-templates/message-templates.service.js`, which the REST
+handlers also call. See `documentation/agent-api.md` §9 "Messaging asset tools".
+
 **No edit**: Facebook does not permit editing an approved utility template. To change
 wording *or buttons*, delete and recreate.
 

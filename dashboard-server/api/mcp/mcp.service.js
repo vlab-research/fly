@@ -33,6 +33,14 @@ const health = require('../health/health.service');
 const exportsService = require('../exports/exports.service');
 const responses = require('../responses/response.service');
 
+// Templates and media keep their dependency injection; the real deps are
+// built once in each module's .deps.js and shared with the REST routes.
+const templates = require('../message-templates/message-templates.service').makeService(
+  require('../message-templates/message-templates.deps'),
+);
+const mediaService = require('../media/media.service');
+const media = mediaService.makeService(require('../media/media.deps'));
+
 /*
  * Author a form in the researcher's own Typeform account.
  */
@@ -97,4 +105,13 @@ module.exports = {
   startExport: exportsService.startExport,
   listExports: exportsService.listExports,
   getResponses: responses.getResponses,
+
+  // templates and media (api/message-templates, api/media)
+  listTemplates: templates.listTemplates,
+  getTemplate: templates.getTemplate,
+  createTemplate: templates.createTemplate,
+  deleteTemplate: templates.deleteTemplate,
+  listAssets: media.listAssets,
+  uploadAsset: media.uploadAsset,
+  fetchSource: mediaService.fetchSource,
 };

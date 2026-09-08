@@ -48,6 +48,14 @@ function makeService(overrides = {}) {
     startExport: record('startExport'),
     listExports: record('listExports'),
     getResponses: record('getResponses'),
+    // templates and media
+    listTemplates: record('listTemplates'),
+    getTemplate: record('getTemplate'),
+    createTemplate: record('createTemplate'),
+    deleteTemplate: record('deleteTemplate'),
+    listAssets: record('listAssets'),
+    uploadAsset: record('uploadAsset'),
+    fetchSource: record('fetchSource'),
     '@noCallThru': true,
   };
 
@@ -682,5 +690,163 @@ describe('mcp.tools: data', () => {
       const ok = await runTool('get_responses', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['responses:read'] });
       expect(ok.isError).to.not.equal(true);
     });
+  });
+});
+
+describe('mcp.tools: templates', () => {
+  const RECORD = { id: 't1', account_id: 'page1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', status: 'PENDING', rejection_reason: null, buttons: [] };
+
+  it('lists templates, optionally by account', async () => {
+    const { runTool, calls } = loadTools({ listTemplates: async () => [RECORD] });
+    const out = await runTool('list_message_templates', { account_id: 'page1' }, CONTEXT);
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, accountId: 'page1' });
+    expect(payloadOf(out)).to.eql({ count: 1, items: [RECORD] });
+  });
+
+  it('gets one template', async () => {
+    const { runTool, calls } = loadTools({ getTemplate: async () => RECORD });
+    const out = await runTool('get_message_template', { id: 't1' }, CONTEXT);
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, id: 't1' });
+    expect(payloadOf(out).name).to.equal('prize_ready');
+  });
+
+  it('creates a template and explains that approval is asynchronous', async () => {
+    const { runTool, calls } = loadTools({ createTemplate: async () => RECORD });
+    const out = await runTool(
+      'create_message_template',
+      { account_id: 'page1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Ada'], buttons: [{ label: 'Yes' }] },
+      CONTEXT,
+    );
+    expect(calls[0].args).to.eql({
+      email: CONTEXT.email,
+      accountId: 'page1',
+      name: 'prize_ready',
+      language: 'en_US',
+      body: 'Hi {{1}}',
+      buttons: [{ label: 'Yes' }],
+      examples: ['Ada'],
+    });
+    const body = payloadOf(out);
+    expect(body.status).to.equal('PENDING');
+    expect(body.note).to.match(/Approval is asynchronous/);
+  });
+
+  it('says so when Meta approved immediately', async () => {
+    const { runTool } = loadTools({ createTemplate: async () => ({ ...RECORD, status: 'APPROVED' }) });
+    const out = await runTool('create_message_template', { account_id: 'p', name: 'n', language: 'en', body: 'x' }, CONTEXT);
+    expect(payloadOf(out).note).to.match(/can be sent now/);
+  });
+
+  // The service's TemplateFailure is `expected`; the message is Meta's own.
+  it('relays a Meta rejection or a validation failure as a tool error', async () => {
+    const { runTool } = loadTools({
+      createTemplate: async () => {
+        const err = new Error('name must be lowercase letters, digits, and underscores only (snake_case)');
+        err.expected = true;
+        err.status = 400;
+        throw err;
+      },
+    });
+    const out = await runTool('create_message_template', { account_id: 'p', name: 'Bad Name', language: 'en', body: 'x' }, CONTEXT);
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/snake_case/);
+  });
+
+  it('deletes a template and warns about surveys that name it', async () => {
+    const { runTool, calls } = loadTools({ deleteTemplate: async () => ({ id: 't1', name: 'prize_ready', language: 'en_US' }) });
+    const out = await runTool('delete_message_template', { id: 't1' }, CONTEXT);
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, id: 't1' });
+    expect(payloadOf(out).deleted.name).to.equal('prize_ready');
+    expect(payloadOf(out).note).to.match(/Removed at Meta/);
+  });
+
+  it('needs templates:write to create or delete, templates:read to list', async () => {
+    const { runTool, calls } = loadTools({ listTemplates: async () => [] });
+    const denied = await runTool('delete_message_template', { id: 't1' }, { ...CONTEXT, scopes: ['templates:read'] });
+    expect(denied.isError).to.equal(true);
+    expect(textOf(denied)).to.match(/templates:write/);
+    expect(calls).to.have.lengthOf(0);
+
+    const ok = await runTool('list_message_templates', {}, { ...CONTEXT, scopes: ['templates:read'] });
+    expect(ok.isError).to.not.equal(true);
+  });
+});
+
+describe('mcp.tools: media', () => {
+  const ASSET = { id: 'a1', filename: 'welcome.png', mediaType: 'image', mimeType: 'image/png', byteSize: 70, created: '2026-09-01', url: 'https://media.vlab.digital/a/a1/welcome.png' };
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('lists the library', async () => {
+    const { runTool } = loadTools({ listAssets: async () => [ASSET] });
+    const out = await runTool('list_media', {}, CONTEXT);
+    expect(payloadOf(out)).to.eql({ count: 1, items: [ASSET] });
+  });
+
+  it('uploads from base64 without any fetch, and fires the fan-out without waiting', async () => {
+    let fannedOut = false;
+    const { runTool, calls } = loadTools({
+      uploadAsset: async () => ({ ok: true, deduplicated: false, asset: ASSET, fanOut: async () => { fannedOut = true; } }),
+    });
+
+    const out = await runTool('upload_media', { filename: 'welcome.png', content_base64: PNG_B64 }, CONTEXT);
+
+    expect(calls.map(c => c.name)).to.eql(['uploadAsset']);
+    const { file } = calls[0].args;
+    expect(file.originalname).to.equal('welcome.png');
+    expect(file.mimetype).to.equal(undefined);
+    expect(file.buffer.slice(1, 4).toString()).to.equal('PNG');
+    expect(payloadOf(out)).to.include({ id: 'a1', url: ASSET.url, deduplicated: false });
+    expect(fannedOut).to.equal(true);
+  });
+
+  it('uploads from a URL, passing the fetched content type as the claim', async () => {
+    const { runTool, calls } = loadTools({
+      fetchSource: async () => ({ buffer: Buffer.from('bytes'), contentType: 'audio/mp4', url: 'https://cdn.example.org/a.m4a' }),
+      uploadAsset: async () => ({ ok: true, deduplicated: true, asset: ASSET, fanOut: async () => {} }),
+    });
+
+    const out = await runTool('upload_media', { filename: 'a.m4a', source_url: 'https://cdn.example.org/a.m4a' }, CONTEXT);
+
+    expect(calls.map(c => c.name)).to.eql(['fetchSource', 'uploadAsset']);
+    expect(calls[0].args).to.equal('https://cdn.example.org/a.m4a');
+    expect(calls[1].args.file.mimetype).to.equal('audio/mp4');
+    expect(payloadOf(out).deduplicated).to.equal(true);
+  });
+
+  it('refuses both sources, neither source, and a private URL before any IO', async () => {
+    const { runTool, calls } = loadTools();
+    for (const args of [
+      { filename: 'a.png' },
+      { filename: 'a.png', source_url: 'https://x.org/a', content_base64: PNG_B64 },
+      { filename: 'a.png', source_url: 'http://169.254.169.254/x' },
+    ]) {
+      const out = await runTool('upload_media', args, CONTEXT);
+      expect(out.isError, JSON.stringify(args)).to.equal(true);
+    }
+    expect(calls).to.have.lengthOf(0);
+  });
+
+  it('relays a refusal from validation with nothing stored', async () => {
+    const { runTool } = loadTools({ uploadAsset: async () => ({ ok: false, error: 'GIF is not supported; use JPEG or PNG' }) });
+    const out = await runTool('upload_media', { filename: 'a.gif', content_base64: 'R0lGODlh' }, CONTEXT);
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/GIF is not supported; use JPEG or PNG\. Nothing was stored/);
+  });
+
+  it('relays a fetch failure as a tool error', async () => {
+    const { runTool } = loadTools({
+      fetchSource: async () => { const e = new Error('source_url answered HTTP 404; nothing was uploaded.'); e.expected = true; throw e; },
+    });
+    const out = await runTool('upload_media', { filename: 'a.png', source_url: 'https://cdn.example.org/gone.png' }, CONTEXT);
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/HTTP 404/);
+  });
+
+  it('needs media:write to upload', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('upload_media', { filename: 'a.png', content_base64: PNG_B64 }, { ...CONTEXT, scopes: ['media:read'] });
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/media:write/);
+    expect(calls).to.have.lengthOf(0);
   });
 });

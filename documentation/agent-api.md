@@ -614,6 +614,12 @@ see it. **The scope is enforced per tool instead** (`TOOL_SCOPES` in
 | `start_export` | `exports:write` |
 | `list_exports` | `exports:read` |
 | `get_responses` | `responses:read` |
+| `list_message_templates` | `templates:read` |
+| `get_message_template` | `templates:read` |
+| `create_message_template` | `templates:write` |
+| `delete_message_template` | `templates:write` |
+| `list_media` | `media:read` |
+| `upload_media` | `media:write` |
 
 The rule behind the table: a tool needs exactly the scope the REST route it
 wraps would derive (first path segment, `GET` → `read`, else `write`). States
@@ -753,6 +759,54 @@ with `page_size` **clamped to 500** (default 25) and the page shaped as
 `null` on a short page, so the loop is "call, pass `next_cursor` as `after`,
 stop on null". Rows are §10's rows. Needs `responses:read`, which `surveys:*`
 does not imply — that separation is deliberate.
+
+### Messaging asset tools
+
+Utility message templates (`/message-templates`, `documentation/utility-messages.md`)
+and the media library (`/media`, dashboard-server README "Media") as tools. Both
+go through the same service the REST handlers use
+(`api/message-templates/message-templates.service.js`,
+`api/media/media.service.js`), built on the same injected clients and storage
+(`*.deps.js`).
+
+**`list_message_templates({account_id?})`** — `GET /message-templates` verbatim,
+as `{count, items}`. PENDING rows are refreshed from Meta during the call, which
+is how an agent watches an approval land.
+
+**`get_message_template({id})`** — `GET /message-templates/:id` verbatim; a
+PENDING row is refreshed first.
+
+**`create_message_template({account_id, name, language, body, buttons?, examples?})`**
+— `POST /message-templates`. Validation is the same `validateCreateInput`; a
+Meta refusal (REST `502`) or a duplicate (REST `409`) is a tool error carrying
+the same message. The result is the created record plus a `note` saying whether
+Meta approved immediately or the status is PENDING.
+
+**`delete_message_template({id})`** — `DELETE /message-templates/:id`. The
+description opens with the warning: it deletes **at Meta as well as in Fly** and
+cannot be undone. Meta's "template not found" is swallowed, as over REST, so an
+orphaned row can be cleaned up.
+
+**`list_media()`** — `GET /media` verbatim, as `{count, items}`; each item's
+`url` is the permanent public URL a question references.
+
+**`upload_media({filename, source_url | content_base64, mime_type?})`** —
+`POST /media/upload` without multipart. Exactly one source: `source_url`
+(preferred; the server fetches it) or `content_base64`. The bytes then take the
+REST path unchanged — `validateUpload` sniffs the real type and enforces the
+per-type limits, identical bytes return the existing asset with
+`deduplicated: true`, and platform pre-uploads run best-effort in the background.
+The result is the asset plus a `note`.
+
+The fetch is the one new surface. It is bounded by the largest per-type limit
+(100 MB), follows at most three redirects **by hand**, and refuses at every hop
+anything that is not public http(s): loopback, `*.svc`, `*.cluster.local`,
+`*.internal`, `*.local`, private IP literals, and any hostname that **resolves**
+to a private address (`media.core.js#checkSourceUrl`,
+`media.service.js#fetchSource`). This server runs inside the cluster, so
+without that check a caller could make it fetch AlertManager or the Kubernetes
+API. DNS rebinding between the check and the connection is not defended
+against.
 
 ### Failure
 

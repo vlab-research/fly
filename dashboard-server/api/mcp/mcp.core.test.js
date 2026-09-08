@@ -37,6 +37,11 @@ const {
   shapeExportRow,
   shapeExportStarted,
   shapeResponsesPage,
+  MAX_UPLOAD_BYTES,
+  base64DecodedBytes,
+  validateUploadSource,
+  decodeBase64,
+  shapeUploadResult,
   validateAgainstSchema,
   validateToolArgs,
   toolByName,
@@ -78,8 +83,13 @@ const TOOL_NAMES = {
     'get_platform_notices',
   ],
   DATA_TOOLS: ['start_export', 'list_exports', 'get_responses'],
-  TEMPLATE_TOOLS: [],
-  MEDIA_TOOLS: [],
+  TEMPLATE_TOOLS: [
+    'list_message_templates',
+    'get_message_template',
+    'create_message_template',
+    'delete_message_template',
+  ],
+  MEDIA_TOOLS: ['list_media', 'upload_media'],
   BAIL_TOOLS: [],
   TICKET_TOOLS: [],
   ACCOUNT_TOOLS: [],
@@ -819,5 +829,74 @@ describe('mcp.core: data', () => {
     expect(validateToolArgs('start_export', { survey_name: 'S', export_type: 'csv' }).errors[0]).to.match(/export_type: must be one of/);
     expect(validateToolArgs('list_exports', {})).to.eql({ ok: true });
     expect(validateToolArgs('get_responses', { survey_name: 'S', page_size: 'ten' }).errors[0]).to.match(/page_size: expected integer/);
+  });
+});
+
+describe('mcp.core: templates and media', () => {
+  it('teaches the approval model and the media URL in the instructions', () => {
+    expect(SERVER_INSTRUCTIONS).to.match(/MESSAGING ASSETS\./);
+    expect(SERVER_INSTRUCTIONS).to.match(/must be approved/);
+  });
+
+  // Destructive, and external: the first sentence has to say so.
+  it('opens the delete description with the warning', () => {
+    expect(toolByName('delete_message_template').description).to.match(
+      /^Deletes the template at Meta as well as in Fly; this cannot be undone\./,
+    );
+  });
+
+  it('steers uploads to source_url and names the limits', () => {
+    const desc = toolByName('upload_media').description;
+    expect(desc).to.match(/source_url.*preferred/);
+    expect(desc).to.match(/image \(JPEG\/PNG\) up to 5 MB/);
+    expect(desc).to.match(/video \(MP4\/3GPP\) up to 16 MB/);
+    expect(desc).to.match(/document \(PDF\/DOCX\/XLSX\/PPTX\) up to 100 MB/);
+  });
+
+  it('validates template arguments structurally', () => {
+    expect(validateToolArgs('create_message_template', { account_id: 'p', name: 'n', language: 'en_US', body: 'Hi' })).to.eql({ ok: true });
+    expect(validateToolArgs('create_message_template', { account_id: 'p', name: 'n', language: 'en_US' }).errors[0]).to.match(/missing required property "body"/);
+    expect(validateToolArgs('create_message_template', { account_id: 'p', name: 'n', language: 'en_US', body: 'Hi', buttons: [{ text: 'x' }] }).errors[0]).to.match(/buttons\.\[0\]: missing required property "label"/);
+    expect(validateToolArgs('get_message_template', {}).errors[0]).to.match(/missing required property "id"/);
+    expect(validateToolArgs('list_media', {})).to.eql({ ok: true });
+  });
+
+  describe('validateUploadSource', () => {
+    it('requires exactly one source', () => {
+      expect(validateUploadSource({ filename: 'a.png' }).errors[0]).to.match(/either source_url \(preferred\) or content_base64/);
+      expect(validateUploadSource({ filename: 'a.png', source_url: 'https://x.org/a', content_base64: 'AA==' }).errors[0]).to.match(/not both/);
+    });
+
+    it('checks a URL with the media core before any fetch', () => {
+      expect(validateUploadSource({ source_url: 'https://cdn.example.org/a.png' })).to.eql({
+        ok: true,
+        source: 'url',
+        url: 'https://cdn.example.org/a.png',
+      });
+      expect(validateUploadSource({ source_url: 'http://10.0.0.1/a.png' }).errors[0]).to.match(/not a public address/);
+      expect(validateUploadSource({ source_url: 'ftp://x.org/a' }).errors[0]).to.match(/must be http or https/);
+    });
+
+    it('sizes base64 without decoding it and refuses over the cap', () => {
+      expect(base64DecodedBytes('aGVsbG8=')).to.equal(5);
+      expect(base64DecodedBytes('aGVs\nbG8g\nd29ybGQ=')).to.equal(11);
+      expect(validateUploadSource({ content_base64: 'aGVsbG8=' })).to.eql({ ok: true, source: 'base64', bytes: 5 });
+
+      // 4 chars per 3 bytes: just over the cap, without allocating it.
+      const overCap = 'A'.repeat(Math.ceil((MAX_UPLOAD_BYTES + 3) / 3) * 4);
+      expect(validateUploadSource({ content_base64: overCap }).errors[0]).to.match(/the maximum is 100 MB/);
+    });
+
+    it('refuses something that is not base64', () => {
+      expect(validateUploadSource({ content_base64: '' }).errors[0]).to.match(/not valid base64/);
+      expect(validateUploadSource({ content_base64: 'hello world!' }).errors[0]).to.match(/not valid base64/);
+    });
+  });
+
+  it('decodes base64 and shapes the upload answer', () => {
+    expect(decodeBase64('aGVs\nbG8=').toString()).to.equal('hello');
+    const asset = { id: 'a1', url: 'https://media/a/a1/x.png' };
+    expect(shapeUploadResult({ asset, deduplicated: false })).to.include({ id: 'a1', deduplicated: false });
+    expect(shapeUploadResult({ asset, deduplicated: true }).note).to.match(/already in the library/);
   });
 });

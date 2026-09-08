@@ -119,6 +119,41 @@ const fakeService = {
     seen.push({ name: 'getResponses', args });
     return { responses: [{ userid: 'p1', question_ref: 'q1', response: 'A', token: 'tok-1' }] };
   },
+
+  // templates and media
+  async listTemplates(args) {
+    seen.push({ name: 'listTemplates', args });
+    return [{ id: 't1', name: 'prize_ready', language: 'en_US', status: 'APPROVED' }];
+  },
+  async getTemplate(args) {
+    seen.push({ name: 'getTemplate', args });
+    return { id: args.id, name: 'prize_ready', language: 'en_US', status: 'APPROVED' };
+  },
+  async createTemplate(args) {
+    seen.push({ name: 'createTemplate', args });
+    return { id: 't2', name: args.name, language: args.language, status: 'PENDING' };
+  },
+  async deleteTemplate(args) {
+    seen.push({ name: 'deleteTemplate', args });
+    return { id: args.id, name: 'prize_ready', language: 'en_US' };
+  },
+  async listAssets(args) {
+    seen.push({ name: 'listAssets', args });
+    return [{ id: 'a1', filename: 'welcome.png', url: 'https://media/a/a1/welcome.png' }];
+  },
+  async uploadAsset(args) {
+    seen.push({ name: 'uploadAsset', args: { email: args.email, filename: args.file.originalname, bytes: args.file.buffer.length } });
+    return {
+      ok: true,
+      deduplicated: false,
+      asset: { id: 'a2', filename: args.file.originalname, url: `https://media/a/a2/${args.file.originalname}` },
+      fanOut: async () => ({ attempted: 0, succeeded: 0, failed: 0 }),
+    };
+  },
+  async fetchSource(url) {
+    seen.push({ name: 'fetchSource', url });
+    return { buffer: Buffer.from('png-bytes'), contentType: 'image/png', url };
+  },
 };
 
 const tools = proxyquire('./mcp.tools', { './mcp.service': fakeService });
@@ -393,6 +428,52 @@ describe('mcp transport: tool calls', () => {
     const body = JSON.parse(page.content[0].text);
     expect(body.next_cursor).to.equal('tok-1');
     expect(body.items[0].response).to.equal('A');
+
+    await client.close();
+  });
+
+  it('round-trips every template tool', async () => {
+    const client = await connect();
+
+    const listed = await client.callTool({ name: 'list_message_templates', arguments: {} });
+    expect(JSON.parse(listed.content[0].text).items[0].name).to.equal('prize_ready');
+
+    const one = await client.callTool({ name: 'get_message_template', arguments: { id: 't1' } });
+    expect(JSON.parse(one.content[0].text).id).to.equal('t1');
+
+    const created = await client.callTool({
+      name: 'create_message_template',
+      arguments: { account_id: 'page1', name: 'reminder', language: 'en_US', body: 'Hello' },
+    });
+    expect(seen.find(c => c.name === 'createTemplate').args).to.include({ email: EMAIL, accountId: 'page1', name: 'reminder' });
+    expect(JSON.parse(created.content[0].text).status).to.equal('PENDING');
+
+    const deleted = await client.callTool({ name: 'delete_message_template', arguments: { id: 't1' } });
+    expect(JSON.parse(deleted.content[0].text).deleted.id).to.equal('t1');
+
+    await client.close();
+  });
+
+  it('lists media and uploads from base64 and from a URL', async () => {
+    const client = await connect();
+
+    const listed = await client.callTool({ name: 'list_media', arguments: {} });
+    expect(JSON.parse(listed.content[0].text).items[0].url).to.match(/welcome\.png$/);
+
+    const inline = await client.callTool({
+      name: 'upload_media',
+      arguments: { filename: 'hello.txt', content_base64: Buffer.from('hello').toString('base64') },
+    });
+    expect(seen.find(c => c.name === 'uploadAsset').args).to.eql({ email: EMAIL, filename: 'hello.txt', bytes: 5 });
+    expect(JSON.parse(inline.content[0].text).url).to.equal('https://media/a/a2/hello.txt');
+
+    seen.length = 0;
+    const fetched = await client.callTool({
+      name: 'upload_media',
+      arguments: { filename: 'logo.png', source_url: 'https://cdn.example.org/logo.png' },
+    });
+    expect(seen.map(c => c.name)).to.eql(['fetchSource', 'uploadAsset']);
+    expect(JSON.parse(fetched.content[0].text).deduplicated).to.equal(false);
 
     await client.close();
   });

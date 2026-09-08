@@ -45,6 +45,14 @@ const TOOL_SCOPES = {
   start_export: 'exports:write',
   list_exports: 'exports:read',
   get_responses: 'responses:read',
+
+  // templates and media
+  list_message_templates: 'templates:read',
+  get_message_template: 'templates:read',
+  create_message_template: 'templates:write',
+  delete_message_template: 'templates:write',
+  list_media: 'media:read',
+  upload_media: 'media:write',
 };
 
 // Absent scopes are unrestricted, matching the middleware exactly.
@@ -78,6 +86,9 @@ const {
   shapeResponsesPage,
   clampLimit,
   GET_RESPONSES_PAGE,
+  validateUploadSource,
+  decodeBase64,
+  shapeUploadResult,
 } = core;
 
 /*
@@ -303,6 +314,80 @@ const TOOL_HANDLERS = {
       });
       return toolResult(shapeResponsesPage(responses, pageSize));
     });
+  },
+
+  // --- templates -----------------------------------------------------------
+
+  async list_message_templates(args, { email }) {
+    const items = await service.listTemplates({ email, accountId: args.account_id });
+    return toolResult({ count: items.length, items });
+  },
+
+  async get_message_template(args, { email }) {
+    return toolResult(await service.getTemplate({ email, id: args.id }));
+  },
+
+  async create_message_template(args, { email }) {
+    const record = await service.createTemplate({
+      email,
+      accountId: args.account_id,
+      name: args.name,
+      language: args.language,
+      body: args.body,
+      buttons: args.buttons,
+      examples: args.examples,
+    });
+    return toolResult({
+      ...record,
+      note:
+        record.status === 'APPROVED'
+          ? 'Meta approved the template immediately; it can be sent now.'
+          : `Submitted to Meta with status ${record.status}. Approval is asynchronous — ` +
+            'call list_message_templates or get_message_template to see it become ' +
+            'APPROVED or REJECTED (with a rejection_reason).',
+    });
+  },
+
+  async delete_message_template(args, { email }) {
+    const deleted = await service.deleteTemplate({ email, id: args.id });
+    return toolResult({
+      deleted,
+      note: 'Removed at Meta and in Fly. Any survey question still naming this template will fail to send.',
+    });
+  },
+
+  // --- media ---------------------------------------------------------------
+
+  async list_media(args, { email }) {
+    const items = await service.listAssets({ email });
+    return toolResult({ count: items.length, items });
+  },
+
+  async upload_media(args, { email }) {
+    const source = validateUploadSource(args);
+    if (!source.ok) return invalidArgsError(source.errors);
+
+    let buffer;
+    let mimetype = args.mime_type;
+    if (source.source === 'url') {
+      const fetched = await service.fetchSource(source.url);
+      buffer = fetched.buffer;
+      mimetype = mimetype || fetched.contentType || undefined;
+    } else {
+      buffer = decodeBase64(args.content_base64);
+    }
+
+    const result = await service.uploadAsset({
+      email,
+      file: { buffer, originalname: args.filename, mimetype },
+    });
+    if (!result.ok) return toolError(`Refused: ${result.error}. Nothing was stored.`);
+
+    // Best-effort platform copies, never awaited: a handle is an optimisation
+    // (media.service.js), and the reconciler backfills whatever this misses.
+    result.fanOut();
+
+    return toolResult(shapeUploadResult(result));
   },
 };
 
