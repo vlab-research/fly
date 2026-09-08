@@ -76,6 +76,33 @@ const fakeService = {
       settings: { timeouts: null, off_time: '2026-05-01' },
     };
   },
+
+  // monitoring
+  async resolveSurvey(args) {
+    seen.push({ name: 'resolveSurvey', args });
+    if (args.survey_name !== 'Solo Study') return { ok: false, notFound: true, known: ['Solo Study'] };
+    return { ok: true, email: args.email, surveyName: 'Solo Study', shortcodes: ['solo'] };
+  },
+  async statesSummary(survey) {
+    seen.push({ name: 'statesSummary', args: survey });
+    return { summary: [{ current_state: 'RESPONDING', current_form: 'solo', count: 12 }] };
+  },
+  async listStates(survey, filters) {
+    seen.push({ name: 'listStates', args: survey, filters });
+    return { states: [{ userid: 'p1', current_state: 'ERROR', current_form: 'solo' }], total: 1 };
+  },
+  async stateDetail(survey, userid) {
+    seen.push({ name: 'stateDetail', args: survey, userid });
+    return { userid, current_state: 'ERROR', state_json: {} };
+  },
+  async healthFindings(survey) {
+    seen.push({ name: 'healthFindings', args: survey });
+    return { window_hours: 24, findings: [], aggregates: {} };
+  },
+  async platformNotices() {
+    seen.push({ name: 'platformNotices' });
+    return { notices: [] };
+  },
 };
 
 const tools = proxyquire('./mcp.tools', { './mcp.service': fakeService });
@@ -276,6 +303,52 @@ describe('mcp transport: tool calls', () => {
     expect(out.isError).to.equal(true);
     expect(out.content[0].text).to.match(/missing required property "survey_name"/);
     expect(seen).to.have.lengthOf(0);
+
+    await client.close();
+  });
+
+  // Monitoring: one read per tool through the real client, and the ownership
+  // gate is what carries the email from the auth middleware to the query.
+  it('serves a states summary scoped to the caller', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'get_states_summary', arguments: { survey_name: 'Solo Study' } });
+
+    expect(seen.map(c => c.name)).to.eql(['resolveSurvey', 'statesSummary']);
+    expect(seen[0].args).to.eql({ email: EMAIL, survey_name: 'Solo Study' });
+    expect(JSON.parse(out.content[0].text).summary[0].count).to.equal(12);
+
+    await client.close();
+  });
+
+  it('serves a bounded, filtered participant list', async () => {
+    const client = await connect();
+    const out = await client.callTool({
+      name: 'list_states',
+      arguments: { survey_name: 'Solo Study', state: 'ERROR', limit: 999 },
+    });
+
+    expect(seen[1].filters).to.include({ state: 'ERROR', limit: 200, offset: 0 });
+    const body = JSON.parse(out.content[0].text);
+    expect(body).to.include({ total: 1, limit: 200 });
+    expect(body.items[0].userid).to.equal('p1');
+
+    await client.close();
+  });
+
+  it('serves one participant, survey health, and the platform notices', async () => {
+    const client = await connect();
+
+    const one = await client.callTool({
+      name: 'get_participant_state',
+      arguments: { survey_name: 'Solo Study', userid: 'p1' },
+    });
+    expect(JSON.parse(one.content[0].text).current_state).to.equal('ERROR');
+
+    const health = await client.callTool({ name: 'get_survey_health', arguments: { survey_name: 'Solo Study' } });
+    expect(JSON.parse(health.content[0].text).window_hours).to.equal(24);
+
+    const notices = await client.callTool({ name: 'get_platform_notices', arguments: {} });
+    expect(JSON.parse(notices.content[0].text)).to.eql({ notices: [] });
 
     await client.close();
   });

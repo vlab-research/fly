@@ -25,11 +25,20 @@ const { scopeGrants } = require('../auth/auth.core');
  * own and is not otherwise readable through this endpoint.
  */
 const TOOL_SCOPES = {
+  // surveys
   list_surveys: 'surveys:read',
   create_typeform_form: 'surveys:write',
   create_survey: 'surveys:write',
   create_survey_version: 'surveys:write',
   update_survey_settings: 'surveys:write',
+
+  // monitoring — states and health live under /surveys/:name over REST, so
+  // surveys:read already reaches participant state there; the tools match.
+  get_states_summary: 'surveys:read',
+  list_states: 'surveys:read',
+  get_participant_state: 'surveys:read',
+  get_survey_health: 'surveys:read',
+  get_platform_notices: 'platform:read',
 };
 
 // Absent scopes are unrestricted, matching the middleware exactly.
@@ -53,7 +62,23 @@ const {
   buildTypeformCreatePayload,
   NO_TYPEFORM_CREDENTIAL,
   NO_FLY_ACCOUNT,
+  unknownSurveyError,
+  buildStatesFilters,
+  shapeStatesList,
+  noParticipantError,
 } = core;
+
+/*
+ * The ownership gate for every survey-scoped tool: resolve the name through
+ * the same lookup the REST middleware uses, and answer a miss with the names
+ * that exist. `fn` receives the resolved survey and never a bare name.
+ */
+async function withSurvey(args, email, fn) {
+  const resolved = await service.resolveSurvey({ email, survey_name: args.survey_name });
+  if (!resolved.ok) return toolError(unknownSurveyError(args.survey_name, resolved.known));
+  const { email: owner, surveyName, shortcodes } = resolved;
+  return fn({ email: owner, surveyName, shortcodes });
+}
 
 // Everything a tool says about a survey it just wrote. `version` is computed
 // rather than stored, so it is recomputed from the full list every time.
@@ -191,6 +216,40 @@ const TOOL_HANDLERS = {
       off_time: result.settings.off_time,
       retired: !!result.settings.off_time,
     });
+  },
+
+  // --- monitoring ----------------------------------------------------------
+
+  get_states_summary(args, { email }) {
+    return withSurvey(args, email, async survey =>
+      toolResult(await service.statesSummary(survey)),
+    );
+  },
+
+  list_states(args, { email }) {
+    return withSurvey(args, email, async survey => {
+      const filters = buildStatesFilters(args);
+      const result = await service.listStates(survey, filters);
+      return toolResult(shapeStatesList(result, filters));
+    });
+  },
+
+  get_participant_state(args, { email }) {
+    return withSurvey(args, email, async survey => {
+      const row = await service.stateDetail(survey, args.userid);
+      if (!row) return toolError(noParticipantError(args.userid, args.survey_name));
+      return toolResult(row);
+    });
+  },
+
+  get_survey_health(args, { email }) {
+    return withSurvey(args, email, async survey =>
+      toolResult(await service.healthFindings(survey)),
+    );
+  },
+
+  async get_platform_notices() {
+    return toolResult(await service.platformNotices());
   },
 };
 

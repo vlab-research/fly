@@ -606,6 +606,16 @@ see it. **The scope is enforced per tool instead** (`TOOL_SCOPES` in
 | `create_survey` | `surveys:write` |
 | `create_survey_version` | `surveys:write` |
 | `update_survey_settings` | `surveys:write` |
+| `get_states_summary` | `surveys:read` |
+| `list_states` | `surveys:read` |
+| `get_participant_state` | `surveys:read` |
+| `get_survey_health` | `surveys:read` |
+| `get_platform_notices` | `platform:read` |
+
+The rule behind the table: a tool needs exactly the scope the REST route it
+wraps would derive (first path segment, `GET` → `read`, else `write`). States
+and health live under `/surveys/:name` over REST, so `surveys:read` reaches
+participant state there and the tools match; platform notices are `/platform`.
 
 So a `surveys:read` key connects fine and can list, and every write tool refuses.
 A refusal arrives as an MCP **tool error** — a normal result with `isError: true`
@@ -615,11 +625,11 @@ questions is authoring the survey.
 
 An unscoped key (see "Authentication") can call everything.
 
-### The five tools
+### Survey tools
 
 Full argument schemas are advertised by `tools/list` and defined in
-`dashboard-server/api/mcp/mcp.core.js`; what follows is what they do and where
-they differ from the REST endpoints above.
+`dashboard-server/api/mcp/mcp.core.js` (one array per area); what follows is
+what they do and where they differ from the REST endpoints above.
 
 **`list_surveys(survey_name?)`** — the same rows as `GET /surveys` (§4) but
 nested **study → form → versions** instead of flat, with a computed `version`
@@ -672,6 +682,44 @@ before it writes and merges**, so passing only `timeouts` does not wipe
 the whole list rather than appending. `surveyid` is a version `id` from
 `list_surveys` and must be yours — otherwise the tool says so by name rather
 than returning a bare 404.
+
+### Monitoring tools
+
+The participant-state and health endpoints (`/surveys/:surveyName/states`,
+`/surveys/:surveyName/health`, `/platform/notices` — see
+`documentation/states-debugging.md` and `documentation/dashboard-study-health.md`)
+as tools. All four survey-scoped ones take an exact `survey_name` and go through
+the same ownership lookup as the REST middleware (`validateSurveyNameAccess`,
+now `api/states/states.service.js#resolveSurvey`); a name that is not yours is
+answered with the names that are, exactly as `list_surveys` does. The server
+`instructions` say the intended order: summary first, then list, then one
+participant.
+
+**`get_states_summary({survey_name})`** — `GET .../states/summary` verbatim:
+`{summary: [{current_state, current_form, count}]}`. One row per (state, form);
+every participant who has started a form is in exactly one row.
+
+**`list_states({survey_name, state?, error_tag?, form?, search?, limit?, offset?})`**
+— `GET .../states` with two differences. `limit` is **clamped to 200** (default
+50) where the REST endpoint has no maximum, and the result is the paging shape
+`{total, limit, offset, items}` rather than `{states, total}`. `items` are the
+REST rows unchanged (`userid`, `pageid`, `current_state`, `current_form`,
+`updated`, `error_tag`, `stuck_on_question`, `timeout_date`, `form_start_time`),
+newest activity first. `state` is validated against the state machine's values,
+`error_tag` is a case-insensitive substring, `search` a `userid` substring.
+
+**`get_participant_state({survey_name, userid})`** — `GET .../states/:userid`
+verbatim, including `state_json` (the whole conversation context). A userid
+that is not in the survey is a tool error naming it, not an empty result.
+
+**`get_survey_health({survey_name})`** — `GET .../health` verbatim:
+`{window_hours: 24, findings, aggregates}`. Findings arrive as resolved
+sentences with a `level` of `action` or `note`. An agent calls this once; the
+dashboard polls it because a human is watching.
+
+**`get_platform_notices()`** — `GET /platform/notices` verbatim. Not survey
+scoped. Never fails: when AlertManager is unreachable or unconfigured the list
+is empty, so an empty list is "nothing known", not "all clear".
 
 ### Failure
 

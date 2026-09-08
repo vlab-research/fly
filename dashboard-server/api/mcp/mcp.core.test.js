@@ -24,6 +24,12 @@ const {
   MAX_CHOICES,
   clampLimit,
   redactCredential,
+  STATE_NAMES,
+  LIST_STATES_LIMIT,
+  unknownSurveyError,
+  buildStatesFilters,
+  shapeStatesList,
+  noParticipantError,
   validateAgainstSchema,
   validateToolArgs,
   toolByName,
@@ -57,7 +63,13 @@ const TOOL_NAMES = {
     'create_survey_version',
     'update_survey_settings',
   ],
-  MONITORING_TOOLS: [],
+  MONITORING_TOOLS: [
+    'get_states_summary',
+    'list_states',
+    'get_participant_state',
+    'get_survey_health',
+    'get_platform_notices',
+  ],
   DATA_TOOLS: [],
   TEMPLATE_TOOLS: [],
   MEDIA_TOOLS: [],
@@ -636,5 +648,72 @@ describe('mcp.core: redactCredential', () => {
       name: null,
       created: null,
     });
+  });
+});
+
+describe('mcp.core: monitoring', () => {
+  it('teaches the summary -> list -> detail flow in the server instructions', () => {
+    expect(SERVER_INSTRUCTIONS).to.match(/MONITORING\./);
+    expect(SERVER_INSTRUCTIONS).to.match(/get_states_summary first/);
+  });
+
+  it('only accepts a state the state machine can produce', () => {
+    expect(validateToolArgs('list_states', { survey_name: 'S', state: 'ERROR' })).to.eql({ ok: true });
+    const { errors } = validateToolArgs('list_states', { survey_name: 'S', state: 'error' });
+    expect(errors[0]).to.match(/state: must be one of/);
+    // Every documented state is filterable.
+    ['START', 'RESPONDING', 'QOUT', 'END', 'BLOCKED', 'ERROR', 'WAIT_EXTERNAL_EVENT', 'USER_BLOCKED']
+      .forEach(st => expect(STATE_NAMES).to.include(st));
+  });
+
+  it('requires survey_name on every survey-scoped monitoring tool', () => {
+    ['get_states_summary', 'list_states', 'get_survey_health'].forEach(name => {
+      expect(validateToolArgs(name, {}).errors[0], name).to.match(/missing required property "survey_name"/);
+    });
+    expect(validateToolArgs('get_participant_state', { survey_name: 'S' }).errors[0])
+      .to.match(/missing required property "userid"/);
+    expect(validateToolArgs('get_platform_notices', {})).to.eql({ ok: true });
+  });
+
+  // The REST endpoint has no maximum; the tool must, or "show me everyone"
+  // fills the context window.
+  it('clamps the list limit and normalises the offset', () => {
+    expect(buildStatesFilters({ survey_name: 'S' })).to.eql({
+      state: undefined,
+      errorTag: undefined,
+      form: undefined,
+      search: undefined,
+      limit: LIST_STATES_LIMIT.default,
+      offset: 0,
+    });
+    const f = buildStatesFilters({
+      survey_name: 'S',
+      state: 'ERROR',
+      error_tag: 'FB',
+      form: 'main',
+      search: 'abc',
+      limit: 9999,
+      offset: -4,
+    });
+    expect(f).to.include({ state: 'ERROR', errorTag: 'FB', form: 'main', search: 'abc' });
+    expect(f.limit).to.equal(LIST_STATES_LIMIT.max);
+    expect(f.offset).to.equal(0);
+    expect(buildStatesFilters({ survey_name: 'S', offset: 100 }).offset).to.equal(100);
+  });
+
+  it('shapes a page as { total, limit, offset, items }', () => {
+    const rows = [{ userid: 'u1' }];
+    expect(shapeStatesList({ states: rows, total: 41 }, { limit: 50, offset: 0 })).to.eql({
+      total: 41,
+      limit: 50,
+      offset: 0,
+      items: rows,
+    });
+  });
+
+  it('answers an unknown survey with the names that exist', () => {
+    expect(unknownSurveyError('X', ['A', 'B'])).to.match(/No survey named "X"\. Your surveys are: "A", "B"\./);
+    expect(unknownSurveyError('X', [])).to.match(/no surveys yet/);
+    expect(noParticipantError('u9', 'S')).to.match(/No participant "u9" in survey "S"/);
   });
 });

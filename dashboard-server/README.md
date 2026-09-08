@@ -215,7 +215,7 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
-| `/mcp` | MCP server — `POST` only, Streamable HTTP, five survey tools. Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
+| `/mcp` | MCP server — `POST` only, Streamable HTTP, ten tools (five survey, five monitoring). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
 | `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
@@ -287,9 +287,9 @@ forever on a stream that has already ended.
 
 | File | Role |
 |---|---|
-| `mcp.core.js` | Pure. The five tool definitions (name, description, JSON Schema), the server instructions, a small JSON Schema validator, and every decision function — `summariseSurveys`, `resolvePreviousVersion`, `buildVersionRequest`, `mergeSettings`, result shaping. No IO, no clock |
+| `mcp.core.js` | Pure. The tool definitions (name, description, JSON Schema) as one array per area — `SURVEY_TOOLS`, `MONITORING_TOOLS`, … — concatenated into `TOOLS`; the server instructions; a small JSON Schema validator; and every decision function — `summariseSurveys`, `resolvePreviousVersion`, `buildVersionRequest`, `mergeSettings`, `clampLimit`, `redactCredential`, result shaping. No IO, no clock |
 | `mcp.tools.js` | Dispatch. `TOOL_SCOPES` (the per-tool scope check), one thin async handler per tool, and `runTool`, which turns every failure into a tool error rather than letting it escape as a transport error |
-| `mcp.service.js` | The shell: Typeform authoring and the `survey_settings` read-modify-write. **Creating a survey version is not here** — see below |
+| `mcp.service.js` | The shell: Typeform authoring and the `survey_settings` read-modify-write, plus re-exports of every other module's service functions (`api/states/states.service.js`, `api/health/health.service.js`, …) so the dispatcher has one import to stub. **Nothing else is implemented here** — see below |
 | `mcp.typeform.js` | `createForm` — the one Typeform call the dashboard has never needed, since `utils/typeform/` only ever read |
 | `mcp.server.js` | Builds one `Server` per request, bound to one email + scope set |
 | `mcp.routes.js` | Transport wiring |
@@ -320,6 +320,23 @@ and the two kinds of failure are the whole contract: a `SurveyFailure` (marked
 `expected`) is the caller's own bad input and its message is safe to return
 verbatim; anything else is ours and must never be echoed, because unexpected
 messages leak internals.
+
+**That is the rule for every tool.** Each module the MCP reaches has a
+`<module>.service.js` of `req`-free functions taking `{email, ...}`, the
+controller calls it, and `mcp.service.js` re-exports it:
+
+| Module | Service | Shared with |
+|---|---|---|
+| `api/states/states.service.js` | `resolveSurvey` (the ownership lookup `validateSurveyNameAccess` now calls), `statesSummary`, `listStates`, `stateDetail` | states routes, `get_states_summary`, `list_states`, `get_participant_state` |
+| `api/health/health.service.js` | `healthFindings`, `platformNotices` (fail-soft, never throws) | health and platform routes, `get_survey_health`, `get_platform_notices` |
+| `api/exports/exports.service.js` | `startExport`, `listExports` | exports routes |
+| `api/responses/response.service.js` | `getResponses` (a survey with no responses is an empty page, not a `RequestError`) | `GET /responses` |
+| `api/bails/bails.service.js` | `resolveVlabUser` (get-or-create from email, so an agent never sees a user id), `expected`-marked wrappers over `utils/bails` | — |
+| `api/credentials/credential.service.js` | `listMessagingAccounts` (IO only; redaction is `mcp.core#redactCredential`, pure, with a recursive no-secret test) | — |
+
+Survey-scoped tools take a resolved survey — `{email, surveyName, shortcodes}`
+from `resolveSurvey` — rather than a bare name, so the ownership check cannot
+be skipped by accident.
 
 Sharing it fixed two bugs that had been live in the REST path:
 `translation_conf` now defaults to `{}` (the old controller dereferenced it

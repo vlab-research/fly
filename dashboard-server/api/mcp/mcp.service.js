@@ -24,6 +24,14 @@ const { findById, mergeSettings } = require('./mcp.core');
 const { createForm } = require('./mcp.typeform');
 
 /*
+ * Every other area follows the registerSurveyVersion rule: the operation
+ * lives with its module and is re-exported here so mcp.tools has one import
+ * to stub. Nothing below is implemented in this file.
+ */
+const states = require('../states/states.service');
+const health = require('../health/health.service');
+
+/*
  * Author a form in the researcher's own Typeform account.
  */
 async function createTypeformForm({ email, payload }) {
@@ -74,4 +82,12 @@ module.exports = {
   createTypeformForm,
   registerSurveyVersion,
   updateSettings,
+
+  // monitoring (api/states, api/health)
+  resolveSurvey: states.resolveSurvey,
+  statesSummary: states.statesSummary,
+  listStates: states.listStates,
+  stateDetail: states.stateDetail,
+  healthFindings: health.healthFindings,
+  platformNotices: health.platformNotices,
 };

@@ -24,10 +24,12 @@ const SURVEYS = [
 
 function makeService(overrides = {}) {
   const calls = [];
-  const record = name => async args => {
-    calls.push({ name, args });
+  // `args2` is the second positional argument, for the service functions that
+  // take (resolvedSurvey, ...) rather than one options object.
+  const record = name => async (args, args2) => {
+    calls.push({ name, args, args2 });
     const impl = overrides[name];
-    return typeof impl === 'function' ? impl(args) : impl;
+    return typeof impl === 'function' ? impl(args, args2) : impl;
   };
 
   const service = {
@@ -35,6 +37,13 @@ function makeService(overrides = {}) {
     createTypeformForm: record('createTypeformForm'),
     registerSurveyVersion: record('registerSurveyVersion'),
     updateSettings: record('updateSettings'),
+    // monitoring
+    resolveSurvey: record('resolveSurvey'),
+    statesSummary: record('statesSummary'),
+    listStates: record('listStates'),
+    stateDetail: record('stateDetail'),
+    healthFindings: record('healthFindings'),
+    platformNotices: record('platformNotices'),
     '@noCallThru': true,
   };
 
@@ -42,6 +51,23 @@ function makeService(overrides = {}) {
     service.listSurveys = async args => {
       calls.push({ name: 'listSurveys', args });
       return SURVEYS;
+    };
+  }
+
+  // The same ownership answer the real resolveSurvey gives over SURVEYS.
+  if (!overrides.resolveSurvey) {
+    service.resolveSurvey = async args => {
+      calls.push({ name: 'resolveSurvey', args });
+      const mine = SURVEYS.filter(r => r.survey_name === args.survey_name);
+      if (!mine.length) {
+        return { ok: false, notFound: true, known: [...new Set(SURVEYS.map(r => r.survey_name))] };
+      }
+      return {
+        ok: true,
+        email: args.email,
+        surveyName: args.survey_name,
+        shortcodes: [...new Set(mine.map(r => r.shortcode))],
+      };
     };
   }
 
@@ -394,5 +420,134 @@ describe('mcp.tools: update_survey_settings', () => {
         expect(TOOL_SCOPES[name], `${name} has no entry in TOOL_SCOPES`).to.be.a('string');
       });
     });
+  });
+});
+
+/*
+ * Monitoring. Every survey-scoped tool goes through resolveSurvey — the same
+ * lookup the REST middleware uses — and hands the resolved survey (with its
+ * shortcodes, the query pre-filter) to the service. A miss is a tool error
+ * naming the caller's real surveys, and nothing else is called.
+ */
+describe('mcp.tools: monitoring', () => {
+  const RESOLVED = { email: CONTEXT.email, surveyName: 'HPV', shortcodes: ['main', 'branch'] };
+
+  describe('get_states_summary', () => {
+    it('resolves the survey and returns the summary rows', async () => {
+      const summary = { summary: [{ current_state: 'ERROR', current_form: 'main', count: 3 }] };
+      const { runTool, calls } = loadTools({ statesSummary: async () => summary });
+
+      const out = await runTool('get_states_summary', { survey_name: 'HPV' }, CONTEXT);
+
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey', 'statesSummary']);
+      expect(calls[1].args).to.eql(RESOLVED);
+      expect(payloadOf(out)).to.eql(summary);
+    });
+
+    it('answers a survey that is not yours with the ones that are, and stops', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool('get_states_summary', { survey_name: 'Nope' }, CONTEXT);
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/No survey named "Nope"/);
+      expect(textOf(out)).to.match(/"HPV", "Solo"/);
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey']);
+    });
+  });
+
+  describe('list_states', () => {
+    it('maps the arguments onto the query filters and shapes the page', async () => {
+      const { runTool, calls } = loadTools({
+        listStates: async () => ({ states: [{ userid: 'u1', current_state: 'ERROR' }], total: 7 }),
+      });
+
+      const out = await runTool(
+        'list_states',
+        { survey_name: 'HPV', state: 'ERROR', error_tag: 'FB', limit: 5, offset: 5 },
+        CONTEXT,
+      );
+
+      const [survey, filters] = [calls[1].args, calls[1].args2];
+      expect(survey).to.eql(RESOLVED);
+      expect(filters).to.eql({
+        state: 'ERROR',
+        errorTag: 'FB',
+        form: undefined,
+        search: undefined,
+        limit: 5,
+        offset: 5,
+      });
+      expect(payloadOf(out)).to.eql({
+        total: 7,
+        limit: 5,
+        offset: 5,
+        items: [{ userid: 'u1', current_state: 'ERROR' }],
+      });
+    });
+
+    it('caps the limit at 200 no matter what is asked', async () => {
+      const { runTool, calls } = loadTools({ listStates: async () => ({ states: [], total: 0 }) });
+      await runTool('list_states', { survey_name: 'HPV', limit: 100000 }, CONTEXT);
+      expect(calls[1].args2.limit).to.equal(200);
+    });
+  });
+
+  describe('get_participant_state', () => {
+    it('returns the full row for one participant', async () => {
+      const row = { userid: 'u1', current_state: 'ERROR', state_json: { qa: [] } };
+      const { runTool, calls } = loadTools({ stateDetail: async () => row });
+
+      const out = await runTool('get_participant_state', { survey_name: 'HPV', userid: 'u1' }, CONTEXT);
+
+      expect(calls[1].args).to.eql(RESOLVED);
+      expect(calls[1].args2).to.equal('u1');
+      expect(payloadOf(out)).to.eql(row);
+    });
+
+    it('names the missing participant rather than returning nothing', async () => {
+      const { runTool } = loadTools({ stateDetail: async () => null });
+      const out = await runTool('get_participant_state', { survey_name: 'HPV', userid: 'ghost' }, CONTEXT);
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/No participant "ghost" in survey "HPV"/);
+    });
+  });
+
+  describe('get_survey_health', () => {
+    it('returns the findings and aggregates for the resolved survey', async () => {
+      const health = { window_hours: 24, findings: [{ level: 'action' }], aggregates: {} };
+      const { runTool, calls } = loadTools({ healthFindings: async () => health });
+
+      const out = await runTool('get_survey_health', { survey_name: 'Solo' }, CONTEXT);
+
+      expect(calls[1].args).to.eql({ email: CONTEXT.email, surveyName: 'Solo', shortcodes: ['only'] });
+      expect(payloadOf(out)).to.eql(health);
+    });
+  });
+
+  describe('get_platform_notices', () => {
+    it('returns the notices without touching any survey', async () => {
+      const { runTool, calls } = loadTools({ platformNotices: async () => ({ notices: [] }) });
+      const out = await runTool('get_platform_notices', {}, CONTEXT);
+
+      expect(calls.map(c => c.name)).to.eql(['platformNotices']);
+      expect(payloadOf(out)).to.eql({ notices: [] });
+    });
+
+    it('needs platform:read, not surveys:read', async () => {
+      const { runTool } = loadTools({ platformNotices: async () => ({ notices: [] }) });
+      const refused = await runTool('get_platform_notices', {}, { ...CONTEXT, scopes: ['surveys:read'] });
+      expect(refused.isError).to.equal(true);
+      expect(textOf(refused)).to.match(/platform:read/);
+
+      const ok = await runTool('get_platform_notices', {}, { ...CONTEXT, scopes: ['platform:read'] });
+      expect(ok.isError).to.not.equal(true);
+    });
+  });
+
+  it('lets a surveys:read key read participant state, as REST does', async () => {
+    const { runTool } = loadTools({ statesSummary: async () => ({ summary: [] }) });
+    const out = await runTool('get_states_summary', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['surveys:read'] });
+    expect(out.isError).to.not.equal(true);
   });
 });

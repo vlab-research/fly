@@ -42,8 +42,17 @@ const IDENTIFIER_NOTE = [
   '`formid` is the Typeform form whose content was imported into that row.',
 ].join(' ');
 
+const MONITORING_NOTE = [
+  'MONITORING. Participants are always in exactly one state (START, RESPONDING,',
+  'QOUT, END, BLOCKED, ERROR, WAIT_EXTERNAL_EVENT, USER_BLOCKED). Call',
+  'get_states_summary first for counts, then list_states with a `state` or',
+  '`error_tag` filter to find who, then get_participant_state for one person\'s',
+  'full context. get_survey_health is the same 24-hour findings the dashboard\'s',
+  'Monitor tab shows. Lists are capped at 200 rows; page with offset.',
+].join(' ');
+
 const SERVER_INSTRUCTIONS = [
-  'This server creates and versions surveys on the Fly platform (vlab).',
+  'This server creates, versions and monitors surveys on the Fly platform (vlab).',
   '',
   IDENTIFIER_NOTE,
   '',
@@ -62,6 +71,8 @@ const SERVER_INSTRUCTIONS = [
   'update_survey_settings (timeouts / retire a version) ->',
   'create_survey_version (publish a revision after editing in Typeform).',
   'Call list_surveys first if you are working on something that already exists.',
+  '',
+  MONITORING_NOTE,
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -515,7 +526,169 @@ const SURVEY_TOOLS = [
 // area; the phases of planning/mcp-full-coverage-plan.md fill them in.
 // ---------------------------------------------------------------------------
 
-const MONITORING_TOOLS = [];
+// KEEP IN SYNC with STATE_MACHINE_STATES in queries/states/states.queries.js.
+// The first eight are the documented state machine (documentation/
+// states-debugging.md); RESET and OFF are rare administrative states that can
+// still appear in a summary, and a value the summary can show must be one the
+// list can filter on.
+const STATE_NAMES = [
+  'START',
+  'RESPONDING',
+  'QOUT',
+  'END',
+  'BLOCKED',
+  'ERROR',
+  'WAIT_EXTERNAL_EVENT',
+  'USER_BLOCKED',
+  'RESET',
+  'OFF',
+];
+
+const LIST_STATES_LIMIT = { default: 50, max: 200 };
+
+const SURVEY_NAME_ARG = {
+  type: 'string',
+  minLength: 1,
+  description:
+    'Exact survey_name of one of your studies, as list_surveys reports it. A name ' +
+    'that is not yours is answered with the names that are.',
+};
+
+const MONITORING_TOOLS = [
+  {
+    name: 'get_states_summary',
+    description: [
+      'Count the participants of a survey by state and by form — the cheapest way to',
+      'see how a study is doing, and the first monitoring call to make.',
+      '',
+      'Returns one row per (state, form) with a count. A form is a shortcode. Every',
+      'participant who has started any form of the survey is in exactly one row.',
+      'Follow up with list_states to see who is in a state, and get_survey_health for',
+      'the 24-hour findings the dashboard shows.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: { survey_name: SURVEY_NAME_ARG },
+    },
+  },
+
+  {
+    name: 'list_states',
+    description: [
+      'List participants of a survey with their current state, newest activity first,',
+      'filtered by state, error tag, form or a userid substring.',
+      '',
+      'Bounded: at most 200 rows per call (default 50). The result carries `total`,',
+      'the number of matching participants, so page with `offset` until',
+      'offset + items.length reaches total. Use get_participant_state on one userid',
+      'for the full state including the conversation context.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        state: {
+          type: 'string',
+          enum: STATE_NAMES,
+          description:
+            'Only participants currently in this state. ERROR and BLOCKED are the ones ' +
+            'worth investigating; WAIT_EXTERNAL_EVENT is a participant parked on a ' +
+            'timeout or an external event.',
+        },
+        error_tag: {
+          type: 'string',
+          description:
+            'Only participants whose error tag contains this text (case-insensitive). ' +
+            'Tags come from get_states_summary rows and from get_survey_health findings.',
+        },
+        form: {
+          type: 'string',
+          description: 'Only participants currently on this form (a shortcode).',
+        },
+        search: {
+          type: 'string',
+          description: 'Only participants whose userid contains this substring.',
+        },
+        limit: {
+          type: 'integer',
+          description: `Rows per page, 1..${LIST_STATES_LIMIT.max}; default ${LIST_STATES_LIMIT.default}.`,
+        },
+        offset: {
+          type: 'integer',
+          description: 'Rows to skip, for paging. Default 0.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_participant_state',
+    description: [
+      'Everything Fly knows about one participant in a survey: their current state,',
+      'error tag and code, the question they are stuck on, any pending timeout, and the',
+      'full `state_json` — the conversation context, including the question/answer',
+      'history in `qa`.',
+      '',
+      'Use it after list_states has told you who to look at. `state_json` can be',
+      'large; ask for one participant at a time.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name', 'userid'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        userid: {
+          type: 'string',
+          minLength: 1,
+          description: 'The participant id exactly as list_states reports it.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_survey_health',
+    description: [
+      'The health findings for a survey over the last 24 hours — the same ones the',
+      'dashboard Monitor tab shows, already resolved into sentences.',
+      '',
+      'Returns `findings` (each with a level: "action" means something is broken and',
+      'needs a change, "note" is worth knowing) and the `aggregates` they were computed',
+      'from: active users, error counts by category, blocked participants by cause,',
+      'stuck and expired counts, per form. No findings means nothing is wrong in the',
+      'window. Call once; the numbers only move as participants act.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: { survey_name: SURVEY_NAME_ARG },
+    },
+  },
+
+  {
+    name: 'get_platform_notices',
+    description: [
+      'Platform-wide notices from Fly operations: messaging channels down, provider',
+      'errors, and similar problems that affect every survey and are not caused by',
+      'your configuration.',
+      '',
+      'Not survey-scoped. Always succeeds — when monitoring is unreachable the list is',
+      'empty, so an empty list means "nothing known", not "all clear". Check this',
+      'before blaming a survey for a sudden run of errors.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+];
 const DATA_TOOLS = [];
 const TEMPLATE_TOOLS = [];
 const MEDIA_TOOLS = [];
@@ -806,6 +979,51 @@ function mergeSettings(current, args) {
 }
 
 // ---------------------------------------------------------------------------
+// Survey-scoped tools: the one error message and the monitoring shapes.
+// ---------------------------------------------------------------------------
+
+/*
+ * Every survey-scoped tool answers a name that is not the caller's the same
+ * way list_surveys does: with the names that are. Not-yours and
+ * does-not-exist are deliberately the same message.
+ */
+function unknownSurveyError(survey_name, known = []) {
+  return (
+    `No survey named "${survey_name}". ` +
+    (known.length
+      ? `Your surveys are: ${known.map(n => `"${n}"`).join(', ')}.`
+      : 'You have no surveys yet.')
+  );
+}
+
+// The filter object queries/states#list takes, from the tool's arguments.
+function buildStatesFilters(args) {
+  const offset = Number(args.offset);
+  return {
+    state: args.state,
+    errorTag: args.error_tag,
+    form: args.form,
+    search: args.search,
+    limit: clampLimit(args.limit, LIST_STATES_LIMIT),
+    offset: Number.isInteger(offset) && offset > 0 ? offset : 0,
+  };
+}
+
+// { total, limit, offset, items } — the paging contract for offset-paged lists.
+function shapeStatesList(result, filters) {
+  return {
+    total: result.total,
+    limit: filters.limit,
+    offset: filters.offset,
+    items: result.states,
+  };
+}
+
+const noParticipantError = (userid, survey_name) =>
+  `No participant "${userid}" in survey "${survey_name}". The userid must match ` +
+  'exactly what list_states reports; use its `search` argument to find a partial id.';
+
+// ---------------------------------------------------------------------------
 // Bounded lists and redaction — the two decisions every list tool shares.
 // ---------------------------------------------------------------------------
 
@@ -908,6 +1126,15 @@ module.exports = {
   resolvePreviousVersion,
   buildVersionRequest,
   mergeSettings,
+
+  // survey-scoped tools and monitoring
+  STATE_NAMES,
+  LIST_STATES_LIMIT,
+  MONITORING_NOTE,
+  unknownSurveyError,
+  buildStatesFilters,
+  shapeStatesList,
+  noParticipantError,
 
   // bounded lists and redaction
   clampLimit,
