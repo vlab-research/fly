@@ -1,9 +1,51 @@
 # MCP full coverage — implementation plan
 
 **Date:** 2026-09-07
-**Status:** plan approved in principle, nothing built. Phases A–C are committed;
-D is "probably"; E is deferred. The intent is to **release the built phases
-together** as one dashboard tag.
+**Status (2026-09-08):** Phases 0, A, B and C are **built** on branch
+`feature/mcp-full-coverage` (worktree `../fly-mcp-coverage`), one commit per
+phase, 19 tools. D is "probably" and waits on §8; E is deferred. The intent is
+still to **release the built phases together** as one dashboard tag.
+
+### Where the build deviated from this plan, and why
+
+Read these before Phase D; they are the ground truth now.
+
+- **`healthFindings` and `platformNotices` live in `api/health/health.service.js`**,
+  not `states.service.js` (§2.1 said states). Rule 2 — the operation lives with
+  its module — wins over the letter of §2.1.
+- **The exporter's terminal status is `Finished`, not `Completed`.** The
+  statuses are `Requested → Processing → Finished | Failed`
+  (`exporter/exporter/main.py`, `exporter.py#set_export_status`). §4 and
+  `exports-storage.md` said `Completed`; the doc is corrected, and
+  `list_exports` reports `export_link` null until `Finished`.
+- **`chat_log` options are `include_metadata` and `include_raw_payload`**
+  (`ChatLogExportOptions`), not the `responses` keys `exports-storage.md`
+  listed. The doc is corrected; `start_export` validates against the real
+  models. `metadata` on a `responses` export is a list of keys, not an object.
+- **`list_states.state` accepts ten values, not eight**: `RESET` and `OFF` are
+  in `STATE_MACHINE_STATES` and can appear in a summary, so the list must be
+  able to filter on them.
+- **`upload_media`'s URL fetch has an SSRF guard** the plan did not ask for:
+  http(s) only, no loopback / `*.svc` / `*.cluster.local` / `*.internal` /
+  `*.local` / private IP literals, hostname resolved and its address checked,
+  redirects followed by hand (max 3) with the same check per hop. This server
+  runs in-cluster, so without it a caller could fetch AlertManager or the
+  Kubernetes API. DNS rebinding is not defended against.
+- **`MAX_UPLOAD_BYTES` moved into `media.core.js`** (was derived in
+  `media.routes.js`) so the fetch cap and the multer cap are one constant.
+- **`GET /responses` on a survey with no responses now answers `200 []`**, not
+  `500`: `response.service.js#getResponses` maps the query's `RequestError` to
+  an empty page for REST and MCP alike (agent-api.md §10).
+- **`GET /exports/status` for an account with no `users` row answers `200 []`**
+  rather than throwing (`exports.service.js#listExports`).
+- **A docs base commit** carries the audit, this plan, and the audit's doc
+  pass (README Cube.js section, agent-api §10, the exports contract,
+  `full-messages-export.md`) onto the branch — they were uncommitted in the
+  main checkout and the phases edit those files.
+- **Not run locally:** the database-backed suites (`states.test.js`,
+  `health.test.js`, `bails.test.js`, media integration). Docker's daemon was
+  broken on the build machine. Every hermetic suite is green on Node 22; CI
+  (`dashboard-test.yml`) is the gate for the rest.
 **Audit this plan implements:** `planning/mcp-coverage-audit.md` (read it
 first; §2 is the capability matrix, §5 the design rules, §6 the security
 findings, and the DECIDE items are still open).
