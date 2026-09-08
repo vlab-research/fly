@@ -30,6 +30,13 @@ const {
   buildStatesFilters,
   shapeStatesList,
   noParticipantError,
+  EXPORT_TYPES,
+  EXPORT_OPTION_SCHEMAS,
+  GET_RESPONSES_PAGE,
+  validateExportOptions,
+  shapeExportRow,
+  shapeExportStarted,
+  shapeResponsesPage,
   validateAgainstSchema,
   validateToolArgs,
   toolByName,
@@ -70,7 +77,7 @@ const TOOL_NAMES = {
     'get_survey_health',
     'get_platform_notices',
   ],
-  DATA_TOOLS: [],
+  DATA_TOOLS: ['start_export', 'list_exports', 'get_responses'],
   TEMPLATE_TOOLS: [],
   MEDIA_TOOLS: [],
   BAIL_TOOLS: [],
@@ -715,5 +722,102 @@ describe('mcp.core: monitoring', () => {
     expect(unknownSurveyError('X', ['A', 'B'])).to.match(/No survey named "X"\. Your surveys are: "A", "B"\./);
     expect(unknownSurveyError('X', [])).to.match(/no surveys yet/);
     expect(noParticipantError('u9', 'S')).to.match(/No participant "u9" in survey "S"/);
+  });
+});
+
+describe('mcp.core: data', () => {
+  it('explains that exports are asynchronous and answers are a separate scope', () => {
+    expect(SERVER_INSTRUCTIONS).to.match(/DATA\. Exports are asynchronous/);
+    expect(SERVER_INSTRUCTIONS).to.match(/responses:read/);
+    expect(toolByName('start_export').description).to.match(/7 hours/);
+  });
+
+  it('has an option schema for every export type, and every option is described', () => {
+    expect(Object.keys(EXPORT_OPTION_SCHEMAS)).to.eql(EXPORT_TYPES);
+    EXPORT_TYPES.forEach(type => {
+      Object.entries(EXPORT_OPTION_SCHEMAS[type].properties).forEach(([key, schema]) => {
+        expect(schema.description, `${type}.${key}`).to.be.a('string');
+      });
+    });
+  });
+
+  it('accepts the options that belong to the type', () => {
+    expect(
+      validateExportOptions('responses', {
+        pivot: true,
+        response_value: 'translated_response',
+        metadata: ['wave'],
+      }),
+    ).to.eql([]);
+    expect(validateExportOptions('chat_log', { include_metadata: true })).to.eql([]);
+    expect(
+      validateExportOptions('full_messages', {
+        event_groups: ['conversation', 'bails'],
+        start_time: '2026-08-01T00:00:00Z',
+      }),
+    ).to.eql([]);
+    expect(validateExportOptions('responses', undefined)).to.eql([]);
+  });
+
+  // A key from a different type is a typo the exporter would silently drop.
+  it('rejects an option key that belongs to a different export type', () => {
+    const [err] = validateExportOptions('chat_log', { pivot: true });
+    expect(err).to.match(/options: unknown property "pivot"/);
+    expect(err).to.match(/accepted: include_metadata, include_raw_payload/);
+
+    expect(validateExportOptions('responses', { event_groups: [] })[0]).to.match(/unknown property "event_groups"/);
+    expect(validateExportOptions('full_messages', { event_groups: ['nope'] })[0]).to.match(/must be one of/);
+    expect(validateExportOptions('responses', { response_value: 'answer' })[0]).to.match(/must be one of "response"/);
+  });
+
+  it('projects an export row and hides the link until the export is finished', () => {
+    const row = {
+      id: 'e1',
+      user_id: 'me@example.org',
+      survey_id: 'HPV',
+      source: 'responses',
+      status: 'Requested',
+      export_link: 'Not Found',
+      updated: '2026-09-01T00:00:00Z',
+      retry_count: 0,
+      locked_at: null,
+      options: { pivot: true },
+    };
+    const shaped = shapeExportRow(row);
+    expect(shaped).to.eql({
+      id: 'e1',
+      survey_name: 'HPV',
+      export_type: 'responses',
+      status: 'Requested',
+      export_link: null,
+      updated: '2026-09-01T00:00:00Z',
+      retry_count: 0,
+      options: { pivot: true },
+    });
+    expect(shaped).to.not.have.any.keys('user_id', 'locked_at');
+    expect(shapeExportRow({ ...row, status: 'Finished', export_link: 'https://x/y' }).export_link)
+      .to.equal('https://x/y');
+  });
+
+  it('tells the caller how to follow a started export', () => {
+    const out = shapeExportStarted({ export_id: 'e9', source: 'chat_log' }, 'HPV');
+    expect(out).to.include({ export_id: 'e9', survey_name: 'HPV', export_type: 'chat_log', status: 'Requested' });
+    expect(out.note).to.match(/list_exports/);
+    expect(out.note).to.match(/Finished/);
+  });
+
+  it('pages responses with the last row’s token, and ends on a short page', () => {
+    const rows = [{ userid: 'a', token: 't1' }, { userid: 'b', token: 't2' }];
+    expect(shapeResponsesPage(rows, 2)).to.eql({ page_size: 2, next_cursor: 't2', items: rows });
+    expect(shapeResponsesPage(rows, 3).next_cursor).to.equal(null);
+    expect(shapeResponsesPage([], 25).next_cursor).to.equal(null);
+    expect(GET_RESPONSES_PAGE).to.eql({ default: 25, max: 500 });
+  });
+
+  it('validates the data tool arguments', () => {
+    expect(validateToolArgs('start_export', { survey_name: 'S' }).errors[0]).to.match(/missing required property "export_type"/);
+    expect(validateToolArgs('start_export', { survey_name: 'S', export_type: 'csv' }).errors[0]).to.match(/export_type: must be one of/);
+    expect(validateToolArgs('list_exports', {})).to.eql({ ok: true });
+    expect(validateToolArgs('get_responses', { survey_name: 'S', page_size: 'ten' }).errors[0]).to.match(/page_size: expected integer/);
   });
 });

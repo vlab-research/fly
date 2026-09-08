@@ -44,6 +44,10 @@ function makeService(overrides = {}) {
     stateDetail: record('stateDetail'),
     healthFindings: record('healthFindings'),
     platformNotices: record('platformNotices'),
+    // data
+    startExport: record('startExport'),
+    listExports: record('listExports'),
+    getResponses: record('getResponses'),
     '@noCallThru': true,
   };
 
@@ -549,5 +553,134 @@ describe('mcp.tools: monitoring', () => {
     const { runTool } = loadTools({ statesSummary: async () => ({ summary: [] }) });
     const out = await runTool('get_states_summary', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['surveys:read'] });
     expect(out.isError).to.not.equal(true);
+  });
+});
+
+describe('mcp.tools: data', () => {
+  describe('start_export', () => {
+    it('resolves the survey, inserts the request and explains how to follow it', async () => {
+      const { runTool, calls } = loadTools({
+        startExport: async () => ({ export_id: 'e1', source: 'chat_log', status: 'Requested' }),
+      });
+
+      const out = await runTool(
+        'start_export',
+        { survey_name: 'HPV', export_type: 'chat_log', options: { include_metadata: true } },
+        CONTEXT,
+      );
+
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey', 'startExport']);
+      expect(calls[1].args).to.eql({
+        email: CONTEXT.email,
+        survey_name: 'HPV',
+        export_type: 'chat_log',
+        options: { include_metadata: true },
+      });
+      expect(payloadOf(out)).to.include({ export_id: 'e1', export_type: 'chat_log', status: 'Requested' });
+      expect(payloadOf(out).note).to.match(/list_exports/);
+    });
+
+    it('refuses an option from another export type before any IO', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool(
+        'start_export',
+        { survey_name: 'HPV', export_type: 'full_messages', options: { pivot: true } },
+        CONTEXT,
+      );
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/unknown property "pivot"/);
+      expect(calls).to.have.lengthOf(0);
+    });
+
+    it('refuses a survey that is not yours before inserting anything', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool('start_export', { survey_name: 'Nope', export_type: 'responses' }, CONTEXT);
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/No survey named "Nope"/);
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey']);
+    });
+
+    it('needs exports:write', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool(
+        'start_export',
+        { survey_name: 'HPV', export_type: 'responses' },
+        { ...CONTEXT, scopes: ['exports:read', 'surveys:write'] },
+      );
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/exports:write/);
+      expect(calls).to.have.lengthOf(0);
+    });
+  });
+
+  describe('list_exports', () => {
+    const ROWS = [
+      { id: 'e2', user_id: CONTEXT.email, survey_id: 'HPV', source: 'responses', status: 'Finished', export_link: 'https://x/e2', updated: '2026-09-02', retry_count: 0, options: {} },
+      { id: 'e1', user_id: CONTEXT.email, survey_id: 'HPV', source: 'chat_log', status: 'Requested', export_link: 'Not Found', updated: '2026-09-01', retry_count: 0, options: {} },
+    ];
+
+    it('lists everything without a survey filter and projects the rows', async () => {
+      const { runTool, calls } = loadTools({ listExports: async () => ROWS });
+      const out = await runTool('list_exports', {}, CONTEXT);
+
+      expect(calls.map(c => c.name)).to.eql(['listExports']);
+      expect(calls[0].args).to.eql({ email: CONTEXT.email, survey_name: undefined });
+      const body = payloadOf(out);
+      expect(body.count).to.equal(2);
+      expect(body.items[0]).to.include({ id: 'e2', status: 'Finished', export_link: 'https://x/e2' });
+      expect(body.items[1].export_link).to.equal(null);
+      expect(body.items[0]).to.not.have.property('user_id');
+    });
+
+    it('resolves the survey when one is named', async () => {
+      const { runTool, calls } = loadTools({ listExports: async () => [] });
+      await runTool('list_exports', { survey_name: 'HPV' }, CONTEXT);
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey', 'listExports']);
+      expect(calls[1].args).to.eql({ email: CONTEXT.email, survey_name: 'HPV' });
+
+      const out = await runTool('list_exports', { survey_name: 'Nope' }, CONTEXT);
+      expect(out.isError).to.equal(true);
+    });
+  });
+
+  describe('get_responses', () => {
+    const rows = n => Array.from({ length: n }, (_, i) => ({ userid: `u${i}`, token: `t${i}` }));
+
+    it('passes the cursor and a clamped page size, and returns the next cursor', async () => {
+      const { runTool, calls } = loadTools({ getResponses: async () => ({ responses: rows(500) }) });
+
+      const out = await runTool(
+        'get_responses',
+        { survey_name: 'HPV', after: 'abc', page_size: 100000 },
+        CONTEXT,
+      );
+
+      expect(calls[1].args).to.eql({ email: CONTEXT.email, survey_name: 'HPV', after: 'abc', pageSize: 500 });
+      const body = payloadOf(out);
+      expect(body.page_size).to.equal(500);
+      expect(body.next_cursor).to.equal('t499');
+      expect(body.items).to.have.lengthOf(500);
+    });
+
+    it('defaults to 25 rows and ends paging on a short page', async () => {
+      const { runTool, calls } = loadTools({ getResponses: async () => ({ responses: rows(3) }) });
+      const out = await runTool('get_responses', { survey_name: 'HPV' }, CONTEXT);
+
+      expect(calls[1].args).to.include({ after: null, pageSize: 25 });
+      expect(payloadOf(out).next_cursor).to.equal(null);
+    });
+
+    // The whole reason `responses` is its own resource.
+    it('refuses a surveys:read key and needs responses:read', async () => {
+      const { runTool } = loadTools({ getResponses: async () => ({ responses: [] }) });
+      const refused = await runTool('get_responses', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['surveys:write'] });
+      expect(refused.isError).to.equal(true);
+      expect(textOf(refused)).to.match(/responses:read/);
+
+      const ok = await runTool('get_responses', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['responses:read'] });
+      expect(ok.isError).to.not.equal(true);
+    });
   });
 });

@@ -611,6 +611,9 @@ see it. **The scope is enforced per tool instead** (`TOOL_SCOPES` in
 | `get_participant_state` | `surveys:read` |
 | `get_survey_health` | `surveys:read` |
 | `get_platform_notices` | `platform:read` |
+| `start_export` | `exports:write` |
+| `list_exports` | `exports:read` |
+| `get_responses` | `responses:read` |
 
 The rule behind the table: a tool needs exactly the scope the REST route it
 wraps would derive (first path segment, `GET` → `read`, else `write`). States
@@ -721,6 +724,36 @@ dashboard polls it because a human is watching.
 scoped. Never fails: when AlertManager is unreachable or unconfigured the list
 is empty, so an empty list is "nothing known", not "all clear".
 
+### Data tools
+
+Exports (`POST /exports`, `GET /exports/status[/survey]` — see
+`documentation/exports-storage.md` "Request and status contract") and the paged
+response read (§10) as tools. Exports stay **asynchronous**: no tool waits on
+the exporter or returns file contents; the server `instructions` say so.
+
+**`start_export({survey_name, export_type, options?})`** — `POST /exports?survey=`
+with the type made explicit (`responses` \| `chat_log` \| `full_messages`;
+REST infers `responses` when `export_type` is absent) and the `options` keys
+**validated per type** against the exporter's own option models, so a
+`chat_log` option on a `responses` export is refused rather than silently
+dropped. The survey is resolved before the row is inserted, so a name that is
+not yours is a message and never a job. Returns `{export_id, survey_name,
+export_type, status: "Requested", note}`.
+
+**`list_exports({survey_name?})`** — the status rows, newest first, projected to
+`{id, survey_name, export_type, status, export_link, updated, retry_count,
+options}`. `status` is one of `Requested`, `Processing`, `Finished`, `Failed`
+(the exporter's real values; older docs said `Completed`). `export_link` is
+`null` until `Finished`, then the presigned URL, valid for 7 hours. Without
+`survey_name` it is every export the caller has requested.
+
+**`get_responses({survey_name, after?, page_size?})`** — `GET /responses` (§10)
+with `page_size` **clamped to 500** (default 25) and the page shaped as
+`{page_size, next_cursor, items}`: `next_cursor` is the last row's `token`, or
+`null` on a short page, so the loop is "call, pass `next_cursor` as `after`,
+stop on null". Rows are §10's rows. Needs `responses:read`, which `surveys:*`
+does not imply — that separation is deliberate.
+
 ### Failure
 
 Every failure is a tool error (`isError: true`) with a sentence a model can act
@@ -777,6 +810,14 @@ indefinitely, so a consumer can store it and resume paging later.
 three fields. Responses are therefore sorted by submission time, with ties broken by participant id and question.
 
 **Scoping:** All responses are scoped to the caller's email; the caller can only read responses from surveys they own.
+
+**Empty surveys:** a survey with no responses yet answers `200 {"responses": []}`.
+(Before the MCP data tools this was a `500`, from a `RequestError` the query
+raised for the CSV download; `api/responses/response.service.js#getResponses`
+now maps it to an empty page for both REST and MCP.)
+
+The MCP tool `get_responses` (§9 "Data tools") is this endpoint with a 500-row
+cap and an explicit `next_cursor`.
 
 ---
 

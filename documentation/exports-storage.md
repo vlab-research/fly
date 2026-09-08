@@ -25,29 +25,30 @@ All requests are `POST /api/v1/exports?survey=<name>` and return `201 { status: 
   "drop_duplicated_users": boolean,
   "add_duration": boolean,
   "drop_users_without": string,
-  "response_value": string,
-  "metadata": object
+  "response_value": "response" | "translated_response",
+  "metadata": [string]
 }
 ```
 
 When `export_type` is omitted, the export defaults to `"responses"` — one row per response event.
+`metadata` is a **list of metadata keys** to project into columns (the UI splits a
+comma-separated string); `response_value` is required when `pivot` is true.
 
 #### `chat_log`
 
 ```json
 {
   "export_type": "chat_log",
-  "pivot": boolean,
-  "keep_final_answer": boolean,
-  "drop_duplicated_users": boolean,
-  "add_duration": boolean,
-  "drop_users_without": string,
-  "response_value": string,
-  "metadata": object
+  "include_metadata": boolean,
+  "include_raw_payload": boolean
 }
 ```
 
-A curated, deduplicated record of user-visible message exchanges.
+A curated, deduplicated record of user-visible message exchanges. Both flags
+default to `false` (`ChatLogExportOptions` in `exporter/exporter/main.py`;
+`dashboard-client/src/containers/CreateChatLogExport`). An earlier revision of
+this section listed the `responses` keys here; the exporter ignores them for
+this type.
 
 #### `full_messages`
 
@@ -90,8 +91,8 @@ Both endpoints return an array of export status rows, most recent first. Each ro
 | `id` | UUID | Unique export id, returned by the `POST` and used to track this export across resubmissions |
 | `user_id` | string | Caller's email |
 | `survey_id` | string | Survey name |
-| `status` | enum | One of: `Requested`, `Completed`, `Failed`. An export remains `Requested` until the exporter marks it otherwise. |
-| `export_link` | string | Presigned S3 download URL when `status === "Completed"`. The URL is valid for **7 hours** after the export finishes. Before completion or on failure, this is a placeholder like `"Not Found"`. |
+| `status` | enum | One of: `Requested`, `Processing`, `Finished`, `Failed` (`exporter/exporter/main.py`, `exporter.py#set_export_status`). An export remains `Requested` until a worker claims it, is `Processing` while it runs, and ends `Finished` or `Failed`. There is no `Completed`. |
+| `export_link` | string | Presigned S3 download URL when `status === "Finished"`. The URL is valid for **7 hours** after the export finishes. Before completion or on failure, this is a placeholder like `"Not Found"`. |
 | `source` | string | The export type: `"responses"`, `"chat_log"`, or `"full_messages"` |
 | `options` | object | The request body (minus `export_type`) stored as-is for audit and resumption |
 | `updated` | timestamp | Last update time; used to identify stale exports for pruning |
@@ -99,7 +100,13 @@ Both endpoints return an array of export status rows, most recent first. Each ro
 | `locked_at` | timestamp or null | When the exporter locked this row to begin processing; cleared when the status updates. Helps detect stalled jobs. |
 | `metadata` | object | Application metadata, if any |
 
-**Polling behavior:** Exports are async: the exporter polls `export_status` for `Requested` rows (`exporter/exporter/main.py`, migration 16); nothing is published to Kafka. Callers should poll `/exports/status` or `/exports/status/survey` every few seconds until the export reaches a terminal status (`Completed` or `Failed`) and the `export_link` is valid. A `Completed` export's presigned URL is valid for 7 hours, so downloads must happen within that window.
+**Polling behavior:** Exports are async: the exporter polls `export_status` for `Requested` rows (`exporter/exporter/main.py`, migration 16); nothing is published to Kafka. Callers should poll `/exports/status` or `/exports/status/survey` every few seconds until the export reaches a terminal status (`Finished` or `Failed`) and the `export_link` is valid. A `Finished` export's presigned URL is valid for 7 hours, so downloads must happen within that window.
+
+**Agents:** the same contract is exposed as the MCP tools `start_export`
+(options validated per `export_type` against the exporter's option models) and
+`list_exports` (rows projected, `export_link` null until `Finished`); both go
+through `api/exports/exports.service.js`, as the REST controller does. See
+`documentation/agent-api.md` §9 "Data tools".
 
 ## Lifecycle: exports are temporary
 

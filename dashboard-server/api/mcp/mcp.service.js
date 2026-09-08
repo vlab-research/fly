@@ -30,6 +30,8 @@ const { createForm } = require('./mcp.typeform');
  */
 const states = require('../states/states.service');
 const health = require('../health/health.service');
+const exportsService = require('../exports/exports.service');
+const responses = require('../responses/response.service');
 
 /*
  * Author a form in the researcher's own Typeform account.
@@ -90,4 +92,9 @@ module.exports = {
   stateDetail: states.stateDetail,
   healthFindings: health.healthFindings,
   platformNotices: health.platformNotices,
+
+  // data (api/exports, api/responses)
+  startExport: exportsService.startExport,
+  listExports: exportsService.listExports,
+  getResponses: responses.getResponses,
 };

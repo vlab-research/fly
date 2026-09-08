@@ -39,6 +39,12 @@ const TOOL_SCOPES = {
   get_participant_state: 'surveys:read',
   get_survey_health: 'surveys:read',
   get_platform_notices: 'platform:read',
+
+  // data — `responses` is its own resource so a key can see study structure
+  // and participant state without reading people's answers.
+  start_export: 'exports:write',
+  list_exports: 'exports:read',
+  get_responses: 'responses:read',
 };
 
 // Absent scopes are unrestricted, matching the middleware exactly.
@@ -66,6 +72,12 @@ const {
   buildStatesFilters,
   shapeStatesList,
   noParticipantError,
+  validateExportOptions,
+  shapeExportRow,
+  shapeExportStarted,
+  shapeResponsesPage,
+  clampLimit,
+  GET_RESPONSES_PAGE,
 } = core;
 
 /*
@@ -250,6 +262,47 @@ const TOOL_HANDLERS = {
 
   async get_platform_notices() {
     return toolResult(await service.platformNotices());
+  },
+
+  // --- data ----------------------------------------------------------------
+
+  start_export(args, { email }) {
+    // Options are checked against the per-type schema before any IO, and the
+    // survey is resolved before the insert so a survey that is not yours is a
+    // message rather than a row the exporter would run to nothing.
+    const optionErrors = validateExportOptions(args.export_type, args.options);
+    if (optionErrors.length) return invalidArgsError(optionErrors);
+
+    return withSurvey(args, email, async () => {
+      const started = await service.startExport({
+        email,
+        survey_name: args.survey_name,
+        export_type: args.export_type,
+        options: args.options || {},
+      });
+      return toolResult(shapeExportStarted(started, args.survey_name));
+    });
+  },
+
+  async list_exports(args, { email }) {
+    const list = async () => {
+      const rows = await service.listExports({ email, survey_name: args.survey_name });
+      return toolResult({ count: rows.length, items: rows.map(shapeExportRow) });
+    };
+    return args.survey_name ? withSurvey(args, email, list) : list();
+  },
+
+  get_responses(args, { email }) {
+    return withSurvey(args, email, async () => {
+      const pageSize = clampLimit(args.page_size, GET_RESPONSES_PAGE);
+      const { responses } = await service.getResponses({
+        email,
+        survey_name: args.survey_name,
+        after: args.after || null,
+        pageSize,
+      });
+      return toolResult(shapeResponsesPage(responses, pageSize));
+    });
   },
 };
 

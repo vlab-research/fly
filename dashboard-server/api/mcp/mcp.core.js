@@ -51,8 +51,18 @@ const MONITORING_NOTE = [
   'Monitor tab shows. Lists are capped at 200 rows; page with offset.',
 ].join(' ');
 
+const DATA_NOTE = [
+  'DATA. Exports are asynchronous: start_export returns an id, the exporter',
+  'picks it up within seconds, and list_exports shows the status and, once',
+  'Finished, a download URL valid for 7 hours. Fetch that URL yourself; no tool',
+  'returns file contents. get_responses is for looking at answers in pages, not',
+  'for bulk — use an export for that. Reading answers needs the responses:read',
+  'scope, which is separate from surveys:read on purpose.',
+].join(' ');
+
 const SERVER_INSTRUCTIONS = [
-  'This server creates, versions and monitors surveys on the Fly platform (vlab).',
+  'This server creates, versions and monitors surveys on the Fly platform (vlab),',
+  'and exports and reads their response data.',
   '',
   IDENTIFIER_NOTE,
   '',
@@ -73,6 +83,8 @@ const SERVER_INSTRUCTIONS = [
   'Call list_surveys first if you are working on something that already exists.',
   '',
   MONITORING_NOTE,
+  '',
+  DATA_NOTE,
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -689,7 +701,216 @@ const MONITORING_TOOLS = [
     },
   },
 ];
-const DATA_TOOLS = [];
+// ---------------------------------------------------------------------------
+// Data: exports and paged responses.
+// ---------------------------------------------------------------------------
+
+// The exporter's status machine (exporter/exporter/main.py): a row is
+// Requested until a worker claims it, Processing while it runs, then Finished
+// with a presigned link or Failed. There is no "Completed".
+const EXPORT_STATUSES = ['Requested', 'Processing', 'Finished', 'Failed'];
+const EXPORT_DONE_STATUS = 'Finished';
+const EXPORT_LINK_TTL_HOURS = 7;
+
+const EXPORT_TYPES = ['responses', 'chat_log', 'full_messages'];
+
+const EVENT_GROUPS = [
+  'conversation',
+  'referrals',
+  'bails',
+  'payments',
+  'external_tracking',
+  'retries',
+  'system',
+  'other',
+];
+
+/*
+ * The allowed `options` per export type, exactly the fields the exporter's
+ * pydantic models accept (ExportOptions, ChatLogExportOptions,
+ * FullMessagesExportOptions). additionalProperties is false on purpose: a key
+ * from the wrong type is a typo the exporter would otherwise silently drop.
+ */
+const EXPORT_OPTION_SCHEMAS = {
+  responses: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      pivot: {
+        type: 'boolean',
+        description:
+          'Wide format: one row per participant, one column per question. Needs ' +
+          '`response_value`. Default false (long format, one row per answer).',
+      },
+      keep_final_answer: {
+        type: 'boolean',
+        description: 'When a participant answered a question more than once, keep only the last answer.',
+      },
+      drop_duplicated_users: {
+        type: 'boolean',
+        description: 'Drop participants who appear more than once.',
+      },
+      add_duration: {
+        type: 'boolean',
+        description: 'Add a per-participant duration column (last answer minus first).',
+      },
+      drop_users_without: {
+        type: 'string',
+        description: 'A question_ref; drop participants who never answered it.',
+      },
+      response_value: {
+        type: 'string',
+        enum: ['response', 'translated_response'],
+        description: 'Which column becomes the cell value when pivoting.',
+      },
+      metadata: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Metadata keys to project into their own columns (e.g. ["wave", "arm"]).',
+      },
+    },
+  },
+  chat_log: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      include_metadata: {
+        type: 'boolean',
+        description: 'Include the message metadata column. Default false.',
+      },
+      include_raw_payload: {
+        type: 'boolean',
+        description: 'Include the raw platform payload of each message. Default false.',
+      },
+    },
+  },
+  full_messages: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      event_groups: {
+        type: 'array',
+        items: { type: 'string', enum: EVENT_GROUPS },
+        description:
+          `Which event groups to include; default all of ${EVENT_GROUPS.join(', ')}.`,
+      },
+      include_raw_json: {
+        type: 'boolean',
+        description: 'Include the raw event JSON alongside the classified columns. Default false.',
+      },
+      start_time: {
+        type: 'string',
+        description: 'ISO-8601 lower bound on event time (inclusive). Omit for unbounded.',
+      },
+      end_time: {
+        type: 'string',
+        description: 'ISO-8601 upper bound on event time (exclusive). Omit for unbounded.',
+      },
+    },
+  },
+};
+
+const describeOptionKeys = type =>
+  Object.entries(EXPORT_OPTION_SCHEMAS[type].properties)
+    .map(([k, v]) => `${k} (${v.type})`)
+    .join(', ');
+
+const GET_RESPONSES_PAGE = { default: 25, max: 500 };
+
+const DATA_TOOLS = [
+  {
+    name: 'start_export',
+    description: [
+      'Start an asynchronous export of a survey and return its id. Nothing is',
+      'downloaded here: the exporter picks the request up within seconds, and',
+      `list_exports reports its status and, once ${EXPORT_DONE_STATUS}, a download URL`,
+      `valid for ${EXPORT_LINK_TTL_HOURS} hours. Fetch that URL yourself.`,
+      '',
+      'Three export types, each with its own `options` keys (anything else is refused):',
+      `  responses     — one row per answer (or one per participant with pivot): ${describeOptionKeys('responses')}`,
+      `  chat_log      — the user-visible message exchanges: ${describeOptionKeys('chat_log')}`,
+      `  full_messages — every classified event, raw: ${describeOptionKeys('full_messages')}`,
+      '',
+      'Use this for bulk data; use get_responses to look at a few answers.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name', 'export_type'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        export_type: {
+          type: 'string',
+          enum: EXPORT_TYPES,
+          description: 'Which export to produce; decides which `options` keys are accepted.',
+        },
+        options: {
+          type: 'object',
+          additionalProperties: true,
+          description:
+            'Export options for the chosen type — see the tool description for the ' +
+            'keys. Omit for the defaults.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'list_exports',
+    description: [
+      'List your exports, newest first, with their status and download link.',
+      '',
+      `Status is one of ${EXPORT_STATUSES.join(', ')}. \`export_link\` is null until the`,
+      `export is ${EXPORT_DONE_STATUS}, then a presigned URL valid for ${EXPORT_LINK_TTL_HOURS} hours`,
+      'after completion. Pass survey_name to see one survey; omit it for everything you',
+      'have ever requested. Poll every few seconds after start_export; a small survey',
+      'finishes in well under a minute.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        survey_name: {
+          ...SURVEY_NAME_ARG,
+          description: 'Optional: only exports of this survey. Omit for all of yours.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_responses',
+    description: [
+      'Read the answers collected by a survey, one row per answer, in pages ordered',
+      'by submission time.',
+      '',
+      `A page holds at most ${GET_RESPONSES_PAGE.max} rows (default ${GET_RESPONSES_PAGE.default}).`,
+      'The result carries `next_cursor`: pass it back as `after` to get the next page;',
+      'null means there is no more. Cursors stay valid indefinitely, so you can stop',
+      'and resume. For a whole dataset use start_export instead — paging through',
+      'thousands of answers is slow for you and for the database.',
+      '',
+      'Each row: userid, question_ref, question_text, response, translated_response,',
+      'timestamp, surveyid, shortcode, flowid, metadata, ad_id, pageid.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        after: {
+          type: 'string',
+          description: 'The `next_cursor` of the previous page. Omit to start from the beginning.',
+        },
+        page_size: {
+          type: 'integer',
+          description: `Rows per page, 1..${GET_RESPONSES_PAGE.max}; default ${GET_RESPONSES_PAGE.default}.`,
+        },
+      },
+    },
+  },
+];
 const TEMPLATE_TOOLS = [];
 const MEDIA_TOOLS = [];
 const BAIL_TOOLS = [];
@@ -1024,6 +1245,62 @@ const noParticipantError = (userid, survey_name) =>
   'exactly what list_states reports; use its `search` argument to find a partial id.';
 
 // ---------------------------------------------------------------------------
+// Data shaping.
+// ---------------------------------------------------------------------------
+
+// Errors, prefixed with the argument path, or [] when the options fit the type.
+function validateExportOptions(export_type, options) {
+  const schema = EXPORT_OPTION_SCHEMAS[export_type];
+  if (!schema) return [`export_type: must be one of ${EXPORT_TYPES.join(', ')}`];
+  return validateAgainstSchema(schema, options === undefined ? {} : options, ['options']);
+}
+
+// The row export_status stores, projected to what an agent needs. `user_id`
+// is the caller's own email and `locked_at` is the worker's business, so
+// neither is returned; the placeholder link ("Not Found") becomes null until
+// the export is actually done.
+function shapeExportRow(row) {
+  return {
+    id: row.id,
+    survey_name: row.survey_id,
+    export_type: row.source,
+    status: row.status,
+    export_link: row.status === EXPORT_DONE_STATUS ? row.export_link : null,
+    updated: row.updated,
+    retry_count: row.retry_count,
+    options: row.options,
+  };
+}
+
+function shapeExportStarted({ export_id, source }, survey_name) {
+  return {
+    export_id,
+    survey_name,
+    export_type: source,
+    status: 'Requested',
+    note:
+      'The export runs asynchronously. Call list_exports (with this survey_name) to ' +
+      `watch it move through ${EXPORT_STATUSES.join(' -> ')}; when it is ` +
+      `${EXPORT_DONE_STATUS} the row carries a download URL valid for ` +
+      `${EXPORT_LINK_TTL_HOURS} hours.`,
+  };
+}
+
+/*
+ * { page_size, next_cursor, items }. The query stamps every row with the
+ * cursor that points just past it, so the last row's token is the next page;
+ * a short page is the last page.
+ */
+function shapeResponsesPage(rows, pageSize) {
+  const full = rows.length >= pageSize;
+  return {
+    page_size: pageSize,
+    next_cursor: full ? rows[rows.length - 1].token : null,
+    items: rows,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Bounded lists and redaction — the two decisions every list tool shares.
 // ---------------------------------------------------------------------------
 
@@ -1135,6 +1412,20 @@ module.exports = {
   buildStatesFilters,
   shapeStatesList,
   noParticipantError,
+
+  // data
+  DATA_NOTE,
+  EXPORT_TYPES,
+  EXPORT_STATUSES,
+  EXPORT_DONE_STATUS,
+  EXPORT_LINK_TTL_HOURS,
+  EXPORT_OPTION_SCHEMAS,
+  EVENT_GROUPS,
+  GET_RESPONSES_PAGE,
+  validateExportOptions,
+  shapeExportRow,
+  shapeExportStarted,
+  shapeResponsesPage,
 
   // bounded lists and redaction
   clampLimit,

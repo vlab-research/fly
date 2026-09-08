@@ -215,7 +215,7 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
-| `/mcp` | MCP server — `POST` only, Streamable HTTP, ten tools (five survey, five monitoring). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
+| `/mcp` | MCP server — `POST` only, Streamable HTTP, thirteen tools (five survey, five monitoring, three data). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
 | `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
@@ -329,8 +329,8 @@ controller calls it, and `mcp.service.js` re-exports it:
 |---|---|---|
 | `api/states/states.service.js` | `resolveSurvey` (the ownership lookup `validateSurveyNameAccess` now calls), `statesSummary`, `listStates`, `stateDetail` | states routes, `get_states_summary`, `list_states`, `get_participant_state` |
 | `api/health/health.service.js` | `healthFindings`, `platformNotices` (fail-soft, never throws) | health and platform routes, `get_survey_health`, `get_platform_notices` |
-| `api/exports/exports.service.js` | `startExport`, `listExports` | exports routes |
-| `api/responses/response.service.js` | `getResponses` (a survey with no responses is an empty page, not a `RequestError`) | `GET /responses` |
+| `api/exports/exports.service.js` | `startExport`, `listExports` | exports routes, `start_export`, `list_exports` |
+| `api/responses/response.service.js` | `getResponses` (a survey with no responses is an empty page, not a `RequestError`) | `GET /responses`, `get_responses` |
 | `api/bails/bails.service.js` | `resolveVlabUser` (get-or-create from email, so an agent never sees a user id), `expected`-marked wrappers over `utils/bails` | — |
 | `api/credentials/credential.service.js` | `listMessagingAccounts` (IO only; redaction is `mcp.core#redactCredential`, pure, with a recursive no-secret test) | — |
 

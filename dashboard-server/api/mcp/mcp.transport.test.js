@@ -103,6 +103,22 @@ const fakeService = {
     seen.push({ name: 'platformNotices' });
     return { notices: [] };
   },
+
+  // data
+  async startExport(args) {
+    seen.push({ name: 'startExport', args });
+    return { export_id: 'exp-1', source: 'responses', status: 'Requested' };
+  },
+  async listExports(args) {
+    seen.push({ name: 'listExports', args });
+    return [
+      { id: 'exp-1', user_id: EMAIL, survey_id: 'Solo Study', source: 'responses', status: 'Finished', export_link: 'https://minio/x', updated: '2026-09-01', retry_count: 0, options: {} },
+    ];
+  },
+  async getResponses(args) {
+    seen.push({ name: 'getResponses', args });
+    return { responses: [{ userid: 'p1', question_ref: 'q1', response: 'A', token: 'tok-1' }] };
+  },
 };
 
 const tools = proxyquire('./mcp.tools', { './mcp.service': fakeService });
@@ -349,6 +365,34 @@ describe('mcp transport: tool calls', () => {
 
     const notices = await client.callTool({ name: 'get_platform_notices', arguments: {} });
     expect(JSON.parse(notices.content[0].text)).to.eql({ notices: [] });
+
+    await client.close();
+  });
+
+  it('starts an export, lists it, and pages responses', async () => {
+    const client = await connect();
+
+    const started = await client.callTool({
+      name: 'start_export',
+      arguments: { survey_name: 'Solo Study', export_type: 'responses', options: { pivot: true, response_value: 'response' } },
+    });
+    expect(seen.find(c => c.name === 'startExport').args).to.eql({
+      email: EMAIL,
+      survey_name: 'Solo Study',
+      export_type: 'responses',
+      options: { pivot: true, response_value: 'response' },
+    });
+    expect(JSON.parse(started.content[0].text).export_id).to.equal('exp-1');
+
+    const listed = await client.callTool({ name: 'list_exports', arguments: {} });
+    const rows = JSON.parse(listed.content[0].text).items;
+    expect(rows[0]).to.include({ id: 'exp-1', status: 'Finished', export_link: 'https://minio/x' });
+    expect(rows[0]).to.not.have.property('user_id');
+
+    const page = await client.callTool({ name: 'get_responses', arguments: { survey_name: 'Solo Study', page_size: 1 } });
+    const body = JSON.parse(page.content[0].text);
+    expect(body.next_cursor).to.equal('tok-1');
+    expect(body.items[0].response).to.equal('A');
 
     await client.close();
   });
