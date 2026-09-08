@@ -1,10 +1,12 @@
 # MCP full coverage — implementation plan
 
 **Date:** 2026-09-07
-**Status (2026-09-08):** Phases 0, A, B and C are **built** on branch
-`feature/mcp-full-coverage` (worktree `../fly-mcp-coverage`), one commit per
-phase, 19 tools. D is "probably" and waits on §8; E is deferred. The intent is
-still to **release the built phases together** as one dashboard tag.
+**Status (2026-09-08):** Phases 0, A, B and C are **released** as dashboard
+**v0.0.75** (PR #170, merged to `main` as `b53da3e6`; deploy commit
+`0a63fba7`; vstag revision 100, vprod revision 666), 19 tools. The feature
+branch and its worktree are gone — **Phase D starts from `main`** with a new
+worktree (`git worktree add ../fly-mcp-phase-d -b feature/mcp-phase-d`). D is
+"probably" and waits on §8; E is deferred.
 
 ### Where the build deviated from this plan, and why
 
@@ -45,7 +47,8 @@ Read these before Phase D; they are the ground truth now.
 - **Not run locally:** the database-backed suites (`states.test.js`,
   `health.test.js`, `bails.test.js`, media integration). Docker's daemon was
   broken on the build machine. Every hermetic suite is green on Node 22; CI
-  (`dashboard-test.yml`) is the gate for the rest.
+  (`dashboard-test.yml`) is the gate for the rest. CI ran them green on PR #170.
+
 **Audit this plan implements:** `planning/mcp-coverage-audit.md` (read it
 first; §2 is the capability matrix, §5 the design rules, §6 the security
 findings, and the DECIDE items are still open).
