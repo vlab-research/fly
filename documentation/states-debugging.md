@@ -800,6 +800,12 @@ This shows how many participants are responding, completed, errored, blocked, or
 
 The States Explorer feature in the dashboard provides a user-facing interface for debugging participant states. It follows the established container pattern with multiple views for different debugging scenarios.
 
+The same three endpoints are also MCP tools for agents — `get_states_summary`,
+`list_states` (limit clamped to 200, `{total, limit, offset, items}`) and
+`get_participant_state` — through the same ownership lookup
+(`api/states/states.service.js#resolveSurvey`). See `documentation/agent-api.md`
+§9 "Monitoring tools".
+
 ### StatesSummary Component
 
 **Path**: `dashboard-client/src/containers/StatesExplorer/StatesSummary.js`

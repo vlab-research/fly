@@ -3,6 +3,7 @@ const { Readable } = require('stream');
 
 const { Response } = require('../../queries');
 const { ResponseUtil, KafkaUtil } = require('../../utils');
+const { getResponses } = require('./response.service');
 
 function handle(err, res) {
   console.error(err);
@@ -23,7 +24,7 @@ exports.getAll = async (req, res) => {
       return res.status(400).send({ error: { message: 'No user, no responses!' } });
     }
 
-    const responses = await Response.all(email, survey, after, pageSize);
+    const responses = await getResponses({ email, survey_name: survey, after, pageSize });
     res.status(200).send(responses);
   } catch (err) {
     console.error(err);

@@ -17,6 +17,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
 
 const { makeAPIToken } = require('../../utils/auth/auth.util');
+const { TOOLS } = require('./mcp.core');
 
 const EMAIL = 'researcher@test.org';
 
@@ -43,6 +44,14 @@ const stubService = {
   async updateSettings(args) {
     return { ok: true, survey: { survey_name: 'Test Survey' }, settings: {} };
   },
+  async uploadAsset({ file }) {
+    return {
+      ok: true,
+      deduplicated: false,
+      asset: { id: 'a1', filename: file.originalname, byteSize: file.buffer.length, url: 'https://media/a/a1/x' },
+      fanOut: async () => ({ attempted: 0, succeeded: 0, failed: 0 }),
+    };
+  },
 };
 
 // Stub the mcp.tools module to use our stubbed service
@@ -50,10 +59,11 @@ const tools = proxyquire('./mcp.tools', { './mcp.service': stubService });
 const mcpServer = proxyquire('./mcp.server', { './mcp.tools': tools });
 const mcpRoutes = proxyquire('./mcp.routes', { './mcp.server': mcpServer });
 
-// Stub the entire mcp module in the app
-const app = proxyquire('../../server', {
-  './api/mcp': mcpRoutes,
-});
+// server.js requires './api', and api/index.js is what requires './mcp', so the
+// stub has to go in at that layer — a key of './api/mcp' on server would never
+// match and the real service (and a real database) would be reached.
+const apiRouter = proxyquire('../../api', { './mcp': mcpRoutes });
+const app = proxyquire('../../server', { './api': apiRouter });
 
 describe('MCP routes integration: crypto regression', () => {
   let authToken;
@@ -86,7 +96,7 @@ describe('MCP routes integration: crypto regression', () => {
     expect(body.result.serverInfo.name).to.equal('vlab-fly-surveys');
   });
 
-  it('lists tools and returns the five expected tool names', async () => {
+  it('lists every tool the core defines', async () => {
     const res = await request(app)
       .post('/api/v1/mcp')
       .set('Authorization', `Bearer ${authToken}`)
@@ -105,13 +115,9 @@ describe('MCP routes integration: crypto regression', () => {
     expect(body.result).to.have.property('tools');
 
     const toolNames = body.result.tools.map(t => t.name);
-    expect(toolNames).to.eql([
-      'list_surveys',
-      'create_typeform_form',
-      'create_survey',
-      'create_survey_version',
-      'update_survey_settings',
-    ]);
+    // The exact list is the core test's contract (TOOL_NAMES); this test is
+    // about the transport advertising whatever the core defines.
+    expect(toolNames).to.eql(TOOLS.map(t => t.name));
 
     // Verify each tool has a description and schema
     body.result.tools.forEach(tool => {
@@ -119,6 +125,32 @@ describe('MCP routes integration: crypto regression', () => {
       expect(tool).to.have.property('inputSchema');
       expect(tool.inputSchema).to.have.property('type');
     });
+  });
+
+  // upload_media's content_base64 is a string inside the JSON-RPC body, so the
+  // JSON parser's limit is the upload limit. The global parser's default is
+  // 100 KB; server.js mounts a larger one on the MCP path ahead of it.
+  it('accepts a multi-megabyte inline upload through the real body parser', async () => {
+    const bytes = 3 * 1024 * 1024;
+    const res = await request(app)
+      .post('/api/v1/mcp')
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('Content-Type', 'application/json')
+      .set('Accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: {
+          name: 'upload_media',
+          arguments: { filename: 'big.bin', content_base64: Buffer.alloc(bytes, 7).toString('base64') },
+        },
+      });
+
+    expect(res.status).to.equal(200);
+    const result = JSON.parse(res.text).result;
+    expect(result.isError, result.content && result.content[0].text).to.not.equal(true);
+    expect(JSON.parse(result.content[0].text).byteSize).to.equal(bytes);
   });
 
   it('rejects requests without authentication with 401', async () => {

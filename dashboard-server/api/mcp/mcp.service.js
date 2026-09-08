@@ -24,6 +24,24 @@ const { findById, mergeSettings } = require('./mcp.core');
 const { createForm } = require('./mcp.typeform');
 
 /*
+ * Every other area follows the registerSurveyVersion rule: the operation
+ * lives with its module and is re-exported here so mcp.tools has one import
+ * to stub. Nothing below is implemented in this file.
+ */
+const states = require('../states/states.service');
+const health = require('../health/health.service');
+const exportsService = require('../exports/exports.service');
+const responses = require('../responses/response.service');
+
+// Templates and media keep their dependency injection; the real deps are
+// built once in each module's .deps.js and shared with the REST routes.
+const templates = require('../message-templates/message-templates.service').makeService(
+  require('../message-templates/message-templates.deps'),
+);
+const mediaService = require('../media/media.service');
+const media = mediaService.makeService(require('../media/media.deps'));
+
+/*
  * Author a form in the researcher's own Typeform account.
  */
 async function createTypeformForm({ email, payload }) {
@@ -74,4 +92,26 @@ module.exports = {
   createTypeformForm,
   registerSurveyVersion,
   updateSettings,
+
+  // monitoring (api/states, api/health)
+  resolveSurvey: states.resolveSurvey,
+  statesSummary: states.statesSummary,
+  listStates: states.listStates,
+  stateDetail: states.stateDetail,
+  healthFindings: health.healthFindings,
+  platformNotices: health.platformNotices,
+
+  // data (api/exports, api/responses)
+  startExport: exportsService.startExport,
+  listExports: exportsService.listExports,
+  getResponses: responses.getResponses,
+
+  // templates and media (api/message-templates, api/media)
+  listTemplates: templates.listTemplates,
+  getTemplate: templates.getTemplate,
+  createTemplate: templates.createTemplate,
+  deleteTemplate: templates.deleteTemplate,
+  listAssets: media.listAssets,
+  uploadAsset: media.uploadAsset,
+  fetchSource: mediaService.fetchSource,
 };

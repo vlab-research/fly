@@ -32,6 +32,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
 
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+const { TOOLS, MCP_BODY_LIMIT_BYTES } = require('./mcp.core');
 const {
   StreamableHTTPClientTransport,
 } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
@@ -75,6 +76,84 @@ const fakeService = {
       settings: { timeouts: null, off_time: '2026-05-01' },
     };
   },
+
+  // monitoring
+  async resolveSurvey(args) {
+    seen.push({ name: 'resolveSurvey', args });
+    if (args.survey_name !== 'Solo Study') return { ok: false, notFound: true, known: ['Solo Study'] };
+    return { ok: true, email: args.email, surveyName: 'Solo Study', shortcodes: ['solo'] };
+  },
+  async statesSummary(survey) {
+    seen.push({ name: 'statesSummary', args: survey });
+    return { summary: [{ current_state: 'RESPONDING', current_form: 'solo', count: 12 }] };
+  },
+  async listStates(survey, filters) {
+    seen.push({ name: 'listStates', args: survey, filters });
+    return { states: [{ userid: 'p1', current_state: 'ERROR', current_form: 'solo' }], total: 1 };
+  },
+  async stateDetail(survey, userid) {
+    seen.push({ name: 'stateDetail', args: survey, userid });
+    return { userid, current_state: 'ERROR', state_json: {} };
+  },
+  async healthFindings(survey) {
+    seen.push({ name: 'healthFindings', args: survey });
+    return { window_hours: 24, findings: [], aggregates: {} };
+  },
+  async platformNotices() {
+    seen.push({ name: 'platformNotices' });
+    return { notices: [] };
+  },
+
+  // data
+  async startExport(args) {
+    seen.push({ name: 'startExport', args });
+    return { export_id: 'exp-1', source: 'responses', status: 'Requested' };
+  },
+  async listExports(args) {
+    seen.push({ name: 'listExports', args });
+    return [
+      { id: 'exp-1', user_id: EMAIL, survey_id: 'Solo Study', source: 'responses', status: 'Finished', export_link: 'https://minio/x', updated: '2026-09-01', retry_count: 0, options: {} },
+    ];
+  },
+  async getResponses(args) {
+    seen.push({ name: 'getResponses', args });
+    return { responses: [{ userid: 'p1', question_ref: 'q1', response: 'A', token: 'tok-1' }] };
+  },
+
+  // templates and media
+  async listTemplates(args) {
+    seen.push({ name: 'listTemplates', args });
+    return [{ id: 't1', name: 'prize_ready', language: 'en_US', status: 'APPROVED' }];
+  },
+  async getTemplate(args) {
+    seen.push({ name: 'getTemplate', args });
+    return { id: args.id, name: 'prize_ready', language: 'en_US', status: 'APPROVED' };
+  },
+  async createTemplate(args) {
+    seen.push({ name: 'createTemplate', args });
+    return { id: 't2', name: args.name, language: args.language, status: 'PENDING' };
+  },
+  async deleteTemplate(args) {
+    seen.push({ name: 'deleteTemplate', args });
+    return { id: args.id, name: 'prize_ready', language: 'en_US' };
+  },
+  async listAssets(args) {
+    seen.push({ name: 'listAssets', args });
+    return [{ id: 'a1', filename: 'welcome.png', url: 'https://media/a/a1/welcome.png' }];
+  },
+  async uploadAsset(args) {
+    seen.push({ name: 'uploadAsset', args: { email: args.email, filename: args.file.originalname, bytes: args.file.buffer.length } });
+    return {
+      ok: true,
+      deduplicated: false,
+      asset: { id: 'a2', filename: args.file.originalname, url: `https://media/a/a2/${args.file.originalname}` },
+      fanOut: async () => ({ attempted: 0, succeeded: 0, failed: 0 }),
+    };
+  },
+  async fetchSource(url) {
+    seen.push({ name: 'fetchSource', url });
+    return { buffer: Buffer.from('png-bytes'), contentType: 'image/png', url };
+  },
 };
 
 const tools = proxyquire('./mcp.tools', { './mcp.service': fakeService });
@@ -88,6 +167,7 @@ const routes = proxyquire('./mcp.routes', { './mcp.server': mcpServer });
  */
 function makeApp() {
   return express()
+    .use('/api/v1/mcp', express.json({ limit: MCP_BODY_LIMIT_BYTES }))
     .use(express.json())
     .use('/api/v1', (req, res, next) => {
       const header = req.get('authorization') || '';
@@ -226,13 +306,7 @@ describe('mcp transport: handshake', () => {
     const client = await connect();
     const { tools } = await client.listTools();
 
-    expect(tools.map(t => t.name)).to.eql([
-      'list_surveys',
-      'create_typeform_form',
-      'create_survey',
-      'create_survey_version',
-      'update_survey_settings',
-    ]);
+    expect(tools.map(t => t.name)).to.eql(TOOLS.map(t => t.name));
     tools.forEach(t => {
       expect(t.description, t.name).to.be.a('string');
       expect(t.inputSchema, t.name).to.include({ type: 'object' });
@@ -281,6 +355,135 @@ describe('mcp transport: tool calls', () => {
     expect(out.isError).to.equal(true);
     expect(out.content[0].text).to.match(/missing required property "survey_name"/);
     expect(seen).to.have.lengthOf(0);
+
+    await client.close();
+  });
+
+  // Monitoring: one read per tool through the real client, and the ownership
+  // gate is what carries the email from the auth middleware to the query.
+  it('serves a states summary scoped to the caller', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'get_states_summary', arguments: { survey_name: 'Solo Study' } });
+
+    expect(seen.map(c => c.name)).to.eql(['resolveSurvey', 'statesSummary']);
+    expect(seen[0].args).to.eql({ email: EMAIL, survey_name: 'Solo Study' });
+    expect(JSON.parse(out.content[0].text).summary[0].count).to.equal(12);
+
+    await client.close();
+  });
+
+  it('serves a bounded, filtered participant list', async () => {
+    const client = await connect();
+    const out = await client.callTool({
+      name: 'list_states',
+      arguments: { survey_name: 'Solo Study', state: 'ERROR', limit: 999 },
+    });
+
+    expect(seen[1].filters).to.include({ state: 'ERROR', limit: 200, offset: 0 });
+    const body = JSON.parse(out.content[0].text);
+    expect(body).to.include({ total: 1, limit: 200 });
+    expect(body.items[0].userid).to.equal('p1');
+
+    await client.close();
+  });
+
+  it('serves one participant, survey health, and the platform notices', async () => {
+    const client = await connect();
+
+    const one = await client.callTool({
+      name: 'get_participant_state',
+      arguments: { survey_name: 'Solo Study', userid: 'p1' },
+    });
+    expect(JSON.parse(one.content[0].text).current_state).to.equal('ERROR');
+
+    const health = await client.callTool({ name: 'get_survey_health', arguments: { survey_name: 'Solo Study' } });
+    expect(JSON.parse(health.content[0].text).window_hours).to.equal(24);
+
+    const notices = await client.callTool({ name: 'get_platform_notices', arguments: {} });
+    expect(JSON.parse(notices.content[0].text)).to.eql({ notices: [] });
+
+    await client.close();
+  });
+
+  it('starts an export, lists it, and pages responses', async () => {
+    const client = await connect();
+
+    const started = await client.callTool({
+      name: 'start_export',
+      arguments: { survey_name: 'Solo Study', export_type: 'responses', options: { pivot: true, response_value: 'response' } },
+    });
+    expect(seen.find(c => c.name === 'startExport').args).to.eql({
+      email: EMAIL,
+      survey_name: 'Solo Study',
+      export_type: 'responses',
+      options: { pivot: true, response_value: 'response' },
+    });
+    expect(JSON.parse(started.content[0].text).export_id).to.equal('exp-1');
+
+    const listed = await client.callTool({ name: 'list_exports', arguments: {} });
+    const rows = JSON.parse(listed.content[0].text).items;
+    expect(rows[0]).to.include({ id: 'exp-1', status: 'Finished', export_link: 'https://minio/x' });
+    expect(rows[0]).to.not.have.property('user_id');
+
+    const page = await client.callTool({ name: 'get_responses', arguments: { survey_name: 'Solo Study', page_size: 1 } });
+    const body = JSON.parse(page.content[0].text);
+    expect(body.next_cursor).to.equal('tok-1');
+    expect(body.items[0].response).to.equal('A');
+
+    await client.close();
+  });
+
+  it('round-trips every template tool', async () => {
+    const client = await connect();
+
+    const listed = await client.callTool({ name: 'list_message_templates', arguments: {} });
+    expect(JSON.parse(listed.content[0].text).items[0].name).to.equal('prize_ready');
+
+    const one = await client.callTool({ name: 'get_message_template', arguments: { id: 't1' } });
+    expect(JSON.parse(one.content[0].text).id).to.equal('t1');
+
+    const created = await client.callTool({
+      name: 'create_message_template',
+      arguments: { account_id: 'page1', name: 'reminder', language: 'en_US', body: 'Hello' },
+    });
+    expect(seen.find(c => c.name === 'createTemplate').args).to.include({ email: EMAIL, accountId: 'page1', name: 'reminder' });
+    expect(JSON.parse(created.content[0].text).status).to.equal('PENDING');
+
+    const deleted = await client.callTool({ name: 'delete_message_template', arguments: { id: 't1' } });
+    expect(JSON.parse(deleted.content[0].text).deleted.id).to.equal('t1');
+
+    await client.close();
+  });
+
+  it('lists media and uploads from base64 and from a URL', async () => {
+    const client = await connect();
+
+    const listed = await client.callTool({ name: 'list_media', arguments: {} });
+    expect(JSON.parse(listed.content[0].text).items[0].url).to.match(/welcome\.png$/);
+
+    const inline = await client.callTool({
+      name: 'upload_media',
+      arguments: { filename: 'hello.txt', content_base64: Buffer.from('hello').toString('base64') },
+    });
+    expect(seen.find(c => c.name === 'uploadAsset').args).to.eql({ email: EMAIL, filename: 'hello.txt', bytes: 5 });
+    expect(JSON.parse(inline.content[0].text).url).to.equal('https://media/a/a2/hello.txt');
+
+    // A body the global 100 KB parser would refuse.
+    seen.length = 0;
+    const big = await client.callTool({
+      name: 'upload_media',
+      arguments: { filename: 'big.bin', content_base64: Buffer.alloc(2 * 1024 * 1024, 1).toString('base64') },
+    });
+    expect(big.isError).to.not.equal(true);
+    expect(seen[0].args.bytes).to.equal(2 * 1024 * 1024);
+
+    seen.length = 0;
+    const fetched = await client.callTool({
+      name: 'upload_media',
+      arguments: { filename: 'logo.png', source_url: 'https://cdn.example.org/logo.png' },
+    });
+    expect(seen.map(c => c.name)).to.eql(['fetchSource', 'uploadAsset']);
+    expect(JSON.parse(fetched.content[0].text).deduplicated).to.equal(false);
 
     await client.close();
   });

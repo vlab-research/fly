@@ -42,8 +42,36 @@ const IDENTIFIER_NOTE = [
   '`formid` is the Typeform form whose content was imported into that row.',
 ].join(' ');
 
+const MONITORING_NOTE = [
+  'MONITORING. Participants are always in exactly one state (START, RESPONDING,',
+  'QOUT, END, BLOCKED, ERROR, WAIT_EXTERNAL_EVENT, USER_BLOCKED). Call',
+  'get_states_summary first for counts, then list_states with a `state` or',
+  '`error_tag` filter to find who, then get_participant_state for one person\'s',
+  'full context. get_survey_health is the same 24-hour findings the dashboard\'s',
+  'Monitor tab shows. Lists are capped at 200 rows; page with offset.',
+].join(' ');
+
+const DATA_NOTE = [
+  'DATA. Exports are asynchronous: start_export returns an id, the exporter',
+  'picks it up within seconds, and list_exports shows the status and, once',
+  'Finished, a download URL valid for 7 hours. Fetch that URL yourself; no tool',
+  'returns file contents. get_responses is for looking at answers in pages, not',
+  'for bulk — use an export for that. Reading answers needs the responses:read',
+  'scope, which is separate from surveys:read on purpose.',
+].join(' ');
+
+const MESSAGING_ASSETS_NOTE = [
+  'MESSAGING ASSETS. Media uploaded with upload_media gets a permanent public URL',
+  'to reference from questions (see the `description` YAML of',
+  'create_typeform_form). Utility message templates are submitted to Meta and',
+  'must be approved before they can be sent; check status with',
+  'list_message_templates.',
+].join(' ');
+
 const SERVER_INSTRUCTIONS = [
-  'This server creates and versions surveys on the Fly platform (vlab).',
+  'This server creates, versions and monitors surveys on the Fly platform (vlab),',
+  'exports and reads their response data, and manages the media and message',
+  'templates surveys send.',
   '',
   IDENTIFIER_NOTE,
   '',
@@ -62,6 +90,12 @@ const SERVER_INSTRUCTIONS = [
   'update_survey_settings (timeouts / retire a version) ->',
   'create_survey_version (publish a revision after editing in Typeform).',
   'Call list_surveys first if you are working on something that already exists.',
+  '',
+  MONITORING_NOTE,
+  '',
+  DATA_NOTE,
+  '',
+  MESSAGING_ASSETS_NOTE,
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -246,7 +280,7 @@ const TYPEFORM_FIELD_SCHEMA = {
   },
 };
 
-const TOOLS = [
+const SURVEY_TOOLS = [
   {
     name: 'list_surveys',
     description: [
@@ -509,6 +543,625 @@ const TOOLS = [
     },
   },
 ];
+
+// ---------------------------------------------------------------------------
+// The other areas. Each is its own array so tests and docs can assert per
+// area; the phases of planning/mcp-full-coverage-plan.md fill them in.
+// ---------------------------------------------------------------------------
+
+// KEEP IN SYNC with STATE_MACHINE_STATES in queries/states/states.queries.js.
+// The first eight are the documented state machine (documentation/
+// states-debugging.md); RESET and OFF are rare administrative states that can
+// still appear in a summary, and a value the summary can show must be one the
+// list can filter on.
+const STATE_NAMES = [
+  'START',
+  'RESPONDING',
+  'QOUT',
+  'END',
+  'BLOCKED',
+  'ERROR',
+  'WAIT_EXTERNAL_EVENT',
+  'USER_BLOCKED',
+  'RESET',
+  'OFF',
+];
+
+const LIST_STATES_LIMIT = { default: 50, max: 200 };
+
+const SURVEY_NAME_ARG = {
+  type: 'string',
+  minLength: 1,
+  description:
+    'Exact survey_name of one of your studies, as list_surveys reports it. A name ' +
+    'that is not yours is answered with the names that are.',
+};
+
+const MONITORING_TOOLS = [
+  {
+    name: 'get_states_summary',
+    description: [
+      'Count the participants of a survey by state and by form — the cheapest way to',
+      'see how a study is doing, and the first monitoring call to make.',
+      '',
+      'Returns one row per (state, form) with a count. A form is a shortcode. Every',
+      'participant who has started any form of the survey is in exactly one row.',
+      'Follow up with list_states to see who is in a state, and get_survey_health for',
+      'the 24-hour findings the dashboard shows.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: { survey_name: SURVEY_NAME_ARG },
+    },
+  },
+
+  {
+    name: 'list_states',
+    description: [
+      'List participants of a survey with their current state, newest activity first,',
+      'filtered by state, error tag, form or a userid substring.',
+      '',
+      'Bounded: at most 200 rows per call (default 50). The result carries `total`,',
+      'the number of matching participants, so page with `offset` until',
+      'offset + items.length reaches total. Use get_participant_state on one userid',
+      'for the full state including the conversation context.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        state: {
+          type: 'string',
+          enum: STATE_NAMES,
+          description:
+            'Only participants currently in this state. ERROR and BLOCKED are the ones ' +
+            'worth investigating; WAIT_EXTERNAL_EVENT is a participant parked on a ' +
+            'timeout or an external event.',
+        },
+        error_tag: {
+          type: 'string',
+          description:
+            'Only participants whose error tag contains this text (case-insensitive). ' +
+            'Tags come from get_states_summary rows and from get_survey_health findings.',
+        },
+        form: {
+          type: 'string',
+          description: 'Only participants currently on this form (a shortcode).',
+        },
+        search: {
+          type: 'string',
+          description: 'Only participants whose userid contains this substring.',
+        },
+        limit: {
+          type: 'integer',
+          description: `Rows per page, 1..${LIST_STATES_LIMIT.max}; default ${LIST_STATES_LIMIT.default}.`,
+        },
+        offset: {
+          type: 'integer',
+          description: 'Rows to skip, for paging. Default 0.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_participant_state',
+    description: [
+      'Everything Fly knows about one participant in a survey: their current state,',
+      'error tag and code, the question they are stuck on, any pending timeout, and the',
+      'full `state_json` — the conversation context, including the question/answer',
+      'history in `qa`.',
+      '',
+      'Use it after list_states has told you who to look at. `state_json` can be',
+      'large; ask for one participant at a time.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name', 'userid'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        userid: {
+          type: 'string',
+          minLength: 1,
+          description: 'The participant id exactly as list_states reports it.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_survey_health',
+    description: [
+      'The health findings for a survey over the last 24 hours — the same ones the',
+      'dashboard Monitor tab shows, already resolved into sentences.',
+      '',
+      'Returns `findings` (each with a level: "action" means something is broken and',
+      'needs a change, "note" is worth knowing) and the `aggregates` they were computed',
+      'from: active users, error counts by category, blocked participants by cause,',
+      'stuck and expired counts, per form. No findings means nothing is wrong in the',
+      'window. Call once; the numbers only move as participants act.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: { survey_name: SURVEY_NAME_ARG },
+    },
+  },
+
+  {
+    name: 'get_platform_notices',
+    description: [
+      'Platform-wide notices from Fly operations: messaging channels down, provider',
+      'errors, and similar problems that affect every survey and are not caused by',
+      'your configuration.',
+      '',
+      'Not survey-scoped. Always succeeds — when monitoring is unreachable the list is',
+      'empty, so an empty list means "nothing known", not "all clear". Check this',
+      'before blaming a survey for a sudden run of errors.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+];
+// ---------------------------------------------------------------------------
+// Data: exports and paged responses.
+// ---------------------------------------------------------------------------
+
+// The exporter's status machine (exporter/exporter/main.py): a row is
+// Requested until a worker claims it, Processing while it runs, then Finished
+// with a presigned link or Failed. There is no "Completed".
+const EXPORT_STATUSES = ['Requested', 'Processing', 'Finished', 'Failed'];
+const EXPORT_DONE_STATUS = 'Finished';
+const EXPORT_LINK_TTL_HOURS = 7;
+
+const EXPORT_TYPES = ['responses', 'chat_log', 'full_messages'];
+
+const EVENT_GROUPS = [
+  'conversation',
+  'referrals',
+  'bails',
+  'payments',
+  'external_tracking',
+  'retries',
+  'system',
+  'other',
+];
+
+/*
+ * The allowed `options` per export type, exactly the fields the exporter's
+ * pydantic models accept (ExportOptions, ChatLogExportOptions,
+ * FullMessagesExportOptions). additionalProperties is false on purpose: a key
+ * from the wrong type is a typo the exporter would otherwise silently drop.
+ */
+const EXPORT_OPTION_SCHEMAS = {
+  responses: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      pivot: {
+        type: 'boolean',
+        description:
+          'Wide format: one row per participant, one column per question. Needs ' +
+          '`response_value`. Default false (long format, one row per answer).',
+      },
+      keep_final_answer: {
+        type: 'boolean',
+        description: 'When a participant answered a question more than once, keep only the last answer.',
+      },
+      drop_duplicated_users: {
+        type: 'boolean',
+        description: 'Drop participants who appear more than once.',
+      },
+      add_duration: {
+        type: 'boolean',
+        description: 'Add a per-participant duration column (last answer minus first).',
+      },
+      drop_users_without: {
+        type: 'string',
+        description: 'A question_ref; drop participants who never answered it.',
+      },
+      response_value: {
+        type: 'string',
+        enum: ['response', 'translated_response'],
+        description: 'Which column becomes the cell value when pivoting.',
+      },
+      metadata: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Metadata keys to project into their own columns (e.g. ["wave", "arm"]).',
+      },
+    },
+  },
+  chat_log: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      include_metadata: {
+        type: 'boolean',
+        description: 'Include the message metadata column. Default false.',
+      },
+      include_raw_payload: {
+        type: 'boolean',
+        description: 'Include the raw platform payload of each message. Default false.',
+      },
+    },
+  },
+  full_messages: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      event_groups: {
+        type: 'array',
+        items: { type: 'string', enum: EVENT_GROUPS },
+        description:
+          `Which event groups to include; default all of ${EVENT_GROUPS.join(', ')}.`,
+      },
+      include_raw_json: {
+        type: 'boolean',
+        description: 'Include the raw event JSON alongside the classified columns. Default false.',
+      },
+      start_time: {
+        type: 'string',
+        description: 'ISO-8601 lower bound on event time (inclusive). Omit for unbounded.',
+      },
+      end_time: {
+        type: 'string',
+        description: 'ISO-8601 upper bound on event time (exclusive). Omit for unbounded.',
+      },
+    },
+  },
+};
+
+const describeOptionKeys = type =>
+  Object.entries(EXPORT_OPTION_SCHEMAS[type].properties)
+    .map(([k, v]) => `${k} (${v.type})`)
+    .join(', ');
+
+const GET_RESPONSES_PAGE = { default: 25, max: 500 };
+
+const DATA_TOOLS = [
+  {
+    name: 'start_export',
+    description: [
+      'Start an asynchronous export of a survey and return its id. Nothing is',
+      'downloaded here: the exporter picks the request up within seconds, and',
+      `list_exports reports its status and, once ${EXPORT_DONE_STATUS}, a download URL`,
+      `valid for ${EXPORT_LINK_TTL_HOURS} hours. Fetch that URL yourself.`,
+      '',
+      'Three export types, each with its own `options` keys (anything else is refused):',
+      `  responses     — one row per answer (or one per participant with pivot): ${describeOptionKeys('responses')}`,
+      `  chat_log      — the user-visible message exchanges: ${describeOptionKeys('chat_log')}`,
+      `  full_messages — every classified event, raw: ${describeOptionKeys('full_messages')}`,
+      '',
+      'Use this for bulk data; use get_responses to look at a few answers.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name', 'export_type'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        export_type: {
+          type: 'string',
+          enum: EXPORT_TYPES,
+          description: 'Which export to produce; decides which `options` keys are accepted.',
+        },
+        options: {
+          type: 'object',
+          additionalProperties: true,
+          description:
+            'Export options for the chosen type — see the tool description for the ' +
+            'keys. Omit for the defaults.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'list_exports',
+    description: [
+      'List your exports, newest first, with their status and download link.',
+      '',
+      `Status is one of ${EXPORT_STATUSES.join(', ')}. \`export_link\` is null until the`,
+      `export is ${EXPORT_DONE_STATUS}, then a presigned URL valid for ${EXPORT_LINK_TTL_HOURS} hours`,
+      'after completion. Pass survey_name to see one survey; omit it for everything you',
+      'have ever requested. Poll every few seconds after start_export; a small survey',
+      'finishes in well under a minute.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        survey_name: {
+          ...SURVEY_NAME_ARG,
+          description: 'Optional: only exports of this survey. Omit for all of yours.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_responses',
+    description: [
+      'Read the answers collected by a survey, one row per answer, in pages ordered',
+      'by submission time.',
+      '',
+      `A page holds at most ${GET_RESPONSES_PAGE.max} rows (default ${GET_RESPONSES_PAGE.default}).`,
+      'The result carries `next_cursor`: pass it back as `after` to get the next page;',
+      'null means there is no more. Cursors stay valid indefinitely, so you can stop',
+      'and resume. For a whole dataset use start_export instead — paging through',
+      'thousands of answers is slow for you and for the database.',
+      '',
+      'Each row: userid, question_ref, question_text, response, translated_response,',
+      'timestamp, surveyid, shortcode, flowid, metadata, ad_id, pageid.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['survey_name'],
+      additionalProperties: false,
+      properties: {
+        survey_name: SURVEY_NAME_ARG,
+        after: {
+          type: 'string',
+          description: 'The `next_cursor` of the previous page. Omit to start from the beginning.',
+        },
+        page_size: {
+          type: 'integer',
+          description: `Rows per page, 1..${GET_RESPONSES_PAGE.max}; default ${GET_RESPONSES_PAGE.default}.`,
+        },
+      },
+    },
+  },
+];
+// ---------------------------------------------------------------------------
+// Templates and media.
+// ---------------------------------------------------------------------------
+
+// The pure half of media validation is the media core's; these are its limits
+// and its source-URL check, imported so the two tools cannot disagree with
+// the REST endpoint about what is accepted.
+const {
+  MEDIA_TYPE_LIMITS,
+  MAX_UPLOAD_BYTES,
+  checkSourceUrl,
+} = require('../media/media.core');
+
+const {
+  MAX_BODY_LENGTH: TEMPLATE_BODY_MAX,
+  MAX_BUTTONS: TEMPLATE_MAX_BUTTONS,
+  BUTTON_LABEL_MAX: TEMPLATE_BUTTON_LABEL_MAX,
+  VALID_STATUSES: TEMPLATE_STATUSES,
+} = require('../message-templates/message-templates.core');
+
+const TEMPLATE_ID_ARG = {
+  type: 'string',
+  minLength: 1,
+  description: 'The template `id` as list_message_templates reports it (a UUID, not the Meta id).',
+};
+
+const TEMPLATE_TOOLS = [
+  {
+    name: 'list_message_templates',
+    description: [
+      'List your utility message templates across every connected Messenger page and',
+      "WhatsApp number, with each one's approval status.",
+      '',
+      `Status is one of ${TEMPLATE_STATUSES.join(', ')}. PENDING rows are refreshed from`,
+      'Meta as part of this call, so calling it again is how you watch an approval',
+      'land. A REJECTED row carries `rejection_reason`. Only APPROVED templates can be',
+      'sent.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        account_id: {
+          type: 'string',
+          description:
+            'Optional: only templates of this messaging account (a page id or WhatsApp ' +
+            'phone_number_id, as list_messaging_accounts reports it). Omit for all.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'get_message_template',
+    description: [
+      'One utility message template by id, with its body, buttons, status and, if',
+      'rejected, the reason. A PENDING template is refreshed from Meta first.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      additionalProperties: false,
+      properties: { id: TEMPLATE_ID_ARG },
+    },
+  },
+
+  {
+    name: 'create_message_template',
+    description: [
+      'Submit a utility message template to Meta for approval on one of your',
+      'messaging accounts, and record it in Fly. Approval is asynchronous: the result',
+      'usually has status PENDING (custom utility templates often auto-approve within',
+      'seconds), and list_message_templates shows when it becomes APPROVED or REJECTED.',
+      '',
+      'Templates cannot be edited once approved — to change wording or buttons, delete',
+      'and create again. `name` must be snake_case and is unique per (account,',
+      `language). \`body\` is at most ${TEMPLATE_BODY_MAX} characters and may carry positional`,
+      'placeholders {{1}}, {{2}}, … which must be sequential from {{1}}; Meta requires one',
+      `sample value per placeholder in \`examples\`. Up to ${TEMPLATE_MAX_BUTTONS} quick-reply`,
+      `buttons, labels at most ${TEMPLATE_BUTTON_LABEL_MAX} characters and unique.`,
+      '',
+      "This creates something real in the researcher's Meta account.",
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['account_id', 'name', 'language', 'body'],
+      additionalProperties: false,
+      properties: {
+        account_id: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'The messaging account to create the template on: a Messenger page id or a ' +
+            'WhatsApp phone_number_id, as list_messaging_accounts reports it.',
+        },
+        name: {
+          type: 'string',
+          minLength: 1,
+          description: 'snake_case identifier: lowercase letters, digits and underscores only.',
+        },
+        language: {
+          type: 'string',
+          minLength: 1,
+          description: 'A Meta locale code such as "en_US", "es", "pt_BR", "hi".',
+        },
+        body: {
+          type: 'string',
+          minLength: 1,
+          description:
+            `The message text, at most ${TEMPLATE_BODY_MAX} characters, with optional ` +
+            'sequential {{1}}, {{2}} placeholders.',
+        },
+        buttons: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['label'],
+            additionalProperties: false,
+            properties: {
+              label: {
+                type: 'string',
+                minLength: 1,
+                description: `Button text, at most ${TEMPLATE_BUTTON_LABEL_MAX} characters.`,
+              },
+            },
+          },
+          description:
+            `Up to ${TEMPLATE_MAX_BUTTONS} quick-reply buttons. Omit for a text-only template.`,
+        },
+        examples: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'One sample value per {{N}} placeholder in `body`, in order. Required when ' +
+            'the body has placeholders, must be empty otherwise.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'delete_message_template',
+    description: [
+      'Deletes the template at Meta as well as in Fly; this cannot be undone.',
+      '',
+      'Any survey question that references the template by name will fail to send',
+      'after this. Deleting one row removes exactly one (account, name, language)',
+      'variant; sibling languages are untouched.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      additionalProperties: false,
+      properties: { id: TEMPLATE_ID_ARG },
+    },
+  },
+];
+
+const describeMediaLimits = () =>
+  Object.values(MEDIA_TYPE_LIMITS)
+    .map(l => `${l.humanName} (${l.acceptedFormats.join('/')}) up to ${l.maxBytes / (1024 * 1024)} MB`)
+    .join('; ');
+
+const MEDIA_TOOLS = [
+  {
+    name: 'list_media',
+    description: [
+      "List the researcher's media library: every uploaded asset with its permanent",
+      'public `url`, newest first.',
+      '',
+      'The url is what a survey question references (an `attachment` in the field',
+      'description YAML, or a webview/image URL). There is no delete: assets are',
+      'permanent because live surveys may reference them.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+
+  {
+    name: 'upload_media',
+    description: [
+      'Add a file to the media library and get back its permanent public URL. Pass',
+      'EXACTLY ONE of `source_url` (preferred: Fly fetches it) or `content_base64`',
+      '(the bytes inline, which makes the call a third larger than the file).',
+      '',
+      `Accepted: ${describeMediaLimits()}. The type is determined from the bytes, never`,
+      'from the filename or a declared MIME type, and PNGs must be 8-bit. Anything else',
+      'is refused with a message naming the format and what to convert to. Identical',
+      'bytes already in the library return the existing asset (`deduplicated: true`).',
+      '',
+      'source_url must be publicly reachable over http(s); redirects are followed',
+      'but nothing inside a private network is fetched.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['filename'],
+      additionalProperties: false,
+      properties: {
+        filename: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'The name to store and serve the file under, e.g. "welcome.png". It appears ' +
+            'in the URL and is shown to WhatsApp recipients of documents.',
+        },
+        source_url: {
+          type: 'string',
+          description: 'A public http(s) URL to fetch the file from.',
+        },
+        content_base64: {
+          type: 'string',
+          description: 'The file bytes, base64-encoded (standard alphabet, padding optional).',
+        },
+        mime_type: {
+          type: 'string',
+          description:
+            'Optional declared type, only used to tell audio from video inside an MP4 ' +
+            'container (e.g. "audio/mp4"). The real type is sniffed from the bytes.',
+        },
+      },
+    },
+  },
+];
+const BAIL_TOOLS = [];
+const TICKET_TOOLS = [];
+const ACCOUNT_TOOLS = [];
+
+const TOOLS = [].concat(
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
+);
 
 const toolByName = name => TOOLS.find(t => t.name === name) || null;
 
@@ -782,6 +1435,222 @@ function mergeSettings(current, args) {
 }
 
 // ---------------------------------------------------------------------------
+// Survey-scoped tools: the one error message and the monitoring shapes.
+// ---------------------------------------------------------------------------
+
+/*
+ * Every survey-scoped tool answers a name that is not the caller's the same
+ * way list_surveys does: with the names that are. Not-yours and
+ * does-not-exist are deliberately the same message.
+ */
+function unknownSurveyError(survey_name, known = []) {
+  return (
+    `No survey named "${survey_name}". ` +
+    (known.length
+      ? `Your surveys are: ${known.map(n => `"${n}"`).join(', ')}.`
+      : 'You have no surveys yet.')
+  );
+}
+
+// The filter object queries/states#list takes, from the tool's arguments.
+function buildStatesFilters(args) {
+  const offset = Number(args.offset);
+  return {
+    state: args.state,
+    errorTag: args.error_tag,
+    form: args.form,
+    search: args.search,
+    limit: clampLimit(args.limit, LIST_STATES_LIMIT),
+    offset: Number.isInteger(offset) && offset > 0 ? offset : 0,
+  };
+}
+
+// { total, limit, offset, items } — the paging contract for offset-paged lists.
+function shapeStatesList(result, filters) {
+  return {
+    total: result.total,
+    limit: filters.limit,
+    offset: filters.offset,
+    items: result.states,
+  };
+}
+
+const noParticipantError = (userid, survey_name) =>
+  `No participant "${userid}" in survey "${survey_name}". The userid must match ` +
+  'exactly what list_states reports; use its `search` argument to find a partial id.';
+
+// ---------------------------------------------------------------------------
+// Data shaping.
+// ---------------------------------------------------------------------------
+
+// Errors, prefixed with the argument path, or [] when the options fit the type.
+function validateExportOptions(export_type, options) {
+  const schema = EXPORT_OPTION_SCHEMAS[export_type];
+  if (!schema) return [`export_type: must be one of ${EXPORT_TYPES.join(', ')}`];
+  return validateAgainstSchema(schema, options === undefined ? {} : options, ['options']);
+}
+
+// The row export_status stores, projected to what an agent needs. `user_id`
+// is the caller's own email and `locked_at` is the worker's business, so
+// neither is returned; the placeholder link ("Not Found") becomes null until
+// the export is actually done.
+function shapeExportRow(row) {
+  return {
+    id: row.id,
+    survey_name: row.survey_id,
+    export_type: row.source,
+    status: row.status,
+    export_link: row.status === EXPORT_DONE_STATUS ? row.export_link : null,
+    updated: row.updated,
+    retry_count: row.retry_count,
+    options: row.options,
+  };
+}
+
+function shapeExportStarted({ export_id, source }, survey_name) {
+  return {
+    export_id,
+    survey_name,
+    export_type: source,
+    status: 'Requested',
+    note:
+      'The export runs asynchronously. Call list_exports (with this survey_name) to ' +
+      `watch it move through ${EXPORT_STATUSES.join(' -> ')}; when it is ` +
+      `${EXPORT_DONE_STATUS} the row carries a download URL valid for ` +
+      `${EXPORT_LINK_TTL_HOURS} hours.`,
+  };
+}
+
+/*
+ * { page_size, next_cursor, items }. The query stamps every row with the
+ * cursor that points just past it, so the last row's token is the next page;
+ * a short page is the last page.
+ */
+function shapeResponsesPage(rows, pageSize) {
+  const full = rows.length >= pageSize;
+  return {
+    page_size: pageSize,
+    next_cursor: full ? rows[rows.length - 1].token : null,
+    items: rows,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Media shaping: where the bytes come from, and what an upload answers.
+// ---------------------------------------------------------------------------
+
+const BASE64_PATTERN = /^[A-Za-z0-9+/\s]*={0,2}\s*$/;
+
+// Decoded size of a base64 string without decoding it — the cap is checked
+// before a 130 MB string is turned into a 100 MB buffer.
+function base64DecodedBytes(content) {
+  const clean = String(content).replace(/\s+/g, '');
+  const padding = (clean.match(/=+$/) || [''])[0].length;
+  return Math.floor((clean.length * 3) / 4) - padding;
+}
+
+/*
+ * -> { ok: true, source: 'url', url } | { ok: true, source: 'base64', bytes }
+ * -> { ok: false, errors: [...] }
+ *
+ * Exactly one source, and neither one obviously over the cap, before any IO.
+ */
+function validateUploadSource(args) {
+  const hasUrl = args.source_url !== undefined;
+  const hasBytes = args.content_base64 !== undefined;
+
+  if (hasUrl === hasBytes) {
+    return {
+      ok: false,
+      errors: [
+        hasUrl
+          ? 'pass either source_url or content_base64, not both'
+          : 'pass either source_url (preferred) or content_base64',
+      ],
+    };
+  }
+
+  if (hasUrl) {
+    const check = checkSourceUrl(args.source_url);
+    return check.ok ? { ok: true, source: 'url', url: check.url } : { ok: false, errors: [check.error] };
+  }
+
+  const content = String(args.content_base64);
+  if (!content.trim() || !BASE64_PATTERN.test(content)) {
+    return { ok: false, errors: ['content_base64 is not valid base64'] };
+  }
+  const bytes = base64DecodedBytes(content);
+  if (bytes > MAX_UPLOAD_BYTES) {
+    const maxMB = (MAX_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
+    return {
+      ok: false,
+      errors: [`content_base64 decodes to ${(bytes / (1024 * 1024)).toFixed(1)} MB; the maximum is ${maxMB} MB`],
+    };
+  }
+  return { ok: true, source: 'base64', bytes };
+}
+
+const decodeBase64 = content => Buffer.from(String(content).replace(/\s+/g, ''), 'base64');
+
+/*
+ * The JSON body an upload_media call can be. Over REST a file travels as
+ * multipart and the JSON parser never sees it; over MCP `content_base64` is a
+ * string INSIDE the JSON-RPC message, so the parser's limit is the upload
+ * limit. Base64 is 4/3 of the bytes, plus one megabyte of envelope. server.js
+ * mounts a parser with this limit on the MCP path ahead of the global one,
+ * whose default is 100 KB.
+ */
+const MCP_BODY_LIMIT_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 1024 * 1024;
+
+function shapeUploadResult({ asset, deduplicated }) {
+  return {
+    ...asset,
+    deduplicated: !!deduplicated,
+    note: deduplicated
+      ? 'These exact bytes were already in the library; this is the existing asset.'
+      : 'The URL works immediately. Platform-side copies for faster sending are ' +
+        'created in the background and are never required.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Bounded lists and redaction — the two decisions every list tool shares.
+// ---------------------------------------------------------------------------
+
+/*
+ * Every list a tool returns is bounded. The REST endpoints mostly are not
+ * (list_states has no maximum limit over REST), and an agent that asks for
+ * "everything" gets a context window full of rows. Absent or junk -> the
+ * default; anything above the cap -> the cap.
+ */
+function clampLimit(value, { default: fallback, max }) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) return fallback;
+  return Math.min(n, max);
+}
+
+/*
+ * A messaging credential row is `entity`, `key` (the platform account id) and
+ * a `details` blob that holds the access token. Nothing from `details` leaves
+ * this function except a display name, and the name is looked up by known
+ * keys rather than by copying the blob, so a future column cannot leak by
+ * accident. The recursive no-secret test in mcp.core.test.js is the contract.
+ */
+const DISPLAY_NAME_KEYS = ['name', 'verified_name', 'display_phone_number'];
+
+function redactCredential(row) {
+  const details = (row && row.details) || {};
+  const nameKey = DISPLAY_NAME_KEYS.find(k => typeof details[k] === 'string' && details[k]);
+
+  return {
+    entity: row.entity,
+    account_id: row.key,
+    name: nameKey ? details[nameKey] : null,
+    created: row.created || null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Result shaping.
 // ---------------------------------------------------------------------------
 
@@ -810,6 +1679,14 @@ const NO_FLY_ACCOUNT =
 module.exports = {
   // constants / data
   TOOLS,
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
   SERVER_INSTRUCTIONS,
   VERSIONING_NOTE,
   IDENTIFIER_NOTE,
@@ -839,6 +1716,42 @@ module.exports = {
   resolvePreviousVersion,
   buildVersionRequest,
   mergeSettings,
+
+  // survey-scoped tools and monitoring
+  STATE_NAMES,
+  LIST_STATES_LIMIT,
+  MONITORING_NOTE,
+  unknownSurveyError,
+  buildStatesFilters,
+  shapeStatesList,
+  noParticipantError,
+
+  // data
+  DATA_NOTE,
+  EXPORT_TYPES,
+  EXPORT_STATUSES,
+  EXPORT_DONE_STATUS,
+  EXPORT_LINK_TTL_HOURS,
+  EXPORT_OPTION_SCHEMAS,
+  EVENT_GROUPS,
+  GET_RESPONSES_PAGE,
+  validateExportOptions,
+  shapeExportRow,
+  shapeExportStarted,
+  shapeResponsesPage,
+
+  // templates and media
+  MESSAGING_ASSETS_NOTE,
+  MAX_UPLOAD_BYTES,
+  MCP_BODY_LIMIT_BYTES,
+  base64DecodedBytes,
+  validateUploadSource,
+  decodeBase64,
+  shapeUploadResult,
+
+  // bounded lists and redaction
+  clampLimit,
+  redactCredential,
 
   // results
   toolResult,

@@ -12,8 +12,37 @@ const core = require('./mcp.core');
 
 const {
   TOOLS,
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
   SERVER_INSTRUCTIONS,
   MAX_CHOICES,
+  clampLimit,
+  redactCredential,
+  STATE_NAMES,
+  LIST_STATES_LIMIT,
+  unknownSurveyError,
+  buildStatesFilters,
+  shapeStatesList,
+  noParticipantError,
+  EXPORT_TYPES,
+  EXPORT_OPTION_SCHEMAS,
+  GET_RESPONSES_PAGE,
+  validateExportOptions,
+  shapeExportRow,
+  shapeExportStarted,
+  shapeResponsesPage,
+  MAX_UPLOAD_BYTES,
+  MCP_BODY_LIMIT_BYTES,
+  base64DecodedBytes,
+  validateUploadSource,
+  decodeBase64,
+  shapeUploadResult,
   validateAgainstSchema,
   validateToolArgs,
   toolByName,
@@ -34,15 +63,60 @@ const {
   invalidArgsError,
 } = core;
 
+/*
+ * Every tool the server advertises, by area, in order. Adding a tool means
+ * adding its name here — which is the point: the advertised surface is a
+ * contract, and this table is where a reviewer sees it change.
+ */
+const TOOL_NAMES = {
+  SURVEY_TOOLS: [
+    'list_surveys',
+    'create_typeform_form',
+    'create_survey',
+    'create_survey_version',
+    'update_survey_settings',
+  ],
+  MONITORING_TOOLS: [
+    'get_states_summary',
+    'list_states',
+    'get_participant_state',
+    'get_survey_health',
+    'get_platform_notices',
+  ],
+  DATA_TOOLS: ['start_export', 'list_exports', 'get_responses'],
+  TEMPLATE_TOOLS: [
+    'list_message_templates',
+    'get_message_template',
+    'create_message_template',
+    'delete_message_template',
+  ],
+  MEDIA_TOOLS: ['list_media', 'upload_media'],
+  BAIL_TOOLS: [],
+  TICKET_TOOLS: [],
+  ACCOUNT_TOOLS: [],
+};
+
+const AREAS = {
+  SURVEY_TOOLS,
+  MONITORING_TOOLS,
+  DATA_TOOLS,
+  TEMPLATE_TOOLS,
+  MEDIA_TOOLS,
+  BAIL_TOOLS,
+  TICKET_TOOLS,
+  ACCOUNT_TOOLS,
+};
+
 describe('mcp.core: tool definitions', () => {
-  it('exposes exactly the five tools, each with a name, description and schema', () => {
-    expect(TOOLS.map(t => t.name)).to.eql([
-      'list_surveys',
-      'create_typeform_form',
-      'create_survey',
-      'create_survey_version',
-      'update_survey_settings',
-    ]);
+  it('exposes exactly the expected tools, per area and in order', () => {
+    Object.entries(TOOL_NAMES).forEach(([area, names]) => {
+      expect(AREAS[area].map(t => t.name), area).to.eql(names);
+    });
+    expect(TOOLS.map(t => t.name)).to.eql([].concat(...Object.values(TOOL_NAMES)));
+  });
+
+  it('gives every tool a unique name, a description and an object schema', () => {
+    expect(new Set(TOOLS.map(t => t.name)).size).to.equal(TOOLS.length);
 
     TOOLS.forEach(tool => {
       expect(tool.description, tool.name).to.be.a('string');
@@ -510,5 +584,325 @@ describe('mcp.core: lookups and results', () => {
     expect(invalidArgsError(['a', 'b']).content[0].text).to.equal(
       'Invalid arguments:\n  - a\n  - b',
     );
+  });
+});
+
+describe('mcp.core: clampLimit', () => {
+  const bounds = { default: 50, max: 200 };
+
+  it('passes a sane value through', () => {
+    expect(clampLimit(10, bounds)).to.equal(10);
+    expect(clampLimit('25', bounds)).to.equal(25);
+  });
+
+  it('caps at the maximum rather than refusing', () => {
+    expect(clampLimit(5000, bounds)).to.equal(200);
+    expect(clampLimit(200, bounds)).to.equal(200);
+  });
+
+  it('falls back to the default on absent or junk input', () => {
+    [undefined, null, 0, -3, 'lots', 2.5, NaN].forEach(v => {
+      expect(clampLimit(v, bounds), String(v)).to.equal(50);
+    });
+  });
+});
+
+describe('mcp.core: redactCredential', () => {
+  const SECRET_KEYS = [
+    'access_token',
+    'token',
+    'secret',
+    'value',
+    'password',
+    'id_token',
+    'refresh_token',
+    'details',
+  ];
+
+  // Walks every nesting level: a secret two objects deep is still a leak.
+  const keysAtAnyDepth = value => {
+    if (!value || typeof value !== 'object') return [];
+    return Object.entries(value).flatMap(([k, v]) => [k].concat(keysAtAnyDepth(v)));
+  };
+
+  const row = {
+    entity: 'facebook_page',
+    key: '1234567890',
+    created: '2026-01-01T00:00:00Z',
+    details: {
+      id: '1234567890',
+      name: 'Health Study Page',
+      access_token: 'EAAB-super-secret',
+      nested: { token: 'also-secret', deeper: { secret: 'x' } },
+    },
+  };
+
+  it('keeps only the identity and a display name', () => {
+    expect(redactCredential(row)).to.eql({
+      entity: 'facebook_page',
+      account_id: '1234567890',
+      name: 'Health Study Page',
+      created: '2026-01-01T00:00:00Z',
+    });
+  });
+
+  // The whole reason this is a pure function with its own test.
+  it('leaks no secret-shaped key at any depth', () => {
+    const keys = keysAtAnyDepth(redactCredential(row));
+    SECRET_KEYS.forEach(k => expect(keys, k).to.not.include(k));
+  });
+
+  it('finds a WhatsApp display name and tolerates an empty blob', () => {
+    expect(
+      redactCredential({
+        entity: 'whatsapp_business',
+        key: '9876',
+        details: { verified_name: 'Clinic', display_phone_number: '+1 555 0100' },
+      }).name,
+    ).to.equal('Clinic');
+    expect(redactCredential({ entity: 'whatsapp_business', key: '9876' })).to.eql({
+      entity: 'whatsapp_business',
+      account_id: '9876',
+      name: null,
+      created: null,
+    });
+  });
+});
+
+describe('mcp.core: monitoring', () => {
+  it('teaches the summary -> list -> detail flow in the server instructions', () => {
+    expect(SERVER_INSTRUCTIONS).to.match(/MONITORING\./);
+    expect(SERVER_INSTRUCTIONS).to.match(/get_states_summary first/);
+  });
+
+  it('only accepts a state the state machine can produce', () => {
+    expect(validateToolArgs('list_states', { survey_name: 'S', state: 'ERROR' })).to.eql({ ok: true });
+    const { errors } = validateToolArgs('list_states', { survey_name: 'S', state: 'error' });
+    expect(errors[0]).to.match(/state: must be one of/);
+    // Every documented state is filterable.
+    ['START', 'RESPONDING', 'QOUT', 'END', 'BLOCKED', 'ERROR', 'WAIT_EXTERNAL_EVENT', 'USER_BLOCKED']
+      .forEach(st => expect(STATE_NAMES).to.include(st));
+  });
+
+  it('requires survey_name on every survey-scoped monitoring tool', () => {
+    ['get_states_summary', 'list_states', 'get_survey_health'].forEach(name => {
+      expect(validateToolArgs(name, {}).errors[0], name).to.match(/missing required property "survey_name"/);
+    });
+    expect(validateToolArgs('get_participant_state', { survey_name: 'S' }).errors[0])
+      .to.match(/missing required property "userid"/);
+    expect(validateToolArgs('get_platform_notices', {})).to.eql({ ok: true });
+  });
+
+  // The REST endpoint has no maximum; the tool must, or "show me everyone"
+  // fills the context window.
+  it('clamps the list limit and normalises the offset', () => {
+    expect(buildStatesFilters({ survey_name: 'S' })).to.eql({
+      state: undefined,
+      errorTag: undefined,
+      form: undefined,
+      search: undefined,
+      limit: LIST_STATES_LIMIT.default,
+      offset: 0,
+    });
+    const f = buildStatesFilters({
+      survey_name: 'S',
+      state: 'ERROR',
+      error_tag: 'FB',
+      form: 'main',
+      search: 'abc',
+      limit: 9999,
+      offset: -4,
+    });
+    expect(f).to.include({ state: 'ERROR', errorTag: 'FB', form: 'main', search: 'abc' });
+    expect(f.limit).to.equal(LIST_STATES_LIMIT.max);
+    expect(f.offset).to.equal(0);
+    expect(buildStatesFilters({ survey_name: 'S', offset: 100 }).offset).to.equal(100);
+  });
+
+  it('shapes a page as { total, limit, offset, items }', () => {
+    const rows = [{ userid: 'u1' }];
+    expect(shapeStatesList({ states: rows, total: 41 }, { limit: 50, offset: 0 })).to.eql({
+      total: 41,
+      limit: 50,
+      offset: 0,
+      items: rows,
+    });
+  });
+
+  it('answers an unknown survey with the names that exist', () => {
+    expect(unknownSurveyError('X', ['A', 'B'])).to.match(/No survey named "X"\. Your surveys are: "A", "B"\./);
+    expect(unknownSurveyError('X', [])).to.match(/no surveys yet/);
+    expect(noParticipantError('u9', 'S')).to.match(/No participant "u9" in survey "S"/);
+  });
+});
+
+describe('mcp.core: data', () => {
+  it('explains that exports are asynchronous and answers are a separate scope', () => {
+    expect(SERVER_INSTRUCTIONS).to.match(/DATA\. Exports are asynchronous/);
+    expect(SERVER_INSTRUCTIONS).to.match(/responses:read/);
+    expect(toolByName('start_export').description).to.match(/7 hours/);
+  });
+
+  it('has an option schema for every export type, and every option is described', () => {
+    expect(Object.keys(EXPORT_OPTION_SCHEMAS)).to.eql(EXPORT_TYPES);
+    EXPORT_TYPES.forEach(type => {
+      Object.entries(EXPORT_OPTION_SCHEMAS[type].properties).forEach(([key, schema]) => {
+        expect(schema.description, `${type}.${key}`).to.be.a('string');
+      });
+    });
+  });
+
+  it('accepts the options that belong to the type', () => {
+    expect(
+      validateExportOptions('responses', {
+        pivot: true,
+        response_value: 'translated_response',
+        metadata: ['wave'],
+      }),
+    ).to.eql([]);
+    expect(validateExportOptions('chat_log', { include_metadata: true })).to.eql([]);
+    expect(
+      validateExportOptions('full_messages', {
+        event_groups: ['conversation', 'bails'],
+        start_time: '2026-08-01T00:00:00Z',
+      }),
+    ).to.eql([]);
+    expect(validateExportOptions('responses', undefined)).to.eql([]);
+  });
+
+  // A key from a different type is a typo the exporter would silently drop.
+  it('rejects an option key that belongs to a different export type', () => {
+    const [err] = validateExportOptions('chat_log', { pivot: true });
+    expect(err).to.match(/options: unknown property "pivot"/);
+    expect(err).to.match(/accepted: include_metadata, include_raw_payload/);
+
+    expect(validateExportOptions('responses', { event_groups: [] })[0]).to.match(/unknown property "event_groups"/);
+    expect(validateExportOptions('full_messages', { event_groups: ['nope'] })[0]).to.match(/must be one of/);
+    expect(validateExportOptions('responses', { response_value: 'answer' })[0]).to.match(/must be one of "response"/);
+  });
+
+  it('projects an export row and hides the link until the export is finished', () => {
+    const row = {
+      id: 'e1',
+      user_id: 'me@example.org',
+      survey_id: 'HPV',
+      source: 'responses',
+      status: 'Requested',
+      export_link: 'Not Found',
+      updated: '2026-09-01T00:00:00Z',
+      retry_count: 0,
+      locked_at: null,
+      options: { pivot: true },
+    };
+    const shaped = shapeExportRow(row);
+    expect(shaped).to.eql({
+      id: 'e1',
+      survey_name: 'HPV',
+      export_type: 'responses',
+      status: 'Requested',
+      export_link: null,
+      updated: '2026-09-01T00:00:00Z',
+      retry_count: 0,
+      options: { pivot: true },
+    });
+    expect(shaped).to.not.have.any.keys('user_id', 'locked_at');
+    expect(shapeExportRow({ ...row, status: 'Finished', export_link: 'https://x/y' }).export_link)
+      .to.equal('https://x/y');
+  });
+
+  it('tells the caller how to follow a started export', () => {
+    const out = shapeExportStarted({ export_id: 'e9', source: 'chat_log' }, 'HPV');
+    expect(out).to.include({ export_id: 'e9', survey_name: 'HPV', export_type: 'chat_log', status: 'Requested' });
+    expect(out.note).to.match(/list_exports/);
+    expect(out.note).to.match(/Finished/);
+  });
+
+  it('pages responses with the last row’s token, and ends on a short page', () => {
+    const rows = [{ userid: 'a', token: 't1' }, { userid: 'b', token: 't2' }];
+    expect(shapeResponsesPage(rows, 2)).to.eql({ page_size: 2, next_cursor: 't2', items: rows });
+    expect(shapeResponsesPage(rows, 3).next_cursor).to.equal(null);
+    expect(shapeResponsesPage([], 25).next_cursor).to.equal(null);
+    expect(GET_RESPONSES_PAGE).to.eql({ default: 25, max: 500 });
+  });
+
+  it('validates the data tool arguments', () => {
+    expect(validateToolArgs('start_export', { survey_name: 'S' }).errors[0]).to.match(/missing required property "export_type"/);
+    expect(validateToolArgs('start_export', { survey_name: 'S', export_type: 'csv' }).errors[0]).to.match(/export_type: must be one of/);
+    expect(validateToolArgs('list_exports', {})).to.eql({ ok: true });
+    expect(validateToolArgs('get_responses', { survey_name: 'S', page_size: 'ten' }).errors[0]).to.match(/page_size: expected integer/);
+  });
+});
+
+describe('mcp.core: templates and media', () => {
+  it('teaches the approval model and the media URL in the instructions', () => {
+    expect(SERVER_INSTRUCTIONS).to.match(/MESSAGING ASSETS\./);
+    expect(SERVER_INSTRUCTIONS).to.match(/must be approved/);
+  });
+
+  // Destructive, and external: the first sentence has to say so.
+  it('opens the delete description with the warning', () => {
+    expect(toolByName('delete_message_template').description).to.match(
+      /^Deletes the template at Meta as well as in Fly; this cannot be undone\./,
+    );
+  });
+
+  it('steers uploads to source_url and names the limits', () => {
+    const desc = toolByName('upload_media').description;
+    expect(desc).to.match(/source_url.*preferred/);
+    expect(desc).to.match(/image \(JPEG\/PNG\) up to 5 MB/);
+    expect(desc).to.match(/video \(MP4\/3GPP\) up to 16 MB/);
+    expect(desc).to.match(/document \(PDF\/DOCX\/XLSX\/PPTX\) up to 100 MB/);
+  });
+
+  it('validates template arguments structurally', () => {
+    expect(validateToolArgs('create_message_template', { account_id: 'p', name: 'n', language: 'en_US', body: 'Hi' })).to.eql({ ok: true });
+    expect(validateToolArgs('create_message_template', { account_id: 'p', name: 'n', language: 'en_US' }).errors[0]).to.match(/missing required property "body"/);
+    expect(validateToolArgs('create_message_template', { account_id: 'p', name: 'n', language: 'en_US', body: 'Hi', buttons: [{ text: 'x' }] }).errors[0]).to.match(/buttons\.\[0\]: missing required property "label"/);
+    expect(validateToolArgs('get_message_template', {}).errors[0]).to.match(/missing required property "id"/);
+    expect(validateToolArgs('list_media', {})).to.eql({ ok: true });
+  });
+
+  describe('validateUploadSource', () => {
+    it('requires exactly one source', () => {
+      expect(validateUploadSource({ filename: 'a.png' }).errors[0]).to.match(/either source_url \(preferred\) or content_base64/);
+      expect(validateUploadSource({ filename: 'a.png', source_url: 'https://x.org/a', content_base64: 'AA==' }).errors[0]).to.match(/not both/);
+    });
+
+    it('checks a URL with the media core before any fetch', () => {
+      expect(validateUploadSource({ source_url: 'https://cdn.example.org/a.png' })).to.eql({
+        ok: true,
+        source: 'url',
+        url: 'https://cdn.example.org/a.png',
+      });
+      expect(validateUploadSource({ source_url: 'http://10.0.0.1/a.png' }).errors[0]).to.match(/not a public address/);
+      expect(validateUploadSource({ source_url: 'ftp://x.org/a' }).errors[0]).to.match(/must be http or https/);
+    });
+
+    it('sizes base64 without decoding it and refuses over the cap', () => {
+      expect(base64DecodedBytes('aGVsbG8=')).to.equal(5);
+      expect(base64DecodedBytes('aGVs\nbG8g\nd29ybGQ=')).to.equal(11);
+      expect(validateUploadSource({ content_base64: 'aGVsbG8=' })).to.eql({ ok: true, source: 'base64', bytes: 5 });
+
+      // 4 chars per 3 bytes: just over the cap, without allocating it.
+      const overCap = 'A'.repeat(Math.ceil((MAX_UPLOAD_BYTES + 3) / 3) * 4);
+      expect(validateUploadSource({ content_base64: overCap }).errors[0]).to.match(/the maximum is 100 MB/);
+    });
+
+    it('refuses something that is not base64', () => {
+      expect(validateUploadSource({ content_base64: '' }).errors[0]).to.match(/not valid base64/);
+      expect(validateUploadSource({ content_base64: 'hello world!' }).errors[0]).to.match(/not valid base64/);
+    });
+  });
+
+  it('sizes the MCP JSON body to carry the largest upload as base64', () => {
+    expect(MCP_BODY_LIMIT_BYTES).to.be.above((MAX_UPLOAD_BYTES * 4) / 3);
+    expect(MCP_BODY_LIMIT_BYTES).to.be.below(MAX_UPLOAD_BYTES * 2);
+  });
+
+  it('decodes base64 and shapes the upload answer', () => {
+    expect(decodeBase64('aGVs\nbG8=').toString()).to.equal('hello');
+    const asset = { id: 'a1', url: 'https://media/a/a1/x.png' };
+    expect(shapeUploadResult({ asset, deduplicated: false })).to.include({ id: 'a1', deduplicated: false });
+    expect(shapeUploadResult({ asset, deduplicated: true }).note).to.match(/already in the library/);
   });
 });

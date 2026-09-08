@@ -91,6 +91,15 @@ const MEDIA_TYPE_LIMITS = {
 const ALLOWED_MIME_TYPES = Object.values(MEDIA_TYPE_LIMITS)
   .flatMap(limit => limit.mimeTypes);
 
+// The backstop against unbounded memory for any way bytes can arrive — the
+// multer cap in media.routes.js and the URL fetch in media.service.js. It is
+// the LARGEST per-type limit (documents, 100 MB) so every per-type refusal
+// still comes from validateUpload with the actual number in it; a file over
+// this is beyond every limit we have, and its message can safely be generic.
+const MAX_UPLOAD_BYTES = Math.max(
+  ...Object.values(MEDIA_TYPE_LIMITS).map(limit => limit.maxBytes),
+);
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MINUTE = 60 * 1000;
@@ -246,6 +255,98 @@ function parseAssetId(url) {
   if (!m) return null;
   // gen_random_uuid() emits lowercase, so the column is lowercase.
   return m[1].toLowerCase();
+}
+
+// --------------------------------------------------------------------------
+// Source URLs — what the server may fetch on a caller's behalf
+// --------------------------------------------------------------------------
+
+/*
+ * The server fetching a URL for a caller is a server-side request forgery
+ * surface: from inside the cluster it can reach services the caller cannot.
+ * These two functions are the pure half of the defence (media.service.js
+ * resolves the hostname and checks the address with isPublicAddress too).
+ */
+
+const PRIVATE_HOST_SUFFIXES = ['.local', '.localhost', '.internal', '.svc', '.cluster.local'];
+
+function parseIPv4(host) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return null;
+  const parts = m.slice(1).map(Number);
+  return parts.every(n => n <= 255) ? parts : null;
+}
+
+/** True for an address the public internet can route to. */
+function isPublicAddress(address) {
+  if (typeof address !== 'string' || !address) return false;
+  let ip = address.toLowerCase();
+  if (ip.startsWith('[') && ip.endsWith(']')) ip = ip.slice(1, -1);
+
+  // IPv4-mapped IPv6 (::ffff:10.0.0.1) is judged as the IPv4 it wraps.
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
+  if (mapped) ip = mapped[1];
+
+  const v4 = parseIPv4(ip);
+  if (v4) {
+    const [a, b] = v4;
+    if (a === 0 || a === 10 || a === 127) return false; // this-net, private, loopback
+    if (a === 169 && b === 254) return false; // link-local, and the cloud metadata service
+    if (a === 172 && b >= 16 && b <= 31) return false; // private
+    if (a === 192 && b === 168) return false; // private
+    if (a === 100 && b >= 64 && b <= 127) return false; // carrier-grade NAT
+    if (a >= 224) return false; // multicast and reserved
+    return true;
+  }
+
+  if (ip.includes(':')) {
+    if (ip === '::' || ip === '::1') return false;
+    const head = parseInt(ip.split(':')[0] || '0', 16);
+    if (head >= 0xfc00 && head <= 0xfdff) return false; // unique local
+    if (head >= 0xfe80 && head <= 0xfebf) return false; // link-local
+    if (head >= 0xff00) return false; // multicast
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * -> { ok: true, url } | { ok: false, error }
+ *
+ * http(s) only, and no host that names something inside the cluster or the
+ * machine. A hostname that survives this is still resolved and its address
+ * checked before anything is fetched.
+ */
+function checkSourceUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch (e) {
+    return { ok: false, error: `source_url is not a valid URL: ${JSON.stringify(value)}` };
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { ok: false, error: `source_url must be http or https, not ${url.protocol.replace(':', '')}` };
+  }
+
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  const literal = host.startsWith('[') ? host.slice(1, -1) : host;
+  const isLiteral = parseIPv4(literal) !== null || literal.includes(':');
+
+  if (
+    host === 'localhost' ||
+    PRIVATE_HOST_SUFFIXES.some(suffix => host.endsWith(suffix)) ||
+    !host.includes('.') && !isLiteral ||
+    (isLiteral && !isPublicAddress(literal))
+  ) {
+    return {
+      ok: false,
+      error: `source_url host "${url.hostname}" is not a public address; only publicly reachable URLs can be fetched.`,
+    };
+  }
+
+  return { ok: true, url: url.toString() };
 }
 
 // --------------------------------------------------------------------------
@@ -730,6 +831,9 @@ function action(type, assetId, account, reason) {
 module.exports = {
   MEDIA_TYPE_LIMITS,
   ALLOWED_MIME_TYPES,
+  MAX_UPLOAD_BYTES,
+  isPublicAddress,
+  checkSourceUrl,
   DEFAULT_RECONCILE_POLICY,
   OCTET_STREAM,
   canonicalPlatform,

@@ -25,11 +25,34 @@ const { scopeGrants } = require('../auth/auth.core');
  * own and is not otherwise readable through this endpoint.
  */
 const TOOL_SCOPES = {
+  // surveys
   list_surveys: 'surveys:read',
   create_typeform_form: 'surveys:write',
   create_survey: 'surveys:write',
   create_survey_version: 'surveys:write',
   update_survey_settings: 'surveys:write',
+
+  // monitoring — states and health live under /surveys/:name over REST, so
+  // surveys:read already reaches participant state there; the tools match.
+  get_states_summary: 'surveys:read',
+  list_states: 'surveys:read',
+  get_participant_state: 'surveys:read',
+  get_survey_health: 'surveys:read',
+  get_platform_notices: 'platform:read',
+
+  // data — `responses` is its own resource so a key can see study structure
+  // and participant state without reading people's answers.
+  start_export: 'exports:write',
+  list_exports: 'exports:read',
+  get_responses: 'responses:read',
+
+  // templates and media
+  list_message_templates: 'templates:read',
+  get_message_template: 'templates:read',
+  create_message_template: 'templates:write',
+  delete_message_template: 'templates:write',
+  list_media: 'media:read',
+  upload_media: 'media:write',
 };
 
 // Absent scopes are unrestricted, matching the middleware exactly.
@@ -53,7 +76,32 @@ const {
   buildTypeformCreatePayload,
   NO_TYPEFORM_CREDENTIAL,
   NO_FLY_ACCOUNT,
+  unknownSurveyError,
+  buildStatesFilters,
+  shapeStatesList,
+  noParticipantError,
+  validateExportOptions,
+  shapeExportRow,
+  shapeExportStarted,
+  shapeResponsesPage,
+  clampLimit,
+  GET_RESPONSES_PAGE,
+  validateUploadSource,
+  decodeBase64,
+  shapeUploadResult,
 } = core;
+
+/*
+ * The ownership gate for every survey-scoped tool: resolve the name through
+ * the same lookup the REST middleware uses, and answer a miss with the names
+ * that exist. `fn` receives the resolved survey and never a bare name.
+ */
+async function withSurvey(args, email, fn) {
+  const resolved = await service.resolveSurvey({ email, survey_name: args.survey_name });
+  if (!resolved.ok) return toolError(unknownSurveyError(args.survey_name, resolved.known));
+  const { email: owner, surveyName, shortcodes } = resolved;
+  return fn({ email: owner, surveyName, shortcodes });
+}
 
 // Everything a tool says about a survey it just wrote. `version` is computed
 // rather than stored, so it is recomputed from the full list every time.
@@ -191,6 +239,155 @@ const TOOL_HANDLERS = {
       off_time: result.settings.off_time,
       retired: !!result.settings.off_time,
     });
+  },
+
+  // --- monitoring ----------------------------------------------------------
+
+  get_states_summary(args, { email }) {
+    return withSurvey(args, email, async survey =>
+      toolResult(await service.statesSummary(survey)),
+    );
+  },
+
+  list_states(args, { email }) {
+    return withSurvey(args, email, async survey => {
+      const filters = buildStatesFilters(args);
+      const result = await service.listStates(survey, filters);
+      return toolResult(shapeStatesList(result, filters));
+    });
+  },
+
+  get_participant_state(args, { email }) {
+    return withSurvey(args, email, async survey => {
+      const row = await service.stateDetail(survey, args.userid);
+      if (!row) return toolError(noParticipantError(args.userid, args.survey_name));
+      return toolResult(row);
+    });
+  },
+
+  get_survey_health(args, { email }) {
+    return withSurvey(args, email, async survey =>
+      toolResult(await service.healthFindings(survey)),
+    );
+  },
+
+  async get_platform_notices() {
+    return toolResult(await service.platformNotices());
+  },
+
+  // --- data ----------------------------------------------------------------
+
+  start_export(args, { email }) {
+    // Options are checked against the per-type schema before any IO, and the
+    // survey is resolved before the insert so a survey that is not yours is a
+    // message rather than a row the exporter would run to nothing.
+    const optionErrors = validateExportOptions(args.export_type, args.options);
+    if (optionErrors.length) return invalidArgsError(optionErrors);
+
+    return withSurvey(args, email, async () => {
+      const started = await service.startExport({
+        email,
+        survey_name: args.survey_name,
+        export_type: args.export_type,
+        options: args.options || {},
+      });
+      return toolResult(shapeExportStarted(started, args.survey_name));
+    });
+  },
+
+  async list_exports(args, { email }) {
+    const list = async () => {
+      const rows = await service.listExports({ email, survey_name: args.survey_name });
+      return toolResult({ count: rows.length, items: rows.map(shapeExportRow) });
+    };
+    return args.survey_name ? withSurvey(args, email, list) : list();
+  },
+
+  get_responses(args, { email }) {
+    return withSurvey(args, email, async () => {
+      const pageSize = clampLimit(args.page_size, GET_RESPONSES_PAGE);
+      const { responses } = await service.getResponses({
+        email,
+        survey_name: args.survey_name,
+        after: args.after || null,
+        pageSize,
+      });
+      return toolResult(shapeResponsesPage(responses, pageSize));
+    });
+  },
+
+  // --- templates -----------------------------------------------------------
+
+  async list_message_templates(args, { email }) {
+    const items = await service.listTemplates({ email, accountId: args.account_id });
+    return toolResult({ count: items.length, items });
+  },
+
+  async get_message_template(args, { email }) {
+    return toolResult(await service.getTemplate({ email, id: args.id }));
+  },
+
+  async create_message_template(args, { email }) {
+    const record = await service.createTemplate({
+      email,
+      accountId: args.account_id,
+      name: args.name,
+      language: args.language,
+      body: args.body,
+      buttons: args.buttons,
+      examples: args.examples,
+    });
+    return toolResult({
+      ...record,
+      note:
+        record.status === 'APPROVED'
+          ? 'Meta approved the template immediately; it can be sent now.'
+          : `Submitted to Meta with status ${record.status}. Approval is asynchronous — ` +
+            'call list_message_templates or get_message_template to see it become ' +
+            'APPROVED or REJECTED (with a rejection_reason).',
+    });
+  },
+
+  async delete_message_template(args, { email }) {
+    const deleted = await service.deleteTemplate({ email, id: args.id });
+    return toolResult({
+      deleted,
+      note: 'Removed at Meta and in Fly. Any survey question still naming this template will fail to send.',
+    });
+  },
+
+  // --- media ---------------------------------------------------------------
+
+  async list_media(args, { email }) {
+    const items = await service.listAssets({ email });
+    return toolResult({ count: items.length, items });
+  },
+
+  async upload_media(args, { email }) {
+    const source = validateUploadSource(args);
+    if (!source.ok) return invalidArgsError(source.errors);
+
+    let buffer;
+    let mimetype = args.mime_type;
+    if (source.source === 'url') {
+      const fetched = await service.fetchSource(source.url);
+      buffer = fetched.buffer;
+      mimetype = mimetype || fetched.contentType || undefined;
+    } else {
+      buffer = decodeBase64(args.content_base64);
+    }
+
+    const result = await service.uploadAsset({
+      email,
+      file: { buffer, originalname: args.filename, mimetype },
+    });
+    if (!result.ok) return toolError(`Refused: ${result.error}. Nothing was stored.`);
+
+    // Best-effort platform copies, never awaited: a handle is an optimisation
+    // (media.service.js), and the reconciler backfills whatever this misses.
+    result.fanOut();
+
+    return toolResult(shapeUploadResult(result));
   },
 };
 

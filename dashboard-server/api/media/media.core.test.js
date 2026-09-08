@@ -1065,3 +1065,66 @@ describe('media.core', () => {
     });
   });
 });
+
+describe('media.core source URLs (SSRF guard)', () => {
+  const { expect } = require('chai');
+  const { isPublicAddress, checkSourceUrl, MAX_UPLOAD_BYTES } = require('./media.core');
+
+  it('derives the upload cap from the largest per-type limit', () => {
+    expect(MAX_UPLOAD_BYTES).to.equal(100 * 1024 * 1024);
+  });
+
+  it('knows a public address from a private one', () => {
+    ['8.8.8.8', '151.101.1.69', '2606:4700::1111', '::ffff:93.184.216.34'].forEach(ip => {
+      expect(isPublicAddress(ip), ip).to.equal(true);
+    });
+    [
+      '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254',
+      '100.64.0.1', '0.0.0.0', '224.0.0.1', '::1', '::', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1',
+      '', undefined, 'not-an-ip',
+    ].forEach(ip => {
+      expect(isPublicAddress(ip), String(ip)).to.equal(false);
+    });
+    expect(isPublicAddress('172.32.0.1')).to.equal(true);
+  });
+
+  it('accepts a public http(s) URL', () => {
+    expect(checkSourceUrl('https://cdn.example.org/a/b.png?x=1').ok).to.equal(true);
+    expect(checkSourceUrl('http://93.184.216.34/file.mp4').ok).to.equal(true);
+  });
+
+  it('refuses schemes other than http and https', () => {
+    ['file:///etc/passwd', 'ftp://example.org/x', 'gopher://x', 'javascript:alert(1)'].forEach(u => {
+      const out = checkSourceUrl(u);
+      expect(out.ok, u).to.equal(false);
+      expect(out.error, u).to.match(/must be http or https/);
+    });
+  });
+
+  // From inside the cluster these names reach things the caller cannot. A
+  // bare Kubernetes service name ("alertmanager-operated.monitoring") is not
+  // distinguishable from a public two-label host by shape; it is caught by
+  // the address check after resolution (media.service.test.js).
+  it('refuses cluster-internal and loopback hosts by name or literal', () => {
+    [
+      'http://localhost:9093/api',
+      'http://alertmanager:9093/',
+      'http://kubernetes.default.svc/',
+      'http://cockroachdb.vprod.svc.cluster.local:8080/',
+      'http://127.0.0.1/',
+      'http://[::1]/',
+      'http://169.254.169.254/latest/meta-data/',
+      'http://10.0.0.5/',
+      'http://foo.internal/',
+    ].forEach(u => {
+      const out = checkSourceUrl(u);
+      expect(out.ok, u).to.equal(false);
+      expect(out.error, u).to.match(/not a public address/);
+    });
+  });
+
+  it('refuses garbage', () => {
+    expect(checkSourceUrl('not a url').ok).to.equal(false);
+    expect(checkSourceUrl(undefined).ok).to.equal(false);
+  });
+});

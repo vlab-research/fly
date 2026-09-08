@@ -210,20 +210,39 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/responses` | Survey response data |
 | `/surveys` | Survey CRUD and settings |
 | `/users` | Account operations |
-| `/exports` | Async data export (via Kafka) |
+| `/exports` | Async data export: inserts an `export_status` row the exporter polls (no Kafka) |
 | `/typeform` | Typeform integration |
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
-| `/mcp` | MCP server — `POST` only, Streamable HTTP, five survey tools. Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
-| `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware |
+| `/mcp` | MCP server — `POST` only, Streamable HTTP, nineteen tools (five survey, five monitoring, three data, four template, two media). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
+| `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
 | `/users/:userId/bail-events` | All bail events for a user |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
 | `/platform/notices` | Platform-wide notices proxied from AlertManager (whitelisted alertnames, fail-soft) |
 | `/media` | Researcher media library — upload bytes, get back a permanent public URL. Platform-independent: no page selector, no connected-page requirement. See "Media endpoints" below |
-| `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md` |
+| `/message-templates` | Facebook Utility Message templates (CRUD per `(page, name, language)`); see `documentation/utility-messages.md`. Also the four `*_message_template` MCP tools |
 | `/tickets` | Support tickets — thin UI proxy over Linear (no local storage); see `documentation/tickets.md` |
+| `/cubejs-api` | Cube.js analytics (see "Cube.js analytics" below) |
+
+### Cube.js analytics (`/cubejs-api`)
+
+The `/cubejs-api` endpoint provides aggregated analytics queries via Cube.js, mounted by
+`CubejsServerCore.initApp(app)` in `index.js` with `checkAuthMiddleware: auth`.
+
+**Cubes:**
+- `Responses` — measures: `count`, `uniqueUserCount`, `startTime`, `endTime`; dimensions: `formid`, `userid`, `flowid`, `timestamp`, `response`, `questionId`
+- `LastQuestions` — measure: `count`; dimensions: `formid`, `timestamp`, `response`, `questionRef`, `questionText`
+
+**Known limitation:** The endpoint is authenticated but **not scoped to the caller's surveys**.
+The cube SQL is `SELECT * FROM responses` with no email join and no `queryRewrite`, so the only
+survey filter is the `formid` dimension that the browser client supplies. Any Auth0 user or
+unscoped API key can read any survey's response data by providing another survey's id. Scoped
+API keys are refused only because `/cubejs-api` is not listed in `ROUTE_RESOURCES`, not because
+the endpoint itself enforces scoping. To restrict analytics to a caller's own surveys, a
+`queryRewrite` in the Cube config would be needed to inject an email-based filter, or the five
+analytics reports in the dashboard should be replaced with scoped REST queries.
 
 ### Credentials
 
@@ -264,13 +283,21 @@ The express body parser has already drained the request, so the parsed body is
 handed to `transport.handleRequest` explicitly; without that the transport waits
 forever on a stream that has already ended.
 
+**Body size.** `upload_media`'s `content_base64` is a string inside the JSON-RPC
+message, so the JSON parser's limit is the upload limit. `server.js` mounts
+`express.json({ limit: MCP_BODY_LIMIT_BYTES })` on `/api/v1/mcp` ahead of the
+global parser (default 100 KB); the constant is derived in `mcp.core.js` from
+the media cap (`MAX_UPLOAD_BYTES` × 4/3 plus 1 MB). The dashboard-api ingress
+annotation `proxy-body-size: 200m` in `devops/values/*.yaml` is what lets it
+through nginx.
+
 **Functional core, imperative shell:**
 
 | File | Role |
 |---|---|
-| `mcp.core.js` | Pure. The five tool definitions (name, description, JSON Schema), the server instructions, a small JSON Schema validator, and every decision function — `summariseSurveys`, `resolvePreviousVersion`, `buildVersionRequest`, `mergeSettings`, result shaping. No IO, no clock |
+| `mcp.core.js` | Pure. The tool definitions (name, description, JSON Schema) as one array per area — `SURVEY_TOOLS`, `MONITORING_TOOLS`, … — concatenated into `TOOLS`; the server instructions; a small JSON Schema validator; and every decision function — `summariseSurveys`, `resolvePreviousVersion`, `buildVersionRequest`, `mergeSettings`, `clampLimit`, `redactCredential`, result shaping. No IO, no clock |
 | `mcp.tools.js` | Dispatch. `TOOL_SCOPES` (the per-tool scope check), one thin async handler per tool, and `runTool`, which turns every failure into a tool error rather than letting it escape as a transport error |
-| `mcp.service.js` | The shell: Typeform authoring and the `survey_settings` read-modify-write. **Creating a survey version is not here** — see below |
+| `mcp.service.js` | The shell: Typeform authoring and the `survey_settings` read-modify-write, plus re-exports of every other module's service functions (`api/states/states.service.js`, `api/health/health.service.js`, …) so the dispatcher has one import to stub. **Nothing else is implemented here** — see below |
 | `mcp.typeform.js` | `createForm` — the one Typeform call the dashboard has never needed, since `utils/typeform/` only ever read |
 | `mcp.server.js` | Builds one `Server` per request, bound to one email + scope set |
 | `mcp.routes.js` | Transport wiring |
@@ -302,6 +329,25 @@ and the two kinds of failure are the whole contract: a `SurveyFailure` (marked
 verbatim; anything else is ours and must never be echoed, because unexpected
 messages leak internals.
 
+**That is the rule for every tool.** Each module the MCP reaches has a
+`<module>.service.js` of `req`-free functions taking `{email, ...}`, the
+controller calls it, and `mcp.service.js` re-exports it:
+
+| Module | Service | Shared with |
+|---|---|---|
+| `api/states/states.service.js` | `resolveSurvey` (the ownership lookup `validateSurveyNameAccess` now calls), `statesSummary`, `listStates`, `stateDetail` | states routes, `get_states_summary`, `list_states`, `get_participant_state` |
+| `api/health/health.service.js` | `healthFindings`, `platformNotices` (fail-soft, never throws) | health and platform routes, `get_survey_health`, `get_platform_notices` |
+| `api/exports/exports.service.js` | `startExport`, `listExports` | exports routes, `start_export`, `list_exports` |
+| `api/responses/response.service.js` | `getResponses` (a survey with no responses is an empty page, not a `RequestError`) | `GET /responses`, `get_responses` |
+| `api/bails/bails.service.js` | `resolveVlabUser` (get-or-create from email, so an agent never sees a user id), `expected`-marked wrappers over `utils/bails` | — |
+| `api/credentials/credential.service.js` | `listMessagingAccounts` (IO only; redaction is `mcp.core#redactCredential`, pure, with a recursive no-secret test) | — |
+| `api/message-templates/message-templates.service.js` | `makeService(deps)` → `createTemplate`, `listTemplates`, `getTemplate`, `deleteTemplate`; failures are `TemplateFailure` with the HTTP status. `makeHandlers(deps)` is the HTTP shell over it; `message-templates.deps.js` builds the real deps once | templates routes, the four `*_message_template` tools |
+| `api/media/media.service.js` | `makeService(deps)` → `uploadAsset` (returns the asset and a `fanOut` thunk), `listAssets`, `fanOutHandles`; `fetchSource`, the bounded, SSRF-guarded URL fetch. `media.deps.js` builds the real deps once | media routes, `list_media`, `upload_media` |
+
+Survey-scoped tools take a resolved survey — `{email, surveyName, shortcodes}`
+from `resolveSurvey` — rather than a bare name, so the ownership check cannot
+be skipped by accident.
+
 Sharing it fixed two bugs that had been live in the REST path:
 `translation_conf` now defaults to `{}` (the old controller dereferenced it
 before checking it existed, so omitting it was a `TypeError` and a 500), and the
@@ -318,12 +364,14 @@ asset/handle model (`planning/media-abstraction.md`; migration
 | File | Role |
 |---|---|
 | `api/media/media.core.js` | Pure decision layer — validation, hashing, keys, URLs, reconcile planning. No IO |
-| `api/media/media.controller.js` | The imperative shell: sequences IO, maps outcomes onto HTTP |
+| `api/media/media.service.js` | The imperative shell: `makeService(deps)` sequences validate → hash → dedupe → put → insert and hands back a `fanOut` thunk; `fetchSource` fetches a public URL under `MAX_UPLOAD_BYTES` with the SSRF guard (`checkSourceUrl`, `isPublicAddress` in the core) |
+| `api/media/media.controller.js` | HTTP over the service: status codes, respond-then-fan-out |
+| `api/media/media.deps.js` | The real deps (queries, S3 storage, platform upload), built once for routes and MCP |
 | `api/media/storage/index.js` | S3 client (`minio`), `{put, get, delete, publicUrl}` |
 | `api/media/media.platform-upload.js` | Pre-upload of bytes to Messenger / WhatsApp, producing a handle |
 | `api/media/media.reconcile.js` | The reconciler shell around `planReconcile` — reads state, bounds the work, executes, reports |
 | `scripts/media-reconcile.js` | CronJob entry point (`node scripts/media-reconcile.js`) |
-| `api/media/media.routes.js` | Multer wiring and the three endpoints |
+| `api/media/media.routes.js` | Multer wiring (cap = `MAX_UPLOAD_BYTES` from the core) and the two endpoints |
 | `queries/media/media.queries.js` | `media_asset` reads/writes and the `media_handle` upsert |
 | `queries/credentials` → `getMessagingAccounts` | The fan-out target set |
 
@@ -333,6 +381,11 @@ asset/handle model (`planning/media-abstraction.md`; migration
 |---|---|
 | `POST /media/upload` | multipart `file`. `201` with the new asset, or **`200` with the existing one** on a dedupe hit |
 | `GET /media` | The caller's assets, newest first |
+
+The same two operations are the MCP tools `list_media` and `upload_media`; the
+tool takes a `source_url` or `content_base64` instead of multipart and feeds the
+bytes into the same `uploadAsset`. See `documentation/agent-api.md` §9
+"Messaging asset tools".
 
 The response shape is `{id, filename, mediaType, mimeType, byteSize, created, url}`.
 **`url` is the whole product** — it is what a researcher pastes into a survey.
@@ -765,6 +818,10 @@ Key aspects:
 - Type casting with `::int` for counts ensures proper integer types in results
 - Functions return raw query results or structured objects (e.g., `{ items, total }` for pagination)
 
+#### States Endpoints
+
+**`GET /surveys/:surveyName/states`** returns a paginated list of participants in any state, optionally filtered by state, error tag, form, or userid search. The `limit` parameter defaults to **50** and has **no maximum** — the caller can request any number of rows. The response includes a `total` count for pagination. API consumers should clamp the limit to a reasonable value and implement cursor/offset-based paging.
+
 #### States Query Module
 
 The `queries/states/` module provides three functions for querying participant state data: `summary`, `list`, and `detail`. All three are scoped to `(email, surveyName, shortcodes)` and apply the same scoping logic — see the docstring at the top of `queries/states/states.queries.js` for the full explanation.
@@ -802,7 +859,7 @@ off. All AlertManager failures are fail-soft (2s timeout, empty notices).
 ### External Integrations
 
 - **Cube.js**: Used for analytics aggregation on the dashboard
-- **Kafka**: Used for async export jobs; export requests are published to Kafka and results are delivered asynchronously
+- **Kafka**: not used by the dashboard for exports since migration 16; export requests are rows in `export_status` that the exporter polls
 - **Linear**: Support tickets (`/tickets`) are proxied to Linear's GraphQL API using a service-account API key (`LINEAR_API_KEY`) filing into a single team (`LINEAR_TEAM_ID`). Nothing is stored locally — "my tickets" is scoped by a `vlab-reporter:<email>` sentinel embedded in each issue description. See `documentation/tickets.md`.
 
 ## Testing

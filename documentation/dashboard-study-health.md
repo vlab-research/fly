@@ -163,6 +163,11 @@ Finding levels:
 
 ## 5. Endpoints (dashboard-server)
 
+Both endpoints are also MCP tools — `get_survey_health` and
+`get_platform_notices` — returning the same bodies through
+`api/health/health.service.js`; see `documentation/agent-api.md` §9
+"Monitoring tools".
+
 ### `GET /surveys/:surveyName/health`
 
 Scoped via `validateSurveyNameAccess` (reused from `api/states`). Pipeline:

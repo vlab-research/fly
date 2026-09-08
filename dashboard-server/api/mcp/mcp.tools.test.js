@@ -24,10 +24,12 @@ const SURVEYS = [
 
 function makeService(overrides = {}) {
   const calls = [];
-  const record = name => async args => {
-    calls.push({ name, args });
+  // `args2` is the second positional argument, for the service functions that
+  // take (resolvedSurvey, ...) rather than one options object.
+  const record = name => async (args, args2) => {
+    calls.push({ name, args, args2 });
     const impl = overrides[name];
-    return typeof impl === 'function' ? impl(args) : impl;
+    return typeof impl === 'function' ? impl(args, args2) : impl;
   };
 
   const service = {
@@ -35,6 +37,25 @@ function makeService(overrides = {}) {
     createTypeformForm: record('createTypeformForm'),
     registerSurveyVersion: record('registerSurveyVersion'),
     updateSettings: record('updateSettings'),
+    // monitoring
+    resolveSurvey: record('resolveSurvey'),
+    statesSummary: record('statesSummary'),
+    listStates: record('listStates'),
+    stateDetail: record('stateDetail'),
+    healthFindings: record('healthFindings'),
+    platformNotices: record('platformNotices'),
+    // data
+    startExport: record('startExport'),
+    listExports: record('listExports'),
+    getResponses: record('getResponses'),
+    // templates and media
+    listTemplates: record('listTemplates'),
+    getTemplate: record('getTemplate'),
+    createTemplate: record('createTemplate'),
+    deleteTemplate: record('deleteTemplate'),
+    listAssets: record('listAssets'),
+    uploadAsset: record('uploadAsset'),
+    fetchSource: record('fetchSource'),
     '@noCallThru': true,
   };
 
@@ -42,6 +63,23 @@ function makeService(overrides = {}) {
     service.listSurveys = async args => {
       calls.push({ name: 'listSurveys', args });
       return SURVEYS;
+    };
+  }
+
+  // The same ownership answer the real resolveSurvey gives over SURVEYS.
+  if (!overrides.resolveSurvey) {
+    service.resolveSurvey = async args => {
+      calls.push({ name: 'resolveSurvey', args });
+      const mine = SURVEYS.filter(r => r.survey_name === args.survey_name);
+      if (!mine.length) {
+        return { ok: false, notFound: true, known: [...new Set(SURVEYS.map(r => r.survey_name))] };
+      }
+      return {
+        ok: true,
+        email: args.email,
+        surveyName: args.survey_name,
+        shortcodes: [...new Set(mine.map(r => r.shortcode))],
+      };
     };
   }
 
@@ -394,5 +432,421 @@ describe('mcp.tools: update_survey_settings', () => {
         expect(TOOL_SCOPES[name], `${name} has no entry in TOOL_SCOPES`).to.be.a('string');
       });
     });
+  });
+});
+
+/*
+ * Monitoring. Every survey-scoped tool goes through resolveSurvey — the same
+ * lookup the REST middleware uses — and hands the resolved survey (with its
+ * shortcodes, the query pre-filter) to the service. A miss is a tool error
+ * naming the caller's real surveys, and nothing else is called.
+ */
+describe('mcp.tools: monitoring', () => {
+  const RESOLVED = { email: CONTEXT.email, surveyName: 'HPV', shortcodes: ['main', 'branch'] };
+
+  describe('get_states_summary', () => {
+    it('resolves the survey and returns the summary rows', async () => {
+      const summary = { summary: [{ current_state: 'ERROR', current_form: 'main', count: 3 }] };
+      const { runTool, calls } = loadTools({ statesSummary: async () => summary });
+
+      const out = await runTool('get_states_summary', { survey_name: 'HPV' }, CONTEXT);
+
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey', 'statesSummary']);
+      expect(calls[1].args).to.eql(RESOLVED);
+      expect(payloadOf(out)).to.eql(summary);
+    });
+
+    it('answers a survey that is not yours with the ones that are, and stops', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool('get_states_summary', { survey_name: 'Nope' }, CONTEXT);
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/No survey named "Nope"/);
+      expect(textOf(out)).to.match(/"HPV", "Solo"/);
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey']);
+    });
+  });
+
+  describe('list_states', () => {
+    it('maps the arguments onto the query filters and shapes the page', async () => {
+      const { runTool, calls } = loadTools({
+        listStates: async () => ({ states: [{ userid: 'u1', current_state: 'ERROR' }], total: 7 }),
+      });
+
+      const out = await runTool(
+        'list_states',
+        { survey_name: 'HPV', state: 'ERROR', error_tag: 'FB', limit: 5, offset: 5 },
+        CONTEXT,
+      );
+
+      const [survey, filters] = [calls[1].args, calls[1].args2];
+      expect(survey).to.eql(RESOLVED);
+      expect(filters).to.eql({
+        state: 'ERROR',
+        errorTag: 'FB',
+        form: undefined,
+        search: undefined,
+        limit: 5,
+        offset: 5,
+      });
+      expect(payloadOf(out)).to.eql({
+        total: 7,
+        limit: 5,
+        offset: 5,
+        items: [{ userid: 'u1', current_state: 'ERROR' }],
+      });
+    });
+
+    it('caps the limit at 200 no matter what is asked', async () => {
+      const { runTool, calls } = loadTools({ listStates: async () => ({ states: [], total: 0 }) });
+      await runTool('list_states', { survey_name: 'HPV', limit: 100000 }, CONTEXT);
+      expect(calls[1].args2.limit).to.equal(200);
+    });
+  });
+
+  describe('get_participant_state', () => {
+    it('returns the full row for one participant', async () => {
+      const row = { userid: 'u1', current_state: 'ERROR', state_json: { qa: [] } };
+      const { runTool, calls } = loadTools({ stateDetail: async () => row });
+
+      const out = await runTool('get_participant_state', { survey_name: 'HPV', userid: 'u1' }, CONTEXT);
+
+      expect(calls[1].args).to.eql(RESOLVED);
+      expect(calls[1].args2).to.equal('u1');
+      expect(payloadOf(out)).to.eql(row);
+    });
+
+    it('names the missing participant rather than returning nothing', async () => {
+      const { runTool } = loadTools({ stateDetail: async () => null });
+      const out = await runTool('get_participant_state', { survey_name: 'HPV', userid: 'ghost' }, CONTEXT);
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/No participant "ghost" in survey "HPV"/);
+    });
+  });
+
+  describe('get_survey_health', () => {
+    it('returns the findings and aggregates for the resolved survey', async () => {
+      const health = { window_hours: 24, findings: [{ level: 'action' }], aggregates: {} };
+      const { runTool, calls } = loadTools({ healthFindings: async () => health });
+
+      const out = await runTool('get_survey_health', { survey_name: 'Solo' }, CONTEXT);
+
+      expect(calls[1].args).to.eql({ email: CONTEXT.email, surveyName: 'Solo', shortcodes: ['only'] });
+      expect(payloadOf(out)).to.eql(health);
+    });
+  });
+
+  describe('get_platform_notices', () => {
+    it('returns the notices without touching any survey', async () => {
+      const { runTool, calls } = loadTools({ platformNotices: async () => ({ notices: [] }) });
+      const out = await runTool('get_platform_notices', {}, CONTEXT);
+
+      expect(calls.map(c => c.name)).to.eql(['platformNotices']);
+      expect(payloadOf(out)).to.eql({ notices: [] });
+    });
+
+    it('needs platform:read, not surveys:read', async () => {
+      const { runTool } = loadTools({ platformNotices: async () => ({ notices: [] }) });
+      const refused = await runTool('get_platform_notices', {}, { ...CONTEXT, scopes: ['surveys:read'] });
+      expect(refused.isError).to.equal(true);
+      expect(textOf(refused)).to.match(/platform:read/);
+
+      const ok = await runTool('get_platform_notices', {}, { ...CONTEXT, scopes: ['platform:read'] });
+      expect(ok.isError).to.not.equal(true);
+    });
+  });
+
+  it('lets a surveys:read key read participant state, as REST does', async () => {
+    const { runTool } = loadTools({ statesSummary: async () => ({ summary: [] }) });
+    const out = await runTool('get_states_summary', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['surveys:read'] });
+    expect(out.isError).to.not.equal(true);
+  });
+});
+
+describe('mcp.tools: data', () => {
+  describe('start_export', () => {
+    it('resolves the survey, inserts the request and explains how to follow it', async () => {
+      const { runTool, calls } = loadTools({
+        startExport: async () => ({ export_id: 'e1', source: 'chat_log', status: 'Requested' }),
+      });
+
+      const out = await runTool(
+        'start_export',
+        { survey_name: 'HPV', export_type: 'chat_log', options: { include_metadata: true } },
+        CONTEXT,
+      );
+
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey', 'startExport']);
+      expect(calls[1].args).to.eql({
+        email: CONTEXT.email,
+        survey_name: 'HPV',
+        export_type: 'chat_log',
+        options: { include_metadata: true },
+      });
+      expect(payloadOf(out)).to.include({ export_id: 'e1', export_type: 'chat_log', status: 'Requested' });
+      expect(payloadOf(out).note).to.match(/list_exports/);
+    });
+
+    it('refuses an option from another export type before any IO', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool(
+        'start_export',
+        { survey_name: 'HPV', export_type: 'full_messages', options: { pivot: true } },
+        CONTEXT,
+      );
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/unknown property "pivot"/);
+      expect(calls).to.have.lengthOf(0);
+    });
+
+    it('refuses a survey that is not yours before inserting anything', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool('start_export', { survey_name: 'Nope', export_type: 'responses' }, CONTEXT);
+
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/No survey named "Nope"/);
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey']);
+    });
+
+    it('needs exports:write', async () => {
+      const { runTool, calls } = loadTools();
+      const out = await runTool(
+        'start_export',
+        { survey_name: 'HPV', export_type: 'responses' },
+        { ...CONTEXT, scopes: ['exports:read', 'surveys:write'] },
+      );
+      expect(out.isError).to.equal(true);
+      expect(textOf(out)).to.match(/exports:write/);
+      expect(calls).to.have.lengthOf(0);
+    });
+  });
+
+  describe('list_exports', () => {
+    const ROWS = [
+      { id: 'e2', user_id: CONTEXT.email, survey_id: 'HPV', source: 'responses', status: 'Finished', export_link: 'https://x/e2', updated: '2026-09-02', retry_count: 0, options: {} },
+      { id: 'e1', user_id: CONTEXT.email, survey_id: 'HPV', source: 'chat_log', status: 'Requested', export_link: 'Not Found', updated: '2026-09-01', retry_count: 0, options: {} },
+    ];
+
+    it('lists everything without a survey filter and projects the rows', async () => {
+      const { runTool, calls } = loadTools({ listExports: async () => ROWS });
+      const out = await runTool('list_exports', {}, CONTEXT);
+
+      expect(calls.map(c => c.name)).to.eql(['listExports']);
+      expect(calls[0].args).to.eql({ email: CONTEXT.email, survey_name: undefined });
+      const body = payloadOf(out);
+      expect(body.count).to.equal(2);
+      expect(body.items[0]).to.include({ id: 'e2', status: 'Finished', export_link: 'https://x/e2' });
+      expect(body.items[1].export_link).to.equal(null);
+      expect(body.items[0]).to.not.have.property('user_id');
+    });
+
+    it('resolves the survey when one is named', async () => {
+      const { runTool, calls } = loadTools({ listExports: async () => [] });
+      await runTool('list_exports', { survey_name: 'HPV' }, CONTEXT);
+      expect(calls.map(c => c.name)).to.eql(['resolveSurvey', 'listExports']);
+      expect(calls[1].args).to.eql({ email: CONTEXT.email, survey_name: 'HPV' });
+
+      const out = await runTool('list_exports', { survey_name: 'Nope' }, CONTEXT);
+      expect(out.isError).to.equal(true);
+    });
+  });
+
+  describe('get_responses', () => {
+    const rows = n => Array.from({ length: n }, (_, i) => ({ userid: `u${i}`, token: `t${i}` }));
+
+    it('passes the cursor and a clamped page size, and returns the next cursor', async () => {
+      const { runTool, calls } = loadTools({ getResponses: async () => ({ responses: rows(500) }) });
+
+      const out = await runTool(
+        'get_responses',
+        { survey_name: 'HPV', after: 'abc', page_size: 100000 },
+        CONTEXT,
+      );
+
+      expect(calls[1].args).to.eql({ email: CONTEXT.email, survey_name: 'HPV', after: 'abc', pageSize: 500 });
+      const body = payloadOf(out);
+      expect(body.page_size).to.equal(500);
+      expect(body.next_cursor).to.equal('t499');
+      expect(body.items).to.have.lengthOf(500);
+    });
+
+    it('defaults to 25 rows and ends paging on a short page', async () => {
+      const { runTool, calls } = loadTools({ getResponses: async () => ({ responses: rows(3) }) });
+      const out = await runTool('get_responses', { survey_name: 'HPV' }, CONTEXT);
+
+      expect(calls[1].args).to.include({ after: null, pageSize: 25 });
+      expect(payloadOf(out).next_cursor).to.equal(null);
+    });
+
+    // The whole reason `responses` is its own resource.
+    it('refuses a surveys:read key and needs responses:read', async () => {
+      const { runTool } = loadTools({ getResponses: async () => ({ responses: [] }) });
+      const refused = await runTool('get_responses', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['surveys:write'] });
+      expect(refused.isError).to.equal(true);
+      expect(textOf(refused)).to.match(/responses:read/);
+
+      const ok = await runTool('get_responses', { survey_name: 'HPV' }, { ...CONTEXT, scopes: ['responses:read'] });
+      expect(ok.isError).to.not.equal(true);
+    });
+  });
+});
+
+describe('mcp.tools: templates', () => {
+  const RECORD = { id: 't1', account_id: 'page1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', status: 'PENDING', rejection_reason: null, buttons: [] };
+
+  it('lists templates, optionally by account', async () => {
+    const { runTool, calls } = loadTools({ listTemplates: async () => [RECORD] });
+    const out = await runTool('list_message_templates', { account_id: 'page1' }, CONTEXT);
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, accountId: 'page1' });
+    expect(payloadOf(out)).to.eql({ count: 1, items: [RECORD] });
+  });
+
+  it('gets one template', async () => {
+    const { runTool, calls } = loadTools({ getTemplate: async () => RECORD });
+    const out = await runTool('get_message_template', { id: 't1' }, CONTEXT);
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, id: 't1' });
+    expect(payloadOf(out).name).to.equal('prize_ready');
+  });
+
+  it('creates a template and explains that approval is asynchronous', async () => {
+    const { runTool, calls } = loadTools({ createTemplate: async () => RECORD });
+    const out = await runTool(
+      'create_message_template',
+      { account_id: 'page1', name: 'prize_ready', language: 'en_US', body: 'Hi {{1}}', examples: ['Ada'], buttons: [{ label: 'Yes' }] },
+      CONTEXT,
+    );
+    expect(calls[0].args).to.eql({
+      email: CONTEXT.email,
+      accountId: 'page1',
+      name: 'prize_ready',
+      language: 'en_US',
+      body: 'Hi {{1}}',
+      buttons: [{ label: 'Yes' }],
+      examples: ['Ada'],
+    });
+    const body = payloadOf(out);
+    expect(body.status).to.equal('PENDING');
+    expect(body.note).to.match(/Approval is asynchronous/);
+  });
+
+  it('says so when Meta approved immediately', async () => {
+    const { runTool } = loadTools({ createTemplate: async () => ({ ...RECORD, status: 'APPROVED' }) });
+    const out = await runTool('create_message_template', { account_id: 'p', name: 'n', language: 'en', body: 'x' }, CONTEXT);
+    expect(payloadOf(out).note).to.match(/can be sent now/);
+  });
+
+  // The service's TemplateFailure is `expected`; the message is Meta's own.
+  it('relays a Meta rejection or a validation failure as a tool error', async () => {
+    const { runTool } = loadTools({
+      createTemplate: async () => {
+        const err = new Error('name must be lowercase letters, digits, and underscores only (snake_case)');
+        err.expected = true;
+        err.status = 400;
+        throw err;
+      },
+    });
+    const out = await runTool('create_message_template', { account_id: 'p', name: 'Bad Name', language: 'en', body: 'x' }, CONTEXT);
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/snake_case/);
+  });
+
+  it('deletes a template and warns about surveys that name it', async () => {
+    const { runTool, calls } = loadTools({ deleteTemplate: async () => ({ id: 't1', name: 'prize_ready', language: 'en_US' }) });
+    const out = await runTool('delete_message_template', { id: 't1' }, CONTEXT);
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, id: 't1' });
+    expect(payloadOf(out).deleted.name).to.equal('prize_ready');
+    expect(payloadOf(out).note).to.match(/Removed at Meta/);
+  });
+
+  it('needs templates:write to create or delete, templates:read to list', async () => {
+    const { runTool, calls } = loadTools({ listTemplates: async () => [] });
+    const denied = await runTool('delete_message_template', { id: 't1' }, { ...CONTEXT, scopes: ['templates:read'] });
+    expect(denied.isError).to.equal(true);
+    expect(textOf(denied)).to.match(/templates:write/);
+    expect(calls).to.have.lengthOf(0);
+
+    const ok = await runTool('list_message_templates', {}, { ...CONTEXT, scopes: ['templates:read'] });
+    expect(ok.isError).to.not.equal(true);
+  });
+});
+
+describe('mcp.tools: media', () => {
+  const ASSET = { id: 'a1', filename: 'welcome.png', mediaType: 'image', mimeType: 'image/png', byteSize: 70, created: '2026-09-01', url: 'https://media.vlab.digital/a/a1/welcome.png' };
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('lists the library', async () => {
+    const { runTool } = loadTools({ listAssets: async () => [ASSET] });
+    const out = await runTool('list_media', {}, CONTEXT);
+    expect(payloadOf(out)).to.eql({ count: 1, items: [ASSET] });
+  });
+
+  it('uploads from base64 without any fetch, and fires the fan-out without waiting', async () => {
+    let fannedOut = false;
+    const { runTool, calls } = loadTools({
+      uploadAsset: async () => ({ ok: true, deduplicated: false, asset: ASSET, fanOut: async () => { fannedOut = true; } }),
+    });
+
+    const out = await runTool('upload_media', { filename: 'welcome.png', content_base64: PNG_B64 }, CONTEXT);
+
+    expect(calls.map(c => c.name)).to.eql(['uploadAsset']);
+    const { file } = calls[0].args;
+    expect(file.originalname).to.equal('welcome.png');
+    expect(file.mimetype).to.equal(undefined);
+    expect(file.buffer.slice(1, 4).toString()).to.equal('PNG');
+    expect(payloadOf(out)).to.include({ id: 'a1', url: ASSET.url, deduplicated: false });
+    expect(fannedOut).to.equal(true);
+  });
+
+  it('uploads from a URL, passing the fetched content type as the claim', async () => {
+    const { runTool, calls } = loadTools({
+      fetchSource: async () => ({ buffer: Buffer.from('bytes'), contentType: 'audio/mp4', url: 'https://cdn.example.org/a.m4a' }),
+      uploadAsset: async () => ({ ok: true, deduplicated: true, asset: ASSET, fanOut: async () => {} }),
+    });
+
+    const out = await runTool('upload_media', { filename: 'a.m4a', source_url: 'https://cdn.example.org/a.m4a' }, CONTEXT);
+
+    expect(calls.map(c => c.name)).to.eql(['fetchSource', 'uploadAsset']);
+    expect(calls[0].args).to.equal('https://cdn.example.org/a.m4a');
+    expect(calls[1].args.file.mimetype).to.equal('audio/mp4');
+    expect(payloadOf(out).deduplicated).to.equal(true);
+  });
+
+  it('refuses both sources, neither source, and a private URL before any IO', async () => {
+    const { runTool, calls } = loadTools();
+    for (const args of [
+      { filename: 'a.png' },
+      { filename: 'a.png', source_url: 'https://x.org/a', content_base64: PNG_B64 },
+      { filename: 'a.png', source_url: 'http://169.254.169.254/x' },
+    ]) {
+      const out = await runTool('upload_media', args, CONTEXT);
+      expect(out.isError, JSON.stringify(args)).to.equal(true);
+    }
+    expect(calls).to.have.lengthOf(0);
+  });
+
+  it('relays a refusal from validation with nothing stored', async () => {
+    const { runTool } = loadTools({ uploadAsset: async () => ({ ok: false, error: 'GIF is not supported; use JPEG or PNG' }) });
+    const out = await runTool('upload_media', { filename: 'a.gif', content_base64: 'R0lGODlh' }, CONTEXT);
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/GIF is not supported; use JPEG or PNG\. Nothing was stored/);
+  });
+
+  it('relays a fetch failure as a tool error', async () => {
+    const { runTool } = loadTools({
+      fetchSource: async () => { const e = new Error('source_url answered HTTP 404; nothing was uploaded.'); e.expected = true; throw e; },
+    });
+    const out = await runTool('upload_media', { filename: 'a.png', source_url: 'https://cdn.example.org/gone.png' }, CONTEXT);
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/HTTP 404/);
+  });
+
+  it('needs media:write to upload', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('upload_media', { filename: 'a.png', content_base64: PNG_B64 }, { ...CONTEXT, scopes: ['media:read'] });
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/media:write/);
+    expect(calls).to.have.lengthOf(0);
   });
 });

@@ -1,31 +1,10 @@
 'use strict';
 
 const router = require('express').Router();
-const { Credential, MessageTemplate } = require('../../queries');
 const { makeHandlers } = require('./message-templates.controller');
-const {
-  facebookCreateTemplate,
-  facebookGetTemplatesByName,
-  facebookDeleteTemplateByHsmId,
-  whatsappCreateTemplate,
-  whatsappGetTemplatesByName,
-  whatsappDeleteTemplateByHsmId,
-} = require('./message-templates.facebook');
+const deps = require('./message-templates.deps');
 
-const handlers = makeHandlers({
-  credentialQuery: Credential,
-  templateQuery: MessageTemplate,
-  facebookClient: {
-    createTemplate: facebookCreateTemplate,
-    getTemplatesByName: facebookGetTemplatesByName,
-    deleteTemplateByHsmId: facebookDeleteTemplateByHsmId,
-  },
-  whatsappClient: {
-    createTemplate: whatsappCreateTemplate,
-    getTemplatesByName: whatsappGetTemplatesByName,
-    deleteTemplateByHsmId: whatsappDeleteTemplateByHsmId,
-  },
-});
+const handlers = makeHandlers(deps);
 
 router
   .post('/', handlers.create)

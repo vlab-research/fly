@@ -606,6 +606,25 @@ see it. **The scope is enforced per tool instead** (`TOOL_SCOPES` in
 | `create_survey` | `surveys:write` |
 | `create_survey_version` | `surveys:write` |
 | `update_survey_settings` | `surveys:write` |
+| `get_states_summary` | `surveys:read` |
+| `list_states` | `surveys:read` |
+| `get_participant_state` | `surveys:read` |
+| `get_survey_health` | `surveys:read` |
+| `get_platform_notices` | `platform:read` |
+| `start_export` | `exports:write` |
+| `list_exports` | `exports:read` |
+| `get_responses` | `responses:read` |
+| `list_message_templates` | `templates:read` |
+| `get_message_template` | `templates:read` |
+| `create_message_template` | `templates:write` |
+| `delete_message_template` | `templates:write` |
+| `list_media` | `media:read` |
+| `upload_media` | `media:write` |
+
+The rule behind the table: a tool needs exactly the scope the REST route it
+wraps would derive (first path segment, `GET` → `read`, else `write`). States
+and health live under `/surveys/:name` over REST, so `surveys:read` reaches
+participant state there and the tools match; platform notices are `/platform`.
 
 So a `surveys:read` key connects fine and can list, and every write tool refuses.
 A refusal arrives as an MCP **tool error** — a normal result with `isError: true`
@@ -615,11 +634,11 @@ questions is authoring the survey.
 
 An unscoped key (see "Authentication") can call everything.
 
-### The five tools
+### Survey tools
 
 Full argument schemas are advertised by `tools/list` and defined in
-`dashboard-server/api/mcp/mcp.core.js`; what follows is what they do and where
-they differ from the REST endpoints above.
+`dashboard-server/api/mcp/mcp.core.js` (one array per area); what follows is
+what they do and where they differ from the REST endpoints above.
 
 **`list_surveys(survey_name?)`** — the same rows as `GET /surveys` (§4) but
 nested **study → form → versions** instead of flat, with a computed `version`
@@ -673,6 +692,128 @@ the whole list rather than appending. `surveyid` is a version `id` from
 `list_surveys` and must be yours — otherwise the tool says so by name rather
 than returning a bare 404.
 
+### Monitoring tools
+
+The participant-state and health endpoints (`/surveys/:surveyName/states`,
+`/surveys/:surveyName/health`, `/platform/notices` — see
+`documentation/states-debugging.md` and `documentation/dashboard-study-health.md`)
+as tools. All four survey-scoped ones take an exact `survey_name` and go through
+the same ownership lookup as the REST middleware (`validateSurveyNameAccess`,
+now `api/states/states.service.js#resolveSurvey`); a name that is not yours is
+answered with the names that are, exactly as `list_surveys` does. The server
+`instructions` say the intended order: summary first, then list, then one
+participant.
+
+**`get_states_summary({survey_name})`** — `GET .../states/summary` verbatim:
+`{summary: [{current_state, current_form, count}]}`. One row per (state, form);
+every participant who has started a form is in exactly one row.
+
+**`list_states({survey_name, state?, error_tag?, form?, search?, limit?, offset?})`**
+— `GET .../states` with two differences. `limit` is **clamped to 200** (default
+50) where the REST endpoint has no maximum, and the result is the paging shape
+`{total, limit, offset, items}` rather than `{states, total}`. `items` are the
+REST rows unchanged (`userid`, `pageid`, `current_state`, `current_form`,
+`updated`, `error_tag`, `stuck_on_question`, `timeout_date`, `form_start_time`),
+newest activity first. `state` is validated against the state machine's values,
+`error_tag` is a case-insensitive substring, `search` a `userid` substring.
+
+**`get_participant_state({survey_name, userid})`** — `GET .../states/:userid`
+verbatim, including `state_json` (the whole conversation context). A userid
+that is not in the survey is a tool error naming it, not an empty result.
+
+**`get_survey_health({survey_name})`** — `GET .../health` verbatim:
+`{window_hours: 24, findings, aggregates}`. Findings arrive as resolved
+sentences with a `level` of `action` or `note`. An agent calls this once; the
+dashboard polls it because a human is watching.
+
+**`get_platform_notices()`** — `GET /platform/notices` verbatim. Not survey
+scoped. Never fails: when AlertManager is unreachable or unconfigured the list
+is empty, so an empty list is "nothing known", not "all clear".
+
+### Data tools
+
+Exports (`POST /exports`, `GET /exports/status[/survey]` — see
+`documentation/exports-storage.md` "Request and status contract") and the paged
+response read (§10) as tools. Exports stay **asynchronous**: no tool waits on
+the exporter or returns file contents; the server `instructions` say so.
+
+**`start_export({survey_name, export_type, options?})`** — `POST /exports?survey=`
+with the type made explicit (`responses` \| `chat_log` \| `full_messages`;
+REST infers `responses` when `export_type` is absent) and the `options` keys
+**validated per type** against the exporter's own option models, so a
+`chat_log` option on a `responses` export is refused rather than silently
+dropped. The survey is resolved before the row is inserted, so a name that is
+not yours is a message and never a job. Returns `{export_id, survey_name,
+export_type, status: "Requested", note}`.
+
+**`list_exports({survey_name?})`** — the status rows, newest first, projected to
+`{id, survey_name, export_type, status, export_link, updated, retry_count,
+options}`. `status` is one of `Requested`, `Processing`, `Finished`, `Failed`
+(the exporter's real values; older docs said `Completed`). `export_link` is
+`null` until `Finished`, then the presigned URL, valid for 7 hours. Without
+`survey_name` it is every export the caller has requested.
+
+**`get_responses({survey_name, after?, page_size?})`** — `GET /responses` (§10)
+with `page_size` **clamped to 500** (default 25) and the page shaped as
+`{page_size, next_cursor, items}`: `next_cursor` is the last row's `token`, or
+`null` on a short page, so the loop is "call, pass `next_cursor` as `after`,
+stop on null". Rows are §10's rows. Needs `responses:read`, which `surveys:*`
+does not imply — that separation is deliberate.
+
+### Messaging asset tools
+
+Utility message templates (`/message-templates`, `documentation/utility-messages.md`)
+and the media library (`/media`, dashboard-server README "Media") as tools. Both
+go through the same service the REST handlers use
+(`api/message-templates/message-templates.service.js`,
+`api/media/media.service.js`), built on the same injected clients and storage
+(`*.deps.js`).
+
+**`list_message_templates({account_id?})`** — `GET /message-templates` verbatim,
+as `{count, items}`. PENDING rows are refreshed from Meta during the call, which
+is how an agent watches an approval land.
+
+**`get_message_template({id})`** — `GET /message-templates/:id` verbatim; a
+PENDING row is refreshed first.
+
+**`create_message_template({account_id, name, language, body, buttons?, examples?})`**
+— `POST /message-templates`. Validation is the same `validateCreateInput`; a
+Meta refusal (REST `502`) or a duplicate (REST `409`) is a tool error carrying
+the same message. The result is the created record plus a `note` saying whether
+Meta approved immediately or the status is PENDING.
+
+**`delete_message_template({id})`** — `DELETE /message-templates/:id`. The
+description opens with the warning: it deletes **at Meta as well as in Fly** and
+cannot be undone. Meta's "template not found" is swallowed, as over REST, so an
+orphaned row can be cleaned up.
+
+**`list_media()`** — `GET /media` verbatim, as `{count, items}`; each item's
+`url` is the permanent public URL a question references.
+
+**`upload_media({filename, source_url | content_base64, mime_type?})`** —
+`POST /media/upload` without multipart. Exactly one source: `source_url`
+(preferred; the server fetches it) or `content_base64`. The bytes then take the
+REST path unchanged — `validateUpload` sniffs the real type and enforces the
+per-type limits, identical bytes return the existing asset with
+`deduplicated: true`, and platform pre-uploads run best-effort in the background.
+The result is the asset plus a `note`.
+
+Inline uploads ride inside the JSON-RPC body, so the MCP path has its own JSON
+parser sized to the media cap plus base64 overhead (`MCP_BODY_LIMIT_BYTES`,
+mounted in `server.js` ahead of the global 100 KB parser); the dashboard-api
+ingress allows 200 MB. A `content_base64` upload is therefore bounded by the
+per-type limits, same as multipart.
+
+The fetch is the one new surface. It is bounded by the largest per-type limit
+(100 MB), follows at most three redirects **by hand**, and refuses at every hop
+anything that is not public http(s): loopback, `*.svc`, `*.cluster.local`,
+`*.internal`, `*.local`, private IP literals, and any hostname that **resolves**
+to a private address (`media.core.js#checkSourceUrl`,
+`media.service.js#fetchSource`). This server runs inside the cluster, so
+without that check a caller could make it fetch AlertManager or the Kubernetes
+API. DNS rebinding between the check and the connection is not defended
+against.
+
 ### Failure
 
 Every failure is a tool error (`isError: true`) with a sentence a model can act
@@ -684,7 +825,63 @@ reported generically.
 
 ---
 
-## 10. Known gaps
+## 10. Reading response data: `GET /api/v1/responses`
+
+For agents that need to inspect individual responses (as opposed to bulk export), this endpoint provides cursor-paginated access to answers from a specific survey.
+
+### Request
+
+```
+GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>
+```
+
+| Parameter | Required | Default | Notes |
+|-----------|----------|---------|-------|
+| `survey` | **yes** | — | Survey name; must be one the caller owns |
+| `after` | no | null | Opaque cursor token from the previous response's `responses[n].token` field. Omit to start from the beginning. |
+| `pageSize` | no | 25 | Number of responses per page. Has no maximum in the API, but agents should clamp to a reasonable value (e.g. 500). |
+
+### Response — `200`
+
+```json
+{
+  "responses": [
+    {
+      "parent_surveyid": "550e8400-...",
+      "parent_shortcode": "hpvintro",
+      "surveyid": "550e8401-...",
+      "flowid": "flow-123",
+      "userid": "participant-abc",
+      "question_ref": "consent_q1",
+      "response": "Yes",
+      "timestamp": "2026-08-14T12:30:45.123Z",
+      "token": "eyJ0eXAiOi..."
+    },
+    ...
+  ]
+}
+```
+
+Each response object includes a **`token`** field — an opaque string that encodes the position in the stream.
+Pass this token as the `after` parameter in the next request to fetch the next page. The token is valid
+indefinitely, so a consumer can store it and resume paging later.
+
+**Ordering:** Results are ordered by `(timestamp, userid, question_ref)` and pagination is keyed off these
+three fields. Responses are therefore sorted by submission time, with ties broken by participant id and question.
+
+**Scoping:** All responses are scoped to the caller's email; the caller can only read responses from surveys they own.
+
+**Empty surveys:** a survey with no responses yet answers `200 {"responses": []}`.
+(Before the MCP data tools this was a `500`, from a `RequestError` the query
+raised for the CSV download; `api/responses/response.service.js#getResponses`
+now maps it to an empty page for both REST and MCP.)
+
+The MCP tool `get_responses` (§9 "Data tools") is this endpoint with a 500-row
+cap and an explicit `next_cursor`.
+
+---
+
+## 11. Known gaps
 
 Marked here rather than guessed at.
 
