@@ -1,76 +1,25 @@
 'use strict';
 
-const {
-  validateCreateInput,
-  buildFacebookCreatePayload,
-  buildWhatsAppCreatePayload,
-  resolveWabaId,
-  parseCreateResponse,
-  parseListResponse,
-  matchFbEntry,
-  formatRecord,
-} = require('./message-templates.core');
+/*
+ * HTTP shell over message-templates.service.js. Every decision and every
+ * Meta call lives in the service; this file maps outcomes onto status codes.
+ * `makeHandlers(deps)` keeps the injected-dependency signature the tests and
+ * the routes use.
+ */
 
-function isUniqueViolation(err) {
-  // Postgres / CockroachDB unique_violation
-  return err && (err.code === '23505' || /duplicate key|unique constraint/i.test(err.message || ''));
-}
+const { makeService } = require('./message-templates.service');
 
-function makeHandlers({ credentialQuery, templateQuery, facebookClient, whatsappClient }) {
-  const { createTemplate, getTemplatesByName, deleteTemplateByHsmId } = facebookClient;
-  const waClient = whatsappClient || {};
+function makeHandlers(deps) {
+  const service = makeService(deps);
 
-  // Resolves the messaging account behind accountId and returns
-  // platform-appropriate template operations bound to the right Meta id and
-  // token. Messenger operations are identical to the original page-token
-  // path (Graph calls against the page id with the page access token).
-  // WhatsApp template CRUD is a WABA-level API: operations run against the
-  // WABA id resolved from the whatsapp_business credential's
-  // details.waba_id, using the credential's stored business access token.
-  // A whatsapp_business credential without waba_id fails loudly (400) —
-  // no silent fallback.
-  async function resolveAccountOps(email, accountId) {
-    const page = await credentialQuery.getOne({
-      email,
-      entity: 'facebook_page',
-      key: accountId,
-    });
-    if (page) {
-      const token = page.details && page.details.access_token;
-      if (!token) return { ok: false, status: 404, error: 'Page not found or not connected' };
-      return {
-        ok: true,
-        platform: 'messenger',
-        buildCreatePayload: buildFacebookCreatePayload,
-        createTemplate: payload => createTemplate(accountId, token, payload),
-        getTemplatesByName: name => getTemplatesByName(accountId, token, name),
-        // Messenger delete-by-id needs only hsm_id.
-        deleteTemplate: row => deleteTemplateByHsmId(accountId, token, row.fb_template_id),
-      };
+  // A TemplateFailure carries its own status and a message safe to return;
+  // anything else is ours and is logged with the operation that raised it.
+  function failed(res, err, operation) {
+    if (err && err.expected) {
+      return res.status(err.status).json({ error: err.message });
     }
-
-    const wa = await credentialQuery.getOne({
-      email,
-      entity: 'whatsapp_business',
-      key: accountId,
-    });
-    if (wa) {
-      const token = wa.details && wa.details.access_token;
-      if (!token) return { ok: false, status: 404, error: 'Page not found or not connected' };
-      const waba = resolveWabaId(wa);
-      if (!waba.ok) return { ok: false, status: 400, error: waba.error };
-      return {
-        ok: true,
-        platform: 'whatsapp',
-        buildCreatePayload: buildWhatsAppCreatePayload,
-        createTemplate: payload => waClient.createTemplate(waba.wabaId, token, payload),
-        getTemplatesByName: name => waClient.getTemplatesByName(waba.wabaId, token, name),
-        // WhatsApp delete-by-id requires BOTH hsm_id and name.
-        deleteTemplate: row => waClient.deleteTemplateByHsmId(waba.wabaId, token, row.fb_template_id, row.name),
-      };
-    }
-
-    return { ok: false, status: 404, error: 'Page not found or not connected' };
+    console.error(`message-templates ${operation} error:`, err);
+    return res.status(500).json({ error: err.message || 'Internal server error' });
   }
 
   async function create(req, res) {
@@ -79,86 +28,13 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient, whatsapp
     const accountId = req.body.accountId || req.body.pageId;
     const { name, language, body, buttons, examples } = req.body;
 
-    const validation = validateCreateInput({ accountId, pageId: req.body.pageId, name, language, body, buttons, examples });
-    if (!validation.valid) {
-      return res.status(400).json({ error: validation.error });
-    }
-    const normalizedButtons = validation.buttons || [];
-    const normalizedExamples = validation.examples || [];
-
     try {
-      const account = await resolveAccountOps(email, accountId);
-      if (!account.ok) {
-        return res.status(account.status).json({ error: account.error });
-      }
-
-      const payload = account.buildCreatePayload({
-        name, language, body, buttons: normalizedButtons, examples: normalizedExamples,
+      const record = await service.createTemplate({
+        email, accountId, name, language, body, buttons, examples,
       });
-      const fbResponse = await account.createTemplate(payload);
-      const parsed = parseCreateResponse(fbResponse);
-
-      if (!parsed.ok) {
-        return res.status(502).json({ error: parsed.error.message || parsed.error });
-      }
-
-      const saved = await templateQuery.create({
-        email,
-        accountId,
-        fbTemplateId: parsed.fbTemplateId,
-        name,
-        language,
-        body,
-        status: parsed.status,
-        rejectionReason: parsed.rejectionReason,
-        buttons: normalizedButtons,
-      });
-
-      return res.status(201).json(formatRecord(saved));
+      return res.status(201).json(record);
     } catch (e) {
-      if (isUniqueViolation(e)) {
-        return res.status(409).json({
-          error: `A template with name "${name}" in language "${language}" already exists for this page.`,
-        });
-      }
-      console.error('message-templates create error:', e);
-      return res.status(500).json({ error: e.message || 'Internal server error' });
-    }
-  }
-
-  async function refreshTemplateStatus(rows, email) {
-    // Only PENDING rows can transition — Facebook's GET endpoint never returns
-    // rejection_reason or specific_rejection_reason, so polling REJECTED rows
-    // is useless. Rejection reasons are captured from the create response only.
-    const pending = rows.filter(r => r.status === 'PENDING');
-    if (pending.length === 0) return;
-
-    const accountIds = [...new Set(pending.map(r => r.account_id))];
-    for (const aid of accountIds) {
-      const account = await resolveAccountOps(email, aid);
-      if (!account.ok) continue;
-      const namesToRefresh = [...new Set(pending.filter(r => r.account_id === aid).map(r => r.name))];
-      for (const name of namesToRefresh) {
-        try {
-          const fbResponse = await account.getTemplatesByName(name);
-          const fbEntries = parseListResponse(fbResponse);
-          const rowsWithName = pending.filter(r => r.account_id === aid && r.name === name);
-          for (const row of rowsWithName) {
-            const entry = matchFbEntry(row, fbEntries);
-            if (entry && entry.status !== row.status) {
-              const updated = await templateQuery.updateStatus({
-                id: row.id,
-                status: entry.status,
-                rejectionReason: entry.rejectionReason,
-                fbTemplateId: entry.fbTemplateId,
-              });
-              Object.assign(row, updated);
-            }
-          }
-        } catch (refreshErr) {
-          console.error(`Failed to refresh template status for "${name}":`, refreshErr);
-        }
-      }
+      return failed(res, e, 'create');
     }
   }
 
@@ -168,15 +44,9 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient, whatsapp
     const accountId = req.query.accountId || req.query.pageId;
 
     try {
-      const rows = accountId
-        ? await templateQuery.list({ email, accountId })
-        : await templateQuery.listAll({ email });
-
-      await refreshTemplateStatus(rows, email);
-      return res.status(200).json(rows.map(formatRecord));
+      return res.status(200).json(await service.listTemplates({ email, accountId }));
     } catch (e) {
-      console.error('message-templates list error:', e);
-      return res.status(500).json({ error: e.message || 'Internal server error' });
+      return failed(res, e, 'list');
     }
   }
 
@@ -185,32 +55,10 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient, whatsapp
     const { id } = req.params;
 
     try {
-      const row = await templateQuery.get({ email, id });
-      if (!row) {
-        return res.status(404).json({ error: 'Template not found' });
-      }
-
-      const account = await resolveAccountOps(email, row.account_id);
-      if (!account.ok) {
-        return res.status(account.status).json({ error: account.error });
-      }
-
-      if (row.fb_template_id) {
-        const fbResponse = await account.deleteTemplate(row);
-        if (fbResponse && fbResponse.error) {
-          const code = fbResponse.error.code;
-          // 100 = template not found; ignore so the local row can be cleaned up
-          if (code !== 100) {
-            return res.status(502).json({ error: fbResponse.error.message || 'Facebook delete failed' });
-          }
-        }
-      }
-
-      await templateQuery.remove({ email, id });
+      await service.deleteTemplate({ email, id });
       return res.status(204).send();
     } catch (e) {
-      console.error('message-templates delete error:', e);
-      return res.status(500).json({ error: e.message || 'Internal server error' });
+      return failed(res, e, 'delete');
     }
   }
 
@@ -218,17 +66,9 @@ function makeHandlers({ credentialQuery, templateQuery, facebookClient, whatsapp
     const { email } = req.user;
     const { id } = req.params;
     try {
-      const row = await templateQuery.get({ email, id });
-      if (!row) return res.status(404).json({ error: 'Template not found' });
-
-      if (row.status === 'PENDING') {
-        await refreshTemplateStatus([row], email);
-      }
-
-      return res.status(200).json(formatRecord(row));
+      return res.status(200).json(await service.getTemplate({ email, id }));
     } catch (e) {
-      console.error('message-templates getOne error:', e);
-      return res.status(500).json({ error: e.message || 'Internal server error' });
+      return failed(res, e, 'getOne');
     }
   }
 

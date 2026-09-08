@@ -3,15 +3,13 @@
 const multer = require('multer');
 const router = require('express').Router();
 
-const { Credential, Media } = require('../../queries');
-const { STORAGE } = require('../../config');
 const { makeHandlers } = require('./media.controller');
-const { makeStorage } = require('./storage');
-const { uploadToPlatform } = require('./media.platform-upload');
-const { MEDIA_TYPE_LIMITS } = require('./media.core');
+const deps = require('./media.deps');
+const { MAX_UPLOAD_BYTES } = require('./media.core');
 
 /*
- * The multer cap is DERIVED from the core's per-type limits, never hardcoded.
+ * The multer cap is DERIVED from the core's per-type limits (MAX_UPLOAD_BYTES
+ * in media.core.js), never hardcoded.
  *
  * It used to be a flat 25 MB, which preempted validateUpload: a 40 MB video
  * died inside multer with "File exceeds maximum size of 25 MB" instead of
@@ -20,25 +18,14 @@ const { MEDIA_TYPE_LIMITS } = require('./media.core');
  * actual problem and the actual fix — so multer must be a backstop against
  * unbounded memory, not the thing that decides eligibility.
  *
- * Set to the LARGEST per-type limit (documents, 100 MB) so every per-type error
- * message comes from the core. A file over that is beyond every limit we have,
- * and its message can safely be generic.
+ * The same cap bounds the MCP tool's URL fetch (media.service.js#fetchSource).
  */
-const MAX_UPLOAD_BYTES = Math.max(
-  ...Object.values(MEDIA_TYPE_LIMITS).map(limit => limit.maxBytes),
-);
-
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_UPLOAD_BYTES },
 }).single('file');
 
-const handlers = makeHandlers({
-  credentialQuery: Credential,
-  mediaQuery: Media,
-  storage: makeStorage(STORAGE),
-  platformUpload: uploadToPlatform,
-});
+const handlers = makeHandlers(deps);
 
 /**
  * Turns multer's errors into JSON 400s rather than letting them reach the
