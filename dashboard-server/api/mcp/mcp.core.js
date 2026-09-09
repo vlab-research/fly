@@ -68,6 +68,24 @@ const MESSAGING_ASSETS_NOTE = [
   'list_message_templates.',
 ].join(' ');
 
+const BAILS_NOTE = [
+  'BAIL SYSTEMS route live participants out of the form they are in and into',
+  'another one; the condition grammar is written out in create_bail\'s',
+  '`definition` schema. They belong to you, not to a survey, and one can span',
+  'several studies. preview_bail counts who would be moved before anything is',
+  'created — always run it first, and remember that an enabled bail with timing',
+  '"immediate" keeps firing about once a minute, on everyone who matches later',
+  'too. list_bail_events is the audit trail of what actually moved.',
+].join(' ');
+
+const ACCOUNTS_NOTE = [
+  'ACCOUNTS. list_messaging_accounts gives the account_id the message-template',
+  'tools take; list_typeform_forms gives the formid create_survey takes.',
+  'Connecting either account is a browser login and cannot be done from here.',
+  'Nothing in this server returns an access token, and nothing writes a',
+  'credential or an API key — do those in the dashboard.',
+].join(' ');
+
 const SERVER_INSTRUCTIONS = [
   'This server creates, versions and monitors surveys on the Fly platform (vlab),',
   'exports and reads their response data, and manages the media and message',
@@ -96,6 +114,10 @@ const SERVER_INSTRUCTIONS = [
   DATA_NOTE,
   '',
   MESSAGING_ASSETS_NOTE,
+  '',
+  BAILS_NOTE,
+  '',
+  ACCOUNTS_NOTE,
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -1148,9 +1170,620 @@ const MEDIA_TOOLS = [
     },
   },
 ];
-const BAIL_TOOLS = [];
+// ---------------------------------------------------------------------------
+// Bails.
+//
+// A bail moves live participants out of the form they are in and into another
+// one. It is the only tool area that acts on people rather than on
+// configuration, so every write says so, and the condition grammar is written
+// out here because an agent cannot guess it.
+//
+// Scoping note: bails belong to the researcher, not to a survey. There is no
+// survey_name argument anywhere in this area — a bail's conditions name forms
+// by shortcode, and one bail can span several studies.
+// ---------------------------------------------------------------------------
+
+const BAIL_TYPES = ['conditions', 'user_list'];
+const BAIL_TIMINGS = ['immediate', 'scheduled', 'absolute'];
+const BAIL_CONDITION_TYPES = [
+  'form',
+  'state',
+  'error_code',
+  'current_question',
+  'elapsed_time',
+  'question_response',
+  'surveyid',
+];
+
+const MAX_USER_LIST = 1000;
+const BAIL_EVENTS_LIMIT = { default: 100, max: 500 };
+// A bail that matched thousands of people lists thousands of ids. Events are a
+// debugging aid, not an export, so each one carries a sample plus the count.
+const BAIL_EVENT_USER_SAMPLE = 50;
+const PREVIEW_USER_SAMPLE = 25;
+
+const BAIL_ID_ARG = {
+  type: 'string',
+  minLength: 1,
+  description: 'The bail `id` (a UUID) as list_bails reports it.',
+};
+
+/*
+ * One level of the condition tree, described rather than fully validated.
+ *
+ * The tree is recursive and this validator has no $ref, so `vars` accepts
+ * bare objects and Exodus validates the depth below — its rejections are
+ * relayed verbatim as tool errors, naming the offending node. Writing the
+ * grammar into the description is what makes that a rare event rather than
+ * the normal one.
+ */
+const BAIL_CONDITION_SCHEMA = {
+  type: 'object',
+  description: [
+    'A condition tree. A node is EITHER a group — `op` ("and", "or", "not") with',
+    '`vars` (its children; "not" takes exactly one) — OR a leaf with a `type`:',
+    '',
+    '- {"type": "form", "value": "<shortcode>"} — currently in this form',
+    '- {"type": "state", "value": "BLOCKED"} — currently in this state',
+    '- {"type": "error_code", "value": "10"} — last error had this code',
+    '- {"type": "current_question", "value": "<ref>"} — sitting on this question',
+    '- {"type": "surveyid", "value": "<uuid>"} — in any form of this survey version',
+    '- {"type": "question_response", "form": "<shortcode>", "question_ref": "<ref>",',
+    '  "response": "Yes"} — answered that; omit `response` to mean "answered at all"',
+    '- {"type": "elapsed_time", "since": {"event": "response", "details":',
+    '  {"form": "<shortcode>", "question_ref": "<ref>"}}, "duration": "4 weeks"} —',
+    '  that long since they gave that answer. `duration` is "<number> <unit>"',
+    '  (seconds/minutes/hours/days/weeks/months/years); "4w" is rejected.',
+    '',
+    'elapsed_time and question_response cannot sit under a "not", at any depth.',
+    'surveyid can.',
+  ].join('\n'),
+  properties: {
+    op: {
+      type: 'string',
+      enum: ['and', 'or', 'not'],
+      description: 'Group operator. Present on group nodes, absent on leaves.',
+    },
+    vars: {
+      type: 'array',
+      minItems: 1,
+      items: { type: 'object' },
+      description: 'The children of a group node. "not" takes exactly one.',
+    },
+    type: {
+      type: 'string',
+      enum: BAIL_CONDITION_TYPES,
+      description: 'Leaf condition type. Present on leaves, absent on group nodes.',
+    },
+    value: {
+      type: 'string',
+      description: 'The value matched by form, state, error_code, current_question and surveyid.',
+    },
+    form: {
+      type: 'string',
+      description: 'question_response only: the form shortcode the answer was given in.',
+    },
+    question_ref: {
+      type: 'string',
+      description: 'question_response only: the question ref that was answered.',
+    },
+    response: {
+      type: 'string',
+      description:
+        'question_response only: the exact answer to match. Omit the key entirely to ' +
+        'match anyone who answered at all.',
+    },
+    since: {
+      type: 'object',
+      description:
+        'elapsed_time only: {"event": "response", "details": {"form": "<shortcode>", ' +
+        '"question_ref": "<ref>"}}. "response" is the only supported event.',
+    },
+    duration: {
+      type: 'string',
+      description: 'elapsed_time only: how long since that response, e.g. "4 weeks", "2 days".',
+    },
+  },
+};
+
+const BAIL_DEFINITION_SCHEMA = {
+  type: 'object',
+  description:
+    'Who to move, when, and where to. `type` defaults to "conditions"; use ' +
+    '"user_list" to name the participants explicitly instead.',
+  properties: {
+    type: {
+      type: 'string',
+      enum: BAIL_TYPES,
+      description:
+        '"conditions" (default) selects participants with a condition tree; ' +
+        '"user_list" takes an explicit list, each with their own destination.',
+    },
+    conditions: BAIL_CONDITION_SCHEMA,
+    user_list: {
+      type: 'object',
+      description:
+        `type "user_list" only: {"users": [...]}, 1..${MAX_USER_LIST} entries, each ` +
+        '{"userid", "pageid", "shortcode"} where shortcode is THAT participant\'s ' +
+        'destination form.',
+      properties: {
+        users: {
+          type: 'array',
+          minItems: 1,
+          description: 'The participants to move, each with their own destination shortcode.',
+          items: {
+            type: 'object',
+            required: ['userid', 'pageid', 'shortcode'],
+            additionalProperties: false,
+            properties: {
+              userid: { type: 'string', minLength: 1, description: 'Participant id.' },
+              pageid: { type: 'string', minLength: 1, description: 'The page or account they are on.' },
+              shortcode: { type: 'string', minLength: 1, description: 'The form to move them to.' },
+            },
+          },
+        },
+      },
+    },
+    execution: {
+      type: 'object',
+      required: ['timing'],
+      additionalProperties: false,
+      description: 'When the bail fires.',
+      properties: {
+        timing: {
+          type: 'string',
+          enum: BAIL_TIMINGS,
+          description:
+            '"immediate" runs on every tick (about once a minute) for as long as it is ' +
+            'enabled; "scheduled" runs once a day at time_of_day in timezone; ' +
+            '"absolute" runs once, at datetime, and never again.',
+        },
+        time_of_day: {
+          type: 'string',
+          description:
+            'timing "scheduled": 24-hour "HH:MM", e.g. "09:00". "09:00:00" is stored and ' +
+            'then silently never runs.',
+        },
+        timezone: {
+          type: 'string',
+          description:
+            'timing "scheduled": IANA name, e.g. "America/New_York" or "Africa/Lagos". ' +
+            'An unrecognised name is stored and then silently never runs.',
+        },
+        datetime: {
+          type: 'string',
+          description: 'timing "absolute": ISO 8601, e.g. "2026-06-01T09:00:00Z".',
+        },
+      },
+    },
+    action: {
+      type: 'object',
+      additionalProperties: false,
+      description: 'What happens to whoever matched. Ignored for type "user_list".',
+      properties: {
+        destination_form: {
+          type: 'string',
+          description:
+            'The shortcode everyone matched is moved into. Required for type ' +
+            '"conditions"; filled in from the top-level `destination_form` if you pass ' +
+            'that instead.',
+        },
+        metadata: {
+          type: 'object',
+          description: 'Optional free-form object passed through to the bot with each move.',
+        },
+      },
+    },
+  },
+};
+
+const BAIL_TOOLS = [
+  {
+    name: 'list_bails',
+    description: [
+      'List your bail systems: the rules that move live participants out of one form',
+      'and into another, with whether each is enabled and how its last run went.',
+      '',
+      'Bails belong to you, not to a survey — one can span several studies, so there is',
+      'no survey_name filter. The full condition tree is omitted here; call get_bail for',
+      'it. An `enabled` bail with timing "immediate" is firing about once a minute.',
+    ].join('\n'),
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+  },
+
+  {
+    name: 'get_bail',
+    description: [
+      'One bail in full: its condition tree, execution timing, destination and the',
+      'summary of its last run.',
+      '',
+      'Use it before update_bail — an update replaces the whole `definition`, so start',
+      'from this one rather than writing a new tree from memory.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['bail_id'],
+      additionalProperties: false,
+      properties: { bail_id: BAIL_ID_ARG },
+    },
+  },
+
+  {
+    name: 'create_bail',
+    description: [
+      'Create a bail system. It MOVES LIVE PARTICIPANTS: everyone matching the',
+      'condition is pulled out of the conversation they are in and started on another',
+      'form. Run preview_bail on the same definition first and look at the count.',
+      '',
+      'Created disabled unless you pass enabled: true. Once enabled, timing decides',
+      'when it fires — "immediate" means every tick, repeatedly, for as long as it stays',
+      'enabled, so it will also catch participants who match tomorrow.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'definition'],
+      additionalProperties: false,
+      properties: {
+        name: {
+          type: 'string',
+          minLength: 1,
+          description: 'A name for the bail, unique among yours. Shown in the dashboard and in events.',
+        },
+        description: {
+          type: 'string',
+          description: 'Optional note on why this bail exists. Worth writing: bails outlive their reason.',
+        },
+        definition: BAIL_DEFINITION_SCHEMA,
+        destination_form: {
+          type: 'string',
+          description:
+            'The shortcode matched participants are moved into. The same thing as ' +
+            'definition.action.destination_form — pass either and the other is filled in.',
+        },
+        enabled: {
+          type: 'boolean',
+          description:
+            'Whether it starts firing straight away. Defaults to false, which creates it ' +
+            'dormant so you can preview and then enable it with update_bail.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'update_bail',
+    description: [
+      'Change a bail, or turn one on or off. Only the fields you pass are changed, but',
+      '`definition` is replaced whole — get_bail first and send back the full tree.',
+      '',
+      'Passing enabled: true starts it firing; with timing "immediate" that is within',
+      'about a minute, on everyone who matches then.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['bail_id'],
+      additionalProperties: false,
+      properties: {
+        bail_id: BAIL_ID_ARG,
+        name: { type: 'string', minLength: 1, description: 'New name.' },
+        description: { type: 'string', description: 'New note.' },
+        definition: BAIL_DEFINITION_SCHEMA,
+        destination_form: {
+          type: 'string',
+          description: 'New destination shortcode; kept in step with definition.action.destination_form.',
+        },
+        enabled: {
+          type: 'boolean',
+          description: 'true starts it firing, false stops it. Pass it alone to toggle without touching the rest.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'delete_bail',
+    description: [
+      'Delete a bail permanently. Participants it already moved stay where it put them —',
+      'this stops it firing again and removes the rule and its history.',
+      '',
+      'If you only want it to stop, update_bail with enabled: false keeps the rule and',
+      'its event history and is reversible. Deleting is not.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['bail_id'],
+      additionalProperties: false,
+      properties: { bail_id: BAIL_ID_ARG },
+    },
+  },
+
+  {
+    name: 'preview_bail',
+    description: [
+      'Count who a definition would move, without creating or running anything. Always',
+      'do this before create_bail or before enabling one.',
+      '',
+      `Returns the match \`count\`, a sample of up to ${PREVIEW_USER_SAMPLE} matched participants, and the`,
+      'SQL that was generated, which is the fastest way to see that a condition means',
+      'something other than you intended. A count of 0 usually means a shortcode or a',
+      'question_ref is wrong, not that nobody qualifies.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      required: ['definition'],
+      additionalProperties: false,
+      properties: { definition: BAIL_DEFINITION_SCHEMA },
+    },
+  },
+
+  {
+    name: 'list_bail_events',
+    description: [
+      'The audit trail: every run of your bails, newest first, with how many',
+      'participants matched and how many were actually moved.',
+      '',
+      'With `bail_id`, one bail\'s history; without it, all of them. An `error` event',
+      'carries the failure. users_matched greater than users_bailed means the bot',
+      'refused some moves — check get_survey_health for the destination form. The',
+      `moved participant ids are sampled at ${BAIL_EVENT_USER_SAMPLE} per event.`,
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        bail_id: {
+          type: 'string',
+          minLength: 1,
+          description: 'Optional: only this bail\'s events. Omit for every bail you own.',
+        },
+        limit: {
+          type: 'integer',
+          description: `Events to return, 1..${BAIL_EVENTS_LIMIT.max}; default ${BAIL_EVENTS_LIMIT.default}.`,
+        },
+      },
+    },
+  },
+];
+
+/*
+ * The two things Exodus accepts and then silently never runs.
+ *
+ * Its own validation covers structure — timing present, destination_form
+ * non-empty, the condition grammar — and its messages are relayed verbatim, so
+ * this function deliberately does not restate them. What it does check is
+ * FORMAT: documentation/bail-systems.md "Common Issues" records that a
+ * time_of_day of "09:00:00" or a timezone of "US/Eastern" is stored happily and
+ * then skips execution forever, with no error event. That failure is invisible
+ * from the outside, so it is caught here instead.
+ */
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function validTimezone(name) {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: name });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function validateBailDefinition(definition) {
+  const errors = [];
+  if (!definition || typeof definition !== 'object') return ['definition: must be an object'];
+
+  const execution = definition.execution || {};
+
+  if (execution.timing === 'scheduled') {
+    if (execution.time_of_day && !HH_MM.test(execution.time_of_day)) {
+      errors.push(
+        `definition.execution.time_of_day: "${execution.time_of_day}" is not "HH:MM" ` +
+          '(24-hour, e.g. "09:00"). Exodus would store it and then never run the bail.',
+      );
+    }
+    if (execution.timezone && !validTimezone(execution.timezone)) {
+      errors.push(
+        `definition.execution.timezone: "${execution.timezone}" is not a known IANA zone ` +
+          '(e.g. "America/New_York", "Africa/Lagos"). Exodus would store it and then ' +
+          'never run the bail.',
+      );
+    }
+  }
+
+  if (execution.timing === 'absolute' && execution.datetime) {
+    if (Number.isNaN(Date.parse(execution.datetime))) {
+      errors.push(
+        `definition.execution.datetime: "${execution.datetime}" is not ISO 8601 ` +
+          '(e.g. "2026-06-01T09:00:00Z"). Exodus would store it and then never run the bail.',
+      );
+    }
+  }
+
+  // Expressible in JSON Schema only as maxItems, which this validator does not
+  // implement; Exodus rejects it, but naming the real cap is more useful than
+  // relaying "invalid user list".
+  const users = (definition.user_list || {}).users;
+  if (Array.isArray(users) && users.length > MAX_USER_LIST) {
+    errors.push(
+      `definition.user_list.users: ${users.length} entries, but a user_list bail takes at ` +
+        `most ${MAX_USER_LIST}. Split it into several bails.`,
+    );
+  }
+
+  return errors;
+}
+
+/*
+ * `destination_form` exists twice: a column on the bail row and a field inside
+ * definition.action. The dashboard writes both, Exodus validates the one in
+ * the action, and an agent that sets only one gets a bail that either fails
+ * validation or displays blank. Here they are made to agree, with whichever
+ * one was given winning.
+ */
+function buildBailRequest(args) {
+  const { name, description, definition, destination_form, enabled } = args;
+
+  const request = {};
+  if (name !== undefined) request.name = name;
+  if (description !== undefined) request.description = description;
+  if (enabled !== undefined) request.enabled = enabled;
+
+  let column = destination_form;
+
+  if (definition !== undefined) {
+    const action = { ...(definition.action || {}) };
+    const merged = action.destination_form || destination_form;
+
+    if ((definition.type || 'conditions') === 'conditions' && merged) {
+      action.destination_form = merged;
+      column = merged;
+    }
+
+    request.definition = { ...definition, action };
+  }
+
+  if (column !== undefined) request.destination_form = column;
+
+  const errors = definition === undefined ? [] : validateBailDefinition(request.definition);
+  return errors.length ? { ok: false, errors } : { ok: true, request };
+}
+
+const shapeLastEvent = event =>
+  (event
+    ? {
+      event_type: event.event_type,
+      timestamp: event.timestamp,
+      users_matched: event.users_matched,
+      users_bailed: event.users_bailed,
+      error: event.error || null,
+    }
+    : null);
+
+// The list view: everything except the condition tree, which get_bail returns.
+function shapeBailSummary({ bail, last_event: lastEvent }) {
+  const definition = bail.definition || {};
+
+  return {
+    id: bail.id,
+    name: bail.name,
+    description: bail.description || null,
+    enabled: !!bail.enabled,
+    type: definition.type || 'conditions',
+    timing: (definition.execution || {}).timing || null,
+    destination_form: bail.destination_form || (definition.action || {}).destination_form || null,
+    created_at: bail.created_at,
+    updated_at: bail.updated_at,
+    last_event: shapeLastEvent(lastEvent),
+  };
+}
+
+const shapeBail = row => ({ ...shapeBailSummary(row), definition: row.bail.definition || null });
+
+/*
+ * An event's `definition_snapshot` is the whole tree as it was at run time and
+ * is dropped: it is the largest field by far, and get_bail answers "what does
+ * this bail say" better than a copy inside every event does.
+ */
+function shapeBailEvent(event) {
+  const results = event.execution_results || {};
+  const ids = Array.isArray(results.user_ids) ? results.user_ids : [];
+
+  return {
+    id: event.id,
+    bail_id: event.bail_id,
+    bail_name: event.bail_name || null,
+    event_type: event.event_type,
+    timestamp: event.timestamp,
+    users_matched: event.users_matched,
+    users_bailed: event.users_bailed,
+    error: event.error || null,
+    bailed_user_ids: ids.slice(0, BAIL_EVENT_USER_SAMPLE),
+    bailed_user_id_count: ids.length,
+  };
+}
+
+function shapeBailEvents(events, limit) {
+  const rows = Array.isArray(events) ? events : [];
+  const page = rows.slice(0, limit);
+
+  return {
+    count: page.length,
+    truncated: rows.length > page.length,
+    items: page.map(shapeBailEvent),
+  };
+}
+
+function shapeBailPreview(result) {
+  const users = Array.isArray(result.users) ? result.users : [];
+
+  return {
+    count: result.count,
+    users: users.slice(0, PREVIEW_USER_SAMPLE),
+    users_shown: Math.min(users.length, PREVIEW_USER_SAMPLE),
+    sql: result.sql || null,
+    params: result.params || null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Accounts: the messaging channels a survey can send from, and the Typeform
+// forms available to register. Both are lists of identifiers other tools take.
+// ---------------------------------------------------------------------------
+
+const ACCOUNT_TOOLS = [
+  {
+    name: 'list_messaging_accounts',
+    description: [
+      'List the connected messaging accounts you can send from: Messenger pages and',
+      'WhatsApp business numbers.',
+      '',
+      '`account_id` is what the message-template tools take. Connecting an account is a',
+      'browser flow (Meta login) and cannot be done from here. Access tokens are never',
+      'returned by this or any other tool.',
+    ].join('\n'),
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+  },
+
+  {
+    name: 'list_typeform_forms',
+    description: [
+      'List the forms in your connected Typeform account, with the id create_survey',
+      'takes as `formid`.',
+      '',
+      'Use it to find a form somebody authored by hand, or to confirm a formid before',
+      'registering it — a wrong id becomes a survey that serves the wrong questions.',
+      'Only forms in the Typeform account connected to Fly are visible.',
+    ].join('\n'),
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+  },
+];
+
+const NO_TYPEFORM_CREDENTIAL_LIST = [
+  'No Typeform account is connected to your Fly account, so there are no forms to',
+  'list. Connect one in the dashboard (Settings -> Typeform); it is a browser',
+  'login and cannot be done from here.',
+].join(' ');
+
+// The Typeform list endpoint answers { total_items, page_count, items: [...] }
+// and each item carries far more than an agent needs to pick one.
+function shapeTypeformForms(response) {
+  const items = (response && response.items) || [];
+
+  return {
+    count: items.length,
+    total: (response && response.total_items) !== undefined ? response.total_items : items.length,
+    items: items.map(form => ({
+      formid: form.id,
+      title: form.title,
+      last_updated_at: form.last_updated_at || null,
+    })),
+  };
+}
+
+// Support tickets stay a dashboard feature for now: /tickets is a thin proxy
+// over Linear and the audience is a person asking the Fly team for help, not
+// an agent. planning/mcp-full-coverage-plan.md section 6 has the four tools
+// written out if that changes.
 const TICKET_TOOLS = [];
-const ACCOUNT_TOOLS = [];
 
 const TOOLS = [].concat(
   SURVEY_TOOLS,
@@ -1748,6 +2381,28 @@ module.exports = {
   validateUploadSource,
   decodeBase64,
   shapeUploadResult,
+
+  // bails
+  BAILS_NOTE,
+  BAIL_TYPES,
+  BAIL_TIMINGS,
+  BAIL_CONDITION_TYPES,
+  BAIL_EVENTS_LIMIT,
+  BAIL_EVENT_USER_SAMPLE,
+  PREVIEW_USER_SAMPLE,
+  MAX_USER_LIST,
+  validateBailDefinition,
+  buildBailRequest,
+  shapeBail,
+  shapeBailSummary,
+  shapeBailEvent,
+  shapeBailEvents,
+  shapeBailPreview,
+
+  // accounts
+  ACCOUNTS_NOTE,
+  NO_TYPEFORM_CREDENTIAL_LIST,
+  shapeTypeformForms,
 
   // bounded lists and redaction
   clampLimit,

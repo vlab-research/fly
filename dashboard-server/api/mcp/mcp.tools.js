@@ -53,6 +53,26 @@ const TOOL_SCOPES = {
   delete_message_template: 'templates:write',
   list_media: 'media:read',
   upload_media: 'media:write',
+
+  // bails — REST addresses them as /users/:userId/bails, so `users` is the
+  // resource. preview_bail changes nothing, but REST derives it from a POST
+  // and every scope here is the one its route has; parity is what makes this
+  // table auditable against the router.
+  list_bails: 'users:read',
+  get_bail: 'users:read',
+  create_bail: 'users:write',
+  update_bail: 'users:write',
+  delete_bail: 'users:write',
+  preview_bail: 'users:write',
+  list_bail_events: 'users:read',
+
+
+  // accounts. Reads only: no tool writes a credential or mints an API key —
+  // those stay in the dashboard, where a human does them (plan section 8).
+  // list_typeform_forms is surveys:read because /typeform maps to `surveys`,
+  // for the reason ROUTE_RESOURCES gives.
+  list_messaging_accounts: 'credentials:read',
+  list_typeform_forms: 'surveys:read',
 };
 
 // Absent scopes are unrestricted, matching the middleware exactly.
@@ -89,6 +109,15 @@ const {
   validateUploadSource,
   decodeBase64,
   shapeUploadResult,
+  BAIL_EVENTS_LIMIT,
+  buildBailRequest,
+  shapeBail,
+  shapeBailSummary,
+  shapeBailEvents,
+  shapeBailPreview,
+  redactCredential,
+  shapeTypeformForms,
+  NO_TYPEFORM_CREDENTIAL_LIST,
 } = core;
 
 /*
@@ -101,6 +130,17 @@ async function withSurvey(args, email, fn) {
   if (!resolved.ok) return toolError(unknownSurveyError(args.survey_name, resolved.known));
   const { email: owner, surveyName, shortcodes } = resolved;
   return fn({ email: owner, surveyName, shortcodes });
+}
+
+/*
+ * The bail equivalent of withSurvey. Bails are addressed by user id over REST
+ * and the dashboard gets that id by calling POST /users on mount; an agent has
+ * no such step and must never see an id, so it is resolved from the caller's
+ * email here (get-or-create, exactly what the dashboard does) and every bail
+ * operation takes the resolved user.
+ */
+async function withVlabUser(email, fn) {
+  return fn(await service.resolveVlabUser({ email }));
 }
 
 // Everything a tool says about a survey it just wrote. `version` is computed
@@ -388,6 +428,118 @@ const TOOL_HANDLERS = {
     result.fanOut();
 
     return toolResult(shapeUploadResult(result));
+  },
+
+  // --- bails ---------------------------------------------------------------
+
+  list_bails(args, { email }) {
+    return withVlabUser(email, async user => {
+      const result = await service.listBails(user);
+      const rows = (result && result.bails) || [];
+      return toolResult({ count: rows.length, items: rows.map(shapeBailSummary) });
+    });
+  },
+
+  get_bail(args, { email }) {
+    return withVlabUser(email, async user =>
+      toolResult(shapeBail(await service.getBail(user, args.bail_id))),
+    );
+  },
+
+  create_bail(args, { email }) {
+    const built = buildBailRequest(args);
+    if (!built.ok) return invalidArgsError(built.errors);
+
+    return withVlabUser(email, async user => {
+      const row = await service.createBail(user, built.request);
+      return toolResult({
+        created: shapeBail(row),
+        note: args.enabled
+          ? 'ENABLED: it will fire on the schedule above and move whoever matches. ' +
+            'Watch list_bail_events for what it actually did.'
+          : 'Created disabled — nothing has moved. Enable it with update_bail once ' +
+            'preview_bail shows the count you expect.',
+      });
+    });
+  },
+
+  update_bail(args, { email }) {
+    const { bail_id: bailId, ...changes } = args;
+
+    if (!Object.keys(changes).length) {
+      return toolError(
+        'Nothing to change: pass at least one of `name`, `description`, `definition`, ' +
+          '`destination_form` or `enabled`.',
+      );
+    }
+
+    const built = buildBailRequest(changes);
+    if (!built.ok) return invalidArgsError(built.errors);
+
+    return withVlabUser(email, async user => {
+      const row = await service.updateBail(user, bailId, built.request);
+      return toolResult({
+        updated: shapeBail(row),
+        note: changes.enabled === true
+          ? 'Now enabled: it will fire on the schedule above and move whoever matches.'
+          : changes.enabled === false
+            ? 'Now disabled: it will not fire again. Participants it already moved stay ' +
+              'where it put them.'
+            : 'Changed. Anything it already did is unaffected.',
+      });
+    });
+  },
+
+  delete_bail(args, { email }) {
+    return withVlabUser(email, async user => {
+      await service.deleteBail(user, args.bail_id);
+      return toolResult({
+        deleted: args.bail_id,
+        note:
+          'Gone, with its event history. Participants it already moved stay where it ' +
+          'put them.',
+      });
+    });
+  },
+
+  preview_bail(args, { email }) {
+    // Built through the same function create_bail uses, so a definition that
+    // previews cleanly is one that can be created unchanged.
+    const built = buildBailRequest({ definition: args.definition });
+    if (!built.ok) return invalidArgsError(built.errors);
+
+    return withVlabUser(email, async user =>
+      toolResult(shapeBailPreview(await service.previewBail(user, built.request.definition))),
+    );
+  },
+
+  list_bail_events(args, { email }) {
+    return withVlabUser(email, async user => {
+      const limit = clampLimit(args.limit, BAIL_EVENTS_LIMIT);
+
+      // The per-bail endpoint returns the whole history and takes no limit, so
+      // that page is cut here; the user-wide one is limited in the query.
+      const result = args.bail_id
+        ? await service.bailEvents(user, args.bail_id)
+        : await service.userBailEvents(user, limit);
+
+      return toolResult(shapeBailEvents(result && result.events, limit));
+    });
+  },
+
+  // --- accounts ------------------------------------------------------------
+
+  async list_messaging_accounts(args, { email }) {
+    const rows = await service.listMessagingAccounts({ email });
+    // Redaction is a pure function with a recursive no-secret test: nothing
+    // from the credential's `details` blob leaves here but a display name.
+    return toolResult({ count: rows.length, items: rows.map(redactCredential) });
+  },
+
+  async list_typeform_forms(args, { email }) {
+    const result = await service.listTypeformForms({ email });
+    if (!result.ok) return toolError(NO_TYPEFORM_CREDENTIAL_LIST);
+    return toolResult(shapeTypeformForms(result.forms));
   },
 };
 
