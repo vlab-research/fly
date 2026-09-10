@@ -89,13 +89,30 @@ the ledger, and delivered. Per-candidate outcomes ride along on the Result's
 own — otherwise one payment point would inflate the metrics and the
 `payment-recovery` tooling N-fold.
 
-> **A live gap for DingConnect.** `classify.go`'s DingConnect rows use invented
-> SCREAMING_SNAKE names the provider never emits — it passes DingConnect's
-> PascalCase codes through verbatim. So `InsufficientBalance` from DingConnect is
-> **not** classified `precondition` and is sent to the respondent, releasing them
-> from the wait and ending dean's ability to pay them on top-up: the §3 failure
-> mode, reintroduced for one provider. Live since 2026-09-02, tracked as
-> **VIR-41**. `RateLimited` is already pinned.
+> **The DingConnect spelling gap (VIR-41) — closed 2026-09-10.** `classify.go`'s
+> DingConnect rows used invented SCREAMING_SNAKE names the provider never emits;
+> it passes DingConnect's PascalCase codes through verbatim. So
+> `InsufficientBalance` from DingConnect was **not** classified `precondition`,
+> and was sent to the respondent, releasing them from the wait and ending dean's
+> ability to pay them on top-up: the §3 failure mode, reintroduced for one
+> provider. Live from 2026-09-02.
+>
+> `InsufficientBalance`, `AuthenticationFailed`, `ProviderError`,
+> `TransientProviderError`, `AccountNumberInvalid`, `ParameterInvalid` and
+> `DuplicateTransactionPrevented` are now pinned in DingConnect's own spelling,
+> and `PaymentWalletEmpty` — which matched `code="INSUFFICIENT_BALANCE"`
+> exactly, and was therefore blind to DingConnect in the same way — now matches
+> both. `TestDingConnectSpellingsAreClassified` is the regression test for the
+> class rather than the instance.
+>
+> **The phantom rows are still there.** `INVALID_ACCOUNT_NUMBER`,
+> `DUPLICATE_REFERENCE`, `INVALID_SKU_CODE`, `PROVIDER_UNAVAILABLE` and
+> `PROVIDER_TIMED_OUT` are names nothing emits; removing them is a separate
+> decision. Only nine codes are dinersclub's own inventions for DingConnect
+> (`PIN_DRIFT`, `AMOUNT_CURRENCY_MISMATCH`, `NO_PIN_FOR_OPERATOR`,
+> `IMPOSSIBLE_AMOUNT`, `INVALID_PAYMENT_DETAILS`, `COULD_NOT_AUTO_DETECT_OPERATOR`,
+> `INVALID_RESPONSE`, `HTTP_REQUEST_FAILED`, `PAYMENT_FAILED`); everything else
+> is the provider's, so check `go-dingconnect/errors.go` before adding a row.
 
 **An unrecognised code is `permanent`**, i.e. it is sent, i.e. it behaves
 exactly as every failure behaved before classification existed. Silence is the
@@ -161,6 +178,7 @@ only application service in this repo that Prometheus scrapes.
 | `dinersclub_unclassified_error_codes_total{provider,code}` | which rows are missing from the classifier |
 | `dinersclub_payment_duration_seconds{provider,outcome}` | are we anywhere near the Kafka poll budget |
 | `dinersclub_processing_faults_total{stage}` | is dinersclub itself broken (replaces "the pod restarted") |
+| `dinersclub_dingconnect_pin_drift_total{reason}` | a DingConnect pin no longer delivers the declared amount — alerts as `PaymentPinDrift` |
 | `dinersclub_up` | is anyone scraping this at all |
 
 `recovery != "permanent"` is precisely the set of failures the respondent was

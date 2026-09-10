@@ -94,10 +94,15 @@ spec:
         # `provider`, not the credential key -- adding `key` would name the
         # account directly and is the obvious next improvement, weighed against
         # putting researcher identifiers in metric labels.
+        # Two spellings on purpose: dinersclub synthesises INSUFFICIENT_BALANCE
+        # for Reloadly and the giftcard provider, but keeps DingConnect's own
+        # code verbatim, which is "InsufficientBalance". Matching only the
+        # snake spelling made this rule -- the one payment rule that PAGES --
+        # blind to every DingConnect wallet (found 2026-09-10).
         - alert: PaymentWalletEmpty
           expr: |
             sum by (provider) (
-              increase(dinersclub_payment_results_total{code="INSUFFICIENT_BALANCE", namespace="{{ $p.namespace }}"}[1h])
+              increase(dinersclub_payment_results_total{code=~"INSUFFICIENT_BALANCE|InsufficientBalance", namespace="{{ $p.namespace }}"}[1h])
             ) > {{ $p.walletEmptyThreshold }}
           for: {{ $p.walletEmptyFor }}
           labels:
@@ -113,8 +118,8 @@ spec:
               payment once the account is funded. Everyone parked gets paid on the
               next sweep IF the wallet is topped up within dean's 14-day retry
               window; after that the payments are lost silently. Find the account
-              (`SELECT userid, key FROM credentials WHERE entity='reloadly'`) and
-              get it funded.
+              (`SELECT userid, key FROM credentials WHERE entity = '{{`{{ $labels.provider }}`}}'`)
+              and get it funded.
             runbook_url: "{{ $runbook }}#paymentwalletempty"
 
         # ---- A provider is down --------------------------------------------
@@ -183,6 +188,44 @@ spec:
               right and add the code to the table — if it is actually transient or
               a precondition, those payments were recoverable and are now lost.
             runbook_url: "{{ $runbook }}#paymentunclassifiederrorcode"
+
+        # ---- the researcher's declared amounts no longer hold --------------
+        #
+        # A DingConnect payment declares what the respondent should RECEIVE and
+        # pins the SKU/SendValue that delivers it. Commission rates move on
+        # DingConnect's side, so a pin that was correct when the survey was
+        # written can drift until it delivers something else — and dinersclub
+        # refuses the payment rather than silently paying the wrong incentive
+        # (see planning/dingconnect-amount-resolution.md).
+        #
+        # Refusing is right, but it is invisible: PIN_DRIFT is classified
+        # permanent, so the respondent is simply told the payment failed. It is
+        # nobody's fault and nothing self-heals — the researcher has to
+        # re-declare the pin. Until they do, every respondent reaching that
+        # payment point fails, which is why this is a rate and not a one-shot.
+        #
+        # Observed 2026-09-10: 51 drifted payments on vprod over ~48h, the
+        # single largest DingConnect failure mode, with nothing watching it.
+        - alert: PaymentPinDrift
+          expr: |
+            sum by (reason) (
+              increase(dinersclub_dingconnect_pin_drift_total{namespace="{{ $p.namespace }}"}[6h])
+            ) > {{ $p.pinDriftThreshold }}
+          for: {{ $p.pinDriftFor }}
+          labels:
+            severity: warning
+            component: payments
+          annotations:
+            summary: "DingConnect pin drift ({{`{{ $labels.reason }}`}}) failing payments"
+            description: >-
+              {{`{{ $value | printf "%.0f" }}`}} DingConnect payments were refused
+              because a pinned SKU no longer delivers the declared amount
+              (reason={{`{{ $labels.reason }}`}}). dinersclub is correctly refusing to
+              pay the wrong incentive, but this never self-heals: the survey's
+              payment block has to be re-declared. Every respondent reaching that
+              payment point fails until it is. The dinersclub log line names the
+              SKU, the delivered value and the declared window.
+            runbook_url: "{{ $runbook }}#paymentpindrift"
 
         # ---- dinersclub is broken, rather than the payments ----------------
         #

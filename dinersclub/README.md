@@ -874,6 +874,18 @@ non-2xx. A "5xx means transient" rule would retry an empty wallet forever.
 | HTTP 5xx / 429 | Server-side fault or throttling | **transient** | Retried, then deferred to dean |
 | HTTP 4xx | Request the provider refused | permanent | Check API response/logs |
 
+DingConnect's own codes arrive verbatim (`e.Code()`, `dingconnect.go`), so they
+sit in the same table in CamelCase:
+
+| Code | Meaning | Class | Next Step |
+|------|---------|-------|-----------|
+| ProviderError | The mobile operator failed the transfer | **transient** | Retried, then deferred to dean. Transient **against** the library's `Retryable()` — see the row in `classify.go` |
+| TransientProviderError | The operator was briefly unable | **transient** | Same; DingConnect's explicitly retryable variant, unobserved so far |
+| AccountNumberInvalid | The number is refused or malformed | permanent | The respondent's to fix by giving a different number |
+| ParameterInvalid | DingConnect refused a parameter of ours | permanent | Our request to fix; a retry sends the same body |
+| RateLimited | Throttling **or** a per-number fraud rule | permanent | Never retried, and the cascade never advances past it — the ambiguity resolves to "stop" |
+| InsufficientBalance | Researcher's DingConnect wallet is empty | **precondition** | Top up; parked payments land on dean's next sweep |
+
 The full table, with production frequencies, is `recoveryByCode` in
 `classify.go`.
 
@@ -1056,7 +1068,7 @@ observability: it makes the silent path unaccountable and blinds every alert in
 | `dinersclub_unclassified_error_codes_total` | `provider`, `code` | which rows are missing from `recoveryByCode` |
 | `dinersclub_payment_duration_seconds` | `provider`, `outcome` | are we anywhere near the Kafka poll budget |
 | `dinersclub_processing_faults_total` | `stage` | is dinersclub itself broken (replaces "the pod restarted") |
-| `dinersclub_dingconnect_pin_drift_total` | `reason` | a pinned SKU stopped satisfying its declared amount; the pin needs re-researching |
+| `dinersclub_dingconnect_pin_drift_total` | `reason` | a pinned SKU stopped satisfying its declared amount; the pin needs re-researching — alerts as `PaymentPinDrift` |
 | `dinersclub_dingconnect_delivered_out_of_window_total` | — | a transfer COMPLETED but paid an amount the catalogue did not predict |
 | `dinersclub_up` | — | is anyone scraping this at all |
 
@@ -1064,7 +1076,14 @@ The last two are the DingConnect amount contract. `pin_drift` should be near
 zero — the design assumes SKUs and commission rates move a few times a year, and
 that is what makes hard-failing on drift affordable. If it fires regularly the
 assumption was wrong, and the answer is `on_drift: "resolve"`, not a wider
-tolerance. `delivered_out_of_window` should be **exactly** zero: it fires only
+tolerance.
+
+> **The assumption has already been tested once and did not hold.** vprod saw
+> **51** drifted payments in 48h on 2026-09-10 (one Bolivian commission rate
+> moving `BO_NV_TopUp` from ~11 BOB to 27.3 BOB, outside a declared 11–17 BOB
+> window), making it the largest DingConnect failure mode in that window. It was
+> silent for two days because nothing watched the counter; `PaymentPinDrift`
+> exists as of that incident. `on_drift: "resolve"` is still unimplemented. `delivered_out_of_window` should be **exactly** zero: it fires only
 after money has moved, so it cannot fail the payment, and it is the sole true
 detector of a respondent silently receiving the wrong incentive.
 

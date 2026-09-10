@@ -404,6 +404,18 @@ payments:
   unclassifiedThreshold: 0
   unclassifiedFor: "15m"
 
+  # PaymentPinDrift — a DingConnect pin that no longer delivers the amount the
+  # survey declared, because a commission rate moved. dinersclub refuses the
+  # payment rather than pay the wrong incentive.
+  #
+  # A rate, not a one-shot: this never self-heals and blocks every respondent at
+  # that payment point until the researcher re-declares the pin, so a handful
+  # over 6h is the honest signal that a live survey has drifted. Set above 0
+  # because a single drifted payment on a retired form is not worth a page's
+  # worth of attention; 51 in 48h (vprod, 2026-09-10) is.
+  pinDriftThreshold: 5
+  pinDriftFor: "30m"
+
   # DinersClubProcessingFaults — faults in dinersclub itself (bad Kafka message,
   # database down, botserver refusing results), not payment rejections.
   #

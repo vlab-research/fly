@@ -34,6 +34,14 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"CONNECTION_TO_OPERATOR_TEMPORARILY_DOWN", 6, RecoveryTransient},
 		{"CONNECTION_TO_OPERATOR_FAILED", 4, RecoveryTransient},
 		{"REQUEST_PROCESSING_FAILED", 3, RecoveryTransient},
+		// DingConnect's operator-side failure. Transient against the
+		// library's own Retryable(), on production evidence: 14 results, 5
+		// respondents, all Entel Bolivia with context ProviderUnknownError,
+		// and two of them succeeded on a retry of the IDENTICAL request.
+		// See the row in classify.go for why the retry is safe.
+		{"ProviderError", 14, RecoveryTransient},
+		{"TransientProviderError", 0, RecoveryTransient},
+
 		{"502", 0, RecoveryTransient},
 		{"503", 0, RecoveryTransient},
 		{"504", 0, RecoveryTransient},
@@ -49,6 +57,15 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		// simply waiting for a wallet top-up.
 		{"INSUFFICIENT_BALANCE", 8521, RecoveryPrecondition}, // 7687 reloadly + 834 giftcard
 		{"AUTH_ERROR", 219, RecoveryPrecondition},
+
+		// DingConnect's own spellings of the two preconditions. dinersclub
+		// passes its codes through verbatim, so the SCREAMING_SNAKE rows above
+		// never matched them and both took the permanent default -- telling
+		// the respondent a recoverable payment had failed. Unobserved when
+		// pinned (2026-09-10); pinned before the first DingConnect wallet runs
+		// dry rather than after.
+		{"InsufficientBalance", 0, RecoveryPrecondition},
+		{"AuthenticationFailed", 0, RecoveryPrecondition},
 
 		// ---- permanent: never going to work as configured --------------
 		{"PHONE_RECENTLY_RECHARGED", 3627, RecoveryPermanent},
@@ -82,6 +99,15 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"INVALID_RESPONSE", 0, RecoveryPermanent},
 		{"PAYMENT_FAILED", 0, RecoveryPermanent},
 		{"DUPLICATE_REFERENCE", 0, RecoveryPermanent},
+
+		// DingConnect's own codes for a bad account number and a bad
+		// parameter. Both pinned at the value the unknown-code default
+		// already gave them, so that the default cannot quietly become the
+		// decision. Counts are from the 2026-09-07/10 window, not the
+		// 2026-08-18 census.
+		{"AccountNumberInvalid", 23, RecoveryPermanent},
+		{"ParameterInvalid", 4, RecoveryPermanent},
+		{"DuplicateTransactionPrevented", 0, RecoveryPermanent},
 
 		// DingConnect amount resolution (VIR-40). All permanent: a retry sends
 		// the same stale pin, and silence would hide the drift.
@@ -187,4 +213,50 @@ func TestInsufficientBalanceIsNeverSent(t *testing.T) {
 	assert.True(t, known)
 	assert.Equal(t, RecoveryPrecondition, got)
 	assert.True(t, got.Silent())
+}
+
+// TestDingConnectSpellingsAreClassified is the regression test for a whole
+// class of bug rather than one code.
+//
+// dinersclub keeps DingConnect's own error code verbatim (e.Code() in
+// dingconnect.go), so the table must be keyed on DingConnect's CamelCase
+// spelling. Rows added in SCREAMING_SNAKE "for DingConnect" match nothing, and
+// the failure is silent: the code takes the unknown-code default, which is
+// permanent, which sends the Result and releases the respondent.
+//
+// That was the live state of InsufficientBalance until 2026-09-10 -- the empty
+// researcher wallet, the platform's largest failure mode and the one that
+// TestInsufficientBalanceIsNeverSent exists to keep silent, was permanent for
+// every DingConnect payment because the row said INSUFFICIENT_BALANCE.
+func TestDingConnectSpellingsAreClassified(t *testing.T) {
+	// Codes go-dingconnect can return that dinersclub must have an opinion
+	// about, in the library's spelling (go-dingconnect/errors.go).
+	for code, expected := range map[string]Recovery{
+		"InsufficientBalance":           RecoveryPrecondition,
+		"AuthenticationFailed":          RecoveryPrecondition,
+		"ProviderError":                 RecoveryTransient,
+		"TransientProviderError":        RecoveryTransient,
+		"AccountNumberInvalid":          RecoveryPermanent,
+		"ParameterInvalid":              RecoveryPermanent,
+		"RateLimited":                   RecoveryPermanent,
+		"DuplicateTransactionPrevented": RecoveryPermanent,
+	} {
+		t.Run(code, func(t *testing.T) {
+			got, known := Classify(code)
+			assert.True(t, known,
+				"%s is a code DingConnect returns verbatim; an unpinned code silently defaults to permanent", code)
+			assert.Equal(t, expected, got)
+		})
+	}
+}
+
+// TestDingConnectWalletIsNeverSent extends TestInsufficientBalanceIsNeverSent
+// to the DingConnect spelling. Kept separate for the same reason that one is:
+// the table above says what the class is, this says why anyone cares.
+func TestDingConnectWalletIsNeverSent(t *testing.T) {
+	got, known := Classify("InsufficientBalance")
+	assert.True(t, known)
+	assert.Equal(t, RecoveryPrecondition, got)
+	assert.True(t, got.Silent(),
+		"a DingConnect wallet must stay silent so dean can pay everyone once it is topped up")
 }
