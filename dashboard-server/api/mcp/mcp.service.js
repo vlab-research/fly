@@ -41,6 +41,11 @@ const templates = require('../message-templates/message-templates.service').make
 const mediaService = require('../media/media.service');
 const media = mediaService.makeService(require('../media/media.deps'));
 
+// Bails talk to Exodus over HTTP; credentials and Typeform are plain reads.
+const bails = require('../bails/bails.service');
+const credentials = require('../credentials/credential.service');
+const typeform = require('../typeform/typeform.service');
+
 /*
  * Author a form in the researcher's own Typeform account.
  */
@@ -114,4 +119,21 @@ module.exports = {
   listAssets: media.listAssets,
   uploadAsset: media.uploadAsset,
   fetchSource: mediaService.fetchSource,
+
+  // bails (api/bails) — every operation takes the user resolveVlabUser
+  // returns, so no tool ever handles a user id.
+  resolveVlabUser: bails.resolveVlabUser,
+  listBails: bails.listBails,
+  getBail: bails.getBail,
+  createBail: bails.createBail,
+  updateBail: bails.updateBail,
+  deleteBail: bails.deleteBail,
+  previewBail: bails.previewBail,
+  bailEvents: bails.bailEvents,
+  userBailEvents: bails.userBailEvents,
+
+
+  // accounts (api/credentials, api/typeform)
+  listMessagingAccounts: credentials.listMessagingAccounts,
+  listTypeformForms: typeform.listForms,
 };

@@ -24,6 +24,16 @@ const {
   MAX_CHOICES,
   clampLimit,
   redactCredential,
+  BAIL_EVENT_USER_SAMPLE,
+  PREVIEW_USER_SAMPLE,
+  MAX_USER_LIST,
+  validateBailDefinition,
+  buildBailRequest,
+  shapeBail,
+  shapeBailSummary,
+  shapeBailEvents,
+  shapeBailPreview,
+  shapeTypeformForms,
   STATE_NAMES,
   LIST_STATES_LIMIT,
   unknownSurveyError,
@@ -91,9 +101,17 @@ const TOOL_NAMES = {
     'delete_message_template',
   ],
   MEDIA_TOOLS: ['list_media', 'upload_media'],
-  BAIL_TOOLS: [],
+  BAIL_TOOLS: [
+    'list_bails',
+    'get_bail',
+    'create_bail',
+    'update_bail',
+    'delete_bail',
+    'preview_bail',
+    'list_bail_events',
+  ],
   TICKET_TOOLS: [],
-  ACCOUNT_TOOLS: [],
+  ACCOUNT_TOOLS: ['list_messaging_accounts', 'list_typeform_forms'],
 };
 
 const AREAS = {
@@ -904,5 +922,332 @@ describe('mcp.core: templates and media', () => {
     const asset = { id: 'a1', url: 'https://media/a/a1/x.png' };
     expect(shapeUploadResult({ asset, deduplicated: false })).to.include({ id: 'a1', deduplicated: false });
     expect(shapeUploadResult({ asset, deduplicated: true }).note).to.match(/already in the library/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bails.
+// ---------------------------------------------------------------------------
+
+describe('mcp.core: validateBailDefinition', () => {
+  const scheduled = (time_of_day, timezone) => ({
+    type: 'conditions',
+    conditions: { type: 'state', value: 'BLOCKED' },
+    execution: { timing: 'scheduled', time_of_day, timezone },
+    action: { destination_form: 'exit' },
+  });
+
+  it('accepts a well-formed scheduled definition', () => {
+    expect(validateBailDefinition(scheduled('09:00', 'America/New_York'))).to.eql([]);
+  });
+
+  it('accepts an immediate definition with no timing fields', () => {
+    expect(
+      validateBailDefinition({
+        conditions: { type: 'form', value: 'abc' },
+        execution: { timing: 'immediate' },
+        action: { destination_form: 'exit' },
+      }),
+    ).to.eql([]);
+  });
+
+  // The whole reason this function exists: Exodus stores these and then never
+  // runs the bail, with no error event anywhere.
+  it('rejects a time_of_day that is not HH:MM, saying what would happen', () => {
+    const [err] = validateBailDefinition(scheduled('09:00:00', 'America/New_York'));
+    expect(err).to.match(/time_of_day/);
+    expect(err).to.match(/never run/);
+  });
+
+  it('rejects an hour outside 00-23', () => {
+    expect(validateBailDefinition(scheduled('24:00', 'America/New_York'))).to.have.length(1);
+  });
+
+  it('rejects a timezone name IANA does not know', () => {
+    const [err] = validateBailDefinition(scheduled('09:00', 'US/Eastern-ish'));
+    expect(err).to.match(/timezone/);
+    expect(err).to.match(/never run/);
+  });
+
+  it('accepts other real IANA zones', () => {
+    expect(validateBailDefinition(scheduled('09:00', 'Africa/Lagos'))).to.eql([]);
+  });
+
+  it('rejects an absolute datetime that is not parseable', () => {
+    const errors = validateBailDefinition({
+      execution: { timing: 'absolute', datetime: 'next tuesday' },
+    });
+    expect(errors).to.have.length(1);
+    expect(errors[0]).to.match(/ISO 8601/);
+  });
+
+  it('accepts an ISO 8601 datetime', () => {
+    expect(
+      validateBailDefinition({ execution: { timing: 'absolute', datetime: '2026-06-01T09:00:00Z' } }),
+    ).to.eql([]);
+  });
+
+  it('ignores timing fields that belong to another timing', () => {
+    // A leftover time_of_day on an immediate bail is not what stops it running.
+    expect(
+      validateBailDefinition({ execution: { timing: 'immediate', time_of_day: 'nonsense' } }),
+    ).to.eql([]);
+  });
+
+  it('rejects a user_list longer than the cap, naming the cap', () => {
+    const users = Array.from({ length: MAX_USER_LIST + 1 }, (_, i) => ({
+      userid: `u${i}`, pageid: 'p', shortcode: 's',
+    }));
+    const [err] = validateBailDefinition({ type: 'user_list', user_list: { users } });
+    expect(err).to.match(new RegExp(`${MAX_USER_LIST}`));
+  });
+
+  it('accepts a user_list at the cap', () => {
+    const users = Array.from({ length: MAX_USER_LIST }, (_, i) => ({
+      userid: `u${i}`, pageid: 'p', shortcode: 's',
+    }));
+    expect(validateBailDefinition({ type: 'user_list', user_list: { users } })).to.eql([]);
+  });
+
+  it('rejects a definition that is not an object', () => {
+    expect(validateBailDefinition(null)).to.have.length(1);
+  });
+});
+
+describe('mcp.core: buildBailRequest', () => {
+  const definition = {
+    conditions: { type: 'state', value: 'BLOCKED' },
+    execution: { timing: 'immediate' },
+  };
+
+  it('fills action.destination_form in from the top-level argument', () => {
+    const { request } = buildBailRequest({ name: 'b', definition, destination_form: 'exit' });
+    expect(request.definition.action.destination_form).to.equal('exit');
+    expect(request.destination_form).to.equal('exit');
+  });
+
+  it('fills the top-level column in from action.destination_form', () => {
+    const { request } = buildBailRequest({
+      name: 'b',
+      definition: { ...definition, action: { destination_form: 'exit' } },
+    });
+    expect(request.destination_form).to.equal('exit');
+  });
+
+  it('keeps action.destination_form when both are given and they disagree', () => {
+    const { request } = buildBailRequest({
+      definition: { ...definition, action: { destination_form: 'from_action' } },
+      destination_form: 'from_column',
+    });
+    expect(request.definition.action.destination_form).to.equal('from_action');
+    expect(request.destination_form).to.equal('from_action');
+  });
+
+  it('preserves other action fields', () => {
+    const { request } = buildBailRequest({
+      definition: { ...definition, action: { destination_form: 'exit', metadata: { why: 'x' } } },
+    });
+    expect(request.definition.action.metadata).to.eql({ why: 'x' });
+  });
+
+  it('does not invent a destination for a user_list bail', () => {
+    const { request } = buildBailRequest({
+      definition: {
+        type: 'user_list',
+        user_list: { users: [{ userid: 'u', pageid: 'p', shortcode: 's' }] },
+        execution: { timing: 'immediate' },
+      },
+      destination_form: 'exit',
+    });
+    expect(request.definition.action).to.eql({});
+  });
+
+  it('omits keys that were not passed, so an update stays partial', () => {
+    const { request } = buildBailRequest({ enabled: false });
+    expect(Object.keys(request)).to.eql(['enabled']);
+  });
+
+  it('does not validate when no definition is passed', () => {
+    expect(buildBailRequest({ name: 'renamed' }).ok).to.equal(true);
+  });
+
+  it('reports definition errors instead of a request', () => {
+    const result = buildBailRequest({
+      definition: { ...definition, execution: { timing: 'scheduled', time_of_day: '9am', timezone: 'UTC' } },
+    });
+    expect(result.ok).to.equal(false);
+    expect(result.errors[0]).to.match(/time_of_day/);
+  });
+
+  it('leaves the caller\'s definition untouched', () => {
+    const original = { ...definition };
+    buildBailRequest({ definition: original, destination_form: 'exit' });
+    expect(original.action).to.equal(undefined);
+  });
+});
+
+describe('mcp.core: bail shaping', () => {
+  const row = {
+    bail: {
+      id: 'b1',
+      name: 'Stuck 4 weeks',
+      description: null,
+      enabled: true,
+      destination_form: 'exit',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+      definition: {
+        type: 'conditions',
+        conditions: { type: 'state', value: 'BLOCKED' },
+        execution: { timing: 'scheduled', time_of_day: '09:00', timezone: 'UTC' },
+        action: { destination_form: 'exit' },
+      },
+    },
+    last_event: {
+      id: 'e1',
+      event_type: 'execution',
+      timestamp: '2026-01-03T00:00:00Z',
+      users_matched: 10,
+      users_bailed: 9,
+      definition_snapshot: { huge: true },
+    },
+  };
+
+  it('leaves the condition tree out of the list view', () => {
+    const summary = shapeBailSummary(row);
+    expect(summary).to.not.have.property('definition');
+    expect(summary.type).to.equal('conditions');
+    expect(summary.timing).to.equal('scheduled');
+    expect(summary.destination_form).to.equal('exit');
+  });
+
+  it('includes the condition tree in the single-bail view', () => {
+    expect(shapeBail(row).definition).to.eql(row.bail.definition);
+  });
+
+  it('never carries a definition snapshot into a last_event summary', () => {
+    expect(shapeBailSummary(row).last_event).to.eql({
+      event_type: 'execution',
+      timestamp: '2026-01-03T00:00:00Z',
+      users_matched: 10,
+      users_bailed: 9,
+      error: null,
+    });
+  });
+
+  it('reports a bail that has never run as last_event null', () => {
+    expect(shapeBailSummary({ bail: row.bail, last_event: null }).last_event).to.equal(null);
+  });
+
+  it('falls back to the definition action when the column is blank', () => {
+    const bail = { ...row.bail, destination_form: null };
+    expect(shapeBailSummary({ bail, last_event: null }).destination_form).to.equal('exit');
+  });
+
+  it('defaults a definition with no type to conditions', () => {
+    const bail = { ...row.bail, definition: { execution: {} } };
+    expect(shapeBailSummary({ bail, last_event: null }).type).to.equal('conditions');
+    expect(shapeBailSummary({ bail, last_event: null }).timing).to.equal(null);
+  });
+});
+
+describe('mcp.core: shapeBailEvents', () => {
+  const event = (i, ids) => ({
+    id: `e${i}`,
+    bail_id: 'b1',
+    bail_name: 'Stuck',
+    event_type: 'execution',
+    timestamp: `2026-01-0${i}T00:00:00Z`,
+    users_matched: ids.length,
+    users_bailed: ids.length,
+    definition_snapshot: { huge: true },
+    execution_results: { user_ids: ids },
+  });
+
+  it('drops the definition snapshot from every event', () => {
+    const { items } = shapeBailEvents([event(1, ['u1'])], 10);
+    expect(items[0]).to.not.have.property('definition_snapshot');
+  });
+
+  it('samples the moved participants and keeps the true count', () => {
+    const ids = Array.from({ length: BAIL_EVENT_USER_SAMPLE + 25 }, (_, i) => `u${i}`);
+    const [item] = shapeBailEvents([event(1, ids)], 10).items;
+    expect(item.bailed_user_ids).to.have.length(BAIL_EVENT_USER_SAMPLE);
+    expect(item.bailed_user_id_count).to.equal(ids.length);
+  });
+
+  it('cuts the page at the limit and says it did', () => {
+    const rows = [event(1, []), event(2, []), event(3, [])];
+    const page = shapeBailEvents(rows, 2);
+    expect(page.count).to.equal(2);
+    expect(page.truncated).to.equal(true);
+  });
+
+  it('does not claim truncation when everything fits', () => {
+    expect(shapeBailEvents([event(1, [])], 100).truncated).to.equal(false);
+  });
+
+  it('survives an error event with no execution results', () => {
+    const [item] = shapeBailEvents(
+      [{ id: 'e', event_type: 'error', error: 'exodus exploded' }], 10,
+    ).items;
+    expect(item.error).to.equal('exodus exploded');
+    expect(item.bailed_user_ids).to.eql([]);
+  });
+
+  it('treats a missing events array as empty', () => {
+    expect(shapeBailEvents(undefined, 10)).to.eql({ count: 0, truncated: false, items: [] });
+  });
+});
+
+describe('mcp.core: shapeBailPreview', () => {
+  it('samples the matched users and keeps the count Exodus reported', () => {
+    const users = Array.from({ length: PREVIEW_USER_SAMPLE + 10 }, (_, i) => ({
+      userid: `u${i}`, pageid: 'p',
+    }));
+    const shaped = shapeBailPreview({ count: 999, users, sql: 'SELECT 1', params: ['x'] });
+    expect(shaped.count).to.equal(999);
+    expect(shaped.users).to.have.length(PREVIEW_USER_SAMPLE);
+    expect(shaped.users_shown).to.equal(PREVIEW_USER_SAMPLE);
+  });
+
+  // The generated SQL is the fastest way to see a condition means something
+  // other than intended, so it is deliberately not dropped.
+  it('keeps the generated SQL', () => {
+    expect(shapeBailPreview({ count: 0, users: [], sql: 'SELECT 1' }).sql).to.equal('SELECT 1');
+  });
+
+  it('handles a user_list preview, which generates no SQL', () => {
+    const shaped = shapeBailPreview({ count: 2, users: [{ userid: 'u' }], sql: '', params: null });
+    expect(shaped.sql).to.equal(null);
+    expect(shaped.count).to.equal(2);
+  });
+});
+
+describe('mcp.core: shapeTypeformForms', () => {
+  const response = {
+    total_items: 2,
+    page_count: 1,
+    items: [
+      { id: 'f1', title: 'Intake', last_updated_at: '2026-01-01T00:00:00Z', self: { href: 'x' }, _links: {} },
+      { id: 'f2', title: 'Endline', last_updated_at: '2026-01-02T00:00:00Z' },
+    ],
+  };
+
+  it('reports each form as the three fields create_survey needs', () => {
+    expect(shapeTypeformForms(response).items).to.eql([
+      { formid: 'f1', title: 'Intake', last_updated_at: '2026-01-01T00:00:00Z' },
+      { formid: 'f2', title: 'Endline', last_updated_at: '2026-01-02T00:00:00Z' },
+    ]);
+  });
+
+  it('reports the total separately from what it returned', () => {
+    const shaped = shapeTypeformForms(response);
+    expect(shaped.count).to.equal(2);
+    expect(shaped.total).to.equal(2);
+  });
+
+  it('survives an empty or missing response', () => {
+    expect(shapeTypeformForms(undefined)).to.eql({ count: 0, total: 0, items: [] });
   });
 });

@@ -1,6 +1,7 @@
 'use strict';
 const { Credential } = require('../../queries');
 const { TypeformUtil } = require('../../utils');
+const { listForms } = require('./typeform.service');
 
 
 exports.authorize = async (req, res) => {
@@ -26,17 +27,12 @@ exports.authorize = async (req, res) => {
 
 exports.getForm = async (req, res) => {
   try {
-    const {email} = req.user;
-    const cred = await Credential.getOne({email, entity: 'typeform_token', key: TypeformUtil.makeKey(email)})
+    const { email } = req.user;
+    const result = await listForms({ email });
 
-    if (!cred) return res.status(401).send('Do not have Typeform Token for user');
-    const token = cred.details.access_token
+    if (!result.ok) return res.status(401).send('Do not have Typeform Token for user');
 
-    if (!token) return res.status(401).send('Do not have Typeform Token for user');
-
-    const forms = await TypeformUtil.TypeformFormList(token);
-
-    res.status(200).send(forms);
+    res.status(200).send(result.forms);
   } catch (err) {
     console.error(err);
     res.status(500).send(err);

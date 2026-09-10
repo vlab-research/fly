@@ -1,12 +1,23 @@
 # MCP full coverage — implementation plan
 
 **Date:** 2026-09-07
-**Status (2026-09-08):** Phases 0, A, B and C are **released** as dashboard
+**Status (2026-09-09):** Phases 0, A, B and C are **released** as dashboard
 **v0.0.75** (PR #170, merged to `main` as `b53da3e6`; deploy commit
-`0a63fba7`; vstag revision 100, vprod revision 666), 19 tools. The feature
-branch and its worktree are gone — **Phase D starts from `main`** with a new
-worktree (`git worktree add ../fly-mcp-phase-d -b feature/mcp-phase-d`). D is
-"probably" and waits on §8; E is deferred.
+`0a63fba7`; vstag revision 100, vprod revision 666), 19 tools.
+
+**Phase D is built** on `feature/mcp-phase-d` (worktree
+`../fly-mcp-phase-d`, cut from `main` at `6e0b68dc`): the seven bail tools and
+the two account lists, 9 more, **28 in total**. §8 was decided — see the table
+there.
+
+**The four ticket tools are NOT built** (decided 2026-09-09, after the first
+build): `/tickets` is a thin proxy over Linear whose audience is a person
+asking the Fly team for help, so an agent that hits something it cannot fix
+should say so to whoever is reading it rather than filing. §6 keeps them
+written out in case that changes; `TICKET_TOOLS` stays an empty array in
+`mcp.core.js` and `api/tickets/` is untouched — no service extraction, since
+rule 1 only applies once a tool shares the controller's work. Phase E is still
+deferred.
 
 ### Where the build deviated from this plan, and why
 
@@ -168,10 +179,10 @@ These are not suggestions. A PR that breaks one is not mergeable.
 - `api/responses/response.service.js` — `getResponses({email, survey_name,
   after, pageSize})` over `Response.all`, returning rows plus the next cursor
   as the query already shapes it.
-- `api/media/media.service.js`, `api/message-templates/message-templates.service.js`,
-  `api/tickets/tickets.service.js` — extracted from the respective
-  `makeHandlers` factories (Phase C/D do this; listed here so the shape is
-  decided now). The factories keep their dependency injection; the service
+- `api/media/media.service.js`, `api/message-templates/message-templates.service.js`
+  — extracted from the respective `makeHandlers` factories (Phase C did this).
+  `api/tickets/tickets.service.js` was listed here too and is NOT built, since
+  the ticket tools are not. The factories keep their dependency injection; the service
   takes the same injected deps as a first argument and the route file builds
   them exactly as it does today.
 - `api/credentials/credential.service.js` — `listMessagingAccounts({email})`
@@ -306,7 +317,7 @@ fetched body exceeds the cap.
 
 ---
 
-## 6. Phase D — bails, tickets, accounts (13 tools)
+## 6. Phase D — bails and accounts (9 tools built), tickets (4, not built)
 
 Feature docs: `documentation/bail-systems.md` (the `definition` grammar is
 §4–5 there), `documentation/tickets.md`, `dashboard-server/README.md`
@@ -325,8 +336,10 @@ a user id):
 | `preview_bail` | `users:write` | `definition`; returns the match count. `write` because REST derives it from `POST`; keep parity |
 | `list_bail_events` | `users:read` | `bail_id?`, `limit?` default 100 max 500; without `bail_id` it is the user-wide `bail-events` feed |
 
-Tickets (scope `tickets:*`), via `tickets.service.js` extracted from
-`makeHandlers` with the Linear client injected as today:
+Tickets (scope `tickets:*`) — **not built**, see the status note at the top.
+Kept here as written in case that is revisited; it would go via a
+`tickets.service.js` extracted from `makeHandlers` with the Linear client
+injected as today:
 
 | Tool | Scope | Args |
 |---|---|---|
@@ -346,8 +359,13 @@ Instructions paragraph:
 
 > BAIL SYSTEMS route participants who match a condition to another form; the
 > condition grammar is in create_bail's schema. preview_bail tells you how many
-> would match before you enable one. TICKETS reach the Fly team; include the
-> survey_name and any affected user_ids.
+> would match before you enable one.
+
+(The shipped `BAILS_NOTE` says more than this — that a bail moves live people,
+that it belongs to the researcher rather than to a survey, and that an enabled
+"immediate" bail keeps firing. `ACCOUNTS_NOTE` covers the two lists and says
+that nothing here writes a credential or a key. There is no tickets
+paragraph.)
 
 ---
 
@@ -369,12 +387,45 @@ Not part of this release. Recorded so the next planner does not re-derive it.
 
 ## 8. Open decisions (need a human before Phase D)
 
-| Item | Recommendation | If yes |
+**Decided 2026-09-09.** The MCP surface writes no credential and no API key at
+all; both are dashboard-only, where a human does them. There is therefore no
+`auth:*` scope anywhere in `TOOL_SCOPES`.
+
+| Item | Recommendation | Decision |
 |---|---|---|
-| `set_secret`, `set_reloadly_credential` | Exclude | `credentials:write`, `Credential.create`/`update` with entity fixed |
-| `mint_api_key` | Exclude | `auth:write`; same rule as REST (cannot exceed own scopes) |
-| `revoke_api_key` | Include in D | `auth:write`, `Credential.deleteApiToken({email, name})` |
-| `preview_bail` as `write` | Keep parity with REST | — |
+| `set_secret`, `set_reloadly_credential` | Exclude | **Excluded.** An agent cannot read a credential back to check it, so a bad write is invisible until a survey breaks |
+| `mint_api_key` | Exclude | **Excluded.** Not an escalation (REST caps a new key at the caller's own scopes), but it lets an agent create a credential that outlives the session |
+| `revoke_api_key` | Include in D | **Excluded** — against the recommendation. Key lifecycle stays entirely human; an agent that finds a leaked key reports it |
+| `preview_bail` as `write` | Keep parity with REST | **Kept.** Every scope in the table is the one its REST route derives, with no exceptions to remember |
+
+---
+
+### Where Phase D deviated from this plan, and why
+
+- **The `definition` schema is not fully written out in JSON Schema.** §6 asked
+  for it; the condition tree is recursive, `validateAgainstSchema` has no
+  `$ref`, and a `$ref`/`$defs` schema advertised through `tools/list` is not
+  safely portable across MCP clients. Bounded-depth expansion was the
+  alternative and would have added several KB to every `tools/list` while still
+  rejecting a legal deeper tree. So `BAIL_CONDITION_SCHEMA` validates one level
+  and carries the whole grammar in its description; Exodus validates the depth
+  below and its rejections are relayed verbatim.
+- **`validateBailDefinition` checks time formats**, which the plan did not ask
+  for. It is not a duplicate of Exodus's validation: Exodus checks that
+  `time_of_day` / `timezone` / `datetime` are *present* and not that they are
+  well formed, and a malformed one is stored and then silently skipped forever
+  with no error event. That is the one bail failure invisible from the outside.
+- **`buildBailRequest` reconciles the two `destination_form`s** — the row column
+  and `definition.action.destination_form`. The dashboard writes both; an agent
+  setting one would get a validation failure or a blank display.
+- **`list_bail_events` cuts the per-bail page client-side.** That Exodus
+  endpoint takes no limit and returns the whole history; only the user-wide feed
+  has one.
+- **The bails controller was rewired onto its service** in this PR:
+  `bails.service.js` existed from Phase 0 but nothing called it, and rule 1 (§1)
+  says the tool and the controller call the same function.
+- **`api/typeform/typeform.service.js` is new**: `GET /typeform/form` did the
+  token lookup inline, and `list_typeform_forms` needed the same one.
 
 ---
 

@@ -50,6 +50,34 @@ const SURVEYS = [
   },
 ];
 
+const BAIL = {
+  id: 'b1',
+  name: 'Stuck 4 weeks',
+  description: null,
+  enabled: false,
+  destination_form: 'exit',
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  definition: {
+    type: 'conditions',
+    conditions: { type: 'state', value: 'BLOCKED' },
+    execution: { timing: 'immediate' },
+    action: { destination_form: 'exit' },
+  },
+};
+
+const BAIL_EVENT = {
+  id: 'e1',
+  bail_id: 'b1',
+  bail_name: 'Stuck 4 weeks',
+  event_type: 'execution',
+  timestamp: '2026-01-02T00:00:00Z',
+  users_matched: 3,
+  users_bailed: 3,
+  definition_snapshot: { huge: true },
+  execution_results: { user_ids: ['p1', 'p2', 'p3'] },
+};
+
 const seen = [];
 
 const fakeService = {
@@ -153,6 +181,54 @@ const fakeService = {
   async fetchSource(url) {
     seen.push({ name: 'fetchSource', url });
     return { buffer: Buffer.from('png-bytes'), contentType: 'image/png', url };
+  },
+
+  // bails
+  async resolveVlabUser(args) {
+    seen.push({ name: 'resolveVlabUser', args });
+    return { id: 'vlab-user-1', email: args.email };
+  },
+  async listBails(user) {
+    seen.push({ name: 'listBails', args: user });
+    return { bails: [{ bail: BAIL, last_event: null }] };
+  },
+  async getBail(user, bailId) {
+    seen.push({ name: 'getBail', args: user, bailId });
+    return { bail: { ...BAIL, id: bailId }, last_event: null };
+  },
+  async createBail(user, bail) {
+    seen.push({ name: 'createBail', args: user, bail });
+    return { bail: { ...BAIL, ...bail, id: 'b2' }, last_event: null };
+  },
+  async updateBail(user, bailId, bail) {
+    seen.push({ name: 'updateBail', args: user, bailId, bail });
+    return { bail: { ...BAIL, ...bail, id: bailId }, last_event: null };
+  },
+  async deleteBail(user, bailId) {
+    seen.push({ name: 'deleteBail', args: user, bailId });
+    return null;
+  },
+  async previewBail(user, definition) {
+    seen.push({ name: 'previewBail', args: user, definition });
+    return { count: 3, users: [{ userid: 'p1', pageid: 'pg1' }], sql: 'SELECT 1', params: ['BLOCKED'] };
+  },
+  async bailEvents(user, bailId) {
+    seen.push({ name: 'bailEvents', args: user, bailId });
+    return { events: [BAIL_EVENT] };
+  },
+  async userBailEvents(user, limit) {
+    seen.push({ name: 'userBailEvents', args: user, limit });
+    return { events: [BAIL_EVENT] };
+  },
+
+  // accounts
+  async listMessagingAccounts(args) {
+    seen.push({ name: 'listMessagingAccounts', args });
+    return [{ entity: 'facebook_page', key: '1234', details: { access_token: 'SECRET', name: 'HPV Page' } }];
+  },
+  async listTypeformForms(args) {
+    seen.push({ name: 'listTypeformForms', args });
+    return { ok: true, forms: { total_items: 1, items: [{ id: 'f3', title: 'Solo', last_updated_at: '2026-01-20T00:00:00Z' }] } };
   },
 };
 
@@ -529,5 +605,171 @@ describe('mcp transport: HTTP contract', () => {
     const res = await post(INITIALIZE);
     const body = await res.json();
     expect(body.result.serverInfo.name).to.equal('vlab-fly-surveys');
+  });
+});
+
+/*
+ * One call per Phase D tool through the real client, which is the only place
+ * the whole path is exercised: schema advertised over the wire, arguments
+ * validated against it, handler, service, and the shaped result back.
+ */
+describe('mcp transport: bails and accounts', () => {
+  const payload = out => JSON.parse(out.content[0].text);
+
+  it('lists bails for the resolved user, without ever taking a user id', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'list_bails', arguments: {} });
+
+    expect(seen.map(c => c.name)).to.eql(['resolveVlabUser', 'listBails']);
+    expect(seen[1].args).to.eql({ id: 'vlab-user-1', email: EMAIL });
+    expect(payload(out).items[0].name).to.equal('Stuck 4 weeks');
+
+    await client.close();
+  });
+
+  it('returns one bail with its condition tree', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'get_bail', arguments: { bail_id: 'b1' } });
+
+    expect(payload(out).definition.conditions).to.eql({ type: 'state', value: 'BLOCKED' });
+
+    await client.close();
+  });
+
+  it('creates a bail with both destinations in step', async () => {
+    const client = await connect();
+    const out = await client.callTool({
+      name: 'create_bail',
+      arguments: {
+        name: 'Four weeks stalled',
+        definition: {
+          conditions: {
+            op: 'and',
+            vars: [
+              { type: 'form', value: 'solo' },
+              { type: 'elapsed_time', since: { event: 'response', details: { form: 'solo', question_ref: 'q1' } }, duration: '4 weeks' },
+            ],
+          },
+          execution: { timing: 'immediate' },
+        },
+        destination_form: 'exit',
+      },
+    });
+
+    const write = seen.find(c => c.name === 'createBail');
+    expect(write.bail.definition.action.destination_form).to.equal('exit');
+    expect(write.bail.destination_form).to.equal('exit');
+    expect(payload(out).note).to.match(/nothing has moved/);
+
+    await client.close();
+  });
+
+  it('enables a bail with a partial update', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'update_bail', arguments: { bail_id: 'b1', enabled: true } });
+
+    const write = seen.find(c => c.name === 'updateBail');
+    expect(write.bailId).to.equal('b1');
+    expect(write.bail).to.eql({ enabled: true });
+    expect(payload(out).note).to.match(/Now enabled/);
+
+    await client.close();
+  });
+
+  it('deletes a bail', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'delete_bail', arguments: { bail_id: 'b1' } });
+
+    expect(seen.find(c => c.name === 'deleteBail').bailId).to.equal('b1');
+    expect(payload(out).deleted).to.equal('b1');
+
+    await client.close();
+  });
+
+  it('previews a definition and shows the SQL it generated', async () => {
+    const client = await connect();
+    const out = await client.callTool({
+      name: 'preview_bail',
+      arguments: {
+        definition: {
+          conditions: { type: 'state', value: 'BLOCKED' },
+          execution: { timing: 'immediate' },
+          action: { destination_form: 'exit' },
+        },
+      },
+    });
+
+    const body = payload(out);
+    expect(body.count).to.equal(3);
+    expect(body.sql).to.equal('SELECT 1');
+    expect(seen.find(c => c.name === 'createBail')).to.equal(undefined);
+
+    await client.close();
+  });
+
+  it('reads the bail audit trail without the definition snapshots', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'list_bail_events', arguments: { limit: 10 } });
+
+    expect(seen.find(c => c.name === 'userBailEvents').limit).to.equal(10);
+    const [event] = payload(out).items;
+    expect(event).to.not.have.property('definition_snapshot');
+    expect(event.bailed_user_ids).to.eql(['p1', 'p2', 'p3']);
+
+    await client.close();
+  });
+
+  it('reads one bail\'s events when a bail_id is given', async () => {
+    const client = await connect();
+    await client.callTool({ name: 'list_bail_events', arguments: { bail_id: 'b1' } });
+
+    expect(seen.find(c => c.name === 'bailEvents').bailId).to.equal('b1');
+    expect(seen.find(c => c.name === 'userBailEvents')).to.equal(undefined);
+
+    await client.close();
+  });
+
+  it('refuses a schedule Exodus would accept and then never run', async () => {
+    const client = await connect();
+    const out = await client.callTool({
+      name: 'create_bail',
+      arguments: {
+        name: 'Nightly',
+        definition: {
+          conditions: { type: 'state', value: 'BLOCKED' },
+          execution: { timing: 'scheduled', time_of_day: '9pm', timezone: 'America/New_York' },
+          action: { destination_form: 'exit' },
+        },
+      },
+    });
+
+    expect(out.isError).to.equal(true);
+    expect(out.content[0].text).to.match(/time_of_day/);
+    expect(seen).to.have.lengthOf(0);
+
+    await client.close();
+  });
+
+  it('lists messaging accounts with no token anywhere in the response', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'list_messaging_accounts', arguments: {} });
+
+    expect(out.content[0].text).to.not.include('SECRET');
+    expect(payload(out).items[0]).to.eql({
+      entity: 'facebook_page', account_id: '1234', name: 'HPV Page', created: null,
+    });
+
+    await client.close();
+  });
+
+  it('lists typeform forms as the formid create_survey takes', async () => {
+    const client = await connect();
+    const out = await client.callTool({ name: 'list_typeform_forms', arguments: {} });
+
+    expect(payload(out).items).to.eql([
+      { formid: 'f3', title: 'Solo', last_updated_at: '2026-01-20T00:00:00Z' },
+    ]);
+
+    await client.close();
   });
 });

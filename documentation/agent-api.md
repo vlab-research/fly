@@ -620,11 +620,34 @@ see it. **The scope is enforced per tool instead** (`TOOL_SCOPES` in
 | `delete_message_template` | `templates:write` |
 | `list_media` | `media:read` |
 | `upload_media` | `media:write` |
+| `list_bails` | `users:read` |
+| `get_bail` | `users:read` |
+| `create_bail` | `users:write` |
+| `update_bail` | `users:write` |
+| `delete_bail` | `users:write` |
+| `preview_bail` | `users:write` |
+| `list_bail_events` | `users:read` |
+| `list_messaging_accounts` | `credentials:read` |
+| `list_typeform_forms` | `surveys:read` |
 
 The rule behind the table: a tool needs exactly the scope the REST route it
 wraps would derive (first path segment, `GET` → `read`, else `write`). States
 and health live under `/surveys/:name` over REST, so `surveys:read` reaches
 participant state there and the tools match; platform notices are `/platform`.
+Bails live under `/users/:userId/bails`, so they are `users:*`; `preview_bail`
+changes nothing but REST derives it from a `POST`, and parity is what keeps the
+table auditable against the router. `list_typeform_forms` is `surveys:read`
+because `/typeform` maps to `surveys` (see "Credentials").
+
+**No tool writes a credential or an API key.** There is no `set_secret`, no
+`set_reloadly_credential`, no `mint_api_key` and no `revoke_api_key`: key and
+credential lifecycle stays in the dashboard, where a human does it. That is a
+deliberate exclusion, not a gap — see `planning/mcp-full-coverage-plan.md` §8.
+
+**Support tickets are not tools either.** `/tickets` is a thin proxy over
+Linear whose audience is a person asking the Fly team for help; an agent that
+hits something it cannot fix should say so to whoever is reading it. §6 of the
+plan has the four tools written out if that changes.
 
 So a `surveys:read` key connects fine and can list, and every write tool refuses.
 A refusal arrives as an MCP **tool error** — a normal result with `isError: true`
@@ -813,6 +836,87 @@ to a private address (`media.core.js#checkSourceUrl`,
 without that check a caller could make it fetch AlertManager or the Kubernetes
 API. DNS rebinding between the check and the connection is not defended
 against.
+
+### Bail tools
+
+Bail systems (`/users/:userId/bails`, `documentation/bail-systems.md`) as tools.
+They are the only tools that act on **people rather than configuration**: a bail
+pulls live participants out of the conversation they are in and starts them on
+another form.
+
+Over REST the dashboard addresses bails by user id, which it gets by calling
+`POST /users` on mount. An agent has no such step and never sees an id: every
+tool resolves the caller's email through `bails.service.js#resolveVlabUser`
+(the same get-or-create) and passes the resolved user down. There is no
+`survey_name` argument anywhere in this area — a bail belongs to the researcher
+and its conditions name forms by shortcode, so one bail can span several
+studies.
+
+**`list_bails()`** — `GET .../bails` as `{count, items}`, with the condition
+tree omitted and `type`, `timing` and `destination_form` lifted out of it. Each
+item carries the `last_event` summary the dashboard's "Last Execution" column
+shows.
+
+**`get_bail({bail_id})`** — the same row with the full `definition`. Read it
+before `update_bail`: an update replaces the whole definition.
+
+**`create_bail({name, definition, description?, destination_form?, enabled?})`**
+— `POST .../bails`. Created **disabled** unless `enabled: true`, which is what
+makes preview-then-enable the normal path. The `definition` schema is written
+out in `mcp.core.js` (`BAIL_DEFINITION_SCHEMA`) with the condition grammar in the
+property description; the tree itself is recursive and is validated one level
+deep here and in full by Exodus, whose rejections are relayed verbatim.
+
+`destination_form` exists twice — a column on the bail row and
+`definition.action.destination_form` — and `buildBailRequest` makes them agree,
+with whichever was given winning, so an agent that sets only one does not get a
+bail that fails validation or displays blank.
+
+**`update_bail({bail_id, ...})`** — `PUT .../bails/:id`, partial except that
+`definition` is replaced whole. `enabled` alone is the on/off switch. An update
+with no changed field is refused before any IO.
+
+**`delete_bail({bail_id})`** — `DELETE .../bails/:id`. Permanent, and the
+description says what it does not undo: participants an enabled bail already
+moved stay where it put them.
+
+**`preview_bail({definition})`** — `POST .../bails/preview`. The match `count`,
+a sample of up to 25 matched participants, and the generated SQL, which is the
+fastest way to see that a condition means something other than intended. The
+definition goes through the same `buildBailRequest` as `create_bail`, so
+anything that previews cleanly can be created unchanged.
+
+**`list_bail_events({bail_id?, limit?})`** — the audit trail, `bail-events` for
+all bails or `.../bails/:id/events` for one. Each event keeps
+`users_matched`/`users_bailed` and a sample of 50 moved participant ids with the
+true count; the `definition_snapshot` is dropped, because `get_bail` answers
+"what does this bail say" better than a copy inside every event. The per-bail
+endpoint takes no limit and returns the whole history, so that page is cut
+client-side and flagged `truncated`.
+
+One validation is **not** a relay of Exodus. `time_of_day`, `timezone` and
+`datetime` are checked for format here (`validateBailDefinition`) because
+Exodus validates their presence but not their shape: `"09:00:00"` or
+`"US/Eastern"` is stored happily and the bail then silently never runs, with no
+error event anywhere (`documentation/bail-systems.md`, "Common Issues"). That
+failure is invisible from the outside, so it is refused before the write.
+
+### Account tools
+
+Two lists of identifiers other tools take.
+
+**`list_messaging_accounts()`** — the connected Messenger pages and WhatsApp
+business numbers, as `{entity, account_id, name, created}`. `account_id` is what
+the message-template tools take. The row's `details` blob holds the access
+token and is never returned: `mcp.core.js#redactCredential` copies four fields
+by name rather than filtering a copy, and a recursive no-secret test walks the
+result at every depth. Connecting an account is a Meta browser flow and cannot
+be done from here.
+
+**`list_typeform_forms()`** — `GET /typeform/form` shaped down to
+`{formid, title, last_updated_at}` per form, which is what `create_survey`
+needs. No stored Typeform credential is a tool error telling the agent to
+connect one in the dashboard, matching the REST `401`.
 
 ### Failure
 

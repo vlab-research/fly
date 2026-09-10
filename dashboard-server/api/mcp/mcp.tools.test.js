@@ -26,10 +26,14 @@ function makeService(overrides = {}) {
   const calls = [];
   // `args2` is the second positional argument, for the service functions that
   // take (resolvedSurvey, ...) rather than one options object.
-  const record = name => async (args, args2) => {
-    calls.push({ name, args, args2 });
+  const record = name => async (args, args2, args3) => {
+    const call = { name, args, args2 };
+    // Only the bail update takes three positional arguments; recording it
+    // conditionally keeps every existing `eql` on a two-argument call valid.
+    if (args3 !== undefined) call.args3 = args3;
+    calls.push(call);
     const impl = overrides[name];
-    return typeof impl === 'function' ? impl(args, args2) : impl;
+    return typeof impl === 'function' ? impl(args, args2, args3) : impl;
   };
 
   const service = {
@@ -56,8 +60,30 @@ function makeService(overrides = {}) {
     listAssets: record('listAssets'),
     uploadAsset: record('uploadAsset'),
     fetchSource: record('fetchSource'),
+    // bails
+    resolveVlabUser: record('resolveVlabUser'),
+    listBails: record('listBails'),
+    getBail: record('getBail'),
+    createBail: record('createBail'),
+    updateBail: record('updateBail'),
+    deleteBail: record('deleteBail'),
+    previewBail: record('previewBail'),
+    bailEvents: record('bailEvents'),
+    userBailEvents: record('userBailEvents'),
+    // accounts
+    listMessagingAccounts: record('listMessagingAccounts'),
+    listTypeformForms: record('listTypeformForms'),
     '@noCallThru': true,
   };
+
+  // What the real resolveVlabUser answers: the row for this email, created if
+  // it was not there. No tool ever sees the id it returns.
+  if (!overrides.resolveVlabUser) {
+    service.resolveVlabUser = async args => {
+      calls.push({ name: 'resolveVlabUser', args });
+      return { id: 'vlab-user-1', email: args.email };
+    };
+  }
 
   if (!overrides.listSurveys) {
     service.listSurveys = async args => {
@@ -848,5 +874,295 @@ describe('mcp.tools: media', () => {
     expect(out.isError).to.equal(true);
     expect(textOf(out)).to.match(/media:write/);
     expect(calls).to.have.lengthOf(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bails. Every operation goes through resolveVlabUser first, and no tool
+// takes or returns a user id.
+// ---------------------------------------------------------------------------
+
+const BAIL = {
+  id: 'b1',
+  name: 'Stuck 4 weeks',
+  description: 'Move people who stalled',
+  enabled: false,
+  destination_form: 'exit',
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  definition: {
+    type: 'conditions',
+    conditions: { type: 'state', value: 'BLOCKED' },
+    execution: { timing: 'immediate' },
+    action: { destination_form: 'exit' },
+  },
+};
+
+const DEFINITION = {
+  conditions: { type: 'state', value: 'BLOCKED' },
+  execution: { timing: 'immediate' },
+};
+
+const bailFailure = message => {
+  const err = new Error(message);
+  err.expected = true;
+  err.status = 404;
+  return err;
+};
+
+describe('mcp.tools: list_bails', () => {
+  it('resolves the caller to a user and lists their bails without the tree', async () => {
+    const { runTool, calls } = loadTools({ listBails: async () => ({ bails: [{ bail: BAIL, last_event: null }] }) });
+    const out = await runTool('list_bails', {}, CONTEXT);
+
+    expect(calls[0]).to.eql({ name: 'resolveVlabUser', args: { email: CONTEXT.email } });
+    expect(calls[1].args).to.eql({ id: 'vlab-user-1', email: CONTEXT.email });
+
+    const body = payloadOf(out);
+    expect(body.count).to.equal(1);
+    expect(body.items[0].name).to.equal('Stuck 4 weeks');
+    expect(body.items[0]).to.not.have.property('definition');
+  });
+
+  it('answers an empty account with an empty list, not an error', async () => {
+    const { runTool } = loadTools({ listBails: async () => ({ bails: [] }) });
+    expect(payloadOf(await runTool('list_bails', {}, CONTEXT))).to.eql({ count: 0, items: [] });
+  });
+});
+
+describe('mcp.tools: get_bail', () => {
+  it('returns the full definition', async () => {
+    const { runTool, calls } = loadTools({ getBail: async () => ({ bail: BAIL, last_event: null }) });
+    const out = await runTool('get_bail', { bail_id: 'b1' }, CONTEXT);
+
+    expect(calls[1].args2).to.equal('b1');
+    expect(payloadOf(out).definition).to.eql(BAIL.definition);
+  });
+
+  // Exodus answers 4xx with a message worth relaying; bails.service marks it
+  // expected, and an expected error is a tool error, never a dead turn.
+  it('relays a bail that is not there as a tool error', async () => {
+    const { runTool } = loadTools({ getBail: async () => { throw bailFailure('bail not found'); } });
+    const out = await runTool('get_bail', { bail_id: 'nope' }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/bail not found/);
+  });
+});
+
+describe('mcp.tools: create_bail', () => {
+  it('sends the definition with both destinations agreeing', async () => {
+    const { runTool, calls } = loadTools({ createBail: async () => ({ bail: BAIL, last_event: null }) });
+    await runTool('create_bail', { name: 'b', definition: DEFINITION, destination_form: 'exit' }, CONTEXT);
+
+    const sent = calls[1].args2;
+    expect(sent.definition.action.destination_form).to.equal('exit');
+    expect(sent.destination_form).to.equal('exit');
+  });
+
+  it('says nothing has moved when it was created disabled', async () => {
+    const { runTool } = loadTools({ createBail: async () => ({ bail: BAIL, last_event: null }) });
+    const out = await runTool('create_bail', { name: 'b', definition: DEFINITION, destination_form: 'exit' }, CONTEXT);
+    expect(payloadOf(out).note).to.match(/nothing has moved/);
+  });
+
+  it('warns that it is live when created enabled', async () => {
+    const { runTool } = loadTools({ createBail: async () => ({ bail: { ...BAIL, enabled: true }, last_event: null }) });
+    const out = await runTool('create_bail', { name: 'b', definition: DEFINITION, destination_form: 'exit', enabled: true }, CONTEXT);
+    expect(payloadOf(out).note).to.match(/ENABLED/);
+  });
+
+  it('refuses a silently-broken schedule before any IO', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('create_bail', {
+      name: 'b',
+      definition: { ...DEFINITION, execution: { timing: 'scheduled', time_of_day: '9am', timezone: 'UTC' } },
+      destination_form: 'exit',
+    }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/time_of_day/);
+    expect(calls).to.have.lengthOf(0);
+  });
+
+  it('refuses an unknown condition type against the schema', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('create_bail', {
+      name: 'b',
+      definition: { ...DEFINITION, conditions: { type: 'mood', value: 'sad' } },
+    }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/definition.conditions.type/);
+    expect(calls).to.have.lengthOf(0);
+  });
+
+  it('needs users:write', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('create_bail', { name: 'b', definition: DEFINITION }, { ...CONTEXT, scopes: ['users:read'] });
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/users:write/);
+    expect(calls).to.have.lengthOf(0);
+  });
+});
+
+describe('mcp.tools: update_bail', () => {
+  it('sends only the fields that were passed', async () => {
+    const { runTool, calls } = loadTools({ updateBail: async () => ({ bail: { ...BAIL, enabled: true }, last_event: null }) });
+    await runTool('update_bail', { bail_id: 'b1', enabled: true }, CONTEXT);
+
+    expect(calls[1].args2).to.equal('b1');
+    expect(calls[1].args3).to.eql({ enabled: true });
+  });
+
+  it('says what enabling it means', async () => {
+    const { runTool } = loadTools({ updateBail: async () => ({ bail: { ...BAIL, enabled: true }, last_event: null }) });
+    const out = await runTool('update_bail', { bail_id: 'b1', enabled: true }, CONTEXT);
+    expect(payloadOf(out).note).to.match(/Now enabled/);
+  });
+
+  it('says what disabling it does not undo', async () => {
+    const { runTool } = loadTools({ updateBail: async () => ({ bail: BAIL, last_event: null }) });
+    const out = await runTool('update_bail', { bail_id: 'b1', enabled: false }, CONTEXT);
+    expect(payloadOf(out).note).to.match(/stay where it put them/);
+  });
+
+  it('refuses an update with nothing in it', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('update_bail', { bail_id: 'b1' }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/Nothing to change/);
+    expect(calls).to.have.lengthOf(0);
+  });
+});
+
+describe('mcp.tools: delete_bail', () => {
+  it('reports what it deleted and what it did not undo', async () => {
+    const { runTool, calls } = loadTools({ deleteBail: async () => null });
+    const out = await runTool('delete_bail', { bail_id: 'b1' }, CONTEXT);
+
+    expect(calls[1].args2).to.equal('b1');
+    expect(payloadOf(out).deleted).to.equal('b1');
+    expect(payloadOf(out).note).to.match(/stay where it put them/);
+  });
+});
+
+describe('mcp.tools: preview_bail', () => {
+  it('returns the count with a bounded sample', async () => {
+    const users = Array.from({ length: 200 }, (_, i) => ({ userid: `u${i}`, pageid: 'p' }));
+    const { runTool } = loadTools({ previewBail: async () => ({ count: 200, users, sql: 'SELECT 1', params: [] }) });
+    const out = await runTool('preview_bail', { definition: { ...DEFINITION, action: { destination_form: 'exit' } } }, CONTEXT);
+
+    const body = payloadOf(out);
+    expect(body.count).to.equal(200);
+    expect(body.users).to.have.length(25);
+    expect(body.sql).to.equal('SELECT 1');
+  });
+
+  it('validates the definition the same way create_bail does', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('preview_bail', {
+      definition: { execution: { timing: 'scheduled', time_of_day: '09:00', timezone: 'Mars/Olympus' } },
+    }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/timezone/);
+    expect(calls).to.have.lengthOf(0);
+  });
+});
+
+describe('mcp.tools: list_bail_events', () => {
+  const events = n => Array.from({ length: n }, (_, i) => ({
+    id: `e${i}`, bail_id: 'b1', event_type: 'execution', timestamp: '2026-01-01T00:00:00Z',
+    users_matched: 1, users_bailed: 1, execution_results: { user_ids: ['u1'] },
+    definition_snapshot: { huge: true },
+  }));
+
+  it('asks the user-wide feed for the clamped limit when no bail is named', async () => {
+    const { runTool, calls } = loadTools({ userBailEvents: async () => ({ events: events(3) }) });
+    await runTool('list_bail_events', { limit: 9000 }, CONTEXT);
+
+    expect(calls[1].name).to.equal('userBailEvents');
+    expect(calls[1].args2).to.equal(500);
+  });
+
+  it('cuts the per-bail history client-side, since that endpoint takes no limit', async () => {
+    const { runTool, calls } = loadTools({ bailEvents: async () => ({ events: events(10) }) });
+    const out = await runTool('list_bail_events', { bail_id: 'b1', limit: 4 }, CONTEXT);
+
+    expect(calls[1].name).to.equal('bailEvents');
+    expect(calls[1].args2).to.equal('b1');
+
+    const body = payloadOf(out);
+    expect(body.count).to.equal(4);
+    expect(body.truncated).to.equal(true);
+    expect(body.items[0]).to.not.have.property('definition_snapshot');
+  });
+
+  it('defaults the limit when none is given', async () => {
+    const { runTool, calls } = loadTools({ userBailEvents: async () => ({ events: [] }) });
+    await runTool('list_bail_events', {}, CONTEXT);
+    expect(calls[1].args2).to.equal(100);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Accounts.
+// ---------------------------------------------------------------------------
+
+describe('mcp.tools: list_messaging_accounts', () => {
+  const ROWS = [
+    { entity: 'facebook_page', key: '1234', details: { access_token: 'SECRET', name: 'HPV Page' } },
+    { entity: 'whatsapp_business', key: '5678', details: { token: 'ALSO_SECRET', verified_name: 'HPV WhatsApp', waba_id: 'w1' } },
+  ];
+
+  it('reports the account_id and display name only', async () => {
+    const { runTool } = loadTools({ listMessagingAccounts: async () => ROWS });
+    const body = payloadOf(await runTool('list_messaging_accounts', {}, CONTEXT));
+
+    expect(body.count).to.equal(2);
+    expect(body.items[0]).to.eql({ entity: 'facebook_page', account_id: '1234', name: 'HPV Page', created: null });
+  });
+
+  // The contract that matters: no token, anywhere, at any depth.
+  it('leaks nothing from the credential details blob', async () => {
+    const { runTool } = loadTools({ listMessagingAccounts: async () => ROWS });
+    const text = textOf(await runTool('list_messaging_accounts', {}, CONTEXT));
+
+    ['SECRET', 'ALSO_SECRET', 'waba_id', 'details'].forEach(word => {
+      expect(text).to.not.include(word);
+    });
+  });
+
+  it('needs credentials:read', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('list_messaging_accounts', {}, { ...CONTEXT, scopes: ['surveys:read'] });
+
+    expect(out.isError).to.equal(true);
+    expect(calls).to.have.lengthOf(0);
+  });
+});
+
+describe('mcp.tools: list_typeform_forms', () => {
+  it('reports each form as the id create_survey takes', async () => {
+    const { runTool } = loadTools({
+      listTypeformForms: async () => ({
+        ok: true,
+        forms: { total_items: 1, items: [{ id: 'f9', title: 'Intake', last_updated_at: '2026-01-01T00:00:00Z' }] },
+      }),
+    });
+    const body = payloadOf(await runTool('list_typeform_forms', {}, CONTEXT));
+
+    expect(body.items).to.eql([{ formid: 'f9', title: 'Intake', last_updated_at: '2026-01-01T00:00:00Z' }]);
+  });
+
+  it('says how to connect Typeform when no token is stored', async () => {
+    const { runTool } = loadTools({ listTypeformForms: async () => ({ ok: false, missingCredential: true }) });
+    const out = await runTool('list_typeform_forms', {}, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.match(/Connect one in the dashboard/);
   });
 });

@@ -1,7 +1,13 @@
 'use strict';
 
-const { BailsUtil } = require('../../utils');
+/*
+ * HTTP shell over bails.service.js. The Exodus calls and the 4xx-versus-ours
+ * distinction live there; this file validates the body the dashboard sends,
+ * enforces that :userId is the caller, and maps outcomes onto status codes.
+ */
+
 const { User } = require('../../queries');
+const service = require('./bails.service');
 
 function handle(err, res) {
   console.error('Bails API Error:', err);
@@ -35,9 +41,7 @@ async function validateUserAccess(req, res, next) {
 // List all bails for a user
 exports.listBails = async (req, res) => {
   try {
-    const { userId } = req.params;
-    const result = await BailsUtil.listBails(userId);
-    res.status(200).json(result);
+    res.status(200).json(await service.listBails(req.vlabUser));
   } catch (err) {
     handle(err, res);
   }
@@ -46,9 +50,7 @@ exports.listBails = async (req, res) => {
 // Get a single bail
 exports.getBail = async (req, res) => {
   try {
-    const { userId, bailId } = req.params;
-    const result = await BailsUtil.getBail(userId, bailId);
-    res.status(200).json(result);
+    res.status(200).json(await service.getBail(req.vlabUser, req.params.bailId));
   } catch (err) {
     handle(err, res);
   }
@@ -57,14 +59,13 @@ exports.getBail = async (req, res) => {
 // Create a new bail
 exports.createBail = async (req, res) => {
   try {
-    const { userId } = req.params;
     const { name, description, definition, destination_form } = req.body;
 
     if (!name || !definition) {
       return res.status(400).json({ error: { message: 'name and definition are required' } });
     }
 
-    const result = await BailsUtil.createBail(userId, {
+    const result = await service.createBail(req.vlabUser, {
       name,
       description,
       definition,
@@ -79,10 +80,9 @@ exports.createBail = async (req, res) => {
 // Update an existing bail
 exports.updateBail = async (req, res) => {
   try {
-    const { userId, bailId } = req.params;
     const { name, description, definition, enabled, destination_form } = req.body;
 
-    const result = await BailsUtil.updateBail(userId, bailId, {
+    const result = await service.updateBail(req.vlabUser, req.params.bailId, {
       name,
       description,
       definition,
@@ -98,8 +98,7 @@ exports.updateBail = async (req, res) => {
 // Delete a bail
 exports.deleteBail = async (req, res) => {
   try {
-    const { userId, bailId } = req.params;
-    await BailsUtil.deleteBail(userId, bailId);
+    await service.deleteBail(req.vlabUser, req.params.bailId);
     res.status(204).send();
   } catch (err) {
     handle(err, res);
@@ -109,15 +108,13 @@ exports.deleteBail = async (req, res) => {
 // Preview bail (dry-run query)
 exports.previewBail = async (req, res) => {
   try {
-    const { userId } = req.params;
     const { definition } = req.body;
 
     if (!definition) {
       return res.status(400).json({ error: { message: 'definition is required' } });
     }
 
-    const result = await BailsUtil.previewBail(userId, definition);
-    res.status(200).json(result);
+    res.status(200).json(await service.previewBail(req.vlabUser, definition));
   } catch (err) {
     handle(err, res);
   }
@@ -126,9 +123,7 @@ exports.previewBail = async (req, res) => {
 // Get events for a specific bail
 exports.getBailEvents = async (req, res) => {
   try {
-    const { userId, bailId } = req.params;
-    const result = await BailsUtil.getBailEvents(userId, bailId);
-    res.status(200).json(result);
+    res.status(200).json(await service.bailEvents(req.vlabUser, req.params.bailId));
   } catch (err) {
     handle(err, res);
   }
@@ -137,9 +132,8 @@ exports.getBailEvents = async (req, res) => {
 // Get all bail events for a user
 exports.getUserEvents = async (req, res) => {
   try {
-    const { userId } = req.params;
     const { limit } = req.query;
-    const result = await BailsUtil.getUserEvents(userId, limit ? parseInt(limit) : 100);
+    const result = await service.userBailEvents(req.vlabUser, limit ? parseInt(limit) : 100);
     res.status(200).json(result);
   } catch (err) {
     handle(err, res);

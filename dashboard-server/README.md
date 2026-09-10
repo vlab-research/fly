@@ -215,9 +215,9 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
-| `/mcp` | MCP server — `POST` only, Streamable HTTP, nineteen tools (five survey, five monitoring, three data, four template, two media). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
+| `/mcp` | MCP server — `POST` only, Streamable HTTP, twenty-eight tools (five survey, five monitoring, three data, four template, two media, seven bail, two account). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
-| `/users/:userId/bail-events` | All bail events for a user |
+| `/users/:userId/bail-events` | All bail events for a user. Both bail routes are also the seven bail MCP tools, which resolve the user id from the caller's email instead of taking it in the path |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
 | `/platform/notices` | Platform-wide notices proxied from AlertManager (whitelisted alertnames, fail-soft) |
@@ -339,8 +339,9 @@ controller calls it, and `mcp.service.js` re-exports it:
 | `api/health/health.service.js` | `healthFindings`, `platformNotices` (fail-soft, never throws) | health and platform routes, `get_survey_health`, `get_platform_notices` |
 | `api/exports/exports.service.js` | `startExport`, `listExports` | exports routes, `start_export`, `list_exports` |
 | `api/responses/response.service.js` | `getResponses` (a survey with no responses is an empty page, not a `RequestError`) | `GET /responses`, `get_responses` |
-| `api/bails/bails.service.js` | `resolveVlabUser` (get-or-create from email, so an agent never sees a user id), `expected`-marked wrappers over `utils/bails` | — |
-| `api/credentials/credential.service.js` | `listMessagingAccounts` (IO only; redaction is `mcp.core#redactCredential`, pure, with a recursive no-secret test) | — |
+| `api/bails/bails.service.js` | `resolveVlabUser` (get-or-create from email, so an agent never sees a user id), `expected`-marked wrappers over `utils/bails` | bails routes, the seven `*_bail*` tools |
+| `api/credentials/credential.service.js` | `listMessagingAccounts` (IO only; redaction is `mcp.core#redactCredential`, pure, with a recursive no-secret test) | `list_messaging_accounts` |
+| `api/typeform/typeform.service.js` | `listForms` (the token lookup is `survey.service#typeformToken`; a missing credential is `{ok: false, missingCredential: true}`, not an error) | `GET /typeform/form`, `list_typeform_forms` |
 | `api/message-templates/message-templates.service.js` | `makeService(deps)` → `createTemplate`, `listTemplates`, `getTemplate`, `deleteTemplate`; failures are `TemplateFailure` with the HTTP status. `makeHandlers(deps)` is the HTTP shell over it; `message-templates.deps.js` builds the real deps once | templates routes, the four `*_message_template` tools |
 | `api/media/media.service.js` | `makeService(deps)` → `uploadAsset` (returns the asset and a `fanOut` thunk), `listAssets`, `fanOutHandles`; `fetchSource`, the bounded, SSRF-guarded URL fetch. `media.deps.js` builds the real deps once | media routes, `list_media`, `upload_media` |
 

@@ -412,6 +412,20 @@ Auth proxy layer between the dashboard client and exodus:
 - Validates user identity (`userId` matches authenticated user)
 - Proxies all requests to exodus API via `BailsUtil`
 
+The proxying itself is `api/bails/bails.service.js`, which the REST controller
+and the MCP tools both call. Exodus answers 4xx with a message worth relaying,
+so those become a `BailFailure` marked `expected` — safe to show verbatim —
+while anything else stays ours.
+
+**Agents reach bails too**, as the seven `*_bail*` MCP tools in
+`documentation/agent-api.md` §9. Two things differ from the REST path. An agent
+never sees a user id: `resolveVlabUser` does from the caller's email what the
+dashboard does by calling `POST /users` on mount, and every tool takes the
+resolved user. And `time_of_day`, `timezone` and `datetime` are format-checked
+before the write (`mcp.core.js#validateBailDefinition`), because Exodus
+validates their presence but not their shape and the bail then silently never
+runs — see "Common Issues" below.
+
 ### dashboard-client (React)
 
 UI components for bail management:
