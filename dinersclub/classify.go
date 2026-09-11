@@ -73,11 +73,14 @@ func (r Recovery) Silent() bool {
 // INSUFFICIENT_BALANCE is the same empty wallet whether Reloadly or DingConnect
 // says so, and deserves the same answer.
 //
-// Every non-obvious row below was observed on production: 22,802 recorded
-// failures against 48,772 successes over the life of the platform. The counts
-// in comments are from that census (2026-08-18) and are NOT maintained -- they
-// are here to show which rows carry weight. Codes with no count are documented
-// by the provider but unobserved.
+// DingConnect is the exception: its codes reach the table verbatim in
+// PascalCase, so a SCREAMING_SNAKE row added "for DingConnect" matches nothing
+// and the code silently takes the unknown-code default. Only PIN_DRIFT,
+// AMOUNT_CURRENCY_MISMATCH, NO_PIN_FOR_OPERATOR, IMPOSSIBLE_AMOUNT,
+// INVALID_PAYMENT_DETAILS, COULD_NOT_AUTO_DETECT_OPERATOR, INVALID_RESPONSE,
+// HTTP_REQUEST_FAILED and PAYMENT_FAILED are ours to spell; check
+// go-dingconnect/errors.go for the rest.
+
 var recoveryByCode = map[string]Recovery{
 	// ---- Transient -------------------------------------------------------
 	// Briefly unable. Retried in-process first (see Job); if the budget runs
@@ -106,6 +109,13 @@ var recoveryByCode = map[string]Recovery{
 	"PROVIDER_UNAVAILABLE": RecoveryTransient, // dingconnect: operator down
 	"PROVIDER_TIMED_OUT":   RecoveryTransient, // dingconnect: operator slow
 
+	// Transient against the library's own Retryable(), which excludes
+	// ProviderError: observed retries of the identical request succeed. Safe
+	// because these carry ProcessingState "Failed" with ReceiveValue 0, so no
+	// money moved -- a DistributorRef does not deduplicate.
+	"ProviderError":          RecoveryTransient, // dingconnect: operator failed the transfer
+	"TransientProviderError": RecoveryTransient, // dingconnect: operator briefly unable
+
 	// ---- Precondition ----------------------------------------------------
 	// A human outside this system has to act, and once they do, everyone
 	// still parked gets paid on dean's next sweep. Telling the respondent it
@@ -117,6 +127,10 @@ var recoveryByCode = map[string]Recovery{
 	// Largest single failure mode on the platform by a wide margin: 34% of
 	// all payment failures.
 	"INSUFFICIENT_BALANCE": RecoveryPrecondition, // 7687 reloadly + 834 giftcard
+
+	// DingConnect's spellings of the two rows above.
+	"InsufficientBalance":  RecoveryPrecondition,
+	"AuthenticationFailed": RecoveryPrecondition,
 
 	// Credentials stopped working. Nothing the respondent can do; a
 	// researcher re-authorising restores it and the parked payments land.
@@ -137,6 +151,8 @@ var recoveryByCode = map[string]Recovery{
 	"INVALID_PHONE_NUMBER":           RecoveryPermanent, // 1
 	"RECIPIENT_PHONE_INACTIVE":       RecoveryPermanent, // 1
 	"INVALID_ACCOUNT_NUMBER":         RecoveryPermanent, // dingconnect
+
+	"AccountNumberInvalid": RecoveryPermanent, // dingconnect
 
 	// The operator refused outright, or the recipient hit a limit. Permanent
 	// for this number; a retry loop would never clear it.
@@ -191,8 +207,10 @@ var recoveryByCode = map[string]Recovery{
 	"MISSING_SECRET":            RecoveryPermanent,
 	"BAD_HTTP_REQUEST":          RecoveryPermanent,
 	"INVALID_RESPONSE":          RecoveryPermanent, // dingconnect
-	"400":                       RecoveryPermanent, // 47
-	"404":                       RecoveryPermanent, // 2
+
+	"ParameterInvalid": RecoveryPermanent, // dingconnect
+	"400":              RecoveryPermanent, // 47
+	"404":              RecoveryPermanent, // 2
 
 	// The provider could not map its upstream's error either. Its own
 	// catch-all, so we cannot claim to know better than it does -- but we
@@ -219,6 +237,8 @@ var recoveryByCode = map[string]Recovery{
 	// success: we cannot confirm the payment from this response.
 	"CUSTOM_IDENTIFIER_ALREADY_USED": RecoveryPermanent, // 2385
 	"DUPLICATE_REFERENCE":            RecoveryPermanent, // dingconnect equivalent
+
+	"DuplicateTransactionPrevented": RecoveryPermanent, // dingconnect
 }
 
 // Classify maps a provider error code to how it can recover. ok is false for a

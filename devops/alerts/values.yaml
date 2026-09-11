@@ -404,6 +404,13 @@ payments:
   unclassifiedThreshold: 0
   unclassifiedFor: "15m"
 
+  # PaymentPinDrift — a DingConnect pin that no longer delivers the declared
+  # amount. Above 0 so a single drift on a retired form stays quiet, low enough
+  # that a live survey's drift is loud: it blocks every respondent until the
+  # researcher re-declares the pin.
+  pinDriftThreshold: 5
+  pinDriftFor: "30m"
+
   # DinersClubProcessingFaults — faults in dinersclub itself (bad Kafka message,
   # database down, botserver refusing results), not payment rejections.
   #

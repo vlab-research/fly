@@ -866,8 +866,17 @@ Two consequences worth internalising before triaging anything here:
   escalate it for you; that is what makes the time-to-human the whole game.
 
 ### PaymentWalletEmpty
-`increase(dinersclub_payment_results_total{code="INSUFFICIENT_BALANCE"}[1h]) > 0`
+`increase(dinersclub_payment_results_total{code=~"INSUFFICIENT_BALANCE|InsufficientBalance"}[1h]) > 0`
 by provider, for **10m** — **critical**, routes to `#vlab-alerts-critical`.
+
+> **Two spellings, and the reason matters.** dinersclub synthesises
+> `INSUFFICIENT_BALANCE` for Reloadly and giftcards, but keeps DingConnect's own
+> code verbatim — `InsufficientBalance`. Until 2026-09-10 this rule matched only
+> the snake spelling, so the one payment alert that **pages** was blind to every
+> DingConnect wallet, and `recoveryByCode` missed it the same way — a DingConnect
+> empty wallet took the permanent default and told the respondent their payment
+> had failed. Both are fixed. When adding any DingConnect code anywhere, check
+> the spelling in `go-dingconnect/errors.go` first.
 
 **A researcher's provider wallet is empty and respondents who finished a survey
 are not being paid.** This is the alert the whole payment-recovery workstream
@@ -891,10 +900,17 @@ those payments are lost silently.
    SELECT u.email, c.entity, c.key
    FROM chatroach.credentials c
    JOIN chatroach.users u ON u.id = c.userid
-   WHERE c.entity IN ('reloadly', 'dingconnect');
+   WHERE c.entity = 'reloadly'
+      OR (c.entity = 'secrets' AND c.key = 'DINGCONNECT_API_KEY');
    ```
-   There are ~13 accounts across ~10 researchers on production, so this is a
-   short list, not a search.
+   **The two providers are not stored the same way, and `entity = 'dingconnect'`
+   matches nothing.** Reloadly has its own `entity`; DingConnect is a generic
+   secret, `entity = 'secrets'` with `key = 'DINGCONNECT_API_KEY'` (see
+   `TestDingConnectAuth_ReadsGenericSecret`). A query that looks only for an
+   entity named after the provider returns zero rows for DingConnect and reads
+   as "no such account" rather than as a wrong query. There are ~13 Reloadly
+   accounts and (2026-09-11) 2 DingConnect keys, so this is a short list, not a
+   search.
 2. **Size the backlog** — how many people are waiting on this money:
    ```sql
    SELECT count(*) FROM chatroach.states
@@ -967,6 +983,46 @@ frequency is itself the finding.
    already released are lost** — those respondents were taken out of the wait
    and dean will not re-drive them. Worth checking how many before deciding the
    change is routine.
+
+### PaymentPinDrift
+`increase(dinersclub_dingconnect_pin_drift_total[6h]) > 5` by reason, for
+**30m** — **warning**.
+
+A DingConnect payment declares what the respondent should **receive** and pins
+the SKU/SendValue that delivers it. DingConnect's commission rates move, so a
+pin that was right when the survey was written drifts until it delivers
+something else — and dinersclub refuses the payment rather than silently paying
+the wrong incentive (`planning/dingconnect-amount-resolution.md`).
+
+**Refusing is correct. Being invisible was not.** `PIN_DRIFT` is classified
+permanent, so the respondent is just told the payment failed, and nothing in the
+platform distinguishes that from any other decline. Nothing self-heals: until
+the researcher re-declares the pin, **every** respondent reaching that payment
+point fails. On 2026-09-10 this was 51 refused payments over 48h on vprod — the
+single largest DingConnect failure mode — with no alert watching it.
+
+1. The dinersclub log line carries everything you need: the SKU, what it now
+   delivers, and the window the survey declared. E.g. *"pinned SkuCode
+   BO_NV_TopUp at SendValue 2.75 now delivers 27.33 BOB, outside the declared
+   window 11-17 BOB; a commission rate has moved"*.
+2. Find the affected form:
+   ```sql
+   SELECT current_form, count(*), max(updated)
+   FROM states
+   WHERE state_json->'md'->>'e_payment_dingconnect_error_code' = 'PIN_DRIFT'
+   GROUP BY 1 ORDER BY 3 DESC;
+   ```
+3. **This is the researcher's to fix, not ours.** The pin has to be re-declared
+   against the current catalogue. `reason="out_of_window"` means the SendValue
+   still resolves but delivers outside the declared tolerance;
+   `reason="sku_missing"` means the pinned SKU is gone entirely. Widening the
+   declared tolerance is the wrong fix — it buys quiet by accepting an incentive
+   nobody chose. The structural answer is `on_drift: "resolve"`, which is
+   **accepted as config but not implemented** (`dinersclub/dingconnect.go:330`
+   rejects it); if this alert becomes routine, implementing it is the work.
+4. **Respondents already refused are not recoverable by dean** — permanent means
+   the Result was sent and they were released from the wait. Count them before
+   deciding how urgent the re-declaration is; they need paying by hand.
 
 ### DinersClubProcessingFaults
 `increase(dinersclub_processing_faults_total[30m]) > 10` by stage, for **15m** —

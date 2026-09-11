@@ -34,6 +34,9 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"CONNECTION_TO_OPERATOR_TEMPORARILY_DOWN", 6, RecoveryTransient},
 		{"CONNECTION_TO_OPERATOR_FAILED", 4, RecoveryTransient},
 		{"REQUEST_PROCESSING_FAILED", 3, RecoveryTransient},
+		{"ProviderError", 14, RecoveryTransient},
+		{"TransientProviderError", 0, RecoveryTransient},
+
 		{"502", 0, RecoveryTransient},
 		{"503", 0, RecoveryTransient},
 		{"504", 0, RecoveryTransient},
@@ -49,6 +52,9 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		// simply waiting for a wallet top-up.
 		{"INSUFFICIENT_BALANCE", 8521, RecoveryPrecondition}, // 7687 reloadly + 834 giftcard
 		{"AUTH_ERROR", 219, RecoveryPrecondition},
+
+		{"InsufficientBalance", 0, RecoveryPrecondition},
+		{"AuthenticationFailed", 0, RecoveryPrecondition},
 
 		// ---- permanent: never going to work as configured --------------
 		{"PHONE_RECENTLY_RECHARGED", 3627, RecoveryPermanent},
@@ -82,6 +88,10 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"INVALID_RESPONSE", 0, RecoveryPermanent},
 		{"PAYMENT_FAILED", 0, RecoveryPermanent},
 		{"DUPLICATE_REFERENCE", 0, RecoveryPermanent},
+
+		{"AccountNumberInvalid", 23, RecoveryPermanent},
+		{"ParameterInvalid", 4, RecoveryPermanent},
+		{"DuplicateTransactionPrevented", 0, RecoveryPermanent},
 
 		// DingConnect amount resolution (VIR-40). All permanent: a retry sends
 		// the same stale pin, and silence would hide the drift.
@@ -187,4 +197,27 @@ func TestInsufficientBalanceIsNeverSent(t *testing.T) {
 	assert.True(t, known)
 	assert.Equal(t, RecoveryPrecondition, got)
 	assert.True(t, got.Silent())
+}
+
+// TestDingConnectSpellingsAreClassified guards the keying, not the classes:
+// DingConnect's codes reach recoveryByCode verbatim, so a row spelled the
+// vlab way matches nothing and the code silently defaults to permanent.
+func TestDingConnectSpellingsAreClassified(t *testing.T) {
+	for code, expected := range map[string]Recovery{
+		"InsufficientBalance":           RecoveryPrecondition,
+		"AuthenticationFailed":          RecoveryPrecondition,
+		"ProviderError":                 RecoveryTransient,
+		"TransientProviderError":        RecoveryTransient,
+		"AccountNumberInvalid":          RecoveryPermanent,
+		"ParameterInvalid":              RecoveryPermanent,
+		"RateLimited":                   RecoveryPermanent,
+		"DuplicateTransactionPrevented": RecoveryPermanent,
+	} {
+		t.Run(code, func(t *testing.T) {
+			got, known := Classify(code)
+			assert.True(t, known,
+				"%s is a code DingConnect returns verbatim; an unpinned code silently defaults to permanent", code)
+			assert.Equal(t, expected, got)
+		})
+	}
 }
