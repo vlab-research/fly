@@ -73,25 +73,14 @@ func (r Recovery) Silent() bool {
 // INSUFFICIENT_BALANCE is the same empty wallet whether Reloadly or DingConnect
 // says so, and deserves the same answer.
 //
-// BUT THEY DO NOT SHARE A SPELLING, AND THE KEY IS THE SPELLING. dinersclub
-// only synthesises nine codes for DingConnect (PIN_DRIFT,
+// DingConnect is the exception: its codes reach the table verbatim in
+// PascalCase, so a SCREAMING_SNAKE row added "for DingConnect" matches nothing
+// and the code silently takes the unknown-code default. Only PIN_DRIFT,
 // AMOUNT_CURRENCY_MISMATCH, NO_PIN_FOR_OPERATOR, IMPOSSIBLE_AMOUNT,
 // INVALID_PAYMENT_DETAILS, COULD_NOT_AUTO_DETECT_OPERATOR, INVALID_RESPONSE,
-// HTTP_REQUEST_FAILED, PAYMENT_FAILED); every other DingConnect failure keeps
-// the provider's own CamelCase code verbatim via e.Code(). So a
-// SCREAMING_SNAKE row added "for DingConnect" is a row nothing can ever match,
-// and the code it was meant to catch silently takes the unknown-code default
-// instead. INVALID_ACCOUNT_NUMBER, DUPLICATE_REFERENCE, INVALID_SKU_CODE,
-// PROVIDER_UNAVAILABLE and PROVIDER_TIMED_OUT are all such phantoms; they are
-// left in place because removing them is a separate decision, but the real
-// codes are pinned alongside them. Check go-dingconnect/errors.go for the
-// spelling before adding a DingConnect row.
-//
-// Every non-obvious row below was observed on production: 22,802 recorded
-// failures against 48,772 successes over the life of the platform. The counts
-// in comments are from that census (2026-08-18) and are NOT maintained -- they
-// are here to show which rows carry weight. Codes with no count are documented
-// by the provider but unobserved.
+// HTTP_REQUEST_FAILED and PAYMENT_FAILED are ours to spell; check
+// go-dingconnect/errors.go for the rest.
+
 var recoveryByCode = map[string]Recovery{
 	// ---- Transient -------------------------------------------------------
 	// Briefly unable. Retried in-process first (see Job); if the budget runs
@@ -120,29 +109,10 @@ var recoveryByCode = map[string]Recovery{
 	"PROVIDER_UNAVAILABLE": RecoveryTransient, // dingconnect: operator down
 	"PROVIDER_TIMED_OUT":   RecoveryTransient, // dingconnect: operator slow
 
-	// DingConnect's mobile operator failed the transfer. TRANSIENT, WHICH
-	// CONTRADICTS THE CLIENT LIBRARY ON PURPOSE -- the mirror image of the
-	// RateLimited row below.
-	//
-	// (*dingconnect.Error).Retryable() excludes ProviderError, treating it as
-	// definite because DingConnect offers TransientProviderError for the
-	// retryable case. Production says the distinction does not hold. Every
-	// occurrence observed (2026-09-09/10, 14 results across 5 respondents) was
-	// Entel Bolivia with context ProviderUnknownError -- DingConnect itself
-	// could not classify what the operator returned -- and for two respondents
-	// the IDENTICAL request, same DistributorRef and same single candidate,
-	// succeeded on a later attempt.
-	//
-	// Retrying is safe here, which is the part that matters given a
-	// DistributorRef does not deduplicate (see SendTransferRequest.
-	// DistributorRef: a replay on 2026-09-07 was paid twice). These responses
-	// carry ResultCode 5 with a TransferRecord whose ProcessingState is
-	// "Failed", ReceiveValue 0 and CommissionApplied 0 -- a definite refusal,
-	// so no money moved and there is nothing to double.
-	//
-	// TransientProviderError is pinned alongside it: DingConnect's explicitly
-	// retryable variant has not been observed, and leaving it to the
-	// unknown-code default would make it permanent, which is backwards.
+	// Transient against the library's own Retryable(), which excludes
+	// ProviderError: observed retries of the identical request succeed. Safe
+	// because these carry ProcessingState "Failed" with ReceiveValue 0, so no
+	// money moved -- a DistributorRef does not deduplicate.
 	"ProviderError":          RecoveryTransient, // dingconnect: operator failed the transfer
 	"TransientProviderError": RecoveryTransient, // dingconnect: operator briefly unable
 
@@ -158,25 +128,9 @@ var recoveryByCode = map[string]Recovery{
 	// all payment failures.
 	"INSUFFICIENT_BALANCE": RecoveryPrecondition, // 7687 reloadly + 834 giftcard
 
-	// THE SAME EMPTY WALLET, SPELLED THE WAY DINGCONNECT SPELLS IT.
-	//
-	// dinersclub passes DingConnect's own code through verbatim (e.Code() in
-	// dingconnect.go), so a DingConnect wallet arrives as "InsufficientBalance"
-	// and never matched the SCREAMING_SNAKE row above. It therefore fell to the
-	// unknown-code default -- permanent -- which is precisely the incident
-	// TestInsufficientBalanceIsNeverSent exists to prevent: the respondent is
-	// told the payment failed, leaves WAIT_EXTERNAL_EVENT, and topping the
-	// account up no longer pays them. Latent rather than suffered: no
-	// DingConnect wallet had run dry as of 2026-09-10.
-	//
-	// PaymentWalletEmpty matched the snake spelling exactly too, so the one
-	// alert that PAGES for this was blind to DingConnect. Both spellings are
-	// matched there now.
-	"InsufficientBalance": RecoveryPrecondition, // dingconnect
-
-	// Credentials stopped working. Nothing the respondent can do; a
-	// researcher re-authorising restores it and the parked payments land.
-	"AuthenticationFailed": RecoveryPrecondition, // dingconnect spelling of AUTH_ERROR
+	// DingConnect's spellings of the two rows above.
+	"InsufficientBalance":  RecoveryPrecondition,
+	"AuthenticationFailed": RecoveryPrecondition,
 
 	// Credentials stopped working. Nothing the respondent can do; a
 	// researcher re-authorising restores it and the parked payments land.
@@ -198,16 +152,6 @@ var recoveryByCode = map[string]Recovery{
 	"RECIPIENT_PHONE_INACTIVE":       RecoveryPermanent, // 1
 	"INVALID_ACCOUNT_NUMBER":         RecoveryPermanent, // dingconnect
 
-	// DingConnect's own code for the same thing, in both of the contexts it
-	// arrives with: ProviderRefusedRequest (the operator will not accept this
-	// number) and AccountNumberFailedRegex (the respondent typed something
-	// malformed -- "+13417442480", "+11164895452" for Argentina). Pinned
-	// rather than left to the unknown-code default because the default is
-	// already right and should not be able to drift: go-dingconnect's cascade
-	// also refuses to advance past it (payment.go, cascadeDecide), since no
-	// other product can rescue a bad account number. Every recovery observed
-	// came from the respondent supplying a DIFFERENT number, which is exactly
-	// what permanent releases them to do.
 	"AccountNumberInvalid": RecoveryPermanent, // dingconnect
 
 	// The operator refused outright, or the recipient hit a limit. Permanent
@@ -264,13 +208,6 @@ var recoveryByCode = map[string]Recovery{
 	"BAD_HTTP_REQUEST":          RecoveryPermanent,
 	"INVALID_RESPONSE":          RecoveryPermanent, // dingconnect
 
-	// DingConnect rejecting a parameter of ours. Observed 2026-09-07/08 with
-	// context "ValidateOnly", which was go-dingconnect omitting the field's
-	// false value so that every real transfer was refused while every
-	// validate-only call passed (fixed in v0.3.1, see
-	// SendTransferRequest.ValidateOnly). That specific cause is gone; the code
-	// is pinned because the class is not -- a parameter DingConnect refuses is
-	// our request to fix, and a retry sends the same bad body.
 	"ParameterInvalid": RecoveryPermanent, // dingconnect
 	"400":              RecoveryPermanent, // 47
 	"404":              RecoveryPermanent, // 2
@@ -301,8 +238,6 @@ var recoveryByCode = map[string]Recovery{
 	"CUSTOM_IDENTIFIER_ALREADY_USED": RecoveryPermanent, // 2385
 	"DUPLICATE_REFERENCE":            RecoveryPermanent, // dingconnect equivalent
 
-	// DingConnect's actual spelling. DUPLICATE_REFERENCE above is a name
-	// nothing emits -- see the note on aliases at the top of this section.
 	"DuplicateTransactionPrevented": RecoveryPermanent, // dingconnect
 }
 
