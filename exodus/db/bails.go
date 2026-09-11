@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,17 +11,23 @@ import (
 	"github.com/jackc/pgx/v4"
 )
 
+// ErrBailNotFound is returned when an operation names a bail that does not
+// exist. It is wrapped, not returned bare, so callers must use errors.Is:
+// the API layer maps it to 404 and every other error to 500, so a raw
+// fmt.Errorf here would be reported to the caller as a database failure.
+var ErrBailNotFound = errors.New("bail not found")
+
 // Bail represents a bail configuration stored in the database
 type Bail struct {
-	ID               uuid.UUID       `json:"id"`
-	UserID           uuid.UUID       `json:"user_id"`
-	Name             string          `json:"name"`
-	Description      string          `json:"description"`
-	Enabled          bool            `json:"enabled"`
-	Definition       json.RawMessage `json:"definition"`
-	DestinationForm  string          `json:"destination_form"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	ID              uuid.UUID       `json:"id"`
+	UserID          uuid.UUID       `json:"user_id"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	Enabled         bool            `json:"enabled"`
+	Definition      json.RawMessage `json:"definition"`
+	DestinationForm string          `json:"destination_form"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // GetEnabledBails retrieves all enabled bails from the database
@@ -55,7 +62,7 @@ func (d *DB) GetBailByID(ctx context.Context, id uuid.UUID) (*Bail, error) {
 
 	bail, err := scanBail(row)
 	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("bail not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrBailNotFound, id)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bail: %w", err)
@@ -140,7 +147,7 @@ func (d *DB) UpdateBail(ctx context.Context, bail *Bail) error {
 	).Scan(&bail.UpdatedAt)
 
 	if err == pgx.ErrNoRows {
-		return fmt.Errorf("bail not found: %s", bail.ID)
+		return fmt.Errorf("%w: %s", ErrBailNotFound, bail.ID)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update bail: %w", err)
@@ -159,7 +166,7 @@ func (d *DB) DeleteBail(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("bail not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrBailNotFound, id)
 	}
 
 	return nil
@@ -214,4 +221,3 @@ func scanBails(rows pgx.Rows) ([]*Bail, error) {
 
 	return bails, nil
 }
-

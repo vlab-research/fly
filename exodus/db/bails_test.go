@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -202,14 +203,28 @@ func TestDeleteBail(t *testing.T) {
 		t.Fatalf("DeleteBail failed: %v", err)
 	}
 
+	// Not just "an error": the API layer maps ErrBailNotFound to 404 and
+	// everything else to 500, so a missing bail must stay identifiable
+	// through errors.Is after the db layer wraps it.
 	_, err = db.GetBailByID(context.Background(), bail.ID)
-	if err == nil {
-		t.Error("Expected GetBailByID to return error for deleted bail")
+	if !errors.Is(err, ErrBailNotFound) {
+		t.Errorf("Expected GetBailByID to return ErrBailNotFound for deleted bail, got %v", err)
 	}
 
 	err = db.DeleteBail(context.Background(), uuid.New())
-	if err == nil {
-		t.Error("Expected DeleteBail to return error for non-existent bail")
+	if !errors.Is(err, ErrBailNotFound) {
+		t.Errorf("Expected DeleteBail to return ErrBailNotFound for non-existent bail, got %v", err)
+	}
+
+	err = db.UpdateBail(context.Background(), &Bail{
+		ID:              uuid.New(),
+		UserID:          userID,
+		Name:            "missing",
+		Definition:      CreateTestBailDefinition(),
+		DestinationForm: "exit-form",
+	})
+	if !errors.Is(err, ErrBailNotFound) {
+		t.Errorf("Expected UpdateBail to return ErrBailNotFound for non-existent bail, got %v", err)
 	}
 }
 
