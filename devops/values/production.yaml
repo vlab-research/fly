@@ -148,7 +148,7 @@ versionScribble: &vscribble v0.0.34
 # the account number, the completed state is "Complete" (a paid transfer read
 # as failed on v0.3.0), and transfer history decodes. Measured 2026-09-07 with
 # real sends on the Bolivia and Argentina corridors. No env or config change.
-versionDinersclub: &vdinersclub v0.0.51
+versionDinersclub: &vdinersclub v0.0.52
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
