@@ -900,10 +900,17 @@ those payments are lost silently.
    SELECT u.email, c.entity, c.key
    FROM chatroach.credentials c
    JOIN chatroach.users u ON u.id = c.userid
-   WHERE c.entity IN ('reloadly', 'dingconnect');
+   WHERE c.entity = 'reloadly'
+      OR (c.entity = 'secrets' AND c.key = 'DINGCONNECT_API_KEY');
    ```
-   There are ~13 accounts across ~10 researchers on production, so this is a
-   short list, not a search.
+   **The two providers are not stored the same way, and `entity = 'dingconnect'`
+   matches nothing.** Reloadly has its own `entity`; DingConnect is a generic
+   secret, `entity = 'secrets'` with `key = 'DINGCONNECT_API_KEY'` (see
+   `TestDingConnectAuth_ReadsGenericSecret`). A query that looks only for an
+   entity named after the provider returns zero rows for DingConnect and reads
+   as "no such account" rather than as a wrong query. There are ~13 Reloadly
+   accounts and (2026-09-11) 2 DingConnect keys, so this is a short list, not a
+   search.
 2. **Size the backlog** — how many people are waiting on this money:
    ```sql
    SELECT count(*) FROM chatroach.states

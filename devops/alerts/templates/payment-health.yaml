@@ -118,8 +118,10 @@ spec:
               payment once the account is funded. Everyone parked gets paid on the
               next sweep IF the wallet is topped up within dean's 14-day retry
               window; after that the payments are lost silently. Find the account
-              (`SELECT userid, key FROM credentials WHERE entity = '{{`{{ $labels.provider }}`}}'`)
-              and get it funded.
+              and get it funded. Reloadly lives under `entity='reloadly'`;
+              DingConnect is a generic secret, `entity='secrets'` with
+              `key='DINGCONNECT_API_KEY'` — see the runbook, as `entity` named
+              after the provider matches nothing for DingConnect.
             runbook_url: "{{ $runbook }}#paymentwalletempty"
 
         # ---- A provider is down --------------------------------------------
