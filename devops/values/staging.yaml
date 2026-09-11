@@ -48,7 +48,7 @@ versionScribble: &vscribble v0.0.34
 # on the old image the metrics Service would point at a port nothing binds.
 # v0.0.51: go-dingconnect v0.3.1 -- real transfers were all refused on v0.3.0
 # (ValidateOnly omitted when false); see production.yaml for the full note.
-versionDinersclub: &vdinersclub v0.0.51
+versionDinersclub: &vdinersclub v0.0.52
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
