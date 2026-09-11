@@ -2,11 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/vlab-research/exodus/db"
 	"github.com/vlab-research/exodus/query"
@@ -93,7 +93,7 @@ func (s *Server) GetBail(c echo.Context) error {
 
 	dbBail, err := s.db.GetBailByID(ctx, bailID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, db.ErrBailNotFound) {
 			return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found")
 		}
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -215,7 +215,7 @@ func (s *Server) UpdateBail(c echo.Context) error {
 
 	dbBail, err := s.db.GetBailByID(ctx, bailID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, db.ErrBailNotFound) {
 			return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found")
 		}
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -259,6 +259,9 @@ func (s *Server) UpdateBail(c echo.Context) error {
 	}
 
 	if err := s.db.UpdateBail(ctx, dbBail); err != nil {
+		if errors.Is(err, db.ErrBailNotFound) {
+			return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found")
+		}
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
@@ -306,7 +309,7 @@ func (s *Server) DeleteBail(c echo.Context) error {
 
 	dbBail, err := s.db.GetBailByID(ctx, bailID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, db.ErrBailNotFound) {
 			return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found")
 		}
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -318,6 +321,9 @@ func (s *Server) DeleteBail(c echo.Context) error {
 	}
 
 	if err := s.db.DeleteBail(ctx, bailID); err != nil {
+		if errors.Is(err, db.ErrBailNotFound) {
+			return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found")
+		}
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}
 
@@ -344,7 +350,7 @@ func (s *Server) GetBailEvents(c echo.Context) error {
 
 	dbBail, err := s.db.GetBailByID(ctx, bailID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, db.ErrBailNotFound) {
 			return respondError(c, http.StatusNotFound, "bail_not_found", "Bail not found")
 		}
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())

@@ -103,6 +103,14 @@ All bail endpoints are scoped under `/users/:userId`. A bail belongs to a user a
 | `GET` | `/users/:userId/bails/:id/events` | Get event history for a bail |
 | `GET` | `/users/:userId/bail-events?limit=N` | Get recent events for a user (default 100, max 1000) |
 
+### How errors reach the caller
+
+`respondError` (`api/server.go`) writes `{"error": "<code>", "message": "<detail>"}`. The handlers map a missing bail to `404 bail_not_found` and everything else from the database to `500 database_error`, so which one the caller sees depends entirely on the db layer's error being recognisable.
+
+**The db layer signals "no such bail" with the wrapped sentinel `db.ErrBailNotFound`, and handlers must test it with `errors.Is`.** A direct comparison against `pgx.ErrNoRows` does not work: `db/bails.go` converts the driver's `ErrNoRows` into its own error before returning, so an equality check never matches and a missing bail is reported as a 500 database failure. That was a live bug — `GET /users/:userId/bails/:id` for an unknown id answered `500 database_error: bail not found: <uuid>` — and `api/handlers_test.go#TestHandlers_UnknownBailIsNotFound` exists to keep it fixed. Test doubles for `DBInterface` must return the same wrapped sentinel; a mock returning a bare `pgx.ErrNoRows` is what hid the bug from the suite.
+
+Callers rely on this. dashboard-server's `api/bails/bails.service.js` relays any Exodus response below 500 to the user (and to an MCP agent) verbatim as an expected error, and turns a 500 into a generic "failed unexpectedly".
+
 ## Query DSL
 
 Bail conditions are JSON objects that translate to parameterized SQL against the `states` table. Conditions can be composed with logical operators.

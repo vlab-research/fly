@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/vlab-research/exodus/db"
 	"github.com/vlab-research/exodus/types"
@@ -19,18 +18,18 @@ import (
 
 // mockDB implements the database interface for testing
 type mockDB struct {
-	bails                       []*db.Bail
-	events                      []*db.BailEvent
-	queryFunc                   func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
-	createFunc                  func(ctx context.Context, bail *db.Bail) error
-	updateFunc                  func(ctx context.Context, bail *db.Bail) error
-	deleteFunc                  func(ctx context.Context, id uuid.UUID) error
-	latestEventsFunc            func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
-	latestEventsCallCount       int
-	latestEventsLastCalled      []uuid.UUID
-	latestSummariesFunc         func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error)
-	latestSummariesCallCount    int
-	latestSummariesLastCalled   []uuid.UUID
+	bails                     []*db.Bail
+	events                    []*db.BailEvent
+	queryFunc                 func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
+	createFunc                func(ctx context.Context, bail *db.Bail) error
+	updateFunc                func(ctx context.Context, bail *db.Bail) error
+	deleteFunc                func(ctx context.Context, id uuid.UUID) error
+	latestEventsFunc          func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
+	latestEventsCallCount     int
+	latestEventsLastCalled    []uuid.UUID
+	latestSummariesFunc       func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error)
+	latestSummariesCallCount  int
+	latestSummariesLastCalled []uuid.UUID
 }
 
 func (m *mockDB) GetBailsByUser(ctx context.Context, userID uuid.UUID) ([]*db.Bail, error) {
@@ -49,7 +48,7 @@ func (m *mockDB) GetBailByID(ctx context.Context, id uuid.UUID) (*db.Bail, error
 			return bail, nil
 		}
 	}
-	return nil, pgx.ErrNoRows
+	return nil, fmt.Errorf("%w: %s", db.ErrBailNotFound, id)
 }
 
 func (m *mockDB) CreateBail(ctx context.Context, bail *db.Bail) error {
@@ -74,7 +73,7 @@ func (m *mockDB) UpdateBail(ctx context.Context, bail *db.Bail) error {
 			return nil
 		}
 	}
-	return pgx.ErrNoRows
+	return fmt.Errorf("%w: %s", db.ErrBailNotFound, bail.ID)
 }
 
 func (m *mockDB) DeleteBail(ctx context.Context, id uuid.UUID) error {
@@ -87,7 +86,7 @@ func (m *mockDB) DeleteBail(ctx context.Context, id uuid.UUID) error {
 			return nil
 		}
 	}
-	return pgx.ErrNoRows
+	return fmt.Errorf("%w: %s", db.ErrBailNotFound, id)
 }
 
 func (m *mockDB) GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*db.BailEvent, error) {
@@ -243,15 +242,15 @@ func TestListBails(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:               bailID,
-				UserID:           userID,
-				Name:             "Test Bail",
-				Description:      "Test description",
-				Enabled:          true,
-				Definition:       defJSON,
-				DestinationForm:  "exit-form",
-				CreatedAt:        time.Now(),
-				UpdatedAt:        time.Now(),
+				ID:              bailID,
+				UserID:          userID,
+				Name:            "Test Bail",
+				Description:     "Test description",
+				Enabled:         true,
+				Definition:      defJSON,
+				DestinationForm: "exit-form",
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
 			},
 		},
 		events: []*db.BailEvent{
@@ -540,15 +539,15 @@ func TestUpdateBail(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:               bailID,
-				UserID:           userID,
-				Name:             "Original Name",
-				Description:      "Original description",
-				Enabled:          true,
-				Definition:       defJSON,
-				DestinationForm:  "exit-form",
-				CreatedAt:        time.Now(),
-				UpdatedAt:        time.Now(),
+				ID:              bailID,
+				UserID:          userID,
+				Name:            "Original Name",
+				Description:     "Original description",
+				Enabled:         true,
+				Definition:      defJSON,
+				DestinationForm: "exit-form",
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
 			},
 		},
 	}
@@ -608,15 +607,15 @@ func TestDeleteBail(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:               bailID,
-				UserID:           userID,
-				Name:             "Test Bail",
-				Description:      "Test description",
-				Enabled:          true,
-				Definition:       defJSON,
-				DestinationForm:  "exit-form",
-				CreatedAt:        time.Now(),
-				UpdatedAt:        time.Now(),
+				ID:              bailID,
+				UserID:          userID,
+				Name:            "Test Bail",
+				Description:     "Test description",
+				Enabled:         true,
+				Definition:      defJSON,
+				DestinationForm: "exit-form",
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
 			},
 		},
 	}
@@ -654,15 +653,15 @@ func TestGetBailEvents(t *testing.T) {
 	mock := &mockDB{
 		bails: []*db.Bail{
 			{
-				ID:               bailID,
-				UserID:           userID,
-				Name:             "Test Bail",
-				Description:      "Test description",
-				Enabled:          true,
-				Definition:       defJSON,
-				DestinationForm:  "exit-form",
-				CreatedAt:        time.Now(),
-				UpdatedAt:        time.Now(),
+				ID:              bailID,
+				UserID:          userID,
+				Name:            "Test Bail",
+				Description:     "Test description",
+				Enabled:         true,
+				Definition:      defJSON,
+				DestinationForm: "exit-form",
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
 			},
 		},
 		events: []*db.BailEvent{
@@ -970,5 +969,69 @@ func TestPreviewBail_UserListType(t *testing.T) {
 
 	if response.Params != nil && len(response.Params) > 0 {
 		t.Errorf("Expected empty Params for user_list type, got %v", response.Params)
+	}
+}
+
+// A bail id that does not exist must answer 404 bail_not_found on every
+// handler that looks one up. This regressed once: db/bails.go turned
+// pgx.ErrNoRows into a plain fmt.Errorf, so the handlers' == pgx.ErrNoRows
+// check never matched and a missing bail came back as 500 database_error.
+// The mock above returns the same wrapped db.ErrBailNotFound the real db
+// layer returns, so this test fails if that mapping breaks again.
+func TestHandlers_UnknownBailIsNotFound(t *testing.T) {
+	userID := uuid.New()
+	missingID := uuid.New()
+
+	cases := []struct {
+		name    string
+		method  string
+		path    string
+		body    string
+		handler func(*Server, echo.Context) error
+	}{
+		{"GetBail", http.MethodGet, "/users/:userId/bails/:id", "",
+			func(s *Server, c echo.Context) error { return s.GetBail(c) }},
+		{"UpdateBail", http.MethodPut, "/users/:userId/bails/:id", `{"name":"renamed"}`,
+			func(s *Server, c echo.Context) error { return s.UpdateBail(c) }},
+		{"DeleteBail", http.MethodDelete, "/users/:userId/bails/:id", "",
+			func(s *Server, c echo.Context) error { return s.DeleteBail(c) }},
+		{"GetBailEvents", http.MethodGet, "/users/:userId/bails/:id/events", "",
+			func(s *Server, c echo.Context) error { return s.GetBailEvents(c) }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := New(&mockDB{})
+
+			var req *http.Request
+			if tc.body == "" {
+				req = httptest.NewRequest(tc.method, "/", nil)
+			} else {
+				req = httptest.NewRequest(tc.method, "/", strings.NewReader(tc.body))
+				req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			}
+
+			rec := httptest.NewRecorder()
+			c := server.echo.NewContext(req, rec)
+			c.SetPath(tc.path)
+			c.SetParamNames("userId", "id")
+			c.SetParamValues(userID.String(), missingID.String())
+
+			if err := tc.handler(server, c); err != nil {
+				t.Fatalf("%s returned an error: %v", tc.name, err)
+			}
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("Expected status 404, got %d (body: %s)", rec.Code, rec.Body.String())
+			}
+
+			var response ErrorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("Failed to parse response: %v", err)
+			}
+			if response.Error != "bail_not_found" {
+				t.Errorf("Expected error bail_not_found, got %q", response.Error)
+			}
+		})
 	}
 }
