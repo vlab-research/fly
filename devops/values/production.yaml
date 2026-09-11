@@ -154,7 +154,14 @@ versionExporter: &vexporter v0.6.12
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
 # second account's rows" -- multi-account specific, so it only manifests once a
 # participant exists on two accounts. Part of the same rollout stack.
-versionExodus: &vexodus v0.2.5
+# v0.2.5 -> v0.2.6: a bail id that does not exist now answers 404
+# bail_not_found instead of 500 database_error (PR #173). db/bails.go wrapped
+# pgx.ErrNoRows in a new error, so the handlers' equality check never matched.
+# API-only and read-shaped: the executor is untouched, no schema and no config
+# change, and the 500 -> 404 move only affects requests that were already
+# failing. dashboard-server relays anything under 500 verbatim, so this is what
+# makes the dashboard and an MCP agent say "Bail not found".
+versionExodus: &vexodus v0.2.6
 # v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
 # 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
 # since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
