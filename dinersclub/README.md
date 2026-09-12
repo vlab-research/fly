@@ -490,14 +490,14 @@ migration.
 |---|---|
 | Success | Return immediately |
 | `RechargeNotAllowed` | Wrong operator for this number — try the next candidate |
-| `AccountNumberInvalid` | The number itself is bad — stop; no other SKU will help |
+| `AccountNumberInvalid` | Also a wrong-operator refusal (Claro Honduras answers every Tigo number with it) — try the next candidate |
 | `RateLimited` | **Stop. Never retried, never advanced past** — may be a per-account fraud rule |
 | Transport fault / timeout | Stop. We do not know whether money moved; advancing risks paying twice |
 | Unrecognised code | Stop and surface it |
 | All candidates exhausted | Return the **last real failure**, never a synthetic code |
 
-**Advance is an allow-list and stop is the default**, in `cascadeDecide`
-(`dingconnect_resolve.go`). That is what makes a newly-introduced DingConnect
+**Advance is an allow-list and stop is the default**, in go-dingconnect's
+`decideCascade` (`payment.go`). That is what makes a newly-introduced DingConnect
 code unable to cause a send nobody designed. A stop code **anywhere** in the
 `ErrorCodes` array wins — `Codes[0]` is never read, because DingConnect can
 return `RateLimited` alongside `RechargeNotAllowed`.
@@ -506,6 +506,15 @@ return `RateLimited` alongside `RechargeNotAllowed`.
 against operator mismatch. **It is unconfirmed** as the wrong-operator signal.
 Because it is only the *advance* signal, being wrong about it degrades discovery
 into a single attempt rather than sending money anywhere it should not go.
+
+`AccountNumberInvalid` **is** confirmed as one (VIR-54): `GetAccountLookup`
+returns two Items for every Honduran number, so all of Honduras takes discovery,
+and Claro refuses Tigo numbers with this code. It is also what a mistyped number
+returns, and that is safe: single-send paths have one candidate and never
+advance, and on discovery a bad number costs one refused send per pin, moves no
+money, and surfaces `AccountNumberInvalid` verbatim. **Before a country goes
+live on pins, check how many Items its lookup returns** — more than one means
+every payment there relies on this cascade.
 
 #### `distributor_ref`
 

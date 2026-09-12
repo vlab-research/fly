@@ -148,7 +148,14 @@ versionScribble: &vscribble v0.0.34
 # the account number, the completed state is "Complete" (a paid transfer read
 # as failed on v0.3.0), and transfer history decodes. Measured 2026-09-07 with
 # real sends on the Bolivia and Argentina corridors. No env or config change.
-versionDinersclub: &vdinersclub v0.0.52
+#
+# v0.0.52 -> v0.0.53: go-dingconnect v0.3.2 (VIR-54). The discovery cascade
+# advances on AccountNumberInvalid as well as RechargeNotAllowed. GetAccountLookup
+# returns two operators for every Honduran number, so all of Honduras takes
+# discovery, and Claro refuses Tigo numbers with AccountNumberInvalid -- on
+# v0.3.1 the cascade stopped there and no Tigo number was ever paid. Single-send
+# paths are unchanged. No env or config change.
+versionDinersclub: &vdinersclub v0.0.53
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a

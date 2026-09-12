@@ -1640,6 +1640,8 @@ github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae/go.mod h1:DD4vA1
 github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f/go.mod h1:DD4vA1DwXk04H54A1oHXtwZmA0grkVMdPxx/VGLCah0=
 github.com/vlab-research/go-dingconnect v0.3.1 h1:RqtUdAilo/5DrYrceFk69ZBiX9ziMfxatprt9IRKKsU=
 github.com/vlab-research/go-dingconnect v0.3.1/go.mod h1:27uj/DEvT8x6cRuimexFS1ceKibZKjo5zTAZqSqOrjE=
+github.com/vlab-research/go-dingconnect v0.3.2 h1:g6ZWK5UAOveK7pnj76Mzm11fXrReBXfBxnLsYO+pe3A=
+github.com/vlab-research/go-dingconnect v0.3.2/go.mod h1:27uj/DEvT8x6cRuimexFS1ceKibZKjo5zTAZqSqOrjE=
 github.com/vlab-research/go-reloadly v0.0.23 h1:faK9AIQUW+u6b/T2JF42rsn8XnPTz6ouKqqmxM0YSlU=
 github.com/vlab-research/go-reloadly v0.0.23/go.mod h1:bJHsKM3lTjw1tahB6mK0JXJgYtC0zrUmJ7LS1GSaepA=
 github.com/vlab-research/gotils v0.0.2 h1:o/LceCxyu7x9xogMDBBc37xAOhzGZoSxyDYkatq8NR0=

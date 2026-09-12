@@ -48,7 +48,9 @@ versionScribble: &vscribble v0.0.34
 # on the old image the metrics Service would point at a port nothing binds.
 # v0.0.51: go-dingconnect v0.3.1 -- real transfers were all refused on v0.3.0
 # (ValidateOnly omitted when false); see production.yaml for the full note.
-versionDinersclub: &vdinersclub v0.0.52
+# v0.0.53: go-dingconnect v0.3.2 -- discovery advances on AccountNumberInvalid,
+# so Tigo Honduras numbers are reached (VIR-54); see production.yaml.
+versionDinersclub: &vdinersclub v0.0.53
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
