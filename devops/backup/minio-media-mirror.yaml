@@ -92,7 +92,7 @@ spec:
             - name: mc
               # Pinned. `latest` in a backup job means the one command standing
               # between us and permanent data loss can change without a diff.
-              image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+              image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
               envFrom:
                 - secretRef:
                     name: minio-media-mirror

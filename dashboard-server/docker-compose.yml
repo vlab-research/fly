@@ -59,7 +59,7 @@ services:
         echo "migrations complete"
 
   minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
     command: server /data --console-address ':9001'
     env_file:
       - .env
@@ -83,7 +83,7 @@ services:
   # anonymous access here would make local dev quietly more permissive than
   # production, which is how a bad assumption ships.
   minio-init:
-    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    image: quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z
     depends_on:
       minio:
         condition: service_healthy

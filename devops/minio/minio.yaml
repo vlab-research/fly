@@ -157,7 +157,10 @@ spec:
         - name: minio
           # Pinned deliberately: applying this file must never silently upgrade
           # MinIO, least of all during the maintenance window above.
-          image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+          # Quay, not Docker Hub: MinIO no longer publishes to Docker Hub, and a
+          # node without a cached copy cannot start the pod. The digest guards
+          # against the tag being moved or removed.
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh

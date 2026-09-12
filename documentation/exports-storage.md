@@ -157,8 +157,13 @@ applied on deploy.
 
 ## Deployment & volume sizing
 
-MinIO is a hand-rolled deployment using the upstream `minio/minio` image (not the
-Bitnami helm chart). Its manifests live in `devops/minio/` (StatefulSet, Services,
+MinIO is a hand-rolled deployment using the upstream MinIO image, pulled from
+`quay.io/minio/minio` and pinned by digest (not the Bitnami helm chart). MinIO no
+longer publishes to Docker Hub: `minio/minio` and `minio/mc` tags there do not
+resolve, and a pod scheduled onto a node without a cached copy sits in
+`ImagePullBackOff`. Every MinIO image in the repo (server, `mc` in the
+service-account scripts and the mirror CronJob, local docker-compose) must use
+`quay.io`. Its manifests live in `devops/minio/` (StatefulSet, Services,
 Ingresses, ServiceMonitor) and are applied directly:
 
 ```

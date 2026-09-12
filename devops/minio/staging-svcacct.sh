@@ -72,7 +72,7 @@ OVERRIDES=$(ACCESS_KEY="$ACCESS_KEY" SCRIPT="$SCRIPT" python3 - <<'PY'
 import json, os
 print(json.dumps({"spec": {"restartPolicy": "Never", "containers": [{
     "name": "mc",
-    "image": "minio/mc:latest",
+    "image": "quay.io/minio/mc:latest",
     "command": ["sh", "-c", os.environ["SCRIPT"]],
     "env": [
         {"name": "MINIO_ROOT_USER", "valueFrom": {"secretKeyRef": {"name": "minio-auth", "key": "root-user"}}},
@@ -83,7 +83,7 @@ PY
 )
 
 kubectl delete pod "$POD" -n minio --ignore-not-found >/dev/null 2>&1
-kubectl run "$POD" -n minio --restart=Never --image=minio/mc:latest \
+kubectl run "$POD" -n minio --restart=Never --image=quay.io/minio/mc:latest \
     --overrides="$OVERRIDES" >/dev/null
 
 for _ in $(seq 45); do
