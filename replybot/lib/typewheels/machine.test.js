@@ -1066,6 +1066,67 @@ describe('getState', () => {
     state.state.should.equal('BLOCKED')
   })
 
+  describe('SEND_FAILED (WhatsApp asynchronous send rejection)', () => {
+    const failed = (code, ts = 200) => ({
+      event_id: 'evt_test_wa_failed',
+      user_id: USER_ID,
+      timestamp: ts,
+      source: { type: 'whatsapp', account_id: PAGE_ID },
+      event_type: 'bot_message_failed',
+      payload: {
+        type: 'bot_message_failed',
+        error: { tag: 'FB', code, message: 'Re-engagement message' },
+        errors: [{ code, title: 'Re-engagement message' }],
+        watermark: ts,
+        status_at: ts
+      }
+    })
+
+    it('blocks a QOUT user under the WhatsApp error code', () => {
+      const state = getState([referral, echo, text, echo, failed(131047)])
+      state.state.should.equal('BLOCKED')
+      state.error.tag.should.equal('FB')
+      state.error.code.should.equal(131047)
+      state.error.message.should.equal('Re-engagement message')
+      state.error.ts.should.equal(200)
+    })
+
+    it('clears a pending wait when blocking', () => {
+      const wait = { type: 'timeout', value: '2 days' }
+      const state = getState([referral, echo, text, _echo({ wait, ref: 'bar' }), failed(131026)])
+      state.state.should.equal('BLOCKED')
+      should.not.exist(state.wait)
+      should.not.exist(state.waitStart)
+    })
+
+    it('is a no-op when the user is already BLOCKED, keeping the first error', () => {
+      const log = [referral, echo, text, echo, failed(131047, 200)]
+      const state = getState(log)
+      exec(state, failed(131031, 300)).action.should.equal('NONE')
+      getState([...log, failed(131031, 300)]).error.code.should.equal(131047)
+    })
+
+    it('is a no-op when the user is USER_BLOCKED or in ERROR', () => {
+      const blocked = getState([referral, echo, text, synthetic({ type: 'block_user' })])
+      blocked.state.should.equal('USER_BLOCKED')
+      exec(blocked, failed(131047)).action.should.equal('NONE')
+
+      const errored = getState([referral, echo, text, synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })])
+      errored.state.should.equal('ERROR')
+      exec(errored, failed(131047)).action.should.equal('NONE')
+    })
+
+    it('is a no-op when the event carries no error', () => {
+      const state = getState([referral, echo, text, echo])
+      exec(state, { ...failed(131047), payload: { type: 'bot_message_failed' } }).action.should.equal('NONE')
+    })
+
+    it('lets the user out of BLOCKED when they write again', () => {
+      const state = getState([referral, echo, text, echo, failed(131047), { ...text, timestamp: 400 }])
+      state.state.should.not.equal('BLOCKED')
+    })
+  })
+
   it('gets out of a blocked state if an echo follows a bad platform response', () => {
 
     const pr = { ...syntheticPR, payload: { response: { error: { code: 2022 } } } }

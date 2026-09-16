@@ -378,6 +378,7 @@ WhatsApp event parsing implemented alongside Messenger:
 | `statuses[].status: "delivered"` | `bot_message_delivered` | `{ type: "bot_message_delivered", watermark, delivered_at }` |
 | `statuses[].status: "read"` | `bot_message_read` | `{ type: "bot_message_read", watermark, read_at }` |
 | `statuses[].status: "sent"` | `bot_message_sent` | `{ type: "bot_message_sent", ... }` (for echo tracking) |
+| `statuses[].status: "failed"` | `bot_message_failed` | `{ type: "bot_message_failed", error: { tag: "FB", code, message }, errors, watermark }` — the Cloud API's asynchronous send rejection (131047 re-engagement window, 131026 undeliverable, 131031 account locked, ...). The machine's `SEND_FAILED` case moves the participant to `BLOCKED` under that code, exactly as a synchronous Graph error does via `MACHINE_REPORT`; only codes in dean's `DEAN_FB_CODES` are retried. |
 
 **Key differences from Messenger:**
 - No `quick_reply` — WhatsApp uses `interactive.button_reply` and `interactive.list_reply` instead

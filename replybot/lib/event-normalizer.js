@@ -440,6 +440,29 @@ function categorizeWhatsAppEvent(data) {
     }
   }
 
+  // A failed status is Meta's asynchronous send rejection: the Cloud API
+  // accepts the POST and reports failure (131047 re-engagement window,
+  // 131026 undeliverable, 131031 account locked, ...) only here. It is the
+  // WhatsApp counterpart of a synchronous Graph error, so it carries the same
+  // FB-tagged error shape and must never be read as a delivery watermark.
+  if (data.status === 'failed') {
+    const err = (Array.isArray(data.errors) && data.errors[0]) || {}
+    return {
+      event_type: 'bot_message_failed',
+      payload: {
+        type: 'bot_message_failed',
+        error: {
+          tag: 'FB',
+          code: err.code,
+          message: err.title || err.message || 'WhatsApp send failed'
+        },
+        errors: data.errors,
+        watermark: data.timestamp,
+        status_at: data.timestamp
+      }
+    }
+  }
+
   // Delivery/read/sent receipts (statuses[]) → watermarks, like Messenger.
   if (data.status) {
     const statusMap = {

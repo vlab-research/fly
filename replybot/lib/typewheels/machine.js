@@ -210,6 +210,7 @@ function categorizeEvent(nxt) {
   if (et === 'handover') return 'HANDOVER_EVENT'
   if (et === 'synthetic_timeout' || et === 'synthetic_external') return 'EXTERNAL_EVENT'
   if (et === 'bot_message_read' || et === 'bot_message_delivered') return 'WATERMARK'
+  if (et === 'bot_message_failed') return 'SEND_FAILED'
   if (et === 'bot_message_sent') return 'ECHO'
   if (et === 'user_interaction' && nxt.payload && nxt.payload.interaction_type === 'postback') return 'POSTBACK'
   if (et === 'user_interaction' && nxt.payload && nxt.payload.interaction_type === 'quick_reply') return 'QUICK_REPLY'
@@ -383,6 +384,20 @@ function exec(state, nxt) {
         return { action: 'BLOCKED', error: thinError(response.error, episodeOnset(state), nxt.timestamp) }
       }
       return _noop()
+    }
+
+    // Asynchronous send rejection (WhatsApp `statuses[].status: "failed"`).
+    // Same outcome as a synchronous FB error in MACHINE_REPORT: the message
+    // never reached the participant, so they are BLOCKED under that code and
+    // only dean's DEAN_FB_CODES sweep may retry them.
+    case 'SEND_FAILED': {
+      const error = nxt.payload && nxt.payload.error
+
+      if (!error || ['ERROR', 'BLOCKED', 'USER_BLOCKED'].includes(state.state)) {
+        return _noop()
+      }
+
+      return { action: 'BLOCKED', error: thinError(error, episodeOnset(state), nxt.timestamp) }
     }
 
     case 'MACHINE_REPORT': {
