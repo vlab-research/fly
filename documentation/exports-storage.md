@@ -242,11 +242,12 @@ Three scoped service accounts per media bucket, provisioned by
 |---|---|---|
 | `<bucket>-writer` | dashboard-server | Get/Put/Delete on `<bucket>/*` |
 | `<bucket>-reader` | media-proxy | Get on `<bucket>/*`, **no ListBucket** |
-| `<bucket>-backup` | the `mc mirror` CronJob | Get + List (production only) |
+| `<bucket>-backup` | the mirror CronJob (`devops/backup/minio-media-mirror.yaml`) | Get + List (production only) |
 
 The reader has no `ListBucket` because asset URLs are unguessable capability
-URLs; the backup account is a separate identity precisely because `mc mirror`
-does need it. None of the three can reach the exports buckets.
+URLs; the backup account is a separate identity precisely because the mirror
+does need it. The mirror's GCS target is written under Workload Identity, so it
+holds no credential for that side (`documentation/backups.md`). None of the three can reach the exports buckets.
 
 The env-scoped split (`media` vs `media-staging`) mirrors the existing
 `fly`/`staging` split and is **not** specified in the media plan — it is here

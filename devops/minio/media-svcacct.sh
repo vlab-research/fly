@@ -14,7 +14,7 @@ set -euo pipefail
 #
 #   <bucket>-writer  dashboard-server  Get/Put/Delete on <bucket>/*  (minio-media-policy.json)
 #   <bucket>-reader  media-proxy       Get           on <bucket>/*   (minio-media-readonly-policy.json)
-#   <bucket>-backup  mc mirror CronJob Get + List    on <bucket>     (minio-media-backup-policy.json)
+#   <bucket>-backup  mirror CronJob    Get + List    on <bucket>     (minio-media-backup-policy.json)
 #                                      -- production only
 #
 # None can reach the exports bucket (`fly` / `staging`), which holds respondent
@@ -242,9 +242,8 @@ Next:
   kubectl rollout restart deployment/gbv-dashboard   -n $NAMESPACE
   kubectl rollout restart deployment/gbv-media-proxy -n $NAMESPACE
 
-  # production only, and only once BACKUP_S3_ENDPOINT / BACKUP_S3_BUCKET and the
-  # target's credentials are filled in -- devops/secrets.sh refuses the file
-  # while it still contains __FILL_...__ placeholders:
+  # production only: the mirror CronJob holds the backup key, so re-apply its
+  # secret too (its GCS target needs no credential -- Workload Identity):
   bash devops/secrets.sh minio minio-media-mirror devops/backup/.env-media-mirror
   kubectl apply -f devops/backup/minio-media-mirror.yaml
 

@@ -196,6 +196,60 @@ Residual GCP-side cleanup (deferred, harmless in the meantime):
 8. ~Day 60 — when nobody has needed a legacy SQL dump for ~30 days —
    `gcloud storage rm -r gs://vlab-research-backups/gbv-india/`.
 
+## Media backup (MinIO -> GCS)
+
+The MinIO `media` bucket holds researcher-uploaded assets, and we hold the only
+copy (`exports-storage.md`). It is copied nightly into
+`gs://vlab-research-media-backups` by the `minio-media-mirror` CronJob
+(`devops/backup/minio-media-mirror.yaml`). Staging's `media-staging` bucket is
+not backed up; its uploads are disposable.
+
+| | |
+|---|---|
+| Schedule | `0 3 * * *` UTC |
+| Mechanism | `gcloud storage rsync --recursive s3://media gs://vlab-research-media-backups`, then a check that every source key exists at the target; the run fails otherwise |
+| Source identity | MinIO `media-backup` service account (Get + List on `media`). Keys in the `minio-media-mirror` secret, from the gitignored `devops/backup/.env-media-mirror`, written by `devops/minio/media-svcacct.sh production` |
+| Target identity | KSA `minio/minio-media-mirror` → GSA `media-backup@toixotoixo.iam.gserviceaccount.com` via Workload Identity. `roles/storage.objectUser` and `roles/storage.legacyBucketReader` on this bucket only. No GCS key exists anywhere |
+| Bucket | `europe-west1`, uniform bucket-level access, public access prevention enforced, versioned. Noncurrent versions are deleted after 30 days; there is no age-based delete. Terraform `prevent_destroy` |
+| Deletes | Not propagated. An asset deleted in MinIO stays in the backup |
+| Alerting | The generic `CronJobRepeatedlyFailing` / `CronJobNotSucceeding` rules (`devops/alerts/templates/cronjob-health.yaml`) cover it |
+| Terraform | `infra/modules/media-backup`, composed in `infra/envs/prod/main.tf` |
+
+### Object metadata must survive the copy
+
+media-proxy serves `Content-Type` and `Content-Disposition` from **object
+metadata**, not from the database, so a backup that keeps the bytes but drops
+the metadata restores every file with the wrong headers and no original
+filename.
+
+`gcloud storage` carries both headers from S3 into GCS. **rclone does not**: its
+GCS backend has no metadata support, so an rclone copy in either direction loses
+`Content-Disposition`. Use `gcloud storage` for backup and for restore. After any
+change to the job, check that both fields are present:
+
+```bash
+gcloud storage objects describe gs://vlab-research-media-backups/a/<uuid> \
+  --format='yaml(content_type,content_disposition)'
+```
+
+### Checking it is running
+
+```bash
+kubectl get cronjob minio-media-mirror -n minio
+kubectl get jobs -n minio -l app.kubernetes.io/name=minio-media-mirror
+kubectl logs -n minio job/<job-name> | tail -3   # "source objects: N  target objects: N"
+```
+
+For an ad-hoc run: `kubectl create job --from=cronjob/minio-media-mirror <name> -n minio`.
+
+### Restore
+
+**Not yet rehearsed** — the rehearsal in `planning/media-backup.md` §4 is still
+outstanding, and until it passes this is an untested backup. The intended path is
+the reverse copy with the same tool, from a pod running as `minio/minio-media-mirror`
+(for GCS read) with a MinIO credential that can write the target bucket:
+`gcloud storage rsync --recursive gs://vlab-research-media-backups s3://<bucket>`.
+
 ## Verification
 
 ### Workload Identity is wired up correctly
