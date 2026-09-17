@@ -294,6 +294,13 @@ function tokenWrap(state, nxt, output) {
 // the episode so the next error gets a fresh ts, while a Dean retry that
 // re-fails keeps the original onset. That makes `errored_at` an honest "when
 // did this user break", immune to retry churn.
+// A send the platform refused. The same output whether the refusal was
+// synchronous (MACHINE_REPORT, PLATFORM_RESPONSE) or asynchronous
+// (SEND_FAILED): BLOCKED under the platform's error code.
+function _platformBlocked(state, error, nxt) {
+  return { action: 'BLOCKED', error: thinError(error, episodeOnset(state), nxt.timestamp) }
+}
+
 function thinError(err, onset, ts) {
   return {
     tag: err.tag,
@@ -381,7 +388,7 @@ function exec(state, nxt) {
       const { response } = nxt.payload
 
       if (response && response.error && state.state !== 'BLOCKED') {
-        return { action: 'BLOCKED', error: thinError(response.error, episodeOnset(state), nxt.timestamp) }
+        return _platformBlocked(state, response.error, nxt)
       }
       return _noop()
     }
@@ -397,7 +404,7 @@ function exec(state, nxt) {
         return _noop()
       }
 
-      return { action: 'BLOCKED', error: thinError(error, episodeOnset(state), nxt.timestamp) }
+      return _platformBlocked(state, error, nxt)
     }
 
     case 'MACHINE_REPORT': {
@@ -408,7 +415,7 @@ function exec(state, nxt) {
       }
 
       if (report && report.error && report.error.tag === 'FB') {
-        return { action: 'BLOCKED', error: thinError(report.error, episodeOnset(state), nxt.timestamp) }
+        return _platformBlocked(state, report.error, nxt)
       }
 
       if (report && report.error) {
