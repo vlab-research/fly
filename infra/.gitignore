@@ -1,0 +1,12 @@
+# Provider plugins and any local state. Real state lives in gs://vlab-research-tfstate.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Deliberately NOT ignored:
+#   .terraform.lock.hcl -- provider checksums belong in git.
+#   terraform.tfvars    -- holds only the project id, and apply needs it.
+# Secrets never belong in a tfvars file -- pass them via the environment.
+*.auto.tfvars
