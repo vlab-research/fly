@@ -586,6 +586,27 @@ describe('categorizeWhatsAppEvent', () => {
     event_type.should.equal('bot_message_read')
   })
 
+  it('categorizes a failed status as bot_message_failed carrying an FB-tagged error', () => {
+    const data = {
+      status: 'failed', timestamp: 1788355812000, recipient_id: 'u1',
+      errors: [{ code: 131047, title: 'Re-engagement message', message: 'Re-engagement message', error_data: { details: 'more than 24 hours' } }]
+    }
+    const { event_type, payload } = categorizeWhatsAppEvent(data)
+    event_type.should.equal('bot_message_failed')
+    payload.type.should.equal('bot_message_failed')
+    payload.error.should.deep.equal({ tag: 'FB', code: 131047, message: 'Re-engagement message' })
+    payload.errors.should.deep.equal(data.errors)
+    payload.watermark.should.equal(1788355812000)
+  })
+
+  it('categorizes a failed status with no errors array as bot_message_failed with a generic message', () => {
+    const { event_type, payload } = categorizeWhatsAppEvent({ status: 'failed', timestamp: 1, recipient_id: 'u1' })
+    event_type.should.equal('bot_message_failed')
+    payload.error.tag.should.equal('FB')
+    should.not.exist(payload.error.code)
+    payload.error.message.should.equal('WhatsApp send failed')
+  })
+
   it('categorizes image media as user_media', () => {
     const { event_type, payload } = categorizeWhatsAppEvent({ type: 'image', image: { id: 'media_1' } })
     event_type.should.equal('user_media')

@@ -210,6 +210,7 @@ function categorizeEvent(nxt) {
   if (et === 'handover') return 'HANDOVER_EVENT'
   if (et === 'synthetic_timeout' || et === 'synthetic_external') return 'EXTERNAL_EVENT'
   if (et === 'bot_message_read' || et === 'bot_message_delivered') return 'WATERMARK'
+  if (et === 'bot_message_failed') return 'SEND_FAILED'
   if (et === 'bot_message_sent') return 'ECHO'
   if (et === 'user_interaction' && nxt.payload && nxt.payload.interaction_type === 'postback') return 'POSTBACK'
   if (et === 'user_interaction' && nxt.payload && nxt.payload.interaction_type === 'quick_reply') return 'QUICK_REPLY'
@@ -293,6 +294,13 @@ function tokenWrap(state, nxt, output) {
 // the episode so the next error gets a fresh ts, while a Dean retry that
 // re-fails keeps the original onset. That makes `errored_at` an honest "when
 // did this user break", immune to retry churn.
+// A send the platform refused. The same output whether the refusal was
+// synchronous (MACHINE_REPORT, PLATFORM_RESPONSE) or asynchronous
+// (SEND_FAILED): BLOCKED under the platform's error code.
+function _platformBlocked(state, error, nxt) {
+  return { action: 'BLOCKED', error: thinError(error, episodeOnset(state), nxt.timestamp) }
+}
+
 function thinError(err, onset, ts) {
   return {
     tag: err.tag,
@@ -380,9 +388,23 @@ function exec(state, nxt) {
       const { response } = nxt.payload
 
       if (response && response.error && state.state !== 'BLOCKED') {
-        return { action: 'BLOCKED', error: thinError(response.error, episodeOnset(state), nxt.timestamp) }
+        return _platformBlocked(state, response.error, nxt)
       }
       return _noop()
+    }
+
+    // Asynchronous send rejection (WhatsApp `statuses[].status: "failed"`).
+    // Same outcome as a synchronous FB error in MACHINE_REPORT: the message
+    // never reached the participant, so they are BLOCKED under that code and
+    // only dean's DEAN_FB_CODES sweep may retry them.
+    case 'SEND_FAILED': {
+      const error = nxt.payload && nxt.payload.error
+
+      if (!error || ['ERROR', 'BLOCKED', 'USER_BLOCKED'].includes(state.state)) {
+        return _noop()
+      }
+
+      return _platformBlocked(state, error, nxt)
     }
 
     case 'MACHINE_REPORT': {
@@ -393,7 +415,7 @@ function exec(state, nxt) {
       }
 
       if (report && report.error && report.error.tag === 'FB') {
-        return { action: 'BLOCKED', error: thinError(report.error, episodeOnset(state), nxt.timestamp) }
+        return _platformBlocked(state, report.error, nxt)
       }
 
       if (report && report.error) {
