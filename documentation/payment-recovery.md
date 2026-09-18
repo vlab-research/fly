@@ -189,6 +189,41 @@ Metrics carry a `namespace` label, because Prometheus is a singleton across
 `vprod` for that reason — otherwise a staging deployment would satisfy
 `absent(dinersclub_up)` and mask a production scrape that had stopped.
 
+### Per survey: the respondent's side
+
+dinersclub's payment event carries only `userid`, `pageid`, `platform` and the
+provider block, so none of the metrics above can say **which survey** a payment
+belongs to. sql_exporter's `payment_health` collector
+(`devops/sql-exporter/templates/configmap.yaml`) reads that from `states`
+instead, on the same researcher › survey › shortcode › page labels as the rest
+of Live Traffic:
+
+| metric | what it answers |
+|---|---|
+| `survey_payment_waiting{window,provider,…}` | respondents parked on a `payment:*` wait, by when the wait **started** (`1h`/`6h`/`24h`); `14d` is everyone dean is still retrying |
+| `survey_payment_results{window,provider,outcome,code,…}` | Results that **reached** the respondent (successes and `permanent` failures), counted per Result from `externalEvents` |
+
+The two sources are complementary, not redundant:
+
+- **A withheld failure shows up in state only as a respondent still waiting**,
+  never with its code. The code is on the dinersclub counter, which has no
+  survey. Read them together: `Held: wallet / auth` climbing on the counter, and
+  one survey's waiting rows growing, is that survey's wallet.
+- **`waitStart` is when the respondent first reached the payment.** dean's
+  retries keep it (`state.waitStart || nxt.timestamp`), so it measures how long
+  someone has really been waiting, not time since the last retry.
+- **Time a Result by its envelope `timestamp`, never `payload.timestamp`.**
+  dinersclub leaves the latter zero (`0001-01-01T00:00:00Z`) on most failure
+  Results, and md's `e_payment_<provider>_timestamp` inherits the zero.
+- **`shortcode` is the respondent's current form.** For a delivered Result that
+  is the form they are on now, which after a stitch is not the form that paid
+  them.
+- **Parked rows are never cleaned up** (some date from 2022), so every waiting
+  count is bounded by dean's 14-day horizon.
+
+Both feed the **Payments** row of the Live Traffic Grafana board
+(`devops/grafana-dashboards/README.md`).
+
 ## 7. Timeout budget
 
 `spine` hardcodes `max.poll.interval.ms = 300000` with

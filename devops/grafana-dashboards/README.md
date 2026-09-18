@@ -142,8 +142,26 @@ renders `0` rather than "No data".
 **No alert rule reads `survey_recent_states`** — alerting stays on the 1h metrics; this
 board is for looking at.
 
-**Where it deliberately stops.** Aggregates only. User-level drill-down lives in the
-dashboard app's Monitor tab; user ids are never exported to Prometheus.
+**Payments row.** Every payment going out, in fixed 1h / 6h / 24h columns (not
+`$window`), from two sources:
+
+- **dinersclub's counter** (`dinersclub_payment_results_total`): the Paid / Held:
+  wallet / auth / Held: provider down / Failed: told stats, the code table and the
+  chart. It sees every attempt, including failures held back from the respondent,
+  but its payment event has no survey, so **these panels ignore the scope
+  filters**. It counts attempts, so dean's retries of one stuck respondent count
+  again each time.
+- **sql_exporter's `payment_health` collector** (`survey_payment_waiting`,
+  `survey_payment_results`): the Waiting stats and the two by-survey tables.
+  These respect every filter except Window.
+
+A held-back failure (empty wallet, broken credentials, provider down) writes
+nothing to the respondent's state, so per survey it shows up **only** as people
+waiting. `documentation/payment-recovery.md` §6 has the full contract.
+
+**Where it deliberately stops.** Aggregates only, payments included. User-level
+drill-down lives in the dashboard app's Monitor tab; user ids are never exported to
+Prometheus.
 
 ## How to Access Dashboards
 

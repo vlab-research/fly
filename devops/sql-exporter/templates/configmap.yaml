@@ -15,6 +15,7 @@ data:
         - study_traffic
         - media_health
         - recruitment_health
+        - payment_health
 
     # ---------------------------------------------------------------------------
     # INDEX DISCIPLINE — read before adding or editing any query here.
@@ -987,3 +988,176 @@ data:
           - query_name: media_assets
             query: |
               SELECT COUNT(*)::INT AS assets FROM media_asset;
+
+      # -------------------------------------------------------------------------
+      # PAYMENT HEALTH — documentation/payment-recovery.md §6
+      #
+      # dinersclub_payment_results_total says what dinersclub did, but carries only
+      # provider/outcome/code: its payment event has no shortcode, survey or
+      # researcher. These two metrics put payments on the same researcher > survey
+      # > shortcode axes as survey_recent_states, read from the respondent's side.
+      #
+      # WHAT STATE CANNOT SHOW: a withheld failure (transient / precondition, e.g.
+      # an empty wallet) sends no Result, so it appears here only as a respondent
+      # still WAITING, never with its code. The code is on the dinersclub counter.
+      #
+      # shortcode is current_form: exact for a waiting respondent, and for a
+      # delivered Result it is the form they are on now, which after a stitch is
+      # not the form that paid them.
+      #
+      # Timestamps come from the event envelope, never from payload.timestamp:
+      # dinersclub leaves that zero ("0001-01-01") on most failures.
+      # -------------------------------------------------------------------------
+      - collector_name: payment_health
+        min_interval: {{ .Values.database.minInterval }}s
+        metrics:
+          # survey_payment_waiting{window,provider,researcher,survey,shortcode,page,page_name}
+          #
+          # Respondents parked on a payment:* wait whose wait STARTED inside the
+          # window. waitStart survives dean's retries, so it is when the respondent
+          # first reached the payment. "14d" is dean's whole retry horizon — the
+          # people dean is still trying to pay — and older waits are abandoned rows
+          # (they go back to 2022), deliberately excluded.
+          #
+          # ACCESS PATH: waitStart <= updated, so bounding `updated` loses nothing.
+          - metric_name: survey_payment_waiting
+            type: gauge
+            help: "Respondents waiting on a payment whose wait started within the labelled window, by provider, researcher, survey, shortcode and page"
+            key_labels:
+              - provider
+              - researcher
+              - survey
+              - shortcode
+              - page
+              - page_name
+            value_label: window
+            values:
+              - "1h"
+              - "6h"
+              - "24h"
+              - "14d"
+            query: |
+              WITH w AS (
+                SELECT
+                  COALESCE(current_form, '(none)') AS shortcode,
+                  pageid AS page,
+                  split_part(state_json->'wait'->'value'->>'type', ':', 2) AS provider,
+                  EXTRACT(EPOCH FROM NOW())::DECIMAL * 1000 - (state_json->>'waitStart')::DECIMAL AS age_ms
+                FROM states
+                WHERE current_state = 'WAIT_EXTERNAL_EVENT'
+                  AND updated > NOW() - INTERVAL '14 days'
+                  AND state_json->'wait'->>'type' = 'external'
+                  AND state_json->'wait'->'value'->>'type' LIKE 'payment:%'
+              ),
+              agg AS (
+                SELECT shortcode, page, provider,
+                  COUNT(*) FILTER (WHERE age_ms < 3600000) AS c1h,
+                  COUNT(*) FILTER (WHERE age_ms < 21600000) AS c6h,
+                  COUNT(*) FILTER (WHERE age_ms < 86400000) AS c24h,
+                  COUNT(*) FILTER (WHERE age_ms < 1209600000) AS c14d
+                FROM w
+                GROUP BY 1, 2, 3
+              )
+              SELECT
+                a.provider AS provider,
+                COALESCE(pu.email, 'unknown') AS researcher,
+                COALESCE(sv.survey_name, 'unknown') AS survey,
+                a.shortcode AS shortcode,
+                a.page AS page,
+                COALESCE(cr.details->>'name', a.page) AS page_name,
+                a.c1h AS "1h",
+                a.c6h AS "6h",
+                a.c24h AS "24h",
+                a.c14d AS "14d"
+              FROM agg a
+              LEFT JOIN credentials cr ON cr.facebook_page_id = a.page
+              LEFT JOIN users pu ON pu.id = cr.userid
+              LEFT JOIN LATERAL (
+                SELECT s.survey_name
+                FROM surveys s
+                WHERE s.shortcode = a.shortcode
+                  AND s.userid = cr.userid
+                ORDER BY s.created DESC
+                LIMIT 1
+              ) sv ON true;
+
+          # survey_payment_results{window,provider,outcome,code,researcher,survey,shortcode,page,page_name}
+          #
+          # Payment Results DELIVERED to respondents in the window: successes, and
+          # failures classified permanent. A COUNT OF RESULTS, not of people —
+          # externalEvents keeps every Result, so a survey that pays twice counts
+          # twice. That makes it comparable with the dinersclub counter.
+          #
+          # ACCESS PATH: a Result writes the row, so updated >= its timestamp and the
+          # 24h `updated` bound is the same span study_traffic reads. Only the
+          # envelope shape is read; pre-envelope entries have no payload and are
+          # skipped, which is harmless inside a 24h window.
+          - metric_name: survey_payment_results
+            type: gauge
+            help: "Payment Results delivered to respondents within the labelled window, by provider, outcome, error code, researcher, survey, shortcode and page"
+            key_labels:
+              - provider
+              - outcome
+              - code
+              - researcher
+              - survey
+              - shortcode
+              - page
+              - page_name
+            value_label: window
+            values:
+              - "1h"
+              - "6h"
+              - "24h"
+            query: |
+              WITH ev AS (
+                SELECT
+                  COALESCE(s.current_form, '(none)') AS shortcode,
+                  s.pageid AS page,
+                  split_part(e->'payload'->>'type', ':', 2) AS provider,
+                  CASE WHEN (e->'payload'->>'success')::BOOL THEN 'success' ELSE 'failure' END AS outcome,
+                  CASE WHEN (e->'payload'->>'success')::BOOL THEN ''
+                       ELSE COALESCE(e->'payload'->'error'->>'code', '(none)') END AS code,
+                  EXTRACT(EPOCH FROM NOW())::DECIMAL * 1000 - (e->>'timestamp')::DECIMAL AS age_ms
+                FROM states s,
+                     jsonb_array_elements(
+                       CASE WHEN jsonb_typeof(s.state_json->'externalEvents') = 'array'
+                            THEN s.state_json->'externalEvents' ELSE '[]'::JSONB END
+                     ) e
+                WHERE s.current_state = ANY(ARRAY['START','RESPONDING','QOUT','END','BLOCKED',
+                                                  'ERROR','WAIT_EXTERNAL_EVENT','USER_BLOCKED','RESET','OFF'])
+                  AND s.updated > NOW() - INTERVAL '24 hours'
+                  AND e->'payload'->>'type' LIKE 'payment:%'
+              ),
+              agg AS (
+                SELECT shortcode, page, provider, outcome, code,
+                  COUNT(*) FILTER (WHERE age_ms < 3600000) AS c1h,
+                  COUNT(*) FILTER (WHERE age_ms < 21600000) AS c6h,
+                  COUNT(*) AS c24h
+                FROM ev
+                WHERE age_ms < 86400000
+                GROUP BY 1, 2, 3, 4, 5
+              )
+              SELECT
+                a.provider AS provider,
+                a.outcome AS outcome,
+                a.code AS code,
+                COALESCE(pu.email, 'unknown') AS researcher,
+                COALESCE(sv.survey_name, 'unknown') AS survey,
+                a.shortcode AS shortcode,
+                a.page AS page,
+                COALESCE(cr.details->>'name', a.page) AS page_name,
+                a.c1h AS "1h",
+                a.c6h AS "6h",
+                a.c24h AS "24h"
+              FROM agg a
+              LEFT JOIN credentials cr ON cr.facebook_page_id = a.page
+              LEFT JOIN users pu ON pu.id = cr.userid
+              LEFT JOIN LATERAL (
+                SELECT s.survey_name
+                FROM surveys s
+                WHERE s.shortcode = a.shortcode
+                  AND s.userid = cr.userid
+                ORDER BY s.created DESC
+                LIMIT 1
+              ) sv ON true;
