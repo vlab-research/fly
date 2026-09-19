@@ -4,11 +4,7 @@ const { hash } = require('./utils')
 const { translateTypeformField } = require('../generic-translator')
 const { parseNumber } = require('../generic-validator')
 const yaml = require('js-yaml')
-const phone = require('phone')
-
-function normalizePhone(number, country, mobile) {
-  return phone('' + number, country || '', !mobile)[0] || null
-}
+const { normalizePhone } = require('../phone')
 
 // Mistakes in the study's own form config, not platform faults. The `tag` is what
 // routes them: transition.js reads it, and everything downstream treats an
@@ -80,13 +76,33 @@ function getFromMetadata(ctx, key) {
 }
 
 const transforms = {
-  e164: v => normalizePhone(v, '', false) || v,
+  e164: (v, country) => normalizePhone(v, country) || v,
 }
 
-function _applyTransform(name, value) {
+function _applyTransform(name, value, country) {
   const fn = transforms[name]
   if (!fn) throw new InterpolationError(`Unknown interpolation transform: ${name}`)
-  return fn(value)
+  return fn(value, country)
+}
+
+// The country belongs to the question that collected the value, not to the
+// message being interpolated. Metadata values have no question, and the form
+// is not always in context, so a transform must still run without one.
+function _fieldCountry(ctx, loc, key) {
+  if (loc !== 'field') return undefined
+
+  // Validation sees the field with its Description merged into md; reading the
+  // same promoted field keeps the two from disagreeing about the country.
+  let field
+  try {
+    field = addCustomType(getField(ctx, key))
+  } catch (e) {
+    return undefined
+  }
+
+  const md = field.md || {}
+  return (md.validate && md.validate.country) ||
+    (field.properties || {}).default_country_code
 }
 
 function getDynamicValue(ctx, qa, v) {
@@ -103,7 +119,8 @@ function getDynamicValue(ctx, qa, v) {
     throw new InterpolationError(`Trying to interpolate a non-existent value: ${v}`)
   }
 
-  return transformNames.reduce((acc, name) => _applyTransform(name, acc), val)
+  const country = transformNames.length ? _fieldCountry(ctx, loc, key) : undefined
+  return transformNames.reduce((acc, name) => _applyTransform(name, acc, country), val)
 }
 
 function _zip(a, b) {

@@ -367,6 +367,51 @@ field had `contains`-jumps guarding it: a participant typed `1`, the jump threw
 `STATE_ACTIONS` tag until the fix shipped. Dean retries that tag, so
 conversations stuck this way recover on their own after a deploy.
 
+## Phone numbers (`lib/phone.js`)
+
+`lib/phone.js` is the only place this service parses a phone number. It wraps
+`libphonenumber-js` (a declared dependency) and exports three functions:
+
+| Function | Used by |
+|---|---|
+| `isValidPhone(value, country)` | `lib/generic-validator.js` → `validatePhone`, the `phone_number` question's validator |
+| `normalizePhone(value, country)` | `lib/typewheels/form.js` → `transforms.e164`, the `\|e164` interpolation transform |
+| `parsePhone(value, country)` | the other two; exported for callers that need the parsed object |
+
+Both call sites read the country the same way — `md.validate.country`, else
+`properties.default_country_code`, else none — from the same promoted field, and
+that is load-bearing. The validator decides whether the conversation advances;
+the transform decides what `account_number` a payment carries. If the transform
+were stricter than the validator, a respondent would be told they were paid
+against a string the provider cannot dial.
+
+**The transform reads the country off the referenced field, not the current
+one.** `{{field:pay_1_phone|e164}}` is interpolated while rendering some *other*
+question (usually the payment `wait`), so `_fieldCountry` in `form.js` resolves
+`pay_1_phone` with `addCustomType(getField(...))` — the same Description-merged
+field `machine.js` hands the validator — and reads its country. `getField`
+throws when the form is absent from `ctx` or the ref does not resolve;
+`_fieldCountry` catches that and returns `undefined`, so the transform still
+runs — without a country it handles international numbers and leaves anything
+else untouched. A `hidden:` value never has a country, by construction.
+
+`normalizePhone` returns `null` when nothing resolves, and the transform falls
+back to the raw value (`normalizePhone(v, country) || v`), so an unparseable
+answer reaches the provider verbatim and is rejected there rather than being
+sent as an empty `account_number`.
+
+Country codes are accepted in either case: `parsePhone` uppercases the code
+before handing it to `libphonenumber-js`, which only knows `AR`, not `ar`.
+
+Argentina is the one country where the normalized output is not plain E.164 —
+`_forProvider` strips the carrier-select `9` because that is the shape
+DingConnect accepts. The reasoning, the authoring rules for payment configs, and
+the cross-component flow are in `documentation/phone-numbers.md`.
+
+Tests: `lib/generic-validator.test.js` (`describe('validatePhone')`) and
+`lib/typewheels/form.test.js` (`describe('e164 transform country resolution')`),
+both written against real respondent input.
+
 ## Repeats (`_gatherResponses`)
 
 Every re-send of a question — follow-up nudge, failed validation, repeat
