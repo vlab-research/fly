@@ -63,7 +63,7 @@ func shouldExecuteScheduled(exec *types.Execution, now time.Time, lastExecution 
 	nowInTZ := now.In(loc)
 
 	// Parse time_of_day
-	targetHour, targetMinute, err := parseTimeOfDay(*exec.TimeOfDay)
+	targetHour, targetMinute, err := types.ParseTimeOfDay(*exec.TimeOfDay)
 	if err != nil {
 		return false, fmt.Errorf("invalid time_of_day %q: %w", *exec.TimeOfDay, err)
 	}
@@ -116,7 +116,7 @@ func shouldExecuteAbsolute(exec *types.Execution, now time.Time, lastExecution *
 	}
 
 	// Parse datetime as local time in the specified timezone (YYYY-MM-DDTHH:MM:SS)
-	targetTime, err := time.ParseInLocation("2006-01-02T15:04:05", *exec.Datetime, loc)
+	targetTime, err := time.ParseInLocation(types.DatetimeLayout, *exec.Datetime, loc)
 	if err != nil {
 		return false, fmt.Errorf("invalid datetime %q: must be in YYYY-MM-DDTHH:MM:SS format", *exec.Datetime)
 	}
@@ -132,35 +132,6 @@ func shouldExecuteAbsolute(exec *types.Execution, now time.Time, lastExecution *
 	}
 
 	return true, nil
-}
-
-// parseTimeOfDay parses a time string in HH:MM format
-// Returns hour (0-23) and minute (0-59)
-func parseTimeOfDay(s string) (hour int, minute int, err error) {
-	parts := strings.Split(s, ":")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("invalid time_of_day format: %s (expected HH:MM)", s)
-	}
-
-	hour, err = strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid hour in time_of_day: %s", parts[0])
-	}
-
-	minute, err = strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid minute in time_of_day: %s", parts[1])
-	}
-
-	if hour < 0 || hour > 23 {
-		return 0, 0, fmt.Errorf("hour must be between 0 and 23, got %d", hour)
-	}
-
-	if minute < 0 || minute > 59 {
-		return 0, 0, fmt.Errorf("minute must be between 0 and 59, got %d", minute)
-	}
-
-	return hour, minute, nil
 }
 
 // parseDuration parses a duration string like "4 weeks", "2 days", "3 hours"

@@ -683,3 +683,31 @@ func TestExecutor_Run_UserListBail_WithLimit(t *testing.T) {
 		t.Errorf("Expected 2 users bailed (limit), got %d", event.UsersBailed)
 	}
 }
+
+// The error message must reach the database as valid JSON even when it quotes
+// the offending value, as every timing error does.
+func TestRecordError_MessageWithQuotesIsValidJSON(t *testing.T) {
+	store := &mockBailStore{}
+	exec := New(store, &mockQueryExecutor{}, &mockBailSender{}, 100)
+	bail := &db.Bail{ID: uuid.New(), UserID: uuid.New(), Name: "quoted"}
+	msg := `timing check failed: invalid datetime "2026-06-01T09:00:00Z": must be in YYYY-MM-DDTHH:MM:SS format`
+
+	if err := exec.recordError(context.Background(), bail, errors.New(msg)); err != nil {
+		t.Fatalf("recordError() error = %v", err)
+	}
+	if len(store.recordedEvents) != 1 {
+		t.Fatalf("recorded %d events, want 1", len(store.recordedEvents))
+	}
+
+	encoded, err := json.Marshal(store.recordedEvents[0].Error)
+	if err != nil {
+		t.Fatalf("error event is not valid JSON: %v", err)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal error event: %v", err)
+	}
+	if decoded["message"] != msg {
+		t.Errorf("message = %q, want %q", decoded["message"], msg)
+	}
+}

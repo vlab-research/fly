@@ -261,6 +261,87 @@ func TestExecutionValidation(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "scheduled timing - single-digit hour, which the executor accepts",
+			exec: Execution{
+				Timing:    "scheduled",
+				TimeOfDay: strPtr("9:00"),
+				Timezone:  strPtr("Africa/Lagos"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "scheduled timing - time_of_day with seconds",
+			exec: Execution{
+				Timing:    "scheduled",
+				TimeOfDay: strPtr("09:00:00"),
+				Timezone:  strPtr("UTC"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "scheduled timing - hour out of range",
+			exec: Execution{
+				Timing:    "scheduled",
+				TimeOfDay: strPtr("24:00"),
+				Timezone:  strPtr("UTC"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "scheduled timing - unknown timezone",
+			exec: Execution{
+				Timing:    "scheduled",
+				TimeOfDay: strPtr("09:00"),
+				Timezone:  strPtr("US/Eastern-ish"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "absolute timing - unknown timezone",
+			exec: Execution{
+				Timing:   "absolute",
+				Datetime: strPtr("2025-12-15T10:00:00"),
+				Timezone: strPtr("Mars/Olympus_Mons"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "absolute timing - Z suffix",
+			exec: Execution{
+				Timing:   "absolute",
+				Datetime: strPtr("2025-12-15T10:00:00Z"),
+				Timezone: strPtr("UTC"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "absolute timing - offset",
+			exec: Execution{
+				Timing:   "absolute",
+				Datetime: strPtr("2025-12-15T10:00:00+01:00"),
+				Timezone: strPtr("UTC"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "absolute timing - no seconds",
+			exec: Execution{
+				Timing:   "absolute",
+				Datetime: strPtr("2025-12-15T10:00"),
+				Timezone: strPtr("UTC"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "absolute timing - impossible date",
+			exec: Execution{
+				Timing:   "absolute",
+				Datetime: strPtr("2025-02-30T10:00:00"),
+				Timezone: strPtr("UTC"),
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -477,26 +477,26 @@ func TestParseTimeOfDay(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotHour, gotMinute, err := parseTimeOfDay(tt.input)
+			gotHour, gotMinute, err := types.ParseTimeOfDay(tt.input)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("parseTimeOfDay() expected error, got nil")
+					t.Errorf("ParseTimeOfDay() expected error, got nil")
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("parseTimeOfDay() unexpected error: %v", err)
+				t.Errorf("ParseTimeOfDay() unexpected error: %v", err)
 				return
 			}
 
 			if gotHour != tt.wantHour {
-				t.Errorf("parseTimeOfDay() hour = %v, want %v", gotHour, tt.wantHour)
+				t.Errorf("ParseTimeOfDay() hour = %v, want %v", gotHour, tt.wantHour)
 			}
 
 			if gotMinute != tt.wantMinute {
-				t.Errorf("parseTimeOfDay() minute = %v, want %v", gotMinute, tt.wantMinute)
+				t.Errorf("ParseTimeOfDay() minute = %v, want %v", gotMinute, tt.wantMinute)
 			}
 		})
 	}

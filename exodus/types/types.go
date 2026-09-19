@@ -3,6 +3,8 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -77,8 +79,12 @@ func (e *Execution) Validate() error {
 		if e.Timezone == nil {
 			return fmt.Errorf("timezone is required for scheduled timing")
 		}
-		// TODO: Validate time_of_day format (HH:MM)
-		// TODO: Validate timezone is valid IANA timezone
+		if _, _, err := ParseTimeOfDay(*e.TimeOfDay); err != nil {
+			return fmt.Errorf("invalid time_of_day %q: %w", *e.TimeOfDay, err)
+		}
+		if err := validateTimezone(*e.Timezone); err != nil {
+			return err
+		}
 	case "absolute":
 		if e.Datetime == nil {
 			return fmt.Errorf("datetime is required for absolute timing")
@@ -86,12 +92,56 @@ func (e *Execution) Validate() error {
 		if e.Timezone == nil {
 			return fmt.Errorf("timezone is required for absolute timing")
 		}
-		// TODO: Validate datetime is valid ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
-		// TODO: Validate timezone is valid IANA timezone
+		if err := validateTimezone(*e.Timezone); err != nil {
+			return err
+		}
+		if _, err := time.Parse(DatetimeLayout, *e.Datetime); err != nil {
+			return fmt.Errorf("invalid datetime %q: must be YYYY-MM-DDTHH:MM:SS, wall-clock time in timezone, with no zone suffix or offset", *e.Datetime)
+		}
 	default:
 		return fmt.Errorf("invalid timing type: %s (must be immediate, scheduled, or absolute)", e.Timing)
 	}
 	return nil
+}
+
+// DatetimeLayout is the only accepted shape for an absolute bail's datetime. It
+// has no zone: the value is wall-clock time in the bail's timezone.
+const DatetimeLayout = "2006-01-02T15:04:05"
+
+func validateTimezone(tz string) error {
+	if _, err := time.LoadLocation(tz); err != nil {
+		return fmt.Errorf("invalid timezone %q: must be an IANA name such as \"America/New_York\"", tz)
+	}
+	return nil
+}
+
+// ParseTimeOfDay parses a scheduled bail's time_of_day in HH:MM format.
+// Returns hour (0-23) and minute (0-59)
+func ParseTimeOfDay(s string) (hour int, minute int, err error) {
+	parts := strings.Split(s, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid time_of_day format: %s (expected HH:MM)", s)
+	}
+
+	hour, err = strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid hour in time_of_day: %s", parts[0])
+	}
+
+	minute, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid minute in time_of_day: %s", parts[1])
+	}
+
+	if hour < 0 || hour > 23 {
+		return 0, 0, fmt.Errorf("hour must be between 0 and 23, got %d", hour)
+	}
+
+	if minute < 0 || minute > 59 {
+		return 0, 0, fmt.Errorf("minute must be between 0 and 59, got %d", minute)
+	}
+
+	return hour, minute, nil
 }
 
 // Action defines what happens when a bail is triggered

@@ -310,7 +310,11 @@ func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *
 // recordError records a failed bail execution event.
 // Returns an error if the DB write fails (so callers can include it in their own error).
 func (e *Executor) recordError(ctx context.Context, dbBail *db.Bail, execErr error) error {
-	errorJSON := json.RawMessage(fmt.Sprintf(`{"message": "%s"}`, execErr.Error()))
+	errorJSON, err := json.Marshal(map[string]string{"message": execErr.Error()})
+	if err != nil {
+		return fmt.Errorf("failed to encode error event: %w", err)
+	}
+	errorRaw := json.RawMessage(errorJSON)
 
 	defJSON := json.RawMessage("{}")
 	if dbBail.Definition != nil {
@@ -325,7 +329,7 @@ func (e *Executor) recordError(ctx context.Context, dbBail *db.Bail, execErr err
 		UsersMatched:       0,
 		UsersBailed:        0,
 		DefinitionSnapshot: defJSON,
-		Error:              &errorJSON,
+		Error:              &errorRaw,
 	}
 
 	if err := e.store.RecordEvent(ctx, event); err != nil {
