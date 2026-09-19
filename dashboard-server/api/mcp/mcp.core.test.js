@@ -978,13 +978,34 @@ describe('mcp.core: validateBailDefinition', () => {
       execution: { timing: 'absolute', datetime: 'next tuesday' },
     });
     expect(errors).to.have.length(1);
-    expect(errors[0]).to.match(/ISO 8601/);
+    expect(errors[0]).to.match(/YYYY-MM-DDTHH:MM:SS/);
   });
 
-  it('accepts an ISO 8601 datetime', () => {
+  it('accepts a wall-clock datetime with no zone suffix', () => {
     expect(
-      validateBailDefinition({ execution: { timing: 'absolute', datetime: '2026-06-01T09:00:00Z' } }),
+      validateBailDefinition({
+        execution: { timing: 'absolute', datetime: '2026-06-01T09:00:00', timezone: 'Africa/Lagos' },
+      }),
     ).to.eql([]);
+  });
+
+  // Go's "2006-01-02T15:04:05" layout rejects every one of these.
+  ['2026-06-01T09:00:00Z', '2026-06-01T09:00:00+01:00', '2026-06-01T09:00', '2026-06-01', '2026-13-01T09:00:00']
+    .forEach((datetime) => {
+      it(`rejects an absolute datetime of ${datetime}`, () => {
+        const [err] = validateBailDefinition({
+          execution: { timing: 'absolute', datetime, timezone: 'UTC' },
+        });
+        expect(err).to.match(/datetime/);
+        expect(err).to.match(/never run/);
+      });
+    });
+
+  it('rejects a timezone name IANA does not know on an absolute bail', () => {
+    const [err] = validateBailDefinition({
+      execution: { timing: 'absolute', datetime: '2026-06-01T09:00:00', timezone: 'US/Eastern-ish' },
+    });
+    expect(err).to.match(/timezone/);
   });
 
   it('ignores timing fields that belong to another timing', () => {

@@ -1347,12 +1347,15 @@ const BAIL_DEFINITION_SCHEMA = {
         timezone: {
           type: 'string',
           description:
-            'timing "scheduled": IANA name, e.g. "America/New_York" or "Africa/Lagos". ' +
-            'An unrecognised name is stored and then silently never runs.',
+            'timing "scheduled" and "absolute": IANA name, e.g. "America/New_York" or ' +
+            '"Africa/Lagos". An unrecognised name is stored and then silently never runs.',
         },
         datetime: {
           type: 'string',
-          description: 'timing "absolute": ISO 8601, e.g. "2026-06-01T09:00:00Z".',
+          description:
+            'timing "absolute": "YYYY-MM-DDTHH:MM:SS", e.g. "2026-06-01T09:00:00", read as ' +
+            'wall-clock time in timezone. No "Z" and no offset: those are stored and then ' +
+            'silently never run.',
         },
       },
     },
@@ -1557,6 +1560,9 @@ const BAIL_TOOLS = [
  * from the outside, so it is caught here instead.
  */
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+// The executor parses with Go's "2006-01-02T15:04:05" layout in the bail's
+// timezone, which rejects any zone suffix or offset.
+const LOCAL_DATETIME = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
 
 function validTimezone(name) {
   try {
@@ -1580,6 +1586,9 @@ function validateBailDefinition(definition) {
           '(24-hour, e.g. "09:00"). Exodus would store it and then never run the bail.',
       );
     }
+  }
+
+  if (execution.timing === 'scheduled' || execution.timing === 'absolute') {
     if (execution.timezone && !validTimezone(execution.timezone)) {
       errors.push(
         `definition.execution.timezone: "${execution.timezone}" is not a known IANA zone ` +
@@ -1590,10 +1599,11 @@ function validateBailDefinition(definition) {
   }
 
   if (execution.timing === 'absolute' && execution.datetime) {
-    if (Number.isNaN(Date.parse(execution.datetime))) {
+    if (!LOCAL_DATETIME.test(execution.datetime)) {
       errors.push(
-        `definition.execution.datetime: "${execution.datetime}" is not ISO 8601 ` +
-          '(e.g. "2026-06-01T09:00:00Z"). Exodus would store it and then never run the bail.',
+        `definition.execution.datetime: "${execution.datetime}" is not "YYYY-MM-DDTHH:MM:SS" ` +
+          '(e.g. "2026-06-01T09:00:00", wall-clock time in timezone, with no "Z" or offset). ' +
+          'Exodus would store it and then never run the bail.',
       );
     }
   }
