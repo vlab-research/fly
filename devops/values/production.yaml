@@ -168,7 +168,13 @@ versionExporter: &vexporter v0.6.12
 # change, and the 500 -> 404 move only affects requests that were already
 # failing. dashboard-server relays anything under 500 verbatim, so this is what
 # makes the dashboard and an MCP agent say "Bail not found".
-versionExodus: &vexodus v0.2.6
+# v0.2.6 -> v0.2.7: create, update and preview reject a malformed time_of_day,
+# timezone or datetime with 400 (a "Z"-suffixed datetime was stored and then
+# never fired), and a failed timing check now records its error event instead
+# of failing to encode it (VIR-57). A stored bail that is already malformed was
+# never going to run; it now records "invalid bail definition" each tick. No
+# schema and no config change.
+versionExodus: &vexodus v0.2.7
 # v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
 # 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
 # since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
