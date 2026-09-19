@@ -792,3 +792,67 @@ describe('getCondition', () => {
 //     fn.should.throw(TypeError)
 //   })
 // })
+
+// The |e164 transform feeds account_number in payment configs, so whatever it
+// returns is what the provider is asked to top up. A number that resolves to
+// the wrong country is paid to a stranger's handset in that country, and the
+// respondent can never escape by retyping.
+describe('e164 transform country resolution', () => {
+  const ctxFor = country => ({
+    log: [],
+    user: { id: 'u1' },
+    form: {
+      id: 'f1',
+      fields: [{
+        ref: 'phone',
+        type: 'phone_number',
+        properties: country ? { default_country_code: country } : {}
+      }]
+    }
+  })
+
+  const norm = (value, country) => f.interpolateField(
+    ctxFor(country),
+    [['phone', value]],
+    { title: '{{field:phone|e164}}' }
+  ).title
+
+  describe('Argentina', () => {
+    it('keeps an international mobile in Argentina', () => {
+      norm('+5491164018373', 'AR').should.match(/^\+54/)
+    })
+
+    it('keeps an international mobile written without the plus', () => {
+      norm('5491164018373', 'AR').should.match(/^\+54/)
+    })
+
+    it('resolves a bare national number against the question country', () => {
+      norm('1164018373', 'AR').should.match(/^\+54/)
+    })
+
+    it('never resolves a bare national number to another country', () => {
+      norm('2346459349', 'AR').should.not.match(/^\+1\d/)
+    })
+
+    it('sends the format the provider accepts, without the mobile 9', () => {
+      norm('+5491164018373', 'AR').should.equal('+541164018373')
+    })
+  })
+
+  // Validation sees the field after its Description is merged into md, so
+  // payment must too, or a number can pass validation and still not resolve.
+  it('reads a country set in the question Description, as validation does', () => {
+    const ctx = ctxFor(null)
+    ctx.form.fields[0].properties = { description: 'validate:\n  country: AR' }
+    f.interpolateField(ctx, [['phone', '1164018373']], { title: '{{field:phone|e164}}' })
+      .title.should.equal('+541164018373')
+  })
+
+  it('treats a lowercase country code as that country', () => {
+    norm('1164018373', 'ar').should.equal('+541164018373')
+  })
+
+  it('leaves a Kenyan number alone when the form declares no country', () => {
+    norm('+254712345678 use this', null).should.equal('+254712345678')
+  })
+})

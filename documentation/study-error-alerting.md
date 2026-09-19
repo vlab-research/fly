@@ -638,6 +638,11 @@ any alertname absent from the whitelist, with no error anywhere.
    - Required field with no valid input (e.g., "enter a number between 1 and 10" but all inputs rejected).
    - Skip logic broken (user can't advance past this question).
    - Confusing wording (user doesn't understand what's being asked).
+   - A `phone_number` question with no declared country, or one that does not
+     match the respondents. Bare local numbers are then refused and the
+     respondent is re-asked indefinitely. Check the question's
+     `properties.default_country_code` and any `validate.country` in its
+     Description; see `documentation/phone-numbers.md` §3.
 
 3. **Contact the study owner:** Create a Linear ticket with the question details. Guide them to fix the validation or clarify the question. If it's a platform bug (validation logic broken in botserver-core), escalate to engineering.
 

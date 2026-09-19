@@ -427,6 +427,16 @@ let a catalogue change deliver 1,000 of the wrong unit while reporting success.
 to exactly one operator, so there is nothing to arbitrate — the map is a lookup
 table, and `AccountLookup` returning several items is a data quirk, not a choice.
 
+**`account_number` is sent exactly as it arrives.** dinersclub does no phone
+parsing; the string is produced upstream by replybot's `|e164` interpolation
+transform, which resolves the respondent's answer against the country declared
+on the survey's phone question. For Argentina that string deliberately omits the
+mobile `9` (`+541164018373`), because that is the shape this account's
+Argentine transfers are accepted in. A value replybot could not resolve is
+passed through raw, and DingConnect's `AccountNumberInvalid` for it is
+`RecoveryPermanent` (`classify.go`). A wrong-but-valid number is not caught here
+at all — it is paid. See `documentation/phone-numbers.md`.
+
 > ### ⚠️ `tolerance` defaults to zero, and zero means exact match
 >
 > Omitting `tolerance` makes the window `[amount, amount]` — the delivered value
@@ -1328,5 +1338,7 @@ error handling (`classify.go`) and metrics/instrumentation (`metrics.go`).
 - `documentation/payment-recovery.md` — the cross-component picture: who
   retries, who is told, how a silent failure still gets paid
 - `documentation/alerting.md` §12 — runbooks for every payment alert
+- `documentation/phone-numbers.md` — how the `account_number` a DingConnect
+  payment carries is produced from what the respondent typed
 - `planning/payment-failure-handling.md` — the decision and the reasoning
 - `planning/external-event-taxonomy.md` — the event contract this anticipates

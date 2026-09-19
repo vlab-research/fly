@@ -100,3 +100,56 @@ describe('validateUpload', () => {
     validator(uploadField('video', 'upload'), {})(attachment).valid.should.be.false
   })
 })
+
+// Phone answers as respondents actually type them. A `phone_number` question
+// carries the expected country in properties.default_country_code; without it
+// a bare national number has no country and cannot be resolved.
+const phoneField = (country) => ({
+  type: 'phone_number',
+  properties: country ? { default_country_code: country } : {}
+})
+
+describe('validatePhone', () => {
+  const accepts = (field, ...numbers) => numbers.forEach(n => {
+    it(`accepts ${JSON.stringify(n)}`, () => {
+      validator(field, {})(n).valid.should.be.true
+    })
+  })
+
+  describe('Argentina', () => {
+    // Argentine mobiles carry a 9 between the country code and the area code.
+    // Every one of these is the same reachable handset written the way a
+    // respondent writes it.
+    accepts(phoneField('AR'),
+      '+5491164018373',
+      '+54 9 11 6401-8373',
+      '5491164018373',
+      '54 9 1164018373',
+      '+5492613900931')
+
+    it('rejects a number with too many digits to dial', () => {
+      validator(phoneField('AR'), {})('+549112326403068').valid.should.be.false
+    })
+
+    // No country code. Resolvable only against the question's country.
+    accepts(phoneField('AR'), '1164018373', '2346459349', '2613900931')
+
+    it('rejects a national number when the question names no country', () => {
+      validator(phoneField(null), {})('1164018373').valid.should.be.false
+    })
+  })
+
+  describe('other corridors', () => {
+    accepts(phoneField('BO'), '+59171234567')
+    accepts(phoneField('HN'), '+50499887766')
+    accepts(phoneField('KE'), '+254712345678')
+
+    it('treats a lowercase country code as that country', () => {
+      validator(phoneField('ar'), {})('1164018373').valid.should.be.true
+    })
+
+    it('rejects a number that is too short to dial', () => {
+      validator(phoneField('AR'), {})('23345').valid.should.be.false
+    })
+  })
+})

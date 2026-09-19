@@ -1,5 +1,5 @@
 const emailValidator = require('email-validator')
-const phone = require('phone')
+const { isValidPhone } = require('./phone')
 
 const defaultMessages = {
   'label.error.mustEnter': 'Sorry, that answer is not valid. Please try to answer the question again.',
@@ -191,12 +191,18 @@ function validateEmail(field, messages) {
 }
 
 function validatePhone(field, messages) {
-  // Validate real phone numbers (E.164 / dialable), matching the `phone`
-  // package used by normalizePhone for the |e164 pipe. A bare "23345" must be
-  // rejected while "+918888000000" is accepted. Third arg true = allow landline.
+  const md = field.md || {}
+  const properties = field.properties || {}
+
+  // A bare national number is only resolvable against a country. Typeform
+  // carries it on the question as default_country_code; md.validate.country
+  // overrides it for forms that set one explicitly.
+  const country = (md.validate && md.validate.country) ||
+    properties.default_country_code
+
   return r => ({
     message: messages['label.error.phoneNumber'],
-    valid: typeof r === 'string' && phone(r, '', true)[0] != null
+    valid: isValidPhone(r, country)
   })
 }
 

@@ -36,6 +36,10 @@ Three consequences worth knowing, because they are not obvious:
 
 Interpolation (`{{hidden:id}}`, `{{field:some_ref}}`) is applied to the
 Description *before* it is parsed, so you can build values out of hidden fields.
+A ref may carry a transform after a pipe — `{{field:pay_1_phone|e164}}` — which
+rewrites the value before it is substituted. `e164` is the only one today; see
+**Phone Number** below. An unknown transform name is an error, not a silent
+pass-through.
 
 Fly supports the following question types:
 
@@ -74,12 +78,77 @@ Number type validates that the user has sent us a number and only a number. To c
 
 In Typeform, pick "Number".
 
+## Phone Number
+
+Validates that the user has sent a number that can actually be dialed.
+
+In Typeform, pick "Phone Number", and **set the question's country to the country
+you are recruiting in** — the setting is stored as `default_country_code` and it
+is what lets a respondent answer with a local number instead of the full
+international form. Either case works (`AR` or `ar`). You can also set it in
+the Description with `validate: {country: AR}`; if both are set, the Description
+wins.
+
+With a country declared, all of these are accepted and mean the same handset:
+`+5491164018373`, `+54 9 11 6401-8373`, `5491164018373`, `1164018373`. Without
+one, only an international number is accepted (the `+` is optional) and a local
+number is refused — so if you leave the country unset, the question text must
+ask for the country code.
+
+To pay the number, interpolate it with the `e164` transform, which turns
+whatever the respondent typed into the form the payment provider dials:
+
+```json
+{"account_number": "{{field:pay_1_phone|e164}}"}
+```
+
+**Quote it.** Unquoted, YAML reads `+541164018373` as a number and the `+`
+disappears.
+
+The country comes from the *phone question being referenced*, not from the
+payment question doing the interpolating, so the two can sit anywhere in the
+form. Full behavior, including what is sent for Argentina:
+`documentation/phone-numbers.md`.
 
 ## Statement
 
 A statement is a simple message that you send. The bot will move on to the next question without waiting for a response.
 
 In Typeform, pick "Statement"
+
+## Ending (thank-you screen)
+
+A conversation ends when the bot sends a field of type `thankyou_screen` and
+sees its echo; the state becomes `END` and nothing further is asked. Fly appends
+a form's Typeform thank-you screens *after* its fields
+(`replybot/lib/typewheels/typeform.js`), so you reach one with a logic jump or by
+running off the last field.
+
+Two things are not obvious:
+
+1. **Only the first line of the title is sent.** The rest is dropped
+   (`generic-translator.js` `translateStatement`), because Typeform's own
+   default ending carries its "create your own" boilerplate on line two. An
+   ending that needs more than one paragraph loses everything after the first
+   `\n` on the live channel, with no error; write it as a single line.
+2. **Any field can be an ending.** `{"type": "thankyou_screen"}` in a
+   Statement's Description promotes it (see the top of this page). A form whose
+   only job is to close a conversation, such as a bail destination, is
+   best written this way: its first field is the ending, so a respondent
+   switched into it gets that one message and the conversation ends. A form
+   with no real fields and only a thank-you screen depends on Typeform
+   returning an empty `fields` array, and a missing key breaks the form load.
+
+A respondent who writes after the end gets a reply, then the ending is sent
+again. The reply is the ending's `responseMessage` if its Description sets one,
+else the form's `block.shortText.placeholder` custom message, else the English
+default "Sorry, I can't accept any responses now." For a non-English form,
+set `responseMessage`:
+
+```json
+{"type": "thankyou_screen",
+ "responseMessage": "Ya está todo listo, no hace falta que respondas nada más."}
+```
 
 ## Image
 
