@@ -1,0 +1,843 @@
+{
+  "id": "zlIadaHG",
+  "type": "quiz",
+  "title": "Routine Immunization - Baseline",
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/yPd8ZS"
+  },
+  "theme": {
+    "href": "https://api.typeform.com/themes/qHWOQ7"
+  },
+  "settings": {
+    "language": "en",
+    "progress_bar": "proportion",
+    "meta": {
+      "allow_indexing": false
+    },
+    "hide_navigation": false,
+    "is_public": true,
+    "is_trial": false,
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "are_uploads_public": false,
+    "show_time_to_complete": true,
+    "pro_subdomain_enabled": false,
+    "capabilities": {
+      "e2e_encryption": {
+        "enabled": false,
+        "modifiable": false
+      }
+    }
+  },
+  "thankyou_screens": [
+    {
+      "id": "pTJbsWA1ZRc1",
+      "ref": "thankyou_optout",
+      "title": "Ok, no problem. Thank you for your time!",
+      "properties": {
+        "show_button": true,
+        "share_icons": true,
+        "button_mode": "default_redirect",
+        "button_text": "again"
+      }
+    },
+    {
+      "id": "ycJdVqOazUo6",
+      "ref": "thankyou_early",
+      "title": "I'm sorry, we are only looking to survey parents of young children, therefore you are not eligible for this survey. Thanks for taking the time!",
+      "properties": {
+        "show_button": true,
+        "share_icons": true,
+        "button_mode": "default_redirect",
+        "button_text": "again"
+      }
+    },
+    {
+      "id": "DefaultTyScreen",
+      "ref": "default_tys",
+      "title": "Thanks for completing this typeform\nNow *create your own* — it's free, easy, & beautiful",
+      "properties": {
+        "show_button": true,
+        "share_icons": false,
+        "button_mode": "default_redirect",
+        "button_text": "Create a *typeform*"
+      },
+      "attachment": {
+        "type": "image",
+        "href": "https://images.typeform.com/images/2dpnUBBkz2VN"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "MEyhpvvjCcnC",
+      "title": "Hello! We are running a survey for people with children ages 0-2, and we would like to ask you a few questions. \n\nThis survey will take only x minutes of your time, in total. We would like to ask you some questions today and some questions in a few weeks. Upon completion of the final questions in a few weeks time, you will receive X in mobile credit added to a number you provide.  \n\nWould you like to participate? If so, please click \"OK\" to continue.",
+      "ref": "intro_1",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "WZOStP3kS8RC",
+            "ref": "01FN2Q4Y79K34Q3MDJS75EN6BX",
+            "label": "OK"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "J3R6tZkIUbRU",
+      "title": "Great, thanks!\n\nYour answers will be stored securely and kept confidential, they will only be seen by the research team. If at any time you wish to see your personal data or request that all your personal data be deleted, you can write an email to privacy@vlab.digital.\n\nYou can delete this thread after you have finished the survey, to keep your answers private from anyone else using your phone. \n",
+      "ref": "intro_2",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "VeIStT6yWrLU",
+            "ref": "01FN2Q4Y7A1RVB3M1VNF3XKX1R",
+            "label": "OK"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "J6nB5ISUmT7C",
+      "title": "If at any point during the survey you stop responding, we will send a single reminder message. If you wish to stop the survey, you can stop replying.\n\nSome questions will have buttons that you can click on to respond. If there is no button provided, you should use your keyboard to type the answers. ",
+      "ref": "intro_3",
+      "properties": {
+        "button_text": "Continue",
+        "hide_marks": false
+      },
+      "type": "statement"
+    },
+    {
+      "id": "CTJ2xzGngNKy",
+      "title": "Do you accept to participate in the survey?",
+      "ref": "intro_4",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "20UkweYxii0L",
+            "ref": "01FN2Q4Y7A3WNBM02HN860QGKG",
+            "label": "Yes"
+          },
+          {
+            "id": "MwfkZYYfqLxJ",
+            "ref": "01FN2Q4Y7ANCQK0PQNZHJTHZH8",
+            "label": "No"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "W8D5HFy24EUk",
+      "title": "Do you have children between the ages of 0-2",
+      "ref": "has_young_children",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "UTKcApqSS8ae",
+            "ref": "01FN2Q4Y7AHCCKEGPAWVPSWM7D",
+            "label": "Yes"
+          },
+          {
+            "id": "YeU8QsLreIPJ",
+            "ref": "01FN2Q4Y7APVW9F907NFNXSFTY",
+            "label": "No"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "mWPvJueamN31",
+      "title": "What is your gender?",
+      "ref": "gender",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "p62Zl6ramHt9",
+            "ref": "01FN2Q4Y7AJ47K3FRA4KAJZFTP",
+            "label": "Male"
+          },
+          {
+            "id": "xRJxR1MPfr14",
+            "ref": "01FN2Q4Y7AJD19RT7BDSZZXZH7",
+            "label": "Female"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "8TbTR3lWNY6m",
+      "title": "What is your current age in years? [please enter only a number]",
+      "ref": "age",
+      "properties": {},
+      "validations": {
+        "required": false
+      },
+      "type": "number"
+    },
+    {
+      "id": "jSKDOudaOv7q",
+      "title": "In which region do you live?",
+      "ref": "region",
+      "properties": {},
+      "validations": {
+        "required": false
+      },
+      "type": "short_text"
+    },
+    {
+      "id": "NDkxzWcPyqrx",
+      "title": "Which of the following best describes your ethnicity:\n\n-A. Ethnicity A\n-B. Ethnicity B",
+      "ref": "ethnicity",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "AdWX5sV7HjVX",
+            "ref": "3b2c36f5-1ddf-4ea5-a85a-1ee0bfddee05",
+            "label": "A"
+          },
+          {
+            "id": "Vhq9VW43pqSL",
+            "ref": "8b4e2a48-31d7-4420-a72b-9d75fe68eff1",
+            "label": "B"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "YGGxDebawkNl",
+      "title": "What is your Religion?\n\n- A. Roman Catholic\n- B. Protestant\n- C. Orthodox Christian\n- D. Muslim\n- E. Jewish\n- F. Other religion\n- G. No religion",
+      "ref": "religion",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "vRb3y3Hphg46",
+            "ref": "01FN2Q4Y7A35929SGSJ3TQ60ZH",
+            "label": "A"
+          },
+          {
+            "id": "osJjoD5sXZph",
+            "ref": "01FN2Q4Y7AVTBCVDGR20XEJ4QS",
+            "label": "B"
+          },
+          {
+            "id": "Sa9XoVpyEQTX",
+            "ref": "01FN2Q4Y7A4SQ9ZCKKHBKBEJX0",
+            "label": "C"
+          },
+          {
+            "id": "V6PNaqThXTRZ",
+            "ref": "01FN2Q4Y7AD84KF550F10V6ZDV",
+            "label": "D"
+          },
+          {
+            "id": "ET9tm6iO746M",
+            "ref": "01FN2Q4Y7ANMYDWA8YDHT0WX93",
+            "label": "E"
+          },
+          {
+            "id": "Dts2r2C6YyvA",
+            "ref": "01FN2Q4Y7A2A8FA3SPB4VFWE2R",
+            "label": "F"
+          },
+          {
+            "id": "6Q9Lhpr9CTMw",
+            "ref": "01FN2Q4Y7A7V5T2C3CMRN2YQ53",
+            "label": "G"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "kKxUBr95qM3Y",
+      "title": "Which of the following best describes your relationship status:\n\n- A. Married\n- B. In a relationship and living with a partner\n- C. In a relationship but not living with a partner\n- D. Single\n- E. Prefer not to say",
+      "ref": "relationship_status",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "gezkaI6PTTK6",
+            "ref": "01FN2Q4Y7ANH96Y1QT1ERXQXYR",
+            "label": "A"
+          },
+          {
+            "id": "FSZUd2ut6Tnt",
+            "ref": "01FN2Q4Y7AB4JGSZA8TVJ01DMP",
+            "label": "B"
+          },
+          {
+            "id": "CyVt4kmeie3g",
+            "ref": "01FN2Q4Y7AMPGN2JYHP7DC97W1",
+            "label": "C"
+          },
+          {
+            "id": "GrmIm9NbMbkR",
+            "ref": "01FN2Q4Y7AD4M8RN3V0AZM0PA3",
+            "label": "D"
+          },
+          {
+            "id": "0Tj7lJS1lhyj",
+            "ref": "01FN2Q4Y7ANDT470F8ESWEC5F9",
+            "label": "E"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "t1eBVqJKDjWb",
+      "title": "What is the highest level of education you have completed?\n\n- A. No formal education\n- B. Primary level\n- C. Secondary level\n- D. University level\n- E. Masters/PhD\n- F. Other education level\n- G. Prefer not to say",
+      "ref": "education",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "G1oFoaVCyfmA",
+            "ref": "01FN2Q4Y7A22NHN5WAHWBG72MT",
+            "label": "A"
+          },
+          {
+            "id": "0EtkFNQXYH6i",
+            "ref": "01FN2Q4Y7AARWCM24ER9F8RZSK",
+            "label": "B"
+          },
+          {
+            "id": "uaAmy6Om9J0l",
+            "ref": "01FN2Q4Y7AY9DFTA00M5HMXS8M",
+            "label": "C"
+          },
+          {
+            "id": "B8ESNBKDTpca",
+            "ref": "01FN2Q4Y7AYDZVAM95E09X8Y18",
+            "label": "D"
+          },
+          {
+            "id": "lG41uDKMvfcP",
+            "ref": "01FN2Q4Y7A6GR3BTBHMZ101XWG",
+            "label": "E"
+          },
+          {
+            "id": "v9szDbQqc2oV",
+            "ref": "01FN2Q4Y7A6Y53GE8Q4T038164",
+            "label": "F"
+          },
+          {
+            "id": "j8Rz8V4SMYCu",
+            "ref": "01FN2Q4Y7A29YJPSDEP7RT5Z9J",
+            "label": "G"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "sBIdgTw8Dj6b",
+      "title": "Which of the following best describes your employment status?\n\n- A. Working full time (30+ hours per week)\n- B. Working part time (less than 30 hours per week)\n- C. On maternity leave/looking after children full time\n- D. Unemployed\n- E. Student\n- F. Retired\n- G. Other\n- H. Prefer not to say",
+      "ref": "employment_status",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "KaHr3RkVK87J",
+            "ref": "01FN2Q4Y7AQ0ZMMGAYJS1GDY8K",
+            "label": "A"
+          },
+          {
+            "id": "IaZ7WLTpLPmg",
+            "ref": "01FN2Q4Y7AZ0ZZAAMWMX9WHF8P",
+            "label": "B"
+          },
+          {
+            "id": "mYRdEC75KpRd",
+            "ref": "01FN2Q4Y7A8BBE0VETKHYGTZVZ",
+            "label": "C"
+          },
+          {
+            "id": "3RpwqEABKCY9",
+            "ref": "01FN2Q4Y7APMTEYTRYACFKS80B",
+            "label": "D"
+          },
+          {
+            "id": "ODemGFJMa4K8",
+            "ref": "01FN2Q4Y7A2CT269SQ2MA95Y1R",
+            "label": "E"
+          },
+          {
+            "id": "P5khw15uBOda",
+            "ref": "01FN2Q4Y7AM2GZ8WSP7ZMVY53K",
+            "label": "F"
+          },
+          {
+            "id": "61E9Wgpc8VlR",
+            "ref": "01FN2Q4Y7AFFJKSKJFTG3W5FAE",
+            "label": "G"
+          },
+          {
+            "id": "fARypgqMXSTG",
+            "ref": "01FN2Q4Y7AART0YHFVFQ7V2K5J",
+            "label": "H"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "wFRaOBBW3b1d",
+      "title": "How many adults (18+) live in your household? Do not forget to include yourself.",
+      "ref": "num_adults",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "5zZM5GotuEyf",
+            "ref": "01FN2Q4Y7AWHX55E6PN8C92CQB",
+            "label": "1"
+          },
+          {
+            "id": "PU0bwtsNTPz7",
+            "ref": "01FN2Q4Y7AAMH4M2Z2ZYQ4YDCC",
+            "label": "2"
+          },
+          {
+            "id": "5mfBPkGSopVU",
+            "ref": "01FN2Q4Y7AHYKHBCTWW1J0186C",
+            "label": "3"
+          },
+          {
+            "id": "wVYT9Q71Lf6f",
+            "ref": "01FN2Q4Y7ARQVGQBNAVEK8BSKM",
+            "label": "4+"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "zIHyW7uYJ4m8",
+      "title": "How many children aged 0-2 years live in your household? ",
+      "ref": "num_children_2",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "nknyFgs8hoYa",
+            "ref": "01FN2Q4Y7APXCJTFN9FBXHPE16",
+            "label": "1"
+          },
+          {
+            "id": "ZIQxlqOGFoTC",
+            "ref": "01FN2Q4Y7AHM4H4KZFW7FX6KCK",
+            "label": "2"
+          },
+          {
+            "id": "k2EdGKJRaXo2",
+            "ref": "01FN2Q4Y7A61ANRN1ZB3YEMSW6",
+            "label": "3"
+          },
+          {
+            "id": "AvYy7eS0Cqll",
+            "ref": "01FN2Q4Y7AT47VBRADN7PPYWF0",
+            "label": "4+"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "t7dhpJzZGUpr",
+      "title": "How many children aged 3-6 years live in your household? ",
+      "ref": "num_children_6",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "p95cvUqkBcJu",
+            "ref": "01FN2Q4Y7A5H845163X2BNAWRQ",
+            "label": "1"
+          },
+          {
+            "id": "aVcsSoh6yPYF",
+            "ref": "01FN2Q4Y7A8TM6YAADAJ5945ZC",
+            "label": "2"
+          },
+          {
+            "id": "KWXlOYHp3ev1",
+            "ref": "01FN2Q4Y7A3JW7N3B9DZ0T3Q11",
+            "label": "3"
+          },
+          {
+            "id": "0lQmH3JDnXLc",
+            "ref": "01FN2Q4Y7AKA2G4W43B1CP1FKX",
+            "label": "4+"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "IrOy9XRiQjRL",
+      "title": "How many children aged 7-12 years live in your household? ",
+      "ref": "num_children_12",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "pzWYCwBaD07G",
+            "ref": "01FN2Q4Y7AG256ZP3X58DC5RP6",
+            "label": "1"
+          },
+          {
+            "id": "WI02AO72dwqF",
+            "ref": "01FN2Q4Y7AYBZVYWS1P6WH42XX",
+            "label": "2"
+          },
+          {
+            "id": "hCF8ukuvyF64",
+            "ref": "01FN2Q4Y7AC4Z9VW7PTFHDVC9R",
+            "label": "3"
+          },
+          {
+            "id": "f0Gi8132NbJC",
+            "ref": "01FN2Q4Y7ACQ8XEF5MVBA5NYVC",
+            "label": "4+"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "L9Fesx5kK1Dq",
+      "title": "How many children aged 13-17 years live in your household? ",
+      "ref": "num_children_17",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "K9yota84RSEd",
+            "ref": "01FN2Q4Y7AN7BWCQP76ECE73N8",
+            "label": "1"
+          },
+          {
+            "id": "Q3Nw8gajlGCs",
+            "ref": "01FN2Q4Y7AVJYJ4FACNWB7XRJP",
+            "label": "2"
+          },
+          {
+            "id": "dEJwdsTGurc7",
+            "ref": "01FN2Q4Y7AJW6REN8AYGDKJDEN",
+            "label": "3"
+          },
+          {
+            "id": "sXj0vGfEepJ3",
+            "ref": "01FN2Q4Y7BS9PA04ZW1ZSZESAG",
+            "label": "4+"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "jK9cqttVGzff",
+      "title": "Thank you for your time, that is all the questions we have for now. We would like to contact you again in a few weeks to ask you some more questions.\n\nIf you finish the entire survey, you will recieve X in mobile credit to a phone number you provide. \n\nMay we write you again in a few weeks with more questions?",
+      "ref": "thanks_come_again",
+      "properties": {
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "Lw0y6239tz9r",
+            "ref": "01FN2Q4Y7B62V988Q4PRPT88AF",
+            "label": "Yes"
+          },
+          {
+            "id": "aBTunmnvGGbH",
+            "ref": "01FN2Q4Y7B64M9R09DH9XC3F00",
+            "label": "No"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    },
+    {
+      "id": "b2UN5ULnrBzQ",
+      "title": "Click “Notify me” and we will let you know.",
+      "ref": "notify",
+      "properties": {
+        "description": "{\"type\": \"notify\"}",
+        "button_text": "Continue",
+        "hide_marks": false
+      },
+      "type": "statement"
+    },
+    {
+      "id": "Bg69BRLHS0Ga",
+      "title": "Thank you. We will get in touch soon!",
+      "ref": "talk_soon",
+      "properties": {
+        "description": "{\n \"type\": \"wait\",\n \"responseMessage\": \"Sorry, we can't answer any questions now. But we will write you again soon with more questions for our survey. Thank you!\",\n \"wait\": {\n \"type\": \"timeout\",\n \"notifyPermission\": \"true\",\n \"value\": {\n \"type\": \"relative\",\n \"timeout\": \"1 hour\"\n }\n }\n}",
+        "button_text": "Continue",
+        "hide_marks": false
+      },
+      "type": "statement"
+    },
+    {
+      "id": "czGY2PjOOiwi",
+      "title": "Hello again! Would you like to continue taking this survey? It will take X minutes of your time to complete and you will recieve X in mobile credit sent to phone number you provide if you complete all the questions. Click \"Start\" to take the survey.",
+      "ref": "hello_again",
+      "properties": {
+        "description": "{\"type\": \"stitch\", \"form\": \"foo\"}",
+        "randomize": false,
+        "allow_multiple_selection": false,
+        "allow_other_choice": false,
+        "vertical_alignment": true,
+        "choices": [
+          {
+            "id": "Gw5eU6qUoyrJ",
+            "ref": "01FN2Q4Y7BEH4WWTTPSSN3YHB1",
+            "label": "Start"
+          }
+        ]
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "multiple_choice"
+    }
+  ],
+  "logic": [
+    {
+      "type": "field",
+      "ref": "intro_4",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "thankyou",
+              "value": "thankyou_optout"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "intro_4"
+              },
+              {
+                "type": "choice",
+                "value": "01FN2Q4Y7ANCQK0PQNZHJTHZH8"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "has_young_children"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "has_young_children",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "thankyou",
+              "value": "thankyou_early"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "has_young_children"
+              },
+              {
+                "type": "choice",
+                "value": "01FN2Q4Y7APVW9F907NFNXSFTY"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "gender"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "thanks_come_again",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "thankyou",
+              "value": "thankyou_optout"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "thanks_come_again"
+              },
+              {
+                "type": "choice",
+                "value": "01FN2Q4Y7B64M9R09DH9XC3F00"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "notify"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    }
+  ],
+  "_links": {
+    "display": "https://nandanrao.typeform.com/to/zlIadaHG"
+  }
+}
