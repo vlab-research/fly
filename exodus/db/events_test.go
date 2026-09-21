@@ -19,12 +19,12 @@ func TestRecordEvent(t *testing.T) {
 
 	// Create a bail to reference
 	bail := &Bail{
-		UserID:        userID,
+		UserID:          userID,
 		Name:            "test-bail",
 		Description:     "Test bail",
 		Enabled:         true,
 		Definition:      CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		DestinationForm: "exit-form",
 	}
 	err := db.CreateBail(context.Background(), bail)
 	if err != nil {
@@ -93,12 +93,12 @@ func TestRecordErrorEvent(t *testing.T) {
 
 	// Create a bail
 	bail := &Bail{
-		UserID:        userID,
+		UserID:          userID,
 		Name:            "error-test-bail",
 		Description:     "Test bail for errors",
 		Enabled:         true,
 		Definition:      CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		DestinationForm: "exit-form",
 	}
 	err := db.CreateBail(context.Background(), bail)
 	if err != nil {
@@ -115,7 +115,7 @@ func TestRecordErrorEvent(t *testing.T) {
 
 	event := &BailEvent{
 		BailID:             &bail.ID,
-		UserID:           userID,
+		UserID:             userID,
 		BailName:           bail.Name,
 		EventType:          "error",
 		UsersMatched:       0,
@@ -160,12 +160,12 @@ func TestGetEventsByBailID(t *testing.T) {
 
 	// Create two bails
 	bail1 := &Bail{
-		UserID:        userID,
+		UserID:          userID,
 		Name:            "bail-1",
 		Description:     "Bail 1",
 		Enabled:         true,
 		Definition:      CreateTestBailDefinition(),
-		DestinationForm:  "exit-form-1",
+		DestinationForm: "exit-form-1",
 	}
 	err := db.CreateBail(context.Background(), bail1)
 	if err != nil {
@@ -173,12 +173,12 @@ func TestGetEventsByBailID(t *testing.T) {
 	}
 
 	bail2 := &Bail{
-		UserID:        userID,
+		UserID:          userID,
 		Name:            "bail-2",
 		Description:     "Bail 2",
 		Enabled:         true,
 		Definition:      CreateTestBailDefinition(),
-		DestinationForm:  "exit-form-2",
+		DestinationForm: "exit-form-2",
 	}
 	err = db.CreateBail(context.Background(), bail2)
 	if err != nil {
@@ -189,7 +189,7 @@ func TestGetEventsByBailID(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		event := &BailEvent{
 			BailID:             &bail1.ID,
-			UserID:           userID,
+			UserID:             userID,
 			BailName:           bail1.Name,
 			EventType:          "execution",
 			UsersMatched:       10 + i,
@@ -207,7 +207,7 @@ func TestGetEventsByBailID(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		event := &BailEvent{
 			BailID:             &bail2.ID,
-			UserID:           userID,
+			UserID:             userID,
 			BailName:           bail2.Name,
 			EventType:          "execution",
 			UsersMatched:       5 + i,
@@ -264,12 +264,12 @@ func TestGetEventsByUser(t *testing.T) {
 
 	// Create a bail for survey 1
 	bail1 := &Bail{
-		UserID:        userID1,
+		UserID:          userID1,
 		Name:            "survey1-bail",
 		Description:     "Bail for survey 1",
 		Enabled:         true,
 		Definition:      CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		DestinationForm: "exit-form",
 	}
 	err := db.CreateBail(context.Background(), bail1)
 	if err != nil {
@@ -278,12 +278,12 @@ func TestGetEventsByUser(t *testing.T) {
 
 	// Create a bail for survey 2
 	bail2 := &Bail{
-		UserID:        userID2,
+		UserID:          userID2,
 		Name:            "survey2-bail",
 		Description:     "Bail for survey 2",
 		Enabled:         true,
 		Definition:      CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		DestinationForm: "exit-form",
 	}
 	err = db.CreateBail(context.Background(), bail2)
 	if err != nil {
@@ -294,7 +294,7 @@ func TestGetEventsByUser(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		event := &BailEvent{
 			BailID:             &bail1.ID,
-			UserID:           userID1,
+			UserID:             userID1,
 			BailName:           bail1.Name,
 			EventType:          "execution",
 			UsersMatched:       10,
@@ -312,7 +312,7 @@ func TestGetEventsByUser(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		event := &BailEvent{
 			BailID:             &bail2.ID,
-			UserID:           userID2,
+			UserID:             userID2,
 			BailName:           bail2.Name,
 			EventType:          "execution",
 			UsersMatched:       5,
@@ -363,12 +363,12 @@ func TestGetLastSuccessfulExecution(t *testing.T) {
 
 	// Create a bail
 	bail := &Bail{
-		UserID:        userID,
+		UserID:          userID,
 		Name:            "last-execution-test",
 		Description:     "Test last execution",
 		Enabled:         true,
 		Definition:      CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		DestinationForm: "exit-form",
 	}
 	err := db.CreateBail(context.Background(), bail)
 	if err != nil {
@@ -387,7 +387,7 @@ func TestGetLastSuccessfulExecution(t *testing.T) {
 	// Record an error event (should not count)
 	errorEvent := &BailEvent{
 		BailID:             &bail.ID,
-		UserID:           userID,
+		UserID:             userID,
 		BailName:           bail.Name,
 		EventType:          "error",
 		UsersMatched:       0,
@@ -411,7 +411,7 @@ func TestGetLastSuccessfulExecution(t *testing.T) {
 	// Record first execution
 	firstExecution := &BailEvent{
 		BailID:             &bail.ID,
-		UserID:           userID,
+		UserID:             userID,
 		BailName:           bail.Name,
 		EventType:          "execution",
 		UsersMatched:       10,
@@ -428,7 +428,7 @@ func TestGetLastSuccessfulExecution(t *testing.T) {
 	// Record second execution
 	secondExecution := &BailEvent{
 		BailID:             &bail.ID,
-		UserID:           userID,
+		UserID:             userID,
 		BailName:           bail.Name,
 		EventType:          "execution",
 		UsersMatched:       12,

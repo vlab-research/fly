@@ -280,17 +280,15 @@ Sends HTTP POST requests to botserver's `/synthetic` endpoint, posting the requi
 
 The `page` field is a deprecated alias for `account_id` retained for backward compatibility; both carry the same value (the account where the conversation is happening).
 
-### Platform Data Sources
+### Platform Data Sources (Current Behavior — Pre-Fix)
 
-Platform comes from two sources depending on the bail type:
+**Both bail types have the same bug**: platform is guessed, not resolved. See `documentation/platform-resolution.md` §7 (The rule).
 
-- **Conditions-based bails**: Platform comes from the query result, which selects
-  `COALESCE(s.platform, 'messenger') AS platform` from `states` (`BuildQuery`). See
-  "Platform on conditions-based bails" below for why both the `COALESCE` and the alias
-  are load-bearing.
-- **User_list bails**: Platform is supplied explicitly in each `user_list.users[].platform` field by the caller.
+- **Conditions-based bails**: Query projects `COALESCE(s.platform, 'messenger') AS platform`. The `states.platform` column is NULL for ~96% of rows (rows predate `md.platform`). For WhatsApp conversations with erased `md` (blocked users), `platform` is NULL. COALESCE defaults to `'messenger'` — wrong transport, wrong credential lookup, fails with `token not found`. The comment at `query/builder.go:54-81` documents why the alias and COALESCE are "load-bearing" *under the current design*; that design is being replaced.
 
-Both paths now satisfy the event envelope contract.
+- **User_list bails**: Each entry's `platform` field is copied directly from caller input without validation. An omitted or empty platform produces `"platform": ""` in the event. Replybot guesses `'messenger'`. For WhatsApp accounts, same failure as above.
+
+**Why this is wrong**: `credentials.entity` (at `credentials.key = pageid`) is the authoritative account→transport map, available at every hop. Both bail types should resolve from it, not guess.
 
 ### Rate Limiting and Error Handling
 

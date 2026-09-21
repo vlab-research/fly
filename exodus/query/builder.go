@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/vlab-research/exodus/types"
 )
 
@@ -30,9 +31,10 @@ func NewQueryBuilder() *QueryBuilder {
 	}
 }
 
-// BuildQuery generates SQL query and parameters from a BailDefinition
+// BuildQuery generates SQL query and parameters from a BailDefinition.
+// ownerID is the bail owner; only accounts they connected are matched.
 // Returns the complete SQL query string, parameters slice, and any error
-func BuildQuery(def *types.BailDefinition) (string, []interface{}, error) {
+func BuildQuery(def *types.BailDefinition, ownerID uuid.UUID) (string, []interface{}, error) {
 	builder := NewQueryBuilder()
 
 	// Build the WHERE clause from conditions
@@ -40,6 +42,9 @@ func BuildQuery(def *types.BailDefinition) (string, []interface{}, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to build conditions: %w", err)
 	}
+
+	// Numbered after the conditions so their parameter indexes are unaffected.
+	ownerParam := builder.addParam(ownerID)
 
 	// Assemble the complete query
 	var query strings.Builder
@@ -54,32 +59,33 @@ func BuildQuery(def *types.BailDefinition) (string, []interface{}, error) {
 	// Main SELECT statement.
 	//
 	// A conversation is (platform, account, user), so the bail event has to carry
-	// all three. Selecting only (userid, pageid) left conditions-based bails
-	// posting an empty platform, while user_list bails -- whose platform comes
-	// from the caller's definition -- carried one. Half a contract.
-	//
-	// Three things about this expression are load-bearing:
+	// all three. Four things about this expression are load-bearing:
 	//
 	//   1. `AS platform` is required, not cosmetic. executor.go looks the value up
-	//      as row["platform"]; an unaliased COALESCE lands under the key
-	//      "coalesce", the lookup misses, and the platform silently stays empty --
-	//      the fix would appear to ship and do nothing.
-	//   2. COALESCE, not a bare s.platform. states.platform is a computed column
-	//      over state_json->'md'->>'platform' and is NULL for every row predating
-	//      that persistence -- 1,068,371 of 1,092,078 rows in production (97.8%).
-	//      A bare column would leave those targets with an empty platform AND log
-	//      "Invalid platform type in query result: <nil>" once per target, because
-	//      executor.go type-asserts to string. Defaulting to 'messenger' is the
-	//      consumer contract migration 21 documents, and it is exact: every
-	//      states row on a whatsapp_business account carries platform='whatsapp'
-	//      (verified in production), so all NULLs are Messenger.
-	//   3. Adding a column to a SELECT DISTINCT normally risks splitting groups
-	//      and bailing a participant twice. It cannot here: states is
-	//      PRIMARY KEY (userid, pageid) -- verified in production, 1,092,078 rows
-	//      and 1,092,078 distinct pairs -- so platform is functionally dependent
-	//      on the DISTINCT key and cannot subdivide it. Safe by construction, not
-	//      by the data happening to be clean.
-	query.WriteString("SELECT DISTINCT s.userid, s.pageid, COALESCE(s.platform, 'messenger') AS platform\nFROM states s")
+	//      as row["platform"]; unaliased, the CASE lands under a generated key, the
+	//      lookup misses, and targets go out with an empty platform.
+	//   2. The platform comes from credentials.entity, the authoritative
+	//      account -> transport map. states.platform is NULL for ~96% of rows and
+	//      cannot be used.
+	//   3. The join is INNER and owner-scoped, so a bail only ever matches accounts
+	//      its owner connected. Conditions match on shortcodes, which are not
+	//      unique across users.
+	//   4. Adding a column to a SELECT DISTINCT normally risks splitting groups and
+	//      bailing a participant twice. It cannot here: states is
+	//      PRIMARY KEY (userid, pageid) and credentials has a UNIQUE index on `key`
+	//      for messaging entities (migration 20), so at most one credential row
+	//      joins per pageid.
+	//
+	// Consequence worth stating: disconnecting an account makes its participants
+	// stop matching, rather than being bailed on an account that can no longer send.
+	query.WriteString(fmt.Sprintf(`SELECT DISTINCT s.userid, s.pageid,
+  CASE WHEN c.entity = 'facebook_page' THEN 'messenger'
+       WHEN c.entity = 'whatsapp_business' THEN 'whatsapp'
+  END AS platform
+FROM states s
+INNER JOIN credentials c ON c.key = s.pageid
+  AND c.entity IN ('facebook_page','whatsapp_business')
+  AND c.userid = $%d`, ownerParam))
 
 	// Add CTE joins if any
 	if len(builder.cteJoins) > 0 {

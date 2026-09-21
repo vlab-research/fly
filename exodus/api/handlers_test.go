@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/vlab-research/exodus/db"
+	"github.com/vlab-research/exodus/platform"
 	"github.com/vlab-research/exodus/types"
 )
 
@@ -30,6 +31,9 @@ type mockDB struct {
 	latestSummariesFunc       func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error)
 	latestSummariesCallCount  int
 	latestSummariesLastCalled []uuid.UUID
+	credentials               map[string]platform.Credential
+	credentialsError          error
+	credentialsCallCount      int
 }
 
 func (m *mockDB) GetBailsByUser(ctx context.Context, userID uuid.UUID) ([]*db.Bail, error) {
@@ -180,8 +184,49 @@ func (m *mockDB) Query(ctx context.Context, sql string, args ...interface{}) ([]
 	return []map[string]interface{}{}, nil
 }
 
+func (m *mockDB) GetMessagingCredentials(ctx context.Context, pageids []string) (map[string]platform.Credential, error) {
+	m.credentialsCallCount++
+	if m.credentialsError != nil {
+		return nil, m.credentialsError
+	}
+	found := make(map[string]platform.Credential, len(pageids))
+	for _, pageid := range pageids {
+		if cred, ok := m.credentials[pageid]; ok {
+			found[pageid] = cred
+		}
+	}
+	return found, nil
+}
+
 func (m *mockDB) Close() {
 	// no-op for mock
+}
+
+// ownedCredentials connects each pageid to owner as a Messenger account.
+func ownedCredentials(owner uuid.UUID, pageids ...string) map[string]platform.Credential {
+	creds := make(map[string]platform.Credential, len(pageids))
+	for _, pageid := range pageids {
+		creds[pageid] = platform.Credential{PageID: pageid, Entity: platform.EntityFacebookPage, OwnerID: owner}
+	}
+	return creds
+}
+
+// userListDefinition builds a user_list definition targeting the given pageids,
+// one entry per pageid.
+func userListDefinition(pageids ...string) types.BailDefinition {
+	users := make([]types.UserListEntry, len(pageids))
+	for i, pageid := range pageids {
+		users[i] = types.UserListEntry{
+			UserID:    fmt.Sprintf("user%d", i+1),
+			PageID:    pageid,
+			Shortcode: "exit-form",
+		}
+	}
+	return types.BailDefinition{
+		Type:      "user_list",
+		UserList:  &types.UserList{Users: users},
+		Execution: types.Execution{Timing: "immediate"},
+	}
 }
 
 // Helper to create a test bail definition
@@ -789,7 +834,8 @@ func TestPreviewBail(t *testing.T) {
 func TestCreateBail_UserListType(t *testing.T) {
 	userID := uuid.New()
 	mock := &mockDB{
-		bails: []*db.Bail{},
+		bails:       []*db.Bail{},
+		credentials: ownedCredentials(userID, "page1", "page2"),
 	}
 
 	server := New(mock)
@@ -880,6 +926,7 @@ func TestPreviewBail_UserListType(t *testing.T) {
 	userID := uuid.New()
 	mock := &mockDB{
 		// No queryFunc set - should not be called for user_list type
+		credentials: ownedCredentials(userID, "page1", "page2"),
 	}
 
 	server := New(mock)
@@ -1034,4 +1081,184 @@ func TestHandlers_UnknownBailIsNotFound(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Every pageid in a user_list must belong to a messaging account the caller has
+// connected. Rejecting the list here is the difference between a 400 the
+// researcher can act on and a bail that silently reaches fewer people.
+
+// postUserList runs one of the write handlers against a user_list definition and
+// returns the recorder.
+func postUserList(t *testing.T, server *Server, userID uuid.UUID, def types.BailDefinition, path string, handler func(echo.Context) error) *httptest.ResponseRecorder {
+	t.Helper()
+
+	reqJSON, err := json.Marshal(map[string]interface{}{"name": "User List Bail", "definition": def})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(reqJSON)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := server.echo.NewContext(req, rec)
+	c.SetPath(path)
+	c.SetParamNames("userId")
+	c.SetParamValues(userID.String())
+
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned an error: %v", err)
+	}
+	return rec
+}
+
+func assertInvalidPageIDs(t *testing.T, rec *httptest.ResponseRecorder, wantNamed ...string) {
+	t.Helper()
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var response ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+	if response.Error != "invalid_pageids" {
+		t.Errorf("Expected error 'invalid_pageids', got '%s'", response.Error)
+	}
+	for _, pageid := range wantNamed {
+		if !strings.Contains(response.Message, pageid) {
+			t.Errorf("Expected the message to name %q, got: %s", pageid, response.Message)
+		}
+	}
+}
+
+func TestCreateBail_UserList_RejectsPageIDWithNoCredential(t *testing.T) {
+	userID := uuid.New()
+	mock := &mockDB{credentials: ownedCredentials(userID, "page_good")}
+	server := New(mock)
+
+	rec := postUserList(t, server, userID, userListDefinition("page_good", "page_bad"),
+		"/users/:userId/bails", server.CreateBail)
+
+	assertInvalidPageIDs(t, rec, "page_bad")
+	if len(mock.bails) != 0 {
+		t.Errorf("Expected the bail not to be created, got %d", len(mock.bails))
+	}
+}
+
+func TestCreateBail_UserList_RejectsPageIDOwnedByAnotherUser(t *testing.T) {
+	userID := uuid.New()
+	stranger := uuid.New()
+	mock := &mockDB{credentials: ownedCredentials(stranger, "page_theirs")}
+	server := New(mock)
+
+	rec := postUserList(t, server, userID, userListDefinition("page_theirs"),
+		"/users/:userId/bails", server.CreateBail)
+
+	assertInvalidPageIDs(t, rec, "page_theirs")
+	if len(mock.bails) != 0 {
+		t.Errorf("Expected the bail not to be created, got %d", len(mock.bails))
+	}
+}
+
+func TestCreateBail_UserList_NamesEveryOffendingPageID(t *testing.T) {
+	userID := uuid.New()
+	stranger := uuid.New()
+	mock := &mockDB{credentials: ownedCredentials(userID, "page_good")}
+	mock.credentials["page_theirs"] = platform.Credential{
+		PageID: "page_theirs", Entity: platform.EntityFacebookPage, OwnerID: stranger,
+	}
+	server := New(mock)
+
+	def := userListDefinition("page_zzz", "page_good", "page_theirs", "page_aaa")
+	rec := postUserList(t, server, userID, def, "/users/:userId/bails", server.CreateBail)
+
+	assertInvalidPageIDs(t, rec, "page_aaa", "page_theirs", "page_zzz")
+
+	var response ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+	if !strings.Contains(response.Message, "page_aaa, page_theirs, page_zzz") {
+		t.Errorf("Expected the offending pageids listed in sorted order, got: %s", response.Message)
+	}
+	if strings.Contains(response.Message, "page_good") {
+		t.Errorf("Expected a connected pageid not to be named, got: %s", response.Message)
+	}
+}
+
+func TestCreateBail_ConditionsBailSkipsAccountValidation(t *testing.T) {
+	userID := uuid.New()
+	mock := &mockDB{bails: []*db.Bail{}}
+	server := New(mock)
+
+	def := testBailDefinition()
+	def.Conditions = simpleFormCondition("test-form")
+
+	rec := postUserList(t, server, userID, def, "/users/:userId/bails", server.CreateBail)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Expected status 201, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if mock.credentialsCallCount != 0 {
+		t.Errorf("Conditions bails resolve accounts in the query, so create must not look them up, got %d calls",
+			mock.credentialsCallCount)
+	}
+}
+
+func TestUpdateBail_UserList_RejectsPageIDWithNoCredential(t *testing.T) {
+	userID := uuid.New()
+	bailID := uuid.New()
+
+	existing := userListDefinition("page_good")
+	existingJSON, _ := json.Marshal(existing)
+
+	mock := &mockDB{
+		bails: []*db.Bail{{
+			ID:         bailID,
+			UserID:     userID,
+			Name:       "User List Bail",
+			Enabled:    true,
+			Definition: existingJSON,
+		}},
+		credentials: ownedCredentials(userID, "page_good"),
+	}
+	server := New(mock)
+
+	def := userListDefinition("page_good", "page_bad")
+	reqJSON, _ := json.Marshal(map[string]interface{}{"definition": def})
+
+	req := httptest.NewRequest(http.MethodPut, "/users/"+userID.String()+"/bails/"+bailID.String(),
+		strings.NewReader(string(reqJSON)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := server.echo.NewContext(req, rec)
+	c.SetPath("/users/:userId/bails/:id")
+	c.SetParamNames("userId", "id")
+	c.SetParamValues(userID.String(), bailID.String())
+
+	if err := server.UpdateBail(c); err != nil {
+		t.Fatalf("UpdateBail returned an error: %v", err)
+	}
+
+	assertInvalidPageIDs(t, rec, "page_bad")
+
+	var stored types.BailDefinition
+	if err := json.Unmarshal(mock.bails[0].Definition, &stored); err != nil {
+		t.Fatalf("stored definition is not valid JSON: %v", err)
+	}
+	if len(stored.UserList.Users) != 1 {
+		t.Errorf("Expected the stored definition to be untouched, got %d users", len(stored.UserList.Users))
+	}
+}
+
+func TestPreviewBail_UserList_RejectsPageIDWithNoCredential(t *testing.T) {
+	userID := uuid.New()
+	mock := &mockDB{credentials: ownedCredentials(userID, "page_good")}
+	server := New(mock)
+
+	rec := postUserList(t, server, userID, userListDefinition("page_good", "page_bad"),
+		"/users/:userId/bails/preview", server.PreviewBail)
+
+	assertInvalidPageIDs(t, rec, "page_bad")
 }

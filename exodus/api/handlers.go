@@ -1,14 +1,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/vlab-research/exodus/db"
+	"github.com/vlab-research/exodus/platform"
 	"github.com/vlab-research/exodus/query"
 	"github.com/vlab-research/exodus/types"
 )
@@ -150,6 +153,19 @@ func (s *Server) CreateBail(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
 	}
 
+	ctx, cancel := parseTimeout(c.Request().Context())
+	defer cancel()
+
+	if req.Definition.Type == "user_list" {
+		problem, err := s.checkUserListAccounts(ctx, req.Definition.UserList, userID)
+		if err != nil {
+			return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
+		}
+		if problem != "" {
+			return respondError(c, http.StatusBadRequest, "invalid_pageids", problem)
+		}
+	}
+
 	definitionJSON, err := json.Marshal(req.Definition)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "marshal_error", "Failed to marshal definition")
@@ -171,9 +187,6 @@ func (s *Server) CreateBail(c echo.Context) error {
 		Definition:      definitionJSON,
 		DestinationForm: destForm,
 	}
-
-	ctx, cancel := parseTimeout(c.Request().Context())
-	defer cancel()
 
 	if err := s.db.CreateBail(ctx, dbBail); err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -239,6 +252,16 @@ func (s *Server) UpdateBail(c echo.Context) error {
 	if req.Definition != nil {
 		if err := req.Definition.Validate(); err != nil {
 			return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
+		}
+
+		if req.Definition.Type == "user_list" {
+			problem, err := s.checkUserListAccounts(ctx, req.Definition.UserList, userID)
+			if err != nil {
+				return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
+			}
+			if problem != "" {
+				return respondError(c, http.StatusBadRequest, "invalid_pageids", problem)
+			}
 		}
 
 		definitionJSON, err := json.Marshal(req.Definition)
@@ -421,7 +444,7 @@ func (s *Server) GetUserEvents(c echo.Context) error {
 // POST /users/:userId/bails/preview
 func (s *Server) PreviewBail(c echo.Context) error {
 	userIDStr := c.Param("userId")
-	_, err := uuid.Parse(userIDStr)
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_user_id", "User ID must be a valid UUID")
 	}
@@ -435,8 +458,19 @@ func (s *Server) PreviewBail(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
 	}
 
+	ctx, cancel := parseTimeout(c.Request().Context())
+	defer cancel()
+
 	// For user_list bails, skip query building and return the user list directly
 	if req.Definition.Type == "user_list" && req.Definition.UserList != nil {
+		problem, err := s.checkUserListAccounts(ctx, req.Definition.UserList, userID)
+		if err != nil {
+			return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
+		}
+		if problem != "" {
+			return respondError(c, http.StatusBadRequest, "invalid_pageids", problem)
+		}
+
 		users := make([]UserPreview, len(req.Definition.UserList.Users))
 		for i, entry := range req.Definition.UserList.Users {
 			users[i] = UserPreview{
@@ -450,13 +484,10 @@ func (s *Server) PreviewBail(c echo.Context) error {
 		})
 	}
 
-	sqlQuery, params, err := query.BuildQuery(&req.Definition)
+	sqlQuery, params, err := query.BuildQuery(&req.Definition, userID)
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "query_build_error", err.Error())
 	}
-
-	ctx, cancel := parseTimeout(c.Request().Context())
-	defer cancel()
 
 	results, err := s.db.Query(ctx, sqlQuery, params...)
 	if err != nil {
@@ -485,6 +516,38 @@ func (s *Server) PreviewBail(c echo.Context) error {
 		SQL:    sqlQuery,
 		Params: params,
 	})
+}
+
+// checkUserListAccounts reports which of a user_list's accounts the caller has
+// not connected, as a message for the caller, or "" when all of them resolve.
+// The error return is a lookup failure, which is not the caller's fault.
+//
+// Every listed account must resolve at execution time or its participants are
+// skipped, so rejecting the list at save time is the difference between a 400 a
+// researcher can act on and a bail that quietly reaches fewer people than listed.
+func (s *Server) checkUserListAccounts(ctx context.Context, ul *types.UserList, owner uuid.UUID) (string, error) {
+	if ul == nil || len(ul.Users) == 0 {
+		return "", nil
+	}
+
+	pageids := make([]string, len(ul.Users))
+	for i, entry := range ul.Users {
+		pageids[i] = entry.PageID
+	}
+
+	creds, err := s.db.GetMessagingCredentials(ctx, pageids)
+	if err != nil {
+		return "", err
+	}
+
+	unresolved := platform.UnresolvedPageIDs(pageids, creds, owner)
+	if len(unresolved) == 0 {
+		return "", nil
+	}
+
+	return fmt.Sprintf("no messaging account owned by this user for pageids: %s "+
+		"(each pageid must be a connected facebook_page or whatsapp_business account)",
+		strings.Join(unresolved, ", ")), nil
 }
 
 // dbBailToTypesBail converts a db.Bail to types.Bail

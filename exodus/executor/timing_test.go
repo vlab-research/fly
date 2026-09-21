@@ -104,7 +104,7 @@ func TestShouldExecute_Scheduled(t *testing.T) {
 			name:          "executed earlier today same calendar day - should not execute",
 			timeOfDay:     "15:30",
 			timezone:      "UTC",
-			now:           testNow,                               // 2025-11-30 15:30
+			now:           testNow,                                // 2025-11-30 15:30
 			lastExecution: timePtr(testNow.Add(-5 * time.Second)), // 2025-11-30 15:29:55
 			want:          false,
 		},

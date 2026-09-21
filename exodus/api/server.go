@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/vlab-research/exodus/db"
+	"github.com/vlab-research/exodus/platform"
 )
 
 // DBInterface defines the database operations needed by the API
@@ -21,6 +22,7 @@ type DBInterface interface {
 	GetLatestEventsByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
 	GetLatestEventSummariesByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error)
 	GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*db.BailEvent, error)
+	GetMessagingCredentials(ctx context.Context, pageids []string) (map[string]platform.Credential, error)
 	Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
 	Close()
 }

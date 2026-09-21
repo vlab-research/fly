@@ -14,10 +14,10 @@ import (
 // if timing conditions are not met, or (false, err) if the bail configuration is invalid.
 //
 // Timing types:
-// - immediate: Always returns true (execute on every tick)
-// - scheduled: Returns true if current time matches time_of_day in the specified timezone,
-//   and no execution has occurred in the last 24 hours
-// - absolute: Returns true if current time >= datetime and no prior execution has occurred
+//   - immediate: Always returns true (execute on every tick)
+//   - scheduled: Returns true if current time matches time_of_day in the specified timezone,
+//     and no execution has occurred in the last 24 hours
+//   - absolute: Returns true if current time >= datetime and no prior execution has occurred
 func shouldExecute(execution *types.Execution, now time.Time, lastExecution *time.Time) (bool, error) {
 	switch execution.Timing {
 	case "immediate":

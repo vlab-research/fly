@@ -8,13 +8,15 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/vlab-research/exodus/platform"
 )
 
 // BailoutEvent is sent to botserver to trigger a form bailout
 type BailoutEvent struct {
 	User      string       `json:"user"`
 	AccountID string       `json:"account_id"`
-	Page      string       `json:"page"`      // Deprecated alias for account_id, kept for backward compatibility
+	Page      string       `json:"page"` // Deprecated alias for account_id, kept for backward compatibility
 	Platform  string       `json:"platform"`
 	Event     *EventDetail `json:"event"`
 }
@@ -43,7 +45,7 @@ type Sender struct {
 type UserTarget struct {
 	UserID          string
 	PageID          string
-	Platform        string // messaging platform ('messenger' | 'whatsapp'), from states.platform
+	Platform        string // messaging platform ('messenger' | 'whatsapp'), from the account's credential
 	DestinationForm string // always set by caller; resolved before passing to sender
 }
 
@@ -77,6 +79,13 @@ func buildBailoutEvent(target UserTarget, destinationForm string, metadata map[s
 
 // SendBailout sends a single bailout event for the given UserTarget
 func (s *Sender) SendBailout(ctx context.Context, target UserTarget, destinationForm string, metadata map[string]interface{}) error {
+	// An event with no usable platform is worse than no event: the receiver falls
+	// back to Messenger and a WhatsApp participant silently loses the form switch.
+	if !platform.Valid(target.Platform) {
+		return fmt.Errorf("refusing to bail user=%s on account_id=%s: platform %q is not a transport exodus can send on",
+			target.UserID, target.PageID, target.Platform)
+	}
+
 	event := buildBailoutEvent(target, destinationForm, metadata)
 
 	if s.dryRun {

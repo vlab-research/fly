@@ -17,12 +17,12 @@ func TestCreateAndGetBail(t *testing.T) {
 	db := &DB{pool: pool}
 
 	bail := &Bail{
-		UserID:           userID,
-		Name:             "test-bail",
-		Description:      "Test bail for integration testing",
-		Enabled:          true,
-		Definition:       CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		UserID:          userID,
+		Name:            "test-bail",
+		Description:     "Test bail for integration testing",
+		Enabled:         true,
+		Definition:      CreateTestBailDefinition(),
+		DestinationForm: "exit-form",
 	}
 
 	err := db.CreateBail(context.Background(), bail)
@@ -65,12 +65,12 @@ func TestGetEnabledBails(t *testing.T) {
 	db := &DB{pool: pool}
 
 	bail1 := &Bail{
-		UserID:           userID,
-		Name:             "enabled-bail-1",
-		Description:      "Enabled bail 1",
-		Enabled:          true,
-		Definition:       CreateTestBailDefinition(),
-		DestinationForm:  "exit-form-1",
+		UserID:          userID,
+		Name:            "enabled-bail-1",
+		Description:     "Enabled bail 1",
+		Enabled:         true,
+		Definition:      CreateTestBailDefinition(),
+		DestinationForm: "exit-form-1",
 	}
 	err := db.CreateBail(context.Background(), bail1)
 	if err != nil {
@@ -78,12 +78,12 @@ func TestGetEnabledBails(t *testing.T) {
 	}
 
 	bail2 := &Bail{
-		UserID:           userID,
-		Name:             "disabled-bail",
-		Description:      "Disabled bail",
-		Enabled:          false,
-		Definition:       CreateTestBailDefinition(),
-		DestinationForm:  "exit-form-2",
+		UserID:          userID,
+		Name:            "disabled-bail",
+		Description:     "Disabled bail",
+		Enabled:         false,
+		Definition:      CreateTestBailDefinition(),
+		DestinationForm: "exit-form-2",
 	}
 	err = db.CreateBail(context.Background(), bail2)
 	if err != nil {
@@ -91,12 +91,12 @@ func TestGetEnabledBails(t *testing.T) {
 	}
 
 	bail3 := &Bail{
-		UserID:           userID,
-		Name:             "enabled-bail-2",
-		Description:      "Enabled bail 2",
-		Enabled:          true,
-		Definition:       CreateTestBailDefinition(),
-		DestinationForm:  "exit-form-3",
+		UserID:          userID,
+		Name:            "enabled-bail-2",
+		Description:     "Enabled bail 2",
+		Enabled:         true,
+		Definition:      CreateTestBailDefinition(),
+		DestinationForm: "exit-form-3",
 	}
 	err = db.CreateBail(context.Background(), bail3)
 	if err != nil {
@@ -131,12 +131,12 @@ func TestUpdateBail(t *testing.T) {
 	db := &DB{pool: pool}
 
 	bail := &Bail{
-		UserID:           userID,
-		Name:             "update-test",
-		Description:      "Original description",
-		Enabled:          true,
-		Definition:       CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		UserID:          userID,
+		Name:            "update-test",
+		Description:     "Original description",
+		Enabled:         true,
+		Definition:      CreateTestBailDefinition(),
+		DestinationForm: "exit-form",
 	}
 	err := db.CreateBail(context.Background(), bail)
 	if err != nil {
@@ -186,12 +186,12 @@ func TestDeleteBail(t *testing.T) {
 	db := &DB{pool: pool}
 
 	bail := &Bail{
-		UserID:           userID,
-		Name:             "delete-test",
-		Description:      "Will be deleted",
-		Enabled:          true,
-		Definition:       CreateTestBailDefinition(),
-		DestinationForm:  "exit-form",
+		UserID:          userID,
+		Name:            "delete-test",
+		Description:     "Will be deleted",
+		Enabled:         true,
+		Definition:      CreateTestBailDefinition(),
+		DestinationForm: "exit-form",
 	}
 	err := db.CreateBail(context.Background(), bail)
 	if err != nil {
@@ -239,13 +239,13 @@ func TestGetBailsByUser(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		bail := &Bail{
-			UserID:           userID1,
-			Name:             "user1-bail-" + string(rune('a'+i)),
-			Description:      "Bail for user 1",
-			Enabled:          true,
-			Definition:       CreateTestBailDefinition(),
-			DestinationForm:  "exit-form",
-			}
+			UserID:          userID1,
+			Name:            "user1-bail-" + string(rune('a'+i)),
+			Description:     "Bail for user 1",
+			Enabled:         true,
+			Definition:      CreateTestBailDefinition(),
+			DestinationForm: "exit-form",
+		}
 		err := db.CreateBail(context.Background(), bail)
 		if err != nil {
 			t.Fatalf("CreateBail failed: %v", err)
@@ -254,13 +254,13 @@ func TestGetBailsByUser(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		bail := &Bail{
-			UserID:           userID2,
-			Name:             "user2-bail-" + string(rune('a'+i)),
-			Description:      "Bail for user 2",
-			Enabled:          true,
-			Definition:       CreateTestBailDefinition(),
-			DestinationForm:  "exit-form",
-			}
+			UserID:          userID2,
+			Name:            "user2-bail-" + string(rune('a'+i)),
+			Description:     "Bail for user 2",
+			Enabled:         true,
+			Definition:      CreateTestBailDefinition(),
+			DestinationForm: "exit-form",
+		}
 		err := db.CreateBail(context.Background(), bail)
 		if err != nil {
 			t.Fatalf("CreateBail failed: %v", err)

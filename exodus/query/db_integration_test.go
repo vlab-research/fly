@@ -39,6 +39,7 @@ func resetTablesForQuery(t *testing.T, pool *pgxpool.Pool) {
 		DELETE FROM chatroach.responses;
 		DELETE FROM chatroach.states;
 		DELETE FROM chatroach.surveys;
+		DELETE FROM chatroach.credentials;
 		DELETE FROM chatroach.users;
 	`)
 	if err != nil {
@@ -46,27 +47,48 @@ func resetTablesForQuery(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-// insertSurvey creates an owner user and a survey with the given shortcode.
-// Returns the survey UUID needed for response inserts.
-func insertSurvey(t *testing.T, pool *pgxpool.Pool, shortcode string) uuid.UUID {
+// insertOwner creates a researcher, the identity that owns both surveys and
+// messaging accounts and that every bail query is scoped to.
+func insertOwner(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	ownerID := uuid.New()
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO chatroach.users (id, email) VALUES ($1, $2)
 	`, ownerID, "owner-"+ownerID.String()+"@test.com")
 	if err != nil {
-		t.Fatalf("insertSurvey: insert user: %v", err)
+		t.Fatalf("insertOwner: %v", err)
 	}
+	return ownerID
+}
 
+// insertSurveyFor creates a survey owned by ownerID with the given shortcode.
+// Returns the survey UUID needed for response inserts.
+func insertSurveyFor(t *testing.T, pool *pgxpool.Pool, ownerID uuid.UUID, shortcode string) uuid.UUID {
+	t.Helper()
 	surveyID := uuid.New()
-	_, err = pool.Exec(context.Background(), `
+	_, err := pool.Exec(context.Background(), `
 		INSERT INTO chatroach.surveys (id, userid, created, formid, form, shortcode, title)
 		VALUES ($1, $2, now(), $3, $4, $5, $6)
 	`, surveyID, ownerID, "form-id-"+shortcode, "{}", shortcode, "Test Survey")
 	if err != nil {
-		t.Fatalf("insertSurvey: insert survey: %v", err)
+		t.Fatalf("insertSurveyFor: insert survey: %v", err)
 	}
 	return surveyID
+}
+
+// insertMessagingCredential connects a messaging account to an owner. `details`
+// carries the account id because migration 01 derives facebook_page_id from it
+// under a unique constraint.
+func insertMessagingCredential(t *testing.T, pool *pgxpool.Pool, ownerID uuid.UUID, entity, pageid string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO chatroach.credentials (userid, entity, key, details)
+		VALUES ($1, $2, $3, jsonb_build_object('id', $3::string))
+		ON CONFLICT DO NOTHING
+	`, ownerID, entity, pageid)
+	if err != nil {
+		t.Fatalf("insertMessagingCredential: %v", err)
+	}
 }
 
 // defaultPageid is the messaging account used by tests that do not care about
@@ -77,9 +99,19 @@ func insertSurvey(t *testing.T, pool *pgxpool.Pool, shortcode string) uuid.UUID 
 func defaultPageid(userid string) string { return userid + "-page" }
 
 // insertStateOn creates a state row for a participant's conversation on a specific
-// messaging account (pageid), with the given shortcode as current_form.
+// messaging account (pageid), with the given shortcode as current_form, and
+// connects that account to ownerID as a Messenger account. A bail matches only
+// accounts its owner connected, so a state row without one is invisible.
 // userid and pageid are plain strings (VARCHAR in states table, not FK-constrained).
-func insertStateOn(t *testing.T, pool *pgxpool.Pool, userid, pageid, shortcode string) {
+func insertStateOn(t *testing.T, pool *pgxpool.Pool, ownerID uuid.UUID, userid, pageid, shortcode string) {
+	t.Helper()
+	insertMessagingCredential(t, pool, ownerID, "facebook_page", pageid)
+	insertStateWithoutCredential(t, pool, userid, pageid, shortcode)
+}
+
+// insertStateWithoutCredential creates a state row on an account nobody has
+// connected.
+func insertStateWithoutCredential(t *testing.T, pool *pgxpool.Pool, userid, pageid, shortcode string) {
 	t.Helper()
 	stateJSON := `{"forms": ["` + shortcode + `"]}`
 	_, err := pool.Exec(context.Background(), `
@@ -87,14 +119,14 @@ func insertStateOn(t *testing.T, pool *pgxpool.Pool, userid, pageid, shortcode s
 		VALUES ($1, $2, now(), 'RESPONDING', $3)
 	`, userid, pageid, stateJSON)
 	if err != nil {
-		t.Fatalf("insertStateOn: %v", err)
+		t.Fatalf("insertStateWithoutCredential: %v", err)
 	}
 }
 
 // insertStateOnWithPlatform creates a state row whose state_json carries
-// md.platform, which is what the states.platform computed column reads. Rows
-// written by insertStateOn deliberately omit it, reproducing the 97.8% of
-// production rows that predate md.platform persistence and compute to NULL.
+// md.platform, which is what the states.platform computed column reads. It takes
+// no credential: callers connect the account themselves to set up a case where
+// the two disagree.
 func insertStateOnWithPlatform(t *testing.T, pool *pgxpool.Pool, userid, pageid, shortcode, platform string) {
 	t.Helper()
 	stateJSON := `{"forms": ["` + shortcode + `"], "md": {"platform": "` + platform + `"}}`
@@ -108,9 +140,9 @@ func insertStateOnWithPlatform(t *testing.T, pool *pgxpool.Pool, userid, pageid,
 }
 
 // insertState creates a state row on the participant's default account.
-func insertState(t *testing.T, pool *pgxpool.Pool, userid, shortcode string) {
+func insertState(t *testing.T, pool *pgxpool.Pool, ownerID uuid.UUID, userid, shortcode string) {
 	t.Helper()
-	insertStateOn(t, pool, userid, defaultPageid(userid), shortcode)
+	insertStateOn(t, pool, ownerID, userid, defaultPageid(userid), shortcode)
 }
 
 // insertResponseFull creates a response row attributed to a specific messaging
@@ -232,12 +264,13 @@ func TestIntegration_OR_QuestionResponse(t *testing.T) {
 	defer pool.Close()
 	resetTablesForQuery(t, pool)
 
-	surveyID := insertSurvey(t, pool, "hpv-form")
+	owner := insertOwner(t, pool)
+	surveyID := insertSurveyFor(t, pool, owner, "hpv-form")
 
 	// userA answered "2", userB answered "3", userC answered "1"
 	userA, userB, userC := "user-or-a", "user-or-b", "user-or-c"
 	for _, u := range []string{userA, userB, userC} {
-		insertState(t, pool, u, "hpv-form")
+		insertState(t, pool, owner, u, "hpv-form")
 	}
 	insertResponse(t, pool, surveyID, userA, "hpv-form", "hpv_girl", "2")
 	insertResponse(t, pool, surveyID, userB, "hpv-form", "hpv_girl", "3")
@@ -255,7 +288,7 @@ func TestIntegration_OR_QuestionResponse(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, owner)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
@@ -278,12 +311,13 @@ func TestIntegration_AND_QuestionResponse(t *testing.T) {
 	defer pool.Close()
 	resetTablesForQuery(t, pool)
 
-	surveyID := insertSurvey(t, pool, "consent-form")
+	owner := insertOwner(t, pool)
+	surveyID := insertSurveyFor(t, pool, owner, "consent-form")
 
 	// userA answered both questions, userB answered only q1
 	userA, userB := "user-and-a", "user-and-b"
-	insertState(t, pool, userA, "consent-form")
-	insertState(t, pool, userB, "consent-form")
+	insertState(t, pool, owner, userA, "consent-form")
+	insertState(t, pool, owner, userB, "consent-form")
 	insertResponse(t, pool, surveyID, userA, "consent-form", "q1", "yes")
 	insertResponse(t, pool, surveyID, userA, "consent-form", "q2", "yes")
 	insertResponse(t, pool, surveyID, userB, "consent-form", "q1", "yes")
@@ -300,7 +334,7 @@ func TestIntegration_AND_QuestionResponse(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, owner)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
@@ -320,12 +354,13 @@ func TestIntegration_NOT_QuestionResponse(t *testing.T) {
 	defer pool.Close()
 	resetTablesForQuery(t, pool)
 
-	surveyID := insertSurvey(t, pool, "screen-form")
+	owner := insertOwner(t, pool)
+	surveyID := insertSurveyFor(t, pool, owner, "screen-form")
 
 	// userA answered hpv_girl=1 (should NOT match), userB answered hpv_girl=2 (should match)
 	userA, userB := "user-not-a", "user-not-b"
-	insertState(t, pool, userA, "screen-form")
-	insertState(t, pool, userB, "screen-form")
+	insertState(t, pool, owner, userA, "screen-form")
+	insertState(t, pool, owner, userB, "screen-form")
 	insertResponse(t, pool, surveyID, userA, "screen-form", "hpv_girl", "1")
 	insertResponse(t, pool, surveyID, userB, "screen-form", "hpv_girl", "2")
 
@@ -340,7 +375,7 @@ func TestIntegration_NOT_QuestionResponse(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, owner)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
@@ -355,38 +390,28 @@ func TestIntegration_NOT_QuestionResponse(t *testing.T) {
 	}
 }
 
-// TestIntegration_QuestionResponse_AccountScoped is the regression test for the
-// cross-account bail targeting leak.
-//
-// A conversation is the tuple (platform, account, user) — `pageid` is the legacy
-// column name for the account. The same participant id can hold two entirely
-// independent conversations on two different messaging accounts, and those accounts
-// may belong to two different researchers. Before the fix, the question_response CTE
-// aggregated `responses` across ALL accounts and joined to the account-scoped `states`
-// rows on `s.userid = qr.userid` alone, so an answer given on account A qualified the
-// participant for a bail evaluated against their conversation on account B.
 // A conversation is (platform, account, user), so a bail event must carry all
-// three. Conditions-based bails selected only (userid, pageid), leaving the
-// executor nothing to put on the event and posting an EMPTY platform -- while
-// user_list bails, whose platform comes from the caller's definition, carried
-// one. exodus was half-compliant with the event contract.
-//
-// Both cases below matter, and the second is the one a bare `s.platform` would
-// get wrong for 97.8% of production rows.
+// three. The platform comes from the account's credential, which is the
+// authoritative account -> transport map.
 func TestIntegration_ConditionsBail_CarriesPlatform(t *testing.T) {
 	pool := integrationPool(t)
 	defer pool.Close()
 	resetTablesForQuery(t, pool)
 
-	insertSurvey(t, pool, "platform-form")
+	owner := insertOwner(t, pool)
+	insertSurveyFor(t, pool, owner, "platform-form")
 
 	const waUser, waPage = "user-on-whatsapp", "account-wa"
-	const legacyUser, legacyPage = "user-legacy", "account-legacy"
+	const fbUser, fbPage = "user-on-messenger", "account-fb"
+	const staleUser = "user-with-stale-md"
 
-	// A WhatsApp conversation: state_json carries md.platform.
-	insertStateOnWithPlatform(t, pool, waUser, waPage, "platform-form", "whatsapp")
-	// A legacy conversation predating md.platform persistence: computes to NULL.
-	insertStateOn(t, pool, legacyUser, legacyPage, "platform-form")
+	insertMessagingCredential(t, pool, owner, "whatsapp_business", waPage)
+	insertMessagingCredential(t, pool, owner, "facebook_page", fbPage)
+
+	insertStateWithoutCredential(t, pool, waUser, waPage, "platform-form")
+	insertStateWithoutCredential(t, pool, fbUser, fbPage, "platform-form")
+	// A conversation on the WhatsApp account whose state_json claims Messenger.
+	insertStateOnWithPlatform(t, pool, staleUser, waPage, "platform-form", "messenger")
 
 	def := &types.BailDefinition{
 		Conditions: conditionFromJSON(`{
@@ -397,7 +422,7 @@ func TestIntegration_ConditionsBail_CarriesPlatform(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, owner)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
@@ -405,14 +430,94 @@ func TestIntegration_ConditionsBail_CarriesPlatform(t *testing.T) {
 	matched := runQueryConversations(t, pool, sql, params)
 
 	if got := platformOf(matched, waUser, waPage); got != "whatsapp" {
-		t.Errorf("WhatsApp conversation must be bailed as platform 'whatsapp', got %q (matched: %v)", got, matched)
+		t.Errorf("a conversation on a whatsapp_business account must bail as 'whatsapp', got %q (matched: %v)", got, matched)
+	}
+	if got := platformOf(matched, fbUser, fbPage); got != "messenger" {
+		t.Errorf("a conversation on a facebook_page account must bail as 'messenger', got %q (matched: %v)", got, matched)
+	}
+	if got := platformOf(matched, staleUser, waPage); got != "whatsapp" {
+		t.Errorf("the account's credential decides the platform, not states.platform: got %q (matched: %v)", got, matched)
+	}
+}
+
+// A state row on an account nobody connected cannot be bailed: there is no
+// credential to send with, so the target is excluded rather than guessed at.
+func TestIntegration_ConditionsBail_ExcludesUnconnectedAccount(t *testing.T) {
+	pool := integrationPool(t)
+	defer pool.Close()
+	resetTablesForQuery(t, pool)
+
+	owner := insertOwner(t, pool)
+	insertSurveyFor(t, pool, owner, "orphan-form")
+
+	const connectedUser, connectedPage = "user-connected", "account-connected"
+	const orphanUser, orphanPage = "user-orphan", "account-orphan"
+
+	insertStateOn(t, pool, owner, connectedUser, connectedPage, "orphan-form")
+	insertStateWithoutCredential(t, pool, orphanUser, orphanPage, "orphan-form")
+
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "form", "value": "orphan-form"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	// NULL must not reach the executor: it type-asserts row["platform"] to string,
-	// so a nil would leave the platform empty AND log a warning per target.
-	if got := platformOf(matched, legacyUser, legacyPage); got != "messenger" {
-		t.Errorf("a state row with no md.platform must default to 'messenger', not %q -- "+
-			"NULL here means an empty platform on the bail event (matched: %v)", got, matched)
+	sql, params, err := BuildQuery(def, owner)
+	if err != nil {
+		t.Fatalf("BuildQuery: %v", err)
+	}
+
+	matched := runQueryConversations(t, pool, sql, params)
+
+	if !containsConversation(matched, connectedUser, connectedPage) {
+		t.Errorf("expected the conversation on the connected account to match, got: %v", matched)
+	}
+	if containsConversation(matched, orphanUser, orphanPage) {
+		t.Errorf("a conversation on an account with no credential must not be bailed, got: %v", matched)
+	}
+}
+
+// Shortcodes are not unique across researchers, so a condition on one matches
+// other researchers' participants too. The owner-scoped credentials join is what
+// keeps a bail inside its owner's accounts.
+func TestIntegration_ConditionsBail_CrossTenantShortcode(t *testing.T) {
+	pool := integrationPool(t)
+	defer pool.Close()
+	resetTablesForQuery(t, pool)
+
+	ownerA := insertOwner(t, pool)
+	ownerB := insertOwner(t, pool)
+
+	const shortcode = "shared-shortcode"
+	insertSurveyFor(t, pool, ownerA, shortcode)
+
+	const userA, pageA = "user-tenant-a", "account-tenant-a"
+	const userB, pageB = "user-tenant-b", "account-tenant-b"
+
+	insertStateOn(t, pool, ownerA, userA, pageA, shortcode)
+	insertStateOn(t, pool, ownerB, userB, pageB, shortcode)
+
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "form", "value": "` + shortcode + `"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def, ownerA)
+	if err != nil {
+		t.Fatalf("BuildQuery: %v", err)
+	}
+
+	matched := runQueryConversations(t, pool, sql, params)
+
+	if !containsConversation(matched, userA, pageA) {
+		t.Errorf("expected owner A's own conversation to match, got: %v", matched)
+	}
+	if containsConversation(matched, userB, pageB) {
+		t.Errorf("cross-tenant leak: owner A's bail matched a conversation on owner B's account, got: %v", matched)
+	}
+	if len(matched) != 1 {
+		t.Errorf("expected exactly owner A's conversation, got: %v", matched)
 	}
 }
 
@@ -421,14 +526,15 @@ func TestIntegration_QuestionResponse_AccountScoped(t *testing.T) {
 	defer pool.Close()
 	resetTablesForQuery(t, pool)
 
-	surveyID := insertSurvey(t, pool, "shared-form")
+	owner := insertOwner(t, pool)
+	surveyID := insertSurveyFor(t, pool, owner, "shared-form")
 
 	const user = "user-cross-account"
 	const pageA, pageB = "account-A", "account-B"
 
 	// One participant id, two independent conversations on two accounts.
-	insertStateOn(t, pool, user, pageA, "shared-form")
-	insertStateOn(t, pool, user, pageB, "shared-form")
+	insertStateOn(t, pool, owner, user, pageA, "shared-form")
+	insertStateOn(t, pool, owner, user, pageB, "shared-form")
 
 	// The participant answered the question ONLY on account A.
 	insertResponseOn(t, pool, surveyID, user, pageA, "shared-form", "consent", "yes")
@@ -444,7 +550,7 @@ func TestIntegration_QuestionResponse_AccountScoped(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, owner)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
@@ -466,13 +572,14 @@ func TestIntegration_ElapsedTime_AccountScoped(t *testing.T) {
 	defer pool.Close()
 	resetTablesForQuery(t, pool)
 
-	surveyID := insertSurvey(t, pool, "elapsed-form")
+	owner := insertOwner(t, pool)
+	surveyID := insertSurveyFor(t, pool, owner, "elapsed-form")
 
 	const user = "user-elapsed-cross-account"
 	const pageA, pageB = "elapsed-account-A", "elapsed-account-B"
 
-	insertStateOn(t, pool, user, pageA, "elapsed-form")
-	insertStateOn(t, pool, user, pageB, "elapsed-form")
+	insertStateOn(t, pool, owner, user, pageA, "elapsed-form")
+	insertStateOn(t, pool, owner, user, pageB, "elapsed-form")
 
 	// The participant responded a week ago, ONLY on account A.
 	weekAgo := time.Now().Add(-7 * 24 * time.Hour)
@@ -491,7 +598,7 @@ func TestIntegration_ElapsedTime_AccountScoped(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, owner)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
@@ -511,10 +618,11 @@ func TestIntegration_QuestionResponse_NoMatch(t *testing.T) {
 	defer pool.Close()
 	resetTablesForQuery(t, pool)
 
-	surveyID := insertSurvey(t, pool, "nomatch-form")
+	owner := insertOwner(t, pool)
+	surveyID := insertSurveyFor(t, pool, owner, "nomatch-form")
 
 	userA := "user-nomatch-a"
-	insertState(t, pool, userA, "nomatch-form")
+	insertState(t, pool, owner, userA, "nomatch-form")
 	insertResponse(t, pool, surveyID, userA, "nomatch-form", "hpv_girl", "99")
 
 	def := &types.BailDefinition{
@@ -528,7 +636,7 @@ func TestIntegration_QuestionResponse_NoMatch(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, owner)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
