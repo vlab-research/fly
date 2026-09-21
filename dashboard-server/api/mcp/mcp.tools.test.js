@@ -903,12 +903,22 @@ const DEFINITION = {
   execution: { timing: 'immediate' },
 };
 
-const bailFailure = message => {
+const bailFailure = (message, status = 404) => {
   const err = new Error(message);
   err.expected = true;
-  err.status = 404;
+  err.status = status;
   return err;
 };
+
+const USER_LIST_DEFINITION = {
+  type: 'user_list',
+  user_list: { users: [{ userid: 'u1', pageid: 'p1', shortcode: 'dest' }] },
+  execution: { timing: 'immediate' },
+};
+
+const INVALID_PAGEIDS =
+  'no messaging account owned by this user for pageids: p1, p2 ' +
+  '(connect them in the dashboard, or use one of your own)';
 
 describe('mcp.tools: list_bails', () => {
   it('resolves the caller to a user and lists their bails without the tree', async () => {
@@ -997,6 +1007,18 @@ describe('mcp.tools: create_bail', () => {
     expect(calls).to.have.lengthOf(0);
   });
 
+  // Exodus owns the pageid check: a user_list entry must name a messaging
+  // account of the caller's, and its refusal is the only useful answer here.
+  it('relays a pageid the caller does not own, message intact', async () => {
+    const { runTool } = loadTools({
+      createBail: async () => { throw bailFailure(INVALID_PAGEIDS, 400); },
+    });
+    const out = await runTool('create_bail', { name: 'b', definition: USER_LIST_DEFINITION }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.equal(INVALID_PAGEIDS);
+  });
+
   it('needs users:write', async () => {
     const { runTool, calls } = loadTools();
     const out = await runTool('create_bail', { name: 'b', definition: DEFINITION }, { ...CONTEXT, scopes: ['users:read'] });
@@ -1070,6 +1092,16 @@ describe('mcp.tools: preview_bail', () => {
     expect(out.isError).to.equal(true);
     expect(textOf(out)).to.match(/timezone/);
     expect(calls).to.have.lengthOf(0);
+  });
+
+  it('relays a pageid the caller does not own, message intact', async () => {
+    const { runTool } = loadTools({
+      previewBail: async () => { throw bailFailure(INVALID_PAGEIDS, 400); },
+    });
+    const out = await runTool('preview_bail', { definition: USER_LIST_DEFINITION }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.equal(INVALID_PAGEIDS);
   });
 });
 

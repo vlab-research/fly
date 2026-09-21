@@ -1304,8 +1304,11 @@ const BAIL_DEFINITION_SCHEMA = {
       type: 'object',
       description:
         `type "user_list" only: {"users": [...]}, 1..${MAX_USER_LIST} entries, each ` +
-        '{"userid", "pageid", "shortcode"} where shortcode is THAT participant\'s ' +
-        'destination form.',
+        '{"userid", "pageid", "shortcode"} and nothing else, where shortcode is THAT ' +
+        'participant\'s destination form. Every pageid must be a messaging account ' +
+        'connected to you (list_messaging_accounts); one that is not is rejected by ' +
+        'create_bail, update_bail and preview_bail alike. There is no platform field: ' +
+        'the platform is read from that account\'s credential and cannot be set here.',
       properties: {
         users: {
           type: 'array',
@@ -1317,7 +1320,14 @@ const BAIL_DEFINITION_SCHEMA = {
             additionalProperties: false,
             properties: {
               userid: { type: 'string', minLength: 1, description: 'Participant id.' },
-              pageid: { type: 'string', minLength: 1, description: 'The page or account they are on.' },
+              pageid: {
+                type: 'string',
+                minLength: 1,
+                description:
+                  'The messaging account they are on, as list_messaging_accounts reports ' +
+                  'its account_id. It must be one of yours, and its credential is what ' +
+                  'decides which platform the message is sent on.',
+              },
               shortcode: { type: 'string', minLength: 1, description: 'The form to move them to.' },
             },
           },
@@ -1421,6 +1431,10 @@ const BAIL_TOOLS = [
       'Created disabled unless you pass enabled: true. Once enabled, timing decides',
       'when it fires — "immediate" means every tick, repeatedly, for as long as it stays',
       'enabled, so it will also catch participants who match tomorrow.',
+      '',
+      'A user_list bail is refused unless every pageid is a messaging account connected',
+      'to you (list_messaging_accounts); each entry\'s platform is read from that',
+      'account\'s credential and is not something you pass.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -1461,6 +1475,10 @@ const BAIL_TOOLS = [
       '',
       'Passing enabled: true starts it firing; with timing "immediate" that is within',
       'about a minute, on everyone who matches then.',
+      '',
+      'A replacement user_list definition is checked the same way create_bail checks',
+      'one: every pageid must be a messaging account connected to you, and no entry',
+      'carries a platform.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -1510,6 +1528,10 @@ const BAIL_TOOLS = [
       'SQL that was generated, which is the fastest way to see that a condition means',
       'something other than you intended. A count of 0 usually means a shortcode or a',
       'question_ref is wrong, not that nobody qualifies.',
+      '',
+      'It is also how a user_list is checked before anything is created: a pageid that',
+      'is not a messaging account of yours is refused here exactly as create_bail would',
+      'refuse it.',
     ].join('\n'),
     inputSchema: {
       type: 'object',

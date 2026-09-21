@@ -217,7 +217,7 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
 | `/mcp` | MCP server — `POST` only, Streamable HTTP, twenty-eight tools (five survey, five monitoring, three data, four template, two media, seven bail, two account). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
-| `/users/:userId/bail-events` | All bail events for a user. Both bail routes are also the seven bail MCP tools, which resolve the user id from the caller's email instead of taking it in the path |
+| `/users/:userId/bail-events` | All bail events for a user. Both bail routes are also the seven bail MCP tools, which resolve the user id from the caller's email instead of taking it in the path. See "Bail systems" below for what this server does and does not decide about a bail |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
 | `/surveys/:surveyName/health` | Survey health findings for the Monitor tab (24h aggregates + declarative ruleset); see `documentation/dashboard-study-health.md` |
 | `/platform/notices` | Platform-wide notices proxied from AlertManager (whitelisted alertnames, fail-soft) |
@@ -256,6 +256,49 @@ A messaging credential's `key` **is** the platform account id (`facebook_page` �
 page id, `whatsapp_business` → phone_number_id), and those ids are globally unique
 across messaging entities, so a token can be resolved from an account id alone
 without knowing the platform. See `message-worker/tokenstore.go`.
+
+### Bail systems (`/users/:userId/bails`)
+
+**This server is a proxy, not a second opinion.** `utils/bails/bails.util.js`
+forwards the body to Exodus and relays what comes back; no bail definition is
+validated, rewritten or enriched here. The MCP path adds exactly two checks
+(`mcp.core#validateBailDefinition`) and only because they catch values Exodus
+stores happily and then silently never runs — a `time_of_day` that is not
+`HH:MM`, a timezone IANA does not know. Everything else is Exodus's to judge.
+
+**`enabled` is forwarded on create as well as update.** The create handler used
+to destructure it away, and `CreateBailRequest.Enabled` on the Exodus side is a
+plain Go `bool`, so an absent field means `false`: a bail asked for enabled
+arrived dormant and nothing in either service said so. An *omitted* `enabled` is
+still omitted from the JSON rather than sent as `false` — the default belongs to
+Exodus, and a client that never mentions the field should not be able to tell
+which of the two services chose it.
+
+**A `user_list` entry is `{userid, pageid, shortcode}` and nothing else.** The
+messaging platform is resolved by Exodus from the `credentials.entity` behind
+the account the `pageid` names, so there is no `platform` field to set anywhere:
+the MCP entry schema is `additionalProperties: false` over those three, and
+dashboard-client's CSV upload takes three columns. A platform carried alongside
+a pageid can only ever agree with the credential or contradict it, and the
+contradiction is invisible until a send fails.
+
+**Exodus owns the pageid check and dashboard-server relays it.** At create,
+update and preview, Exodus requires every `pageid` to be a `facebook_page` or
+`whatsapp_business` credential owned by the caller and otherwise answers
+`400 {"error": "invalid_pageids", "message": "no messaging account owned by this
+user for pageids: ..."}`. That check is deliberately **not** duplicated here: a
+second copy of the ownership rule would have to be kept in step with the
+credentials table Exodus already reads, and two copies disagreeing is worse than
+one round trip. The relay chain keeps the message intact end to end —
+`utils/bails` turns the response body's `message` into an `Error` carrying
+`status`, `bails.service` marks any 4xx `expected` (`BailFailure`), the REST
+controller answers it as `{error: {message}}` with the same status, and
+`runTool` turns an `expected` error into an MCP tool error whose text is that
+message and nothing else.
+
+`api/bails/bails.test.js` covers both directions by stubbing `r2` alone, so the
+controller, service and util all run against a recorded request: what Exodus
+would have received, and what a 400 from it does to each caller.
 
 ### MCP server (`api/mcp/`)
 

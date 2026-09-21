@@ -59,16 +59,19 @@ exports.getBail = async (req, res) => {
 // Create a new bail
 exports.createBail = async (req, res) => {
   try {
-    const { name, description, definition, destination_form } = req.body;
+    const { name, description, definition, enabled, destination_form } = req.body;
 
     if (!name || !definition) {
       return res.status(400).json({ error: { message: 'name and definition are required' } });
     }
 
+    // An absent `enabled` is left absent rather than defaulted here: Exodus
+    // owns the default, and JSON.stringify drops the undefined key.
     const result = await service.createBail(req.vlabUser, {
       name,
       description,
       definition,
+      enabled,
       destination_form,
     });
     res.status(201).json(result);
