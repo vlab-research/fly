@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 
-const parseCSV = (text) => {
+export const parseCSV = (text) => {
   const lines = text.trim().split('\n');
   const errors = [];
   const users = [];
@@ -22,7 +22,7 @@ const parseCSV = (text) => {
 
     const parts = line.split(',').map(s => s.trim());
     if (parts.length !== 3) {
-      errors.push(`Row ${i + 1}: expected 3 columns (userid, pageid, shortcode), got ${parts.length}`);
+      errors.push(`Row ${i + 1}: expected 3 columns (userid, pageid, shortcode), got ${parts.length}. The messaging platform is resolved automatically from each user's messaging account and cannot be set in the CSV.`);
       continue;
     }
 
