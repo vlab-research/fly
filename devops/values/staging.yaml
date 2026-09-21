@@ -20,7 +20,7 @@ exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
-versionDashboard: &vdashboard v0.0.77
+versionDashboard: &vdashboard v0.0.78
 versionBotserver: &vbotserver v0.0.12
 # Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
 # suffix guards WhatsApp work from reaching production, and WhatsApp is in
@@ -56,7 +56,9 @@ versionExporter: &vexporter v0.6.12
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
 # v0.2.7: malformed timing rejected at write; timing errors recorded (VIR-57);
 # see production.yaml.
-versionExodus: &vexodus v0.2.7
+# v0.2.8: bail platform comes from the owner's credential (VIR-60, VIR-64);
+# see production.yaml.
+versionExodus: &vexodus v0.2.8
 versionMessageWorker: &vmessageworker v0.1.28
 # Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
 # gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag

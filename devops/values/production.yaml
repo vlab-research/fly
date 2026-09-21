@@ -37,7 +37,9 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 #
 # The remaining services below still carry -wa and were out of scope for both
 # changes; swap each to a clean tag as it next changes.
-versionDashboard: &vdashboard v0.0.77
+# v0.0.77 -> v0.0.78: creating a bail forwards `enabled` (VIR-58) and relays
+# exodus' 400 for a user list naming an account the caller does not own.
+versionDashboard: &vdashboard v0.0.78
 versionBotserver: &vbotserver v0.0.12
 # v0.0.3-wa -> v0.0.5: carries 36808aa5 "feat(envelope): every event carries
 # platform and account_id" -- the PRODUCER side of the conversation-identity
@@ -174,7 +176,12 @@ versionExporter: &vexporter v0.6.12
 # of failing to encode it (VIR-57). A stored bail that is already malformed was
 # never going to run; it now records "invalid bail definition" each tick. No
 # schema and no config change.
-versionExodus: &vexodus v0.2.7
+# v0.2.7 -> v0.2.8: both bail types take the conversation's platform from the
+# owner's messaging credential, so a bailout always names its conversation
+# (VIR-60, VIR-64). Conditions bails match only accounts the owner connected;
+# a user list naming any other account is refused at write and skipped, with a
+# recorded reason, at execution. No schema and no config change.
+versionExodus: &vexodus v0.2.8
 # v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
 # 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
 # since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
