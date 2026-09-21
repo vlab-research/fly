@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vlab-research/exodus/db"
+	"github.com/vlab-research/exodus/platform"
 	"github.com/vlab-research/exodus/query"
 	"github.com/vlab-research/exodus/sender"
 	"github.com/vlab-research/exodus/types"
@@ -19,6 +20,7 @@ type BailStore interface {
 	GetEnabledBails(ctx context.Context) ([]*db.Bail, error)
 	GetLastSuccessfulExecution(ctx context.Context, bailID uuid.UUID) (*time.Time, error)
 	RecordEvent(ctx context.Context, event *db.BailEvent) error
+	GetMessagingCredentials(ctx context.Context, pageids []string) (map[string]platform.Credential, error)
 }
 
 // QueryExecutor defines the interface for executing SQL queries
@@ -151,7 +153,7 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	}
 
 	// Query users matching bail conditions
-	users, err := e.queryUsers(ctx, dbBail, &bailDef, bailType)
+	users, skipped, err := e.queryUsers(ctx, dbBail, &bailDef, bailType)
 	if err != nil {
 		err := fmt.Errorf("failed to query users: %w", err)
 		e.recordError(ctx, dbBail, err)
@@ -159,9 +161,15 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	}
 
 	usersMatched := len(users)
-	log.Printf("Found %d users matching bail conditions", usersMatched)
+	log.Printf("Found %d users matching bail conditions (%d skipped)", usersMatched, len(skipped))
 
 	if usersMatched == 0 {
+		// Skips are the whole story of such a run, so they still need an event:
+		// without one the UI shows nothing at all for a bail that reached nobody.
+		if len(skipped) > 0 {
+			log.Printf("Bail %s reached no one: all %d targets skipped", dbBail.Name, len(skipped))
+			return e.recordSuccess(ctx, dbBail, &bailDef, 0, nil, skipped)
+		}
 		log.Printf("Bail %s matched no users, skipping", dbBail.Name)
 		return nil
 	}
@@ -178,34 +186,34 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 	if err != nil {
 		// Even if some sends failed, record partial success
 		log.Printf("Partially failed to send bailouts: %v", err)
-		if recordErr := e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs); recordErr != nil {
+		if recordErr := e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs, skipped); recordErr != nil {
 			log.Printf("Also failed to record partial success for bail %s: %v", dbBail.Name, recordErr)
 		}
 		return fmt.Errorf("partially failed to send bailouts: %w", err)
 	}
 
 	log.Printf("Successfully bailed %d users", len(bailedIDs))
-	return e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs)
+	return e.recordSuccess(ctx, dbBail, &bailDef, usersMatched, bailedIDs, skipped)
 }
 
-// queryUsers executes the SQL query and returns matching users
+// queryUsers returns the conversations this bail should reach, plus the targets
+// it could not resolve to a transport.
 // For "conditions" type bails, it builds and executes a SQL query
-// For "user_list" type bails, it converts the UserList directly to UserTarget structs
-func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, bailType string) ([]sender.UserTarget, error) {
-	// Handle user_list type bails: skip query, convert UserList directly
+// For "user_list" type bails, it resolves the listed accounts against the owner's credentials
+func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, bailType string) (users []sender.UserTarget, skipped []platform.Skipped, err error) {
 	if bailType == "user_list" {
 		if bailDef.UserList == nil {
-			return nil, fmt.Errorf("user_list is nil for user_list-type bail")
+			return nil, nil, fmt.Errorf("user_list is nil for user_list-type bail")
 		}
-		log.Printf("Converting user_list to targets for bail %s", dbBail.Name)
-		return userListToTargets(bailDef.UserList), nil
+		log.Printf("Resolving user_list targets for bail %s", dbBail.Name)
+		return e.resolveUserList(ctx, dbBail, bailDef.UserList)
 	}
 
 	// Handle conditions-based bails: execute SQL query
 	// Build SQL query from bail definition
-	sql, params, err := query.BuildQuery(bailDef)
+	sql, params, err := query.BuildQuery(bailDef, dbBail.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build query: %w", err)
+		return nil, nil, fmt.Errorf("failed to build query: %w", err)
 	}
 
 	log.Printf("Executing query for bail %s", dbBail.Name)
@@ -213,11 +221,10 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 	// Execute query
 	rows, err := e.query.Query(ctx, sql, params...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
+		return nil, nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
 	// Convert results to UserTarget structs with resolved destination form
-	var users []sender.UserTarget
 	for _, row := range rows {
 		userID, ok := row["userid"].(string)
 		if !ok {
@@ -231,58 +238,89 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 			continue
 		}
 
-		// BuildQuery always projects COALESCE(s.platform, 'messenger') AS platform, so
-		// this should always find a non-NULL string. The tolerant form is kept as a
-		// backstop for any caller assembling its own SQL. If the warning below ever
-		// fires with <nil>, the SELECT lost either its COALESCE or its `AS platform`
-		// alias, and every conditions-based bail is going out with an empty platform.
-		platform := ""
-		if p, exists := row["platform"]; exists {
-			if platformStr, ok := p.(string); ok {
-				platform = platformStr
-			} else {
-				log.Printf("Warning: Invalid platform type in query result: %T", p)
-			}
+		// The query's INNER JOIN already guarantees a messaging credential per row,
+		// so an unresolvable platform means the query changed underneath the
+		// executor. That is a defect in this binary, not a property of one target,
+		// and it fails the whole bail rather than quietly reaching fewer people.
+		transport, ok := row["platform"].(string)
+		if !ok || !platform.Valid(transport) {
+			return nil, nil, fmt.Errorf("query returned an unusable platform %v (%T) for user=%s account_id=%s",
+				row["platform"], row["platform"], userID, pageID)
 		}
 
 		users = append(users, sender.UserTarget{
 			UserID:          userID,
 			PageID:          pageID,
-			Platform:        platform,
+			Platform:        transport,
 			DestinationForm: bailDef.Action.DestinationForm,
 		})
 	}
 
-	return users, nil
+	return users, nil, nil
 }
 
-// userListToTargets converts a UserList to a slice of UserTarget structs
-// Each entry's shortcode becomes the destination form for that user
-func userListToTargets(ul *types.UserList) []sender.UserTarget {
-	targets := make([]sender.UserTarget, len(ul.Users))
+// resolveUserList turns a bail's listed users into targets, resolving each
+// account's transport from the owner's credentials. Each entry's shortcode
+// becomes the destination form for that user.
+func (e *Executor) resolveUserList(ctx context.Context, dbBail *db.Bail, ul *types.UserList) ([]sender.UserTarget, []platform.Skipped, error) {
+	targets := make([]platform.Target, len(ul.Users))
+	pageids := make([]string, 0, len(ul.Users))
+	seen := make(map[string]struct{}, len(ul.Users))
+
 	for i, entry := range ul.Users {
-		targets[i] = sender.UserTarget{
+		targets[i] = platform.Target{
 			UserID:          entry.UserID,
 			PageID:          entry.PageID,
-			Platform:        entry.Platform,
 			DestinationForm: entry.Shortcode,
 		}
+		if _, ok := seen[entry.PageID]; !ok {
+			seen[entry.PageID] = struct{}{}
+			pageids = append(pageids, entry.PageID)
+		}
 	}
-	return targets
+
+	creds, err := e.store.GetMessagingCredentials(ctx, pageids)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load messaging credentials: %w", err)
+	}
+
+	resolved, skipped := platform.Resolve(targets, creds, dbBail.UserID)
+
+	users := make([]sender.UserTarget, len(resolved))
+	for i, r := range resolved {
+		users[i] = sender.UserTarget{
+			UserID:          r.UserID,
+			PageID:          r.PageID,
+			Platform:        r.Platform,
+			DestinationForm: r.DestinationForm,
+		}
+	}
+
+	return users, skipped, nil
 }
 
 // recordSuccess records a successful bail execution event.
+// usersMatched counts resolved targets only; skipped targets are reported separately.
 // Returns an error if marshaling fails (corrupt snapshot would be worse than no record)
 // or if the DB write fails.
-func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, usersMatched int, bailedIDs []string) error {
+func (e *Executor) recordSuccess(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, usersMatched int, bailedIDs []string, skipped []platform.Skipped) error {
 	defJSON, err := json.Marshal(bailDef)
 	if err != nil {
 		return fmt.Errorf("failed to marshal bail definition for success event: %w", err)
 	}
 
 	var executionResults *json.RawMessage
-	if bailedIDs != nil {
-		raw, err := json.Marshal(map[string]interface{}{"user_ids": bailedIDs})
+	if bailedIDs != nil || len(skipped) > 0 {
+		// An all-skipped run still records user_ids, as an empty list rather than
+		// a null, so every execution event has the same shape.
+		if bailedIDs == nil {
+			bailedIDs = []string{}
+		}
+		results := map[string]interface{}{"user_ids": bailedIDs}
+		if len(skipped) > 0 {
+			results["skipped"] = skipped
+		}
+		raw, err := json.Marshal(results)
 		if err != nil {
 			return fmt.Errorf("failed to marshal execution results for success event: %w", err)
 		}

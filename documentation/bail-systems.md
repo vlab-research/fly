@@ -53,7 +53,7 @@ The create form (`/bails/create`) has four sections:
 3. **Execution Timing** -- choose immediate, scheduled (daily at a time + timezone), or absolute (one-time at a datetime)
 4. **Action** -- destination form shortcode and optional JSON metadata (conditions-type bails only)
 
-A **Preview** button performs a dry-run query showing how many users currently match the conditions and a sample of their IDs. For conditions-based bails, the generated SQL and parameters are also returned.
+A **Preview** button performs a dry-run query showing how many users currently match the conditions and a sample of their IDs. For conditions-based bails, the generated SQL and parameters are also returned. For user list bails it is also the account check: a preview of a list naming an account this user has not connected comes back as an error naming each bad `pageid`, which is the cheapest way to check a CSV before saving anything.
 
 ### Event History
 
@@ -68,15 +68,48 @@ A `BailDefinition` has a `type` field that determines how target users are ident
 | Type | Description |
 |------|-------------|
 | `"conditions"` | (default) Builds a SQL query from a condition tree. All bails created before `type` was introduced are implicitly `"conditions"`. |
-| `"user_list"` | Targets a fixed, explicitly enumerated list of users. No SQL query is built. |
+| `"user_list"` | Targets a fixed, explicitly enumerated list of users. No condition query is built, but the listed accounts are still resolved against the owner's credentials. |
 
 ### Conditions Type
 
 The default type. Uses a recursive condition tree to build a SQL query against the `states` and `responses` tables. The `action.destination_form` field is required and specifies where all matched users are sent.
 
+#### The query only matches the owner's own accounts
+
+The generated query joins `credentials` on `c.key = s.pageid`, restricted to the messaging
+entities and to `c.userid = <the bail's owner>`, and reads the platform out of `c.entity` in
+the same pass (`facebook_page` → `messenger`, `whatsapp_business` → `whatsapp`). The join is
+INNER, which does two things at once:
+
+- **It resolves the platform.** Every matched row arrives with a real transport, from the
+  same account→transport map the token lookup uses. `states.platform` is not consulted; it is
+  NULL for the great majority of rows, and NULL again for a blocked conversation whose `md`
+  was erased, which is exactly the population a recovery bail targets.
+- **It scopes the bail to its owner.** Conditions match on *shortcodes*, and a shortcode is
+  not unique across researchers. Without the join, a bail naming `survey_common` matched
+  every `states` row on that shortcode, including another researcher's participants on
+  another researcher's accounts — a mis-target and a cross-tenant leak in one. With it, an
+  account the owner has not connected cannot appear in the result at all.
+
+There is no skip list for conditions bails. An unresolvable platform on a row the INNER JOIN
+returned would mean the query and the executor disagree, which is a defect in the binary
+rather than a property of one participant, so the executor fails the **whole** bail loudly
+instead of quietly reaching fewer people. Skips exist only for user lists, where the owner
+named the accounts explicitly and deserves to be told which ones did not work.
+
+The same consequence applies as for user lists, from the other direction: **disconnecting an
+account stops its participants matching.** They are not bailed onto an account that can no
+longer send.
+
+Before deploying a change to this join, `planning/vir-60-predeploy-check.sql` (read-only)
+reports, per enabled bail, which `(bail, pageid)` populations the owner-scoped join excludes
+and whether each excluded account is owned by someone else or by nobody.
+
 ### User List Type
 
-Targets a fixed list of up to 1000 users. Each entry specifies the user, their page, and their **individual destination form** (`shortcode`). This allows sending different users to different forms in a single bail.
+Targets a fixed list of up to 1000 users. Each entry specifies the user, their account
+(`pageid`), and their **individual destination form** (`shortcode`). This allows sending
+different users to different forms in a single bail.
 
 `action.destination_form` is not used for `user_list` bails — the destination is per-user in the list.
 
@@ -89,7 +122,7 @@ Targets a fixed list of up to 1000 users. Each entry specifies the user, their p
       { "userid": "user2", "pageid": "page2", "shortcode": "survey_b" }
     ]
   },
-  "execution": { "timing": "immediate" },
+  "execution": { "timing": "absolute", "datetime": "2026-09-20T14:00:00", "timezone": "UTC" },
   "action": {}
 }
 ```
@@ -97,9 +130,138 @@ Targets a fixed list of up to 1000 users. Each entry specifies the user, their p
 **Validation rules:**
 - `users` array must have 1–1000 entries
 - Each entry must have non-empty `userid`, `pageid`, and `shortcode`
+- Every `pageid` must name a messaging account the bail's owner has connected — see below
 - `action` is present in the JSON but `destination_form` is not validated (ignored)
 
-**Preview behavior:** Returns the user list directly without executing a query. `sql` and `params` are empty in the preview response.
+#### The platform comes from the account, not from the entry
+
+A conversation is `(platform, account_id, user_id)` and an entry names only the last two.
+The first is read from the account. `chatroach.credentials` holds one row per connected
+account: `key` is the account id (`pageid` here), `userid` is the researcher who connected
+it, and `entity` is what it sends on — `facebook_page` → `messenger`, `whatsapp_business` →
+`whatsapp`. Migration 20 (`devops/migrations/20-messaging-account-unique.sql`) puts a UNIQUE
+index on `key` restricted to those two entities, so an account id matches at most one
+credential in the whole database: one owner, one entity, one platform. There is nothing to
+reconcile, because there is only ever one answer.
+
+`credentials.userid` and `bails.user_id` are both `chatroach.users(id)`, so "owned by this
+bail's owner" is a single equality.
+
+**An account the caller has not connected is rejected when the bail is written.** Create,
+update and preview each resolve every `pageid` in the list, and answer `400 invalid_pageids`
+if any of them has no messaging credential owned by the caller. The message names every
+offender, not only the first:
+
+```json
+{
+  "error": "invalid_pageids",
+  "message": "no messaging account owned by this user for pageids: p_gone, p_theirs (each pageid must be a connected facebook_page or whatsapp_business account)"
+}
+```
+
+Rejecting at write time is the difference between an error a researcher can act on and a
+batch that quietly reaches fewer people than it lists.
+
+**Targets that no longer resolve are skipped when the bail runs.** The same resolution runs
+again at execution, because a credential can be deleted or transferred between saving a bail
+and firing it. An unresolvable target is not sent; it is recorded in the execution event's
+`execution_results` under `skipped`, with a reason:
+
+| Reason | Meaning |
+|--------|---------|
+| `credential_not_found` | no messaging credential exists for that `pageid` at all |
+| `credential_not_owned` | the account exists, but belongs to another researcher |
+| `credential_not_messaging` | the credential's entity maps to no transport. The lookup already filters on the two messaging entities, so this one should be unreachable; it exists so that a filter and a mapping that drift apart produce a recorded skip instead of an empty platform on the wire |
+
+```json
+{
+  "user_ids": ["u1", "u2"],
+  "skipped": [{ "userid": "u3", "pageid": "p_gone", "reason": "credential_not_found" }]
+}
+```
+
+`users_matched` counts resolved targets only: a bail listing 100 users of which 97 resolve
+records `users_matched: 97` and three `skipped` entries. A run in which *every* target was
+skipped still records an execution event, with `"user_ids": []` — without one, a bail that
+reached nobody would show nothing at all in its history, which is indistinguishable from a
+bail that never ran.
+
+The consequence worth planning around: **disconnecting an account takes its participants out
+of the bail.** They are skipped, and visible as skipped in the event, rather than bailed on
+an account that can no longer send them anything.
+
+**A `platform` inside a stored definition is ignored, not rejected.** `UserListEntry`
+declares `userid`, `pageid` and `shortcode`, and Go's JSON decoder drops fields a struct does
+not declare. A definition that carries a `platform` — written before the field went away, or
+sent today by a hand-rolled client — still loads, the value is read as nothing at all, and
+the credential decides. There is no migration and no schema change: stored definitions keep
+whatever they contain, and what they contain has no effect.
+
+Nothing in the product offers the field. dashboard-client's CSV upload takes exactly three
+columns (`userid,pageid,shortcode`) and its error message says the platform is resolved from
+the account; the MCP `create_bail` schema is `additionalProperties: false` over the same
+three. The REST proxy forwards `definition` untouched, so a hand-written POST can still carry
+one, to no effect.
+
+#### Why an un-named bailout is never sent
+
+`SendBailout` refuses a target whose platform is neither `messenger` nor `whatsapp`
+(`exodus/sender/sender.go`), and both bail types resolve one before the sender is reached —
+conditions bails in the query, user lists from the credential map. Exodus cannot emit a
+bailout carrying an empty platform. What such an event costs is still worth recording,
+because the failure is a property of the receiving path and any *other* un-named event still
+triggers it.
+
+On WhatsApp it fails outright. Replybot's `eventPlatform` finds no platform on the event and
+falls back to `messenger` (`replybot/lib/typewheels/utils.js`, logged as
+`EVENT_PLATFORM_GUESSED`); the outbound command goes to the Messenger client, which looks up
+a `facebook_page` token for an account that has only a `whatsapp_business` one and fails with
+`token not found for platform account` (`message-worker/tokenstore.go`). The conversation
+lands in `ERROR` / `STATE_ACTIONS` and the participant receives nothing.
+`documentation/platform-resolution.md` describes this failure shape in full.
+
+**An empty platform is not safe on Messenger either**, which is the half that is easy to
+miss. The `messenger` fallback picks the right client, so the first message of the
+destination form is sent — but the event itself still carries `"platform": ""`, which puts it
+on replybot's degraded path
+(`documentation/states-debugging.md`, "The degraded path"): the state cache is neither read
+nor **written**. The post-bail state therefore exists only in the machine report. The next
+event is the echo of the message just sent, ~1–2 s later; it *is* fully named, misses the
+cache, and replays from `chatroach.messages`. Scribble flushes that archive on a ~2 s poll,
+so if the echo is processed before the bailout row lands, the replay reconstructs the
+**pre-bail** state, the echo is applied to it, and that state is cached and written to
+`states`. The participant has received the destination form's first question, but the
+platform believes they are still on the previous form:
+
+- `states.current_form` and `state_json.forms` never show the destination form (the
+  monitoring tab shows the previous form);
+- their reply is handled by the **previous** form. If that form has a field with the same
+  `ref`, its logic jumps and stitches run (the participant is routed somewhere the bail never
+  intended); if not, the conversation goes to `ERROR` / `FIELD_NOT_FOUND`.
+
+It is a race on send latency, so it is not systematic: on 2026-08-27 the echo took >4 s and
+672 of 672 participants kept the bail; on 2026-09-18 it took ~1.7 s and 463 of 587 lost it.
+Detector — participants of a user list bail whose state never recorded the destination:
+
+```sql
+WITH l AS (
+  SELECT u->>'userid' userid, u->>'pageid' pageid, u->>'shortcode' sc
+  FROM chatroach.bails, jsonb_array_elements(definition->'user_list'->'users') u
+  WHERE id = '<bail_id>')
+SELECT (s.state_json->'forms') ? l.sc AS bail_form_in_state, count(*)
+FROM l LEFT JOIN chatroach.states s ON s.userid = l.userid AND s.pageid = l.pageid
+GROUP BY 1;
+```
+
+The detector reads only `userid`, `pageid` and `shortcode` out of the definition, so it works
+against any user list bail whatever its entries carry. The race itself belongs to the
+degraded path rather than to bails: it applies to any event that reaches replybot without a
+platform, from any producer.
+
+**Preview behavior:** Returns the user list directly without executing a query, after the
+same `invalid_pageids` check create and update apply — a preview is the cheapest way to find
+out that a pageid in a CSV is not one of yours. `sql` and `params` are empty in the preview
+response.
 
 ---
 
@@ -256,14 +418,26 @@ NOT inside an AND group (match users on a form whose state is NOT "END"):
 
 ### SQL Generation Examples
 
+Every generated query carries the same head — the three columns of the conversation, and the
+owner-scoped credentials join that resolves the platform. The bail owner is bound last, so
+its parameter number is always one past the conditions'.
+
 **Simple conditions-based query** (form + state):
 
 ```sql
-SELECT DISTINCT s.userid, s.pageid
+SELECT DISTINCT s.userid, s.pageid,
+  CASE WHEN c.entity = 'facebook_page' THEN 'messenger'
+       WHEN c.entity = 'whatsapp_business' THEN 'whatsapp'
+  END AS platform
 FROM states s
+INNER JOIN credentials c ON c.key = s.pageid
+  AND c.entity IN ('facebook_page','whatsapp_business')
+  AND c.userid = $3
 WHERE (s.current_form = $1 AND s.current_state = $2)
 LIMIT 100000
 ```
+
+Parameters: `[$form, $state, $owner_id]`
 
 **Elapsed time** — uses a named CTE joined to `states`:
 
@@ -274,14 +448,20 @@ WITH response_times_0 AS (
     WHERE shortcode = $1 AND question_ref = $2
     GROUP BY userid, pageid
 )
-SELECT DISTINCT s.userid, s.pageid
+SELECT DISTINCT s.userid, s.pageid,
+  CASE WHEN c.entity = 'facebook_page' THEN 'messenger'
+       WHEN c.entity = 'whatsapp_business' THEN 'whatsapp'
+  END AS platform
 FROM states s
+INNER JOIN credentials c ON c.key = s.pageid
+  AND c.entity IN ('facebook_page','whatsapp_business')
+  AND c.userid = $4
 LEFT JOIN response_times_0 rt0 ON s.userid = rt0.userid AND s.pageid = rt0.pageid
 WHERE rt0.response_time + $3::INTERVAL < NOW()
 LIMIT 100000
 ```
 
-Parameters: `[$form, $question_ref, $duration]`
+Parameters: `[$form, $question_ref, $duration, $owner_id]`
 
 **Question response (exact match):**
 
@@ -291,14 +471,20 @@ WITH question_responses_0 AS (
     FROM responses
     WHERE shortcode = $1 AND question_ref = $2 AND response = $3
 )
-SELECT DISTINCT s.userid, s.pageid
+SELECT DISTINCT s.userid, s.pageid,
+  CASE WHEN c.entity = 'facebook_page' THEN 'messenger'
+       WHEN c.entity = 'whatsapp_business' THEN 'whatsapp'
+  END AS platform
 FROM states s
+INNER JOIN credentials c ON c.key = s.pageid
+  AND c.entity IN ('facebook_page','whatsapp_business')
+  AND c.userid = $4
 LEFT JOIN question_responses_0 qr0 ON s.userid = qr0.userid AND s.pageid = qr0.pageid
 WHERE qr0.userid IS NOT NULL
 LIMIT 100000
 ```
 
-Parameters: `[$form, $question_ref, $response]`
+Parameters: `[$form, $question_ref, $response, $owner_id]`
 
 **Question response (any answer):**
 
@@ -308,14 +494,20 @@ WITH question_responses_0 AS (
     FROM responses
     WHERE shortcode = $1 AND question_ref = $2
 )
-SELECT DISTINCT s.userid, s.pageid
+SELECT DISTINCT s.userid, s.pageid,
+  CASE WHEN c.entity = 'facebook_page' THEN 'messenger'
+       WHEN c.entity = 'whatsapp_business' THEN 'whatsapp'
+  END AS platform
 FROM states s
+INNER JOIN credentials c ON c.key = s.pageid
+  AND c.entity IN ('facebook_page','whatsapp_business')
+  AND c.userid = $3
 LEFT JOIN question_responses_0 qr0 ON s.userid = qr0.userid AND s.pageid = qr0.pageid
 WHERE qr0.userid IS NOT NULL
 LIMIT 100000
 ```
 
-Parameters: `[$form, $question_ref]`
+Parameters: `[$form, $question_ref, $owner_id]`
 
 #### Targeting is scoped to the messaging account
 
@@ -332,7 +524,14 @@ Joining on `userid` alone aggregates `responses` across *all* accounts and attac
 account-scoped `states` rows, so a participant's answers on account A qualify them for a bail
 targeted at account B. That is both a mis-targeting bug and a cross-researcher data leak. The
 CTE joins are `LEFT JOIN` (an inner join would force AND semantics on every CTE-backed
-condition); the `IS NOT NULL` test enforces the actual match.
+condition); the `IS NOT NULL` test enforces the actual match. The credentials join is the one
+INNER join in the query, and is inner on purpose: it decides which accounts exist for this
+bail at all, rather than contributing a condition.
+
+Adding the platform column to a `SELECT DISTINCT` would normally risk splitting a group and
+bailing someone twice. It cannot here: `states` is `PRIMARY KEY (userid, pageid)` and
+`credentials` has a unique `key` for messaging entities, so at most one credential row joins
+per conversation and the added column is functionally dependent on the `DISTINCT` key.
 
 `responses.pageid` used to be nullable, and the join's strict equality meant a `NULL` pageid
 matched no conversation — intended, since an unattributable response must not qualify anyone.
@@ -349,18 +548,31 @@ Defines **when** the bail fires.
 | Timing | Behavior | Required fields |
 |--------|----------|-----------------|
 | `immediate` | Executes on every CronJob tick (every minute) | None |
-| `scheduled` | Executes daily at a specific time in a specific timezone | `time_of_day` (HH:MM), `timezone` (IANA) |
-| `absolute` | Executes once at a specific datetime, then never again | `datetime` (ISO 8601) |
+| `scheduled` | Executes daily at a specific time in a specific timezone | `time_of_day` (HH:MM), `timezone` (IANA); optional `tolerance_minutes` |
+| `absolute` | Executes once at a specific datetime, then never again | `datetime` (`YYYY-MM-DDTHH:MM:SS`, no zone suffix), `timezone` (IANA) |
 
 Deduplication:
-- **Immediate**: No deduplication; runs every tick. Idempotent because botserver handles duplicate bailouts.
-- **Scheduled**: Will not re-execute if the last successful execution was within 24 hours.
-- **Absolute**: Will not re-execute if any prior successful execution exists.
+- **Immediate**: No deduplication; it re-fires every minute, for as long as the bail is enabled. Idempotent because botserver handles duplicate bailouts — but a one-off `user_list` batch should use `absolute`, which fires exactly once, rather than `immediate` plus a race to disable it.
+- **Scheduled**: Fires inside a forward-only window that opens at `time_of_day` in `timezone` and stays open for `tolerance_minutes` (default 30), so a delayed executor can still catch up; it will not fire before the target time. It will not fire twice on the same calendar day in that timezone (`executor/timing.go:49-101`).
+- **Absolute**: Fires on the first tick at or after the target instant, and never again once any prior successful execution exists.
 
-**Important**: At creation time, Exodus validates that required timing fields are present but does not validate their format. Format validation happens at execution time:
-- `time_of_day` must be `HH:MM` format. Invalid format causes the bail to silently skip execution.
-- `timezone` must be a valid IANA timezone name (e.g., `"America/New_York"`). An invalid timezone name causes the bail to silently skip execution with no error event recorded.
-- `datetime` must be ISO 8601 / RFC 3339 format (e.g., `"2024-06-01T09:00:00Z"`). A bare datetime without timezone (`"2024-06-01T09:00:05"`) is also accepted.
+**How `datetime` is interpreted**: `time.ParseInLocation("2006-01-02T15:04:05", ...)` — the
+value is read as **wall-clock time in the bail's `timezone`**, not as UTC
+(`executor/timing.go:119`). `"2026-09-20T14:00:00"` with `timezone: "Africa/Lagos"` means
+14:00 Lagos time. This is why `timezone` is required alongside `datetime`; the API rejects
+its absence with `invalid execution: timezone is required for absolute timing`
+(`types/types.go:82-84`).
+
+**Important**: At creation time, Exodus validates that required timing fields are present
+but does not validate their format. Format validation happens at execution time, and the
+resulting error is **not visible in the bail's event history** (see "Failed executions
+leave no event" below) — only in the executor job logs:
+- `time_of_day` must be `HH:MM` format.
+- `timezone` must be a valid IANA timezone name (e.g., `"America/New_York"`).
+- `datetime` must be exactly `YYYY-MM-DDTHH:MM:SS` with **no zone suffix and no offset**.
+  A trailing `Z` is rejected: `"2026-06-01T09:00:00Z"` stores fine at creation and then
+  fails every tick with `timing check failed: invalid datetime "2026-06-01T09:00:00Z":
+  must be in YYYY-MM-DDTHH:MM:SS format`, so the bail never fires.
 
 ### Action
 
@@ -382,7 +594,8 @@ Defines **what** happens to matched users (conditions-type bails only):
 - Bails are scoped to users, not surveys. A bail's `user_id` references the user who created it.
 - The bail name must be unique per user (`UNIQUE (user_id, name)`).
 - The dashboard-server proxy enforces that `req.params.userId` matches the authenticated user.
-- Exodus itself has no auth layer -- it trusts the caller. All access control happens at the dashboard-server boundary.
+- Exodus itself has no auth layer for *who is calling* -- it trusts the caller's identity. All authentication happens at the dashboard-server boundary.
+- What a bail can *reach* is Exodus's own rule, and it is enforced against `credentials`: a conditions query matches only accounts the bail's owner connected, and every `pageid` in a user list must resolve to one. See "The query only matches the owner's own accounts" and "The platform comes from the account, not from the entry".
 
 ---
 
@@ -397,11 +610,12 @@ The core service, deployed in two modes from the same binary:
 
 Key packages:
 - `types/` -- Bail, BailEvent, BailDefinition, UserList, Condition types with validation and custom JSON marshaling
-- `query/` -- Translates condition trees into parameterized SQL with CTEs for elapsed_time and question_response conditions
+- `platform/` -- pure account→transport resolution: the entity mapping, the partition of targets into resolved and skipped, and the skip reasons. No IO
+- `query/` -- Translates condition trees into parameterized SQL with CTEs for elapsed_time and question_response conditions, over the owner-scoped credentials join
 - `executor/` -- Execution loop with timing logic, error isolation per bail, panic recovery
-- `sender/` -- HTTP POST to botserver's `/synthetic` endpoint with rate limiting and dry-run support
+- `sender/` -- HTTP POST to botserver's `/synthetic` endpoint with rate limiting and dry-run support; refuses a target with no usable platform
 - `api/` -- REST handlers, request/response types, db-to-types conversion
-- `db/` -- Database operations (CRUD for bails, events)
+- `db/` -- Database operations (CRUD for bails and events, messaging-credential lookup)
 - `config/` -- Environment variable configuration loading
 
 ### dashboard-server (Node.js)
@@ -425,6 +639,24 @@ resolved user. And `time_of_day`, `timezone` and `datetime` are format-checked
 before the write (`mcp.core.js#validateBailDefinition`), because Exodus
 validates their presence but not their shape and the bail then silently never
 runs — see "Common Issues" below.
+
+That `datetime` check is weaker than the executor's rule: it accepts anything
+`Date.parse` accepts, so a `Z`-suffixed value passes the agent path and is then
+rejected on every tick by `executor/timing.go:119`. Its error message offers
+`"2026-06-01T09:00:00Z"` as the good example, which is the one shape that cannot
+work. The timezone check also runs only for `scheduled`, though `absolute`
+requires a timezone too.
+
+The REST controller forwards `definition` untouched and applies none of these
+checks, so a hand-written POST can carry fields no client offers — a user list
+entry's `platform`, for one, which Exodus's decoder then drops. It forwards
+`enabled` on create as well as update; an omitted `enabled` is left omitted
+rather than sent as `false`, so the default stays Exodus's to choose.
+
+Neither path re-checks which accounts a user list names. That rule lives in
+Exodus, against the `credentials` table it already reads, and both paths relay
+its `400 invalid_pageids` verbatim — see `dashboard-server/README.md`,
+"Bail systems", for why it is deliberately not duplicated.
 
 ### dashboard-client (React)
 
@@ -460,10 +692,10 @@ Each run:
    b. Fetch the last successful execution timestamp from `bail_events`
    c. Call `shouldExecute()` with the timing config, current time, and last execution
    d. If timing matches:
-      - For `conditions` bails: build SQL query, execute it against the database
-      - For `user_list` bails: convert user list directly to targets
+      - For `conditions` bails: build SQL query, execute it against the database; every row arrives with its platform already resolved by the credentials join
+      - For `user_list` bails: look up one messaging credential per distinct `pageid` and partition the entries into resolved targets and skipped ones
       - Apply `EXODUS_MAX_BAIL_USERS` limit if matched count exceeds it
-      - Send bailouts via botserver, record event
+      - Send bailouts via botserver, record event — including a run where everything was skipped
 3. Exit
 
 ### Error Handling
@@ -473,10 +705,12 @@ Three levels of error isolation:
 | Level | Examples | Behavior |
 |-------|----------|----------|
 | **System** | Database unreachable, invalid config | Exit with non-zero code; Kubernetes retries |
-| **Bail-level** | Invalid definition JSON, SQL error, invalid timezone (silent) | Log error, record error event in `bail_events`, continue to next bail |
+| **Bail-level** | Invalid definition JSON, SQL error, timing-check failure | Log error, attempt an error event in `bail_events`, continue to next bail |
 | **User-level** | Botserver returns non-200 for one user | Log warning, continue with remaining users; record partial success |
 
 Each bail is wrapped in panic recovery (`defer/recover`) so one bad bail cannot crash the entire executor run. Panics are caught, logged, and recorded as error events.
+
+The error event is only *attempted*: `recordError` composes its JSON by interpolating the error string unescaped, so any message containing a double quote — which every timing error does — produces invalid JSON, fails on insert, and leaves nothing but a log line. See "Failed executions leave no event" under Common Issues.
 
 **Partial success**: If some user sends fail, `users_bailed` will be less than `users_matched` in the recorded event. This still counts as an execution event (not an error event).
 
@@ -509,11 +743,11 @@ Every bail execution (successful or failed) is recorded in the `bail_events` tab
 | `bail_name` | Snapshot of bail name at event time |
 | `event_type` | `"execution"` for success, `"error"` for failures |
 | `timestamp` | When the event occurred |
-| `users_matched` | Number of users matching the query (or user list size) |
+| `users_matched` | Number of conversations the bail resolved to a reachable account — the query's rows, or the user list minus its skipped entries |
 | `users_bailed` | Number of users successfully bailed (may differ from matched if sends fail) |
 | `definition_snapshot` | Full JSON copy of the bail definition at execution time |
 | `error` | JSON error details (null for successful executions) |
-| `execution_results` | JSON object `{"user_ids": [...]}` listing user IDs successfully bailed in this execution (null for error events) |
+| `execution_results` | JSON object `{"user_ids": [...]}` listing user IDs successfully bailed, plus `"skipped": [{"userid", "pageid", "reason"}]` when a user list named accounts that did not resolve (null for error events) |
 
 The `definition_snapshot` is critical: it captures exactly what definition was active when the bail ran, providing a full audit trail even if the bail is later edited or deleted.
 
@@ -644,7 +878,20 @@ Content-Type: application/json
 }
 ```
 
-Note: The `enabled` field defaults to `false` if omitted from the request body (standard JSON boolean zero value). To create a bail that runs immediately, pass `"enabled": true` explicitly.
+**A bail is created disabled unless the request says otherwise.** `enabled` is forwarded on
+create by every path — the dashboard REST controller, the MCP `create_bail` tool, and a
+direct POST to Exodus. An *omitted* `enabled` stays omitted rather than being sent as
+`false`, so the default is Exodus's alone: `CreateBailRequest.Enabled` is a plain Go `bool`
+and an absent field leaves it at the zero value, `false`. Pass `"enabled": true` to have a
+new bail start firing on the next tick that its timing allows.
+
+`PUT` forwards `enabled` too, as an optional field (`UpdateBailRequest.Enabled` is a
+`*bool`, applied only when present), so enabling or disabling an existing bail does not
+require resending its definition.
+
+**Errors**: 400 (`missing_field` for a missing name, `invalid_definition` for a definition
+that fails validation, `invalid_pageids` for a user list naming an account the caller has not
+connected), 500 (database error).
 
 ### Update Bail
 
@@ -664,6 +911,10 @@ Content-Type: application/json
 Partial update -- only provided fields are changed.
 
 **Response** (200 OK): Updated bail object with last_event.
+
+**Errors**: as for create, plus 404 `bail_not_found`. A replacement `user_list` definition is
+checked the same way a new one is, so an update can be refused with `400 invalid_pageids`
+even though the bail already exists.
 
 ### Delete Bail
 
@@ -698,11 +949,17 @@ Returns full event history for a specific bail, most recent first.
       "users_bailed": 0,
       "definition_snapshot": {},
       "error": null,
-      "execution_results": {"user_ids": ["uid1", "uid2"]}
+      "execution_results": {
+        "user_ids": ["uid1", "uid2"],
+        "skipped": [{"userid": "uid3", "pageid": "page_gone", "reason": "credential_not_found"}]
+      }
     }
   ]
 }
 ```
+
+`skipped` is present only when a `user_list` bail named accounts that did not resolve at
+execution time; the entries that did are in `user_ids`.
 
 ### Get User Events
 
@@ -742,10 +999,13 @@ Content-Type: application/json
   "users": [
     { "userid": "user1", "pageid": "page1" }
   ],
-  "sql": "SELECT DISTINCT s.userid, s.pageid FROM states s WHERE ...",
-  "params": ["value1", "value2"]
+  "sql": "SELECT DISTINCT s.userid, s.pageid, CASE ... END AS platform FROM states s INNER JOIN credentials c ... WHERE ...",
+  "params": ["value1", "value2", "<owner uuid>"]
 }
 ```
+
+The preview runs the same query the executor would, owner-scoped the same way, so its count
+is the count the bail would match — not a superset. The bound owner is the last parameter.
 
 **Response** (200 OK) for user_list bails:
 ```json
@@ -760,7 +1020,7 @@ Content-Type: application/json
 }
 ```
 
-Shows which users match the conditions without creating or executing the bail. For conditions-based bails, the generated SQL and parameters are included in the response, which is useful for debugging complex condition trees. For user_list bails, the user list is returned directly and no SQL is generated.
+Shows which users match the conditions without creating or executing the bail. For conditions-based bails, the generated SQL and parameters are included in the response, which is useful for debugging complex condition trees. For user_list bails, the user list is returned directly and no SQL is generated — but the accounts it names are checked, so a preview answers `400 invalid_pageids` for a list that create would also refuse.
 
 The dashboard-server proxy is a pure pass-through for preview.
 
@@ -805,8 +1065,9 @@ Compound conditions:
 {
   "timing": "immediate|scheduled|absolute",
   "time_of_day": "HH:MM (required if scheduled)",
-  "timezone": "IANA timezone (required if scheduled)",
-  "datetime": "ISO-8601 (required if absolute)"
+  "timezone": "IANA timezone (required if scheduled AND if absolute)",
+  "datetime": "YYYY-MM-DDTHH:MM:SS, no zone suffix (required if absolute); read as wall-clock time in `timezone`",
+  "tolerance_minutes": "integer (scheduled only, optional, default 30)"
 }
 ```
 
@@ -824,10 +1085,17 @@ Compound conditions:
 ```json
 {
   "users": [
-    { "userid": "string", "pageid": "string", "shortcode": "string (destination form)" }
+    {
+      "userid": "string",
+      "pageid": "string (a messaging account connected by the bail's owner)",
+      "shortcode": "string (destination form)"
+    }
   ]
 }
 ```
+
+There is no `platform` field: it is resolved from the account's credential. Any other key in
+an entry is dropped when the definition is decoded.
 
 **BailEventSummary** (returned as `last_event` by the list endpoint):
 
@@ -864,6 +1132,7 @@ Common errors:
 | 400 | `invalid_request` | Request body is not valid JSON |
 | 400 | `missing_field` | Required field is missing (e.g., name) |
 | 400 | `invalid_definition` | Definition fails validation (with details) |
+| 400 | `invalid_pageids` | A `user_list` names one or more accounts the caller has no messaging credential for. The message lists every offending pageid. Returned by create, update and preview |
 | 404 | `bail_not_found` | Bail does not exist or does not belong to user |
 | 500 | `database_error` | Database operation failed |
 
@@ -931,7 +1200,6 @@ POST /users/550e8400-e29b-41d4-a716-446655440001/bails
 {
   "name": "Direct Outreach Batch",
   "description": "Send specific users to specific surveys",
-  "enabled": true,
   "definition": {
     "type": "user_list",
     "user_list": {
@@ -940,11 +1208,23 @@ POST /users/550e8400-e29b-41d4-a716-446655440001/bails
         { "userid": "def456", "pageid": "page_def", "shortcode": "survey_b" }
       ]
     },
-    "execution": { "timing": "immediate" },
+    "execution": {
+      "timing": "absolute",
+      "datetime": "2026-09-20T14:00:00",
+      "timezone": "Africa/Lagos"
+    },
     "action": {}
   }
 }
 ```
+
+Three things in this example are load-bearing. Each `pageid` is one of this user's own
+messaging accounts — `page_abc` may be WhatsApp and `page_def` Messenger, and neither entry
+says so, because the account's credential does; a pageid the caller has not connected makes
+the whole POST fail with `invalid_pageids`. Timing is `absolute` rather than `immediate`, so
+the batch goes out once instead of every minute until someone disables it. And there is no
+`"enabled": true`, so the bail is created dormant — add the field, or `PUT` it afterwards, to
+start the clock running against that `datetime`.
 
 ---
 
@@ -962,7 +1242,7 @@ Data flows through several layers, with transformations at each boundary:
 | `user_list` | JS object | JSON serialization | UserList | JSONB |
 | `timing` | string | unchanged | string | JSONB |
 | `time_of_day` | moment object | `format('HH:mm')` | string | JSONB |
-| `datetime` | moment object | `toISOString()` | string | JSONB |
+| `datetime` | moment object | `format('YYYY-MM-DDTHH:mm:ss')` | string | JSONB |
 | `timezone` | string | unchanged | string | JSONB |
 | `destination_form` | string | unchanged | string | TEXT |
 | `metadata` | JSON string (textarea) | `JSON.parse()` | map[string]interface{} | JSONB |
@@ -990,11 +1270,13 @@ BailDefinition.Validate()
 +-- (if type="user_list") UserList.Validate()
 |   +-- Array must have 1–1000 entries
 |   +-- Each entry must have userid, pageid, shortcode
+|   (whether each pageid is an account the caller owns is NOT decided here: that
+|    needs the database, so the API layer checks it — see "invalid_pageids")
 |
 +-- Execution.Validate()
 |   +-- Check timing is valid (immediate, scheduled, absolute)
 |   +-- If scheduled: require time_of_day and timezone (presence only, not format)
-|   +-- If absolute: require datetime (presence only, not format)
+|   +-- If absolute: require datetime AND timezone (presence only, not format)
 |
 +-- (if type="conditions") Action.Validate()
     +-- Check destination_form is non-empty
@@ -1002,11 +1284,15 @@ BailDefinition.Validate()
 
 Frontend validation is minimal (required field checks via AntD Form rules). The backend is the source of truth for all validation.
 
+`Validate()` is pure: it judges the definition on its own terms. Everything that needs the
+database — which accounts the caller has connected, and what platform each of them sends on —
+is checked in the API layer, after `Validate()` passes and before anything is written.
+
 ### Common Issues
 
-**Time format mismatches**: `time_of_day` must be `HH:MM` format (e.g., `"09:00"`, not `"09:00:00"`). `datetime` must be ISO 8601 / RFC 3339 (e.g., `"2024-06-01T09:00:00Z"`). Format errors are not caught at creation — the bail stores successfully but silently skips execution.
+**Time format mismatches**: `time_of_day` must be `HH:MM` (e.g., `"09:00"`, not `"09:00:00"`). `datetime` must be `YYYY-MM-DDTHH:MM:SS` with **no** zone suffix — `"2026-06-01T09:00:00"`, never `"2026-06-01T09:00:00Z"` and never an `+01:00` offset. The zone comes from the separate `timezone` field, which `absolute` also requires. Format errors are not caught at creation: the bail stores successfully, then fails the timing check on every tick and never fires.
 
-**Invalid timezone**: An unrecognized IANA timezone name (e.g., `"US/Eastern"` instead of `"America/New_York"`) causes the bail to silently never execute. No error event is recorded. Always use canonical IANA zone names.
+**Invalid timezone**: An unrecognized IANA timezone name (e.g., `"US/Eastern"` instead of `"America/New_York"`) makes the bail fail its timing check on every tick, so it never executes. Always use canonical IANA zone names. As with every timing failure, no event is recorded — see "Failed executions leave no event".
 
 **Metadata validation**: The frontend silently falls back to an empty object on invalid JSON input. Users receive no feedback that their JSON was malformed.
 
@@ -1018,7 +1304,25 @@ Frontend validation is minimal (required field checks via AntD Form rules). The 
 
 **Duration format**: Must be `<number> <unit>` exactly. Accepted units: `microseconds`, `milliseconds`, `seconds`, `minutes`, `hours`, `days`, `weeks`, `months`, `years` (singular or plural). Formats like `"4w"`, `"4 weeks ago"`, or `"1.5 hours"` are rejected.
 
-**Enabled on create**: `enabled` defaults to `false` if omitted. New bails will be created as disabled unless you explicitly pass `"enabled": true`.
+**Enabled on create**: a bail whose request says nothing about `enabled` is created disabled. Every path forwards the field, so `"enabled": true` on the POST is honoured; the default belongs to Exodus, and it is `false` (see "Create Bail").
+
+**`invalid_pageids` on a user list**: every `pageid` in the list must be a `facebook_page` or `whatsapp_business` account connected by the bail's owner, because that credential is what decides which platform the bailout is sent on. Create, update and preview all refuse a list that names one the caller does not own, and the message lists each offending pageid. The usual causes are a CSV assembled from someone else's export, a typo in an account id, and an account that has since been disconnected. `list_messaging_accounts` (MCP) or the dashboard's messaging accounts page shows the ids that will pass.
+
+**Skipped targets**: a pageid can be valid when the bail is saved and gone by the time it fires. Those targets are skipped rather than sent, and listed in the event's `execution_results.skipped` with a reason. Check there first when `users_matched` is lower than the list length.
+
+**Failed executions leave no event**: when an execution fails, the executor builds the error event's JSON by string interpolation — `json.RawMessage(fmt.Sprintf(`{"message": "%s"}`, execErr.Error()))` at `exodus/executor/executor.go:313` — with no escaping. Every timing error formats the offending value with `%q`, so the message contains double quotes, the resulting bytes are not valid JSON, and the insert fails while marshalling: `json: error calling MarshalJSON for type json.RawMessage: invalid character '2' after object key:value pair`. `recordError` only logs a warning on that failure (`executor.go:332`), so nothing is written.
+
+The operational consequence: **an empty event history does not mean the bail has not been tried.** A bail with a bad `datetime`, a bad `time_of_day` or an unknown timezone is attempted on every tick and fails every time, showing zero events in the UI and in `chatroach.bail_events`. The reason exists only in the `gbv-exodus-executor` job logs:
+
+```
+kubectl logs -n <ns> --since=1h --prefix \
+  -l app.kubernetes.io/name=exodus,app.kubernetes.io/component=executor \
+  | grep -i "bail\|timing check failed"
+```
+
+The CronJob is `<release>-exodus-executor`; its pods carry the `component: executor` label above. Because it runs every minute, completed pods are pruned quickly — read the logs soon after the tick you care about.
+
+Errors raised after the timing check — a SQL failure, a bad definition — usually carry no quotes and do record normally.
 
 **User list size**: User list bails are limited to 1–1000 users per bail. For larger batches, split across multiple bails.
 
@@ -1041,9 +1345,10 @@ Both patterns produce identical JSON over the wire.
 |--------|----------|---------|-------|
 | Bail type | string field `type` | `BailDefinition.Type` | Omitting defaults to `"conditions"` |
 | Condition union | Plain JS object with `op` or `type` | Custom unmarshal, discriminated union struct | Identical JSON wire format |
-| Time fields | moment.js objects in form state | ISO 8601 or HH:mm strings in JSON | Transformation in `buildDefinition()` |
+| Time fields | moment.js objects in form state | `YYYY-MM-DDTHH:mm:ss` or `HH:mm` strings in JSON | Transformation in `buildDefinition()`; no zone suffix on `datetime` |
 | Metadata | JSON string in textarea | `map[string]interface{}` | Frontend parses on send, stringifies on load |
-| Enabled on create | Part of form values | Used as-is; defaults to false if omitted | Pass `true` explicitly to enable |
+| Enabled on create | Part of form values | Forwarded by the proxy, honoured by Exodus | Omitted entirely when absent; Exodus's default for an absent field is `false` |
+| User list platform | Not collected — CSV is 3 columns | Not a field on `UserListEntry` | Resolved from the account's credential; an extra key in an entry is dropped on decode |
 | Validation depth | Minimal (required fields) | Comprehensive (type enums, format, structure) | Backend is source of truth |
 | Partial update | Full form always submitted | `UpdateBailRequest` supports optional fields | Only provided fields updated on PUT |
 
@@ -1071,7 +1376,7 @@ All configuration is via environment variables.
 | `CHATBASE_USER` | `root` | Database user |
 | `CHATBASE_PASSWORD` | *(empty)* | Database password |
 
-Tables are stored in the `chatroach` schema (e.g., `chatroach.bails`, `chatroach.bail_events`).
+Tables are stored in the `chatroach` schema (e.g., `chatroach.bails`, `chatroach.bail_events`). Exodus also reads `chatroach.states`, `chatroach.responses`, `chatroach.surveys` and `chatroach.credentials`; it writes only `bails` and `bail_events`.
 
 ### Botserver
 
@@ -1100,7 +1405,9 @@ Exodus posts the following JSON to `BOTSERVER_URL` for each user:
 ```json
 {
   "user": "userid",
+  "account_id": "pageid",
   "page": "pageid",
+  "platform": "messenger|whatsapp",
   "event": {
     "type": "bailout",
     "value": {
@@ -1110,6 +1417,11 @@ Exodus posts the following JSON to `BOTSERVER_URL` for each user:
   }
 }
 ```
+
+The event names the whole conversation, as `documentation/event-envelope.md` requires.
+`page` is a deprecated alias for `account_id` and carries the same value. `platform` is
+always one of the two transports — the sender refuses to post a target without one, so no
+bailout leaves exodus for a receiver to guess about.
 
 ---
 
@@ -1127,7 +1439,7 @@ FROM chatroach.bails
 WHERE name ILIKE '%<bail name>%';
 ```
 
-Check recent execution history for a bail (includes the definition snapshot that was active at execution time):
+Check recent execution history for a bail (includes the definition snapshot that was active at execution time). **Zero rows does not mean the bail was never attempted** — a bail whose timing check fails is retried every minute and records nothing; read the executor job logs instead (see "Failed executions leave no event"):
 
 ```sql
 SELECT id, event_type, timestamp, users_matched, users_bailed,
@@ -1148,4 +1460,37 @@ WHERE userid = '<userid>'
   AND question_ref = '<question_ref>'
 ORDER BY timestamp;
 ```
+
+See which targets a run could not reach, and why:
+
+```sql
+SELECT timestamp, users_matched, users_bailed,
+       execution_results->'skipped' AS skipped
+FROM chatroach.bail_events
+WHERE bail_id = '<bail_id>'
+  AND execution_results ? 'skipped'
+ORDER BY timestamp DESC;
+```
+
+Check which platform an account sends on — the same lookup a bail makes:
+
+```sql
+SELECT key AS pageid, entity, userid AS owner
+FROM chatroach.credentials
+WHERE key = '<pageid>'
+  AND entity IN ('facebook_page', 'whatsapp_business');
+```
+
+No row means no bail can reach that account: a conditions bail stops matching it, and a user
+list target on it is skipped as `credential_not_found`. A row whose `userid` is not the bail's
+owner is `credential_not_owned`.
+
+### Before changing how accounts are resolved
+
+`planning/vir-60-predeploy-check.sql` is a read-only report to run against production before
+deploying a change to the credentials join or the user-list resolution. Per enabled bail it
+shows which `(bail, pageid)` populations the owner-scoped join excludes, whether each excluded
+account belongs to another researcher or to nobody, and which user-list pageids would be
+skipped. An empty result means no bail's population changes. It contains only SELECTs and is
+**not** a migration — do not run it through `devops/run-prod-migration.sh`.
 

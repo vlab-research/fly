@@ -5,8 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/vlab-research/exodus/types"
 )
+
+// testOwner stands in for the bail owner whose connected accounts scope the query.
+var testOwner = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 
 // Helper function to create string pointer
 func strPtr(s string) *string {
@@ -33,7 +37,7 @@ func TestBuildQuery_SimpleFormCondition(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -53,8 +57,8 @@ func TestBuildQuery_SimpleFormCondition(t *testing.T) {
 	}
 
 	// Verify parameters: $1=myform
-	if len(params) != 1 {
-		t.Errorf("Expected 1 parameter, got %d", len(params))
+	if len(params) != 2 {
+		t.Errorf("Expected 2 parameters, got %d", len(params))
 	}
 	if params[0] != "myform" {
 		t.Errorf("Expected parameter 'myform', got %v", params[0])
@@ -72,7 +76,7 @@ func TestBuildQuery_SimpleStateCondition(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -81,7 +85,7 @@ func TestBuildQuery_SimpleStateCondition(t *testing.T) {
 		t.Errorf("SQL missing state condition, got: %s", sql)
 	}
 
-	if len(params) != 1 || params[0] != "WAIT_EXTERNAL_EVENT" {
+	if len(params) != 2 || params[0] != "WAIT_EXTERNAL_EVENT" {
 		t.Errorf("Incorrect parameters: %v", params)
 	}
 }
@@ -97,7 +101,7 @@ func TestBuildQuery_ErrorCodeCondition(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -106,7 +110,7 @@ func TestBuildQuery_ErrorCodeCondition(t *testing.T) {
 		t.Errorf("SQL missing error_code condition, got: %s", sql)
 	}
 
-	if len(params) != 1 || params[0] != "TIMEOUT" {
+	if len(params) != 2 || params[0] != "TIMEOUT" {
 		t.Errorf("Incorrect parameters: %v", params)
 	}
 }
@@ -122,7 +126,7 @@ func TestBuildQuery_CurrentQuestionCondition(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -131,7 +135,7 @@ func TestBuildQuery_CurrentQuestionCondition(t *testing.T) {
 		t.Errorf("SQL missing current_question condition, got: %s", sql)
 	}
 
-	if len(params) != 1 || params[0] != "consent" {
+	if len(params) != 2 || params[0] != "consent" {
 		t.Errorf("Incorrect parameters: %v", params)
 	}
 }
@@ -153,7 +157,7 @@ func TestBuildQuery_ANDCondition(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -170,8 +174,8 @@ func TestBuildQuery_ANDCondition(t *testing.T) {
 		t.Errorf("SQL missing state condition, got: %s", sql)
 	}
 
-	if len(params) != 2 {
-		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	if len(params) != 3 {
+		t.Fatalf("Expected 3 parameters, got %d", len(params))
 	}
 	if params[0] != "myform" {
 		t.Errorf("Expected params[0]='myform', got %v", params[0])
@@ -198,7 +202,7 @@ func TestBuildQuery_ORCondition(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -214,7 +218,7 @@ func TestBuildQuery_ORCondition(t *testing.T) {
 		t.Errorf("SQL missing second form condition, got: %s", sql)
 	}
 
-	if len(params) != 2 || params[0] != "form1" || params[1] != "form2" {
+	if len(params) != 3 || params[0] != "form1" || params[1] != "form2" {
 		t.Errorf("Incorrect parameters: %v", params)
 	}
 }
@@ -242,7 +246,7 @@ func TestBuildQuery_NestedLogicalOperators(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -265,8 +269,8 @@ func TestBuildQuery_NestedLogicalOperators(t *testing.T) {
 		t.Errorf("SQL missing error_code condition, got: %s", sql)
 	}
 
-	if len(params) != 3 {
-		t.Fatalf("Expected 3 parameters, got %d", len(params))
+	if len(params) != 4 {
+		t.Fatalf("Expected 4 parameters, got %d", len(params))
 	}
 	if params[0] != "formA" || params[1] != "stateB" || params[2] != "errorC" {
 		t.Errorf("Incorrect parameters: %v", params)
@@ -294,7 +298,7 @@ func TestBuildQuery_ElapsedTimeCondition(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -322,8 +326,8 @@ func TestBuildQuery_ElapsedTimeCondition(t *testing.T) {
 		t.Errorf("SQL missing elapsed time condition, got: %s", sql)
 	}
 
-	if len(params) != 3 {
-		t.Fatalf("Expected 3 parameters, got %d", len(params))
+	if len(params) != 4 {
+		t.Fatalf("Expected 4 parameters, got %d", len(params))
 	}
 	if params[0] != "myform" {
 		t.Errorf("Expected params[0]='myform', got %v", params[0])
@@ -364,7 +368,7 @@ func TestBuildQuery_ComplexWithElapsedTime(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -393,8 +397,8 @@ func TestBuildQuery_ComplexWithElapsedTime(t *testing.T) {
 	}
 
 	// $1=myform, $2=WAIT_EXTERNAL_EVENT, $3=myform(CTE), $4=q1, $5=4 weeks
-	if len(params) != 5 {
-		t.Fatalf("Expected 5 parameters, got %d", len(params))
+	if len(params) != 6 {
+		t.Fatalf("Expected 6 parameters, got %d", len(params))
 	}
 	if params[0] != "myform" {
 		t.Errorf("Expected params[0]='myform', got %v", params[0])
@@ -450,7 +454,7 @@ func TestBuildQuery_MultipleElapsedTimeConditions(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -476,8 +480,8 @@ func TestBuildQuery_MultipleElapsedTimeConditions(t *testing.T) {
 		t.Errorf("SQL missing second elapsed time condition, got: %s", sql)
 	}
 
-	if len(params) != 6 {
-		t.Fatalf("Expected 6 parameters, got %d", len(params))
+	if len(params) != 7 {
+		t.Fatalf("Expected 7 parameters, got %d", len(params))
 	}
 }
 
@@ -528,7 +532,7 @@ func TestSQLInjectionPrevention(t *testing.T) {
 		},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -538,7 +542,7 @@ func TestSQLInjectionPrevention(t *testing.T) {
 	}
 
 	// params[0]=malicious value
-	if len(params) != 1 || params[0] != "'; DROP TABLE states; --" {
+	if len(params) != 2 || params[0] != "'; DROP TABLE states; --" {
 		t.Error("Parameter not correctly captured")
 	}
 
@@ -554,7 +558,7 @@ func TestBuildQuery_NotSimpleCondition(t *testing.T) {
 		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -562,7 +566,7 @@ func TestBuildQuery_NotSimpleCondition(t *testing.T) {
 	if !strings.Contains(sql, "NOT (s.current_state = $1)") {
 		t.Errorf("SQL missing NOT wrapper, got: %s", sql)
 	}
-	if len(params) != 1 || params[0] != "END" {
+	if len(params) != 2 || params[0] != "END" {
 		t.Errorf("Incorrect parameters: %v", params)
 	}
 }
@@ -583,7 +587,7 @@ func TestBuildQuery_NotWrappingAndGroup(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -594,8 +598,8 @@ func TestBuildQuery_NotWrappingAndGroup(t *testing.T) {
 	if !strings.Contains(sql, "AND") {
 		t.Errorf("SQL missing AND inside NOT, got: %s", sql)
 	}
-	if len(params) != 2 {
-		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	if len(params) != 3 {
+		t.Fatalf("Expected 3 parameters, got %d", len(params))
 	}
 }
 
@@ -612,7 +616,7 @@ func TestBuildQuery_NotInsideAnd(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -623,8 +627,8 @@ func TestBuildQuery_NotInsideAnd(t *testing.T) {
 	if !strings.Contains(sql, "NOT (s.current_state = $2)") {
 		t.Errorf("SQL missing NOT(state) condition, got: %s", sql)
 	}
-	if len(params) != 2 {
-		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	if len(params) != 3 {
+		t.Fatalf("Expected 3 parameters, got %d", len(params))
 	}
 }
 
@@ -635,7 +639,7 @@ func TestBuildQuery_QuestionResponseWithResponse(t *testing.T) {
 		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -658,8 +662,8 @@ func TestBuildQuery_QuestionResponseWithResponse(t *testing.T) {
 	}
 
 	// params: $1=myform, $2=q1, $3=yes
-	if len(params) != 3 {
-		t.Fatalf("Expected 3 parameters, got %d", len(params))
+	if len(params) != 4 {
+		t.Fatalf("Expected 4 parameters, got %d", len(params))
 	}
 	if params[0] != "myform" {
 		t.Errorf("Expected params[0]='myform', got %v", params[0])
@@ -679,7 +683,7 @@ func TestBuildQuery_QuestionResponseWithoutResponse(t *testing.T) {
 		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -702,8 +706,8 @@ func TestBuildQuery_QuestionResponseWithoutResponse(t *testing.T) {
 	}
 
 	// params: $1=myform, $2=q1
-	if len(params) != 2 {
-		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	if len(params) != 3 {
+		t.Fatalf("Expected 3 parameters, got %d", len(params))
 	}
 	if params[0] != "myform" {
 		t.Errorf("Expected params[0]='myform', got %v", params[0])
@@ -729,7 +733,7 @@ func TestBuildQuery_ORQuestionResponseConditions(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -748,8 +752,8 @@ func TestBuildQuery_ORQuestionResponseConditions(t *testing.T) {
 	}
 
 	// $1=myform, $2=hpv_girl, $3=2, $4=myform, $5=hpv_girl, $6=3
-	if len(params) != 6 {
-		t.Fatalf("Expected 6 parameters, got %d: %v", len(params), params)
+	if len(params) != 7 {
+		t.Fatalf("Expected 7 parameters, got %d: %v", len(params), params)
 	}
 	if params[2] != "2" {
 		t.Errorf("Expected params[2]='2', got %v", params[2])
@@ -772,7 +776,7 @@ func TestBuildQuery_QuestionResponseIsAccountScoped(t *testing.T) {
 		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, _, err := BuildQuery(def)
+	sql, _, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -786,8 +790,7 @@ func TestBuildQuery_QuestionResponseIsAccountScoped(t *testing.T) {
 }
 
 // The bail event must carry the whole conversation identity: (platform, account,
-// user). Conditions-based bails selected only (userid, pageid) and so posted an
-// empty platform, while user_list bails carried one from the caller's definition.
+// user), and the platform comes from the account's credential.
 func TestBuildQuery_SelectsPlatformAliasedForTheExecutor(t *testing.T) {
 	def := &types.BailDefinition{
 		Conditions: conditionFromJSON(`{"type": "form", "value": "myform"}`),
@@ -795,27 +798,89 @@ func TestBuildQuery_SelectsPlatformAliasedForTheExecutor(t *testing.T) {
 		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, _, err := BuildQuery(def)
+	sql, _, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
 
-	// COALESCE, not a bare column: states.platform is NULL for every row predating
-	// md.platform persistence (97.8% of production rows), and executor.go
-	// type-asserts the value to string, so a NULL yields an empty platform plus a
-	// warning log per target. 'messenger' is exact for those rows -- migration 21's
-	// documented consumer contract.
-	if !strings.Contains(sql, "COALESCE(s.platform, 'messenger')") {
-		t.Errorf("platform must be COALESCEd to 'messenger'; a bare s.platform is NULL for "+
-			"pre-md.platform rows and reaches the executor as an empty platform, got: %s", sql)
+	for _, want := range []string{
+		"CASE WHEN c.entity = 'facebook_page' THEN 'messenger'",
+		"WHEN c.entity = 'whatsapp_business' THEN 'whatsapp'",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("platform must be projected from credentials.entity, missing %q, got: %s", want, sql)
+		}
 	}
 
 	// The alias is load-bearing, not cosmetic: executor.go reads row["platform"].
-	// Unaliased, the value lands under the key "coalesce", the lookup misses, and
-	// the platform silently stays empty -- the fix would ship and do nothing.
-	if !strings.Contains(sql, "AS platform") {
+	// Unaliased, the lookup misses and targets go out with an empty platform.
+	if !strings.Contains(sql, "END AS platform") {
 		t.Errorf("the platform expression must be aliased AS platform, or executor.go's "+
 			"row[\"platform\"] lookup misses and the fix is a silent no-op, got: %s", sql)
+	}
+
+	if strings.Contains(sql, "s.platform") {
+		t.Errorf("states.platform is NULL for ~96%% of rows and must not be read, got: %s", sql)
+	}
+}
+
+// The owner scopes the join, so it must travel as a bound parameter: interpolating
+// it would put a caller-supplied value into the SQL text.
+func TestBuildQuery_OwnerIsABoundParameter(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{"type": "form", "value": "myform"}`),
+		Execution:  types.Execution{Timing: "immediate"},
+		Action:     types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, params, err := BuildQuery(def, testOwner)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	if strings.Contains(sql, testOwner.String()) {
+		t.Errorf("owner id must not be interpolated into the SQL text, got: %s", sql)
+	}
+	if len(params) == 0 || params[len(params)-1] != testOwner {
+		t.Errorf("owner id must be the last bound parameter, got: %v", params)
+	}
+	// $1 is the form condition, so the owner is numbered after it: condition
+	// numbering must not shift when the owner parameter is added.
+	if !strings.Contains(sql, "AND c.userid = $2") {
+		t.Errorf("the credentials join must be scoped to the owner parameter, got: %s", sql)
+	}
+}
+
+// One credentials row per conversation: a second join would multiply the result
+// set and bail the same participant more than once.
+func TestBuildQuery_JoinsCredentialsOnce(t *testing.T) {
+	def := &types.BailDefinition{
+		Conditions: conditionFromJSON(`{
+			"op": "and",
+			"vars": [
+				{"type": "form", "value": "myform"},
+				{"type": "question_response", "form": "myform", "question_ref": "q1", "response": "yes"}
+			]
+		}`),
+		Execution: types.Execution{Timing: "immediate"},
+		Action:    types.Action{DestinationForm: "exit-form"},
+	}
+
+	sql, _, err := BuildQuery(def, testOwner)
+	if err != nil {
+		t.Fatalf("BuildQuery failed: %v", err)
+	}
+
+	if got := strings.Count(sql, "INNER JOIN credentials c ON c.key = s.pageid"); got != 1 {
+		t.Errorf("credentials must be joined exactly once, found %d, got: %s", got, sql)
+	}
+	if !strings.Contains(sql, "AND c.entity IN ('facebook_page','whatsapp_business')") {
+		t.Errorf("the join must be restricted to messaging entities, got: %s", sql)
+	}
+
+	// The CTE joins come after the credentials join, or the generated SQL is invalid.
+	if strings.Index(sql, "INNER JOIN credentials") > strings.Index(sql, "LEFT JOIN question_responses_0") {
+		t.Errorf("the credentials join must precede the CTE joins, got: %s", sql)
 	}
 }
 
@@ -832,7 +897,7 @@ func TestBuildQuery_ElapsedTimeIsAccountScoped(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, _, err := BuildQuery(def)
+	sql, _, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -863,7 +928,7 @@ func TestBuildQuery_MultipleCTEsAllAccountScoped(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, _, err := BuildQuery(def)
+	sql, _, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -885,7 +950,7 @@ func TestBuildQuery_SurveyIDCondition(t *testing.T) {
 		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -901,8 +966,8 @@ func TestBuildQuery_SurveyIDCondition(t *testing.T) {
 	}
 
 	// Verify parameters: $1=survey UUID
-	if len(params) != 1 {
-		t.Fatalf("Expected 1 parameter, got %d", len(params))
+	if len(params) != 2 {
+		t.Fatalf("Expected 2 parameters, got %d", len(params))
 	}
 	if params[0] != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Errorf("Expected params[0]='550e8400-e29b-41d4-a716-446655440000', got %v", params[0])
@@ -916,7 +981,7 @@ func TestBuildQuery_NotSurveyIDCondition(t *testing.T) {
 		Action:     types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -926,8 +991,8 @@ func TestBuildQuery_NotSurveyIDCondition(t *testing.T) {
 		t.Errorf("SQL missing NOT wrapper around surveyid subquery, got: %s", sql)
 	}
 
-	if len(params) != 1 {
-		t.Fatalf("Expected 1 parameter, got %d", len(params))
+	if len(params) != 2 {
+		t.Fatalf("Expected 2 parameters, got %d", len(params))
 	}
 	if params[0] != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Errorf("Expected params[0]='550e8400-e29b-41d4-a716-446655440000', got %v", params[0])
@@ -947,7 +1012,7 @@ func TestBuildQuery_SurveyIDInsideAnd(t *testing.T) {
 		Action:    types.Action{DestinationForm: "exit-form"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatalf("BuildQuery failed: %v", err)
 	}
@@ -963,8 +1028,8 @@ func TestBuildQuery_SurveyIDInsideAnd(t *testing.T) {
 		t.Error("SQL missing AND operator")
 	}
 
-	if len(params) != 2 {
-		t.Fatalf("Expected 2 parameters, got %d", len(params))
+	if len(params) != 3 {
+		t.Fatalf("Expected 3 parameters, got %d", len(params))
 	}
 	if params[0] != "WAIT_EXTERNAL_EVENT" {
 		t.Errorf("Expected params[0]='WAIT_EXTERNAL_EVENT', got %v", params[0])

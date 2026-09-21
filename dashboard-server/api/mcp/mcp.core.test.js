@@ -1035,6 +1035,47 @@ describe('mcp.core: validateBailDefinition', () => {
   });
 });
 
+describe('mcp.core: the user_list schema', () => {
+  const definition = users => ({
+    type: 'user_list',
+    user_list: { users },
+    execution: { timing: 'immediate' },
+  });
+
+  const entry = { userid: 'u1', pageid: 'p1', shortcode: 'dest' };
+
+  it('accepts an entry of userid, pageid and shortcode', () => {
+    expect(validateToolArgs('create_bail', { name: 'b', definition: definition([entry]) }))
+      .to.eql({ ok: true });
+  });
+
+  // The platform belongs to the account the pageid names, so an entry carrying
+  // one is a disagreement waiting to happen rather than a preference.
+  it('rejects an entry carrying a platform, on every tool that takes a definition', () => {
+    const users = [{ ...entry, platform: 'whatsapp' }];
+
+    [
+      ['create_bail', { name: 'b', definition: definition(users) }],
+      ['update_bail', { bail_id: 'b1', definition: definition(users) }],
+      ['preview_bail', { definition: definition(users) }],
+    ].forEach(([tool, args]) => {
+      const { ok, errors } = validateToolArgs(tool, args);
+      expect(ok, tool).to.equal(false);
+      expect(errors[0], tool).to.match(/unknown property "platform"/);
+      expect(errors[0], tool).to.match(/accepted: userid, pageid, shortcode/);
+    });
+  });
+
+  it('tells the agent where the platform comes from and that the account must be theirs', () => {
+    const userList = toolByName('create_bail').inputSchema.properties.definition
+      .properties.user_list;
+
+    expect(userList.description).to.match(/list_messaging_accounts/);
+    expect(userList.description).to.match(/no platform field/i);
+    expect(userList.properties.users.items.properties.pageid.description).to.match(/credential/);
+  });
+});
+
 describe('mcp.core: buildBailRequest', () => {
   const definition = {
     conditions: { type: 'state', value: 'BLOCKED' },

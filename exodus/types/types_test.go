@@ -455,7 +455,7 @@ func TestBailEventValidation(t *testing.T) {
 			name: "valid execution event",
 			event: BailEvent{
 				BailID:       &bailID,
-				UserID:     userID,
+				UserID:       userID,
 				BailName:     "timeout-bail",
 				EventType:    "execution",
 				Timestamp:    time.Now(),
@@ -482,7 +482,7 @@ func TestBailEventValidation(t *testing.T) {
 			name: "invalid event type",
 			event: BailEvent{
 				BailID:       &bailID,
-				UserID:     userID,
+				UserID:       userID,
 				BailName:     "timeout-bail",
 				EventType:    "invalid",
 				Timestamp:    time.Now(),
@@ -509,7 +509,7 @@ func TestBailEventValidation(t *testing.T) {
 			name: "users_bailed exceeds users_matched",
 			event: BailEvent{
 				BailID:       &bailID,
-				UserID:     userID,
+				UserID:       userID,
 				BailName:     "timeout-bail",
 				EventType:    "execution",
 				Timestamp:    time.Now(),
@@ -1001,6 +1001,47 @@ func TestBailDefinitionMarshalUnmarshal_UserList(t *testing.T) {
 		t.Error("Expected UserList to be non-nil")
 	} else if len(def2.UserList.Users) != 2 {
 		t.Errorf("Expected 2 users, got %d", len(def2.UserList.Users))
+	}
+}
+
+// Definitions stored before the platform was resolved from credentials still
+// carry a per-entry "platform". They must keep loading: the executor runs
+// whatever is in the bails table, so a definition that fails to parse is a bail
+// that silently stops firing.
+func TestUserListEntry_StoredPlatformFieldIsIgnored(t *testing.T) {
+	jsonStr := `{
+		"type": "user_list",
+		"user_list": {
+			"users": [
+				{"userid": "user1", "pageid": "page1", "platform": "whatsapp", "shortcode": "form1"}
+			]
+		},
+		"execution": {"timing": "immediate"},
+		"action": {"destination_form": "form1"}
+	}`
+
+	var def BailDefinition
+	if err := json.Unmarshal([]byte(jsonStr), &def); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if err := def.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, expected nil", err)
+	}
+
+	if def.UserList == nil || len(def.UserList.Users) != 1 {
+		t.Fatalf("Expected 1 user in the list, got %+v", def.UserList)
+	}
+	entry := def.UserList.Users[0]
+	if entry.UserID != "user1" || entry.PageID != "page1" || entry.Shortcode != "form1" {
+		t.Errorf("Unexpected entry: %+v", entry)
+	}
+
+	data, err := json.Marshal(&def)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if strings.Contains(string(data), "platform") {
+		t.Errorf("A re-marshalled definition must not carry a platform, got: %s", data)
 	}
 }
 

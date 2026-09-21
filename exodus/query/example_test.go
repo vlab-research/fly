@@ -32,13 +32,13 @@ func ExampleBuildQuery() {
 		},
 	}
 
-	_, params, _ := BuildQuery(def)
+	_, params, _ := BuildQuery(def, testOwner)
 
 	fmt.Printf("SQL generated with %d parameters\n", len(params))
 	fmt.Printf("Parameters: %v\n", params)
 	// Output:
-	// SQL generated with 2 parameters
-	// Parameters: [survey-123 WAITING]
+	// SQL generated with 3 parameters
+	// Parameters: [survey-123 WAITING 11111111-1111-1111-1111-111111111111]
 }
 
 // Test demonstrating the SQL structure for elapsed_time conditions
@@ -66,7 +66,7 @@ func TestQueryStructure_ElapsedTime(t *testing.T) {
 		Action:     types.Action{DestinationForm: "followup"},
 	}
 
-	sql, params, err := BuildQuery(def)
+	sql, params, err := BuildQuery(def, testOwner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +75,8 @@ func TestQueryStructure_ElapsedTime(t *testing.T) {
 	t.Logf("Parameters: %v", params)
 
 	// Verify key components
-	if len(params) != 3 {
-		t.Errorf("Expected 3 parameters, got %d", len(params))
+	if len(params) != 4 {
+		t.Errorf("Expected 4 parameters, got %d", len(params))
 	}
 
 	// Check CTE is created

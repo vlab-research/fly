@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -211,8 +212,8 @@ func TestSendBailouts_DryRun(t *testing.T) {
 	ctx := context.Background()
 
 	users := []UserTarget{
-		{UserID: "user1", PageID: "page1", DestinationForm: "exit-form"},
-		{UserID: "user2", PageID: "page2", DestinationForm: "exit-form"},
+		{UserID: "user1", PageID: "page1", Platform: "messenger", DestinationForm: "exit-form"},
+		{UserID: "user2", PageID: "page2", Platform: "whatsapp", DestinationForm: "exit-form"},
 	}
 
 	ids, err := sender.SendBailouts(ctx, users, map[string]interface{}{"reason": "test"})
@@ -346,6 +347,55 @@ func TestSendBailout_NilMetadata(t *testing.T) {
 	// Verify metadata field is omitted or empty in JSON
 	if receivedEvent.Event.Value.Metadata != nil && len(receivedEvent.Event.Value.Metadata) > 0 {
 		t.Errorf("Expected nil or empty metadata, got %v", receivedEvent.Event.Value.Metadata)
+	}
+}
+
+// A bailout with no usable platform must not reach botserver at all: the
+// receiver would fall back to Messenger and a WhatsApp participant would
+// silently lose the form switch.
+func TestSendBailout_RefusesUnusablePlatform(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+	}{
+		{name: "empty platform", platform: ""},
+		{name: "unknown platform", platform: "telegram"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			sender := New(server.URL, 0, false)
+			target := UserTarget{UserID: "user123", PageID: "page456", Platform: tt.platform}
+
+			err := sender.SendBailout(context.Background(), target, "exit-form", nil)
+			if err == nil {
+				t.Fatalf("expected an error for platform %q, got nil", tt.platform)
+			}
+			if !strings.Contains(err.Error(), "user123") || !strings.Contains(err.Error(), "page456") {
+				t.Errorf("error must name the user and the account, got: %v", err)
+			}
+			if requests != 0 {
+				t.Errorf("expected no HTTP request, got %d", requests)
+			}
+		})
+	}
+}
+
+// The dry-run branch must not be a way past the platform guard: a dry run that
+// accepts what a real run refuses reports a bail that could never happen.
+func TestSendBailout_RefusesUnusablePlatformInDryRun(t *testing.T) {
+	sender := New("http://unused.invalid", 0, true)
+	target := UserTarget{UserID: "user123", PageID: "page456"}
+
+	if err := sender.SendBailout(context.Background(), target, "exit-form", nil); err == nil {
+		t.Fatal("expected an error for an empty platform in dry-run mode, got nil")
 	}
 }
 

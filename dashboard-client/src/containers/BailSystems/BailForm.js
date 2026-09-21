@@ -185,6 +185,8 @@ const BailForm = () => {
     if (bailType === 'user_list') {
       return {
         type: 'user_list',
+        // Each user's platform is resolved server-side from their pageid's
+        // messaging credential; it cannot be set here.
         user_list: { users: userList },
         execution,
         action: {

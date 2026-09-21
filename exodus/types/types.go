@@ -12,9 +12,9 @@ import (
 
 // BailDefinition represents a complete bail configuration
 type BailDefinition struct {
-	Type       string     `json:"type,omitempty"`        // "conditions" (default) or "user_list"
-	Conditions *Condition `json:"conditions,omitempty"`  // Required when Type="conditions"
-	UserList   *UserList  `json:"user_list,omitempty"`   // Required when Type="user_list"
+	Type       string     `json:"type,omitempty"`       // "conditions" (default) or "user_list"
+	Conditions *Condition `json:"conditions,omitempty"` // Required when Type="conditions"
+	UserList   *UserList  `json:"user_list,omitempty"`  // Required when Type="user_list"
 	Execution  Execution  `json:"execution"`
 	Action     Action     `json:"action"`
 }
@@ -158,11 +158,11 @@ func (a *Action) Validate() error {
 	return nil
 }
 
-// UserListEntry represents a single user in a user list bail
+// UserListEntry represents a single user in a user list bail.
+// The platform is not part of it: it is resolved from the account's credential.
 type UserListEntry struct {
 	UserID    string `json:"userid"`
 	PageID    string `json:"pageid"`
-	Platform  string `json:"platform"` // messaging platform ('messenger' | 'whatsapp')
 	Shortcode string `json:"shortcode"` // per-user destination form
 }
 
@@ -220,8 +220,8 @@ type LogicalOperator struct {
 
 // TimeReference specifies what event to measure time from
 type TimeReference struct {
-	Event   string             `json:"event"`
-	Details *TimeEventDetails  `json:"details,omitempty"`
+	Event   string            `json:"event"`
+	Details *TimeEventDetails `json:"details,omitempty"`
 }
 
 // TimeEventDetails provides context for time-based conditions
@@ -417,15 +417,15 @@ func (c *Condition) GetOperator() *LogicalOperator {
 
 // Bail represents a bail configuration stored in the database
 type Bail struct {
-	ID               uuid.UUID      `json:"id"`
-	UserID           uuid.UUID      `json:"user_id"`
-	Name             string         `json:"name"`
-	Description      string         `json:"description"`
-	Enabled          bool           `json:"enabled"`
-	Definition       BailDefinition `json:"definition"`
-	DestinationForm  string         `json:"destination_form"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID              uuid.UUID      `json:"id"`
+	UserID          uuid.UUID      `json:"user_id"`
+	Name            string         `json:"name"`
+	Description     string         `json:"description"`
+	Enabled         bool           `json:"enabled"`
+	Definition      BailDefinition `json:"definition"`
+	DestinationForm string         `json:"destination_form"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // Validate checks if the Bail is valid
