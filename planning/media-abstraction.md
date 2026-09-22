@@ -209,7 +209,9 @@ shown — it is our problem.
 Storage is reached over the S3 API and nothing else.
 
 CockroachDB's GCS backup (`documentation/backups.md`) is not a counterexample: that is
-the *database's* dependency, repointable, and it does not live in our code.
+the *database's* dependency, repointable, and it does not live in our code. Neither is the
+media backup (§4.5): a CronJob beside the application that writes GCS under Workload
+Identity, not an application component.
 
 Consequences: **one S3 client, not a two-backend abstraction**; federated identity is
 moot for the application.
@@ -278,29 +280,16 @@ no handle (§13).
 
 ### 4.5 Backup and capacity
 
-**Backup is DEFERRED — decided 2026-08-10. Not on the critical path; planned separately in
-`planning/media-backup.md` and implemented later.**
+**Backup runs as a nightly CronJob copying MinIO into `gs://vlab-research-media-backups`,
+written under Workload Identity.** It was deferred out of
+the initial deploy and planned separately in `planning/media-backup.md`, which records the
+decisions and the restore rehearsal; `documentation/backups.md` is the operator doc.
 
-The design is unchanged: an **`mc mirror` CronJob to an S3-compatible endpoint set by
-environment** — `BACKUP_S3_ENDPOINT` / `BACKUP_S3_BUCKET` plus credentials, **no provider
-named**; **off-cluster** (a second bucket on the same MinIO shares the same disks and is
-not a backup); residency the operator's choice. Plus **a restore rehearsal**, because a
-backup never restored is not a backup. The manifest is written and reviewable; it is simply
-not in the initial deploy, and its endpoint value is still unset.
-
-**The risk, stated once.** Distributed MinIO covers disk and node failure. It does **not**
+**The risk it covers.** Distributed MinIO covers disk and node failure. It does **not**
 cover loss of the cluster's disks, and media is unrecoverable by construction — we hold the
-only copy of every researcher's file. Until the mirror runs, a cluster-level loss loses the
-media library permanently: assets 404, surveys show broken images, and there is no
+only copy of every researcher's file. Without an off-cluster copy, a cluster-level loss loses
+the media library permanently: assets 404, surveys show broken images, and there is no
 re-upload path because the bytes exist nowhere else.
-
-**Why deferring is safe now, and when it stops being.** The bucket is empty. Exposure is a
-function of *adoption*, not time — it grows with every file uploaded. The feature also ships
-dark, so nothing is uploaded until the media tab reaches users.
-
-> **Trigger: the mirror must be running before researchers are told the media tab exists.**
-> Not before merge, not before the flag flips — before anyone uploads a file they cannot
-> reproduce. An adoption event, not a date.
 
 **Capacity alerting is NOT deferred** and stays in the initial deploy: bucket size and PVC
 utilisation, because media has no lifecycle rule and only grows — unlike exports, which have

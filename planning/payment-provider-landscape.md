@@ -224,6 +224,28 @@ Open items to confirm with sales before building:
 - dLocal Bolivia/Honduras/Argentina: confirm no cash/wallet option is a hard
   limit for those studies, and Argentina CVU target-bank reach.
 
+### Scored against a live corridor — Honduras, 2026-09-16
+
+The first market where this table was applied to a real fielded study. Outcome:
+**nothing in §2–§4 beat the incumbents.** DT One's Honduran minimums are not
+public and it resells the same Tigo/Claro products; dLocal, Transfer365 and every
+bank rail need a DNI plus a bank account in a country where ~70% lack financial
+access; Thunes/TerraPay publish no Honduran wallet coverage; Tremendous has no
+Honduran instrument. **No aggregator sells a Honduran wallet** — DingConnect's own
+HN catalogue is four telcos and ~60 gaming gift cards.
+
+Two lessons that generalise beyond Honduras:
+
+1. **Check the incumbent's catalogue before shopping.** The cheapest Honduran
+   product was an unused SKU inside DingConnect, at half the price of the one we
+   had pinned. A provider search would never have found it.
+2. **A published minimum is a default, not a floor.** DingConnect ran a $0.10
+   Honduran minimum on our account and reverted it silently. When a corridor
+   prices too high, the first move is a commercial ask on the account we already
+   hold, not an integration.
+
+Full workings: `projects/lac-healthy-diets/honduras-payment-plan.md`.
+
 ---
 
 ## 8. Sources

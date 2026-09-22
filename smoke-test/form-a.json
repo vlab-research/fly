@@ -67,17 +67,17 @@
     },
     {
       "type": "multiple_choice",
-      "ref": "test_payment",
-      "title": "Would you like to test the payment feature?",
+      "ref": "test_payment_reloadly",
+      "title": "Would you like to test the Reloadly payment feature? This sends 300 NGN of real mobile credit.",
       "properties": {
         "choices": [
           {
             "label": "Yes",
-            "ref": "choice_payment_yes"
+            "ref": "choice_payment_reloadly_yes"
           },
           {
             "label": "No",
-            "ref": "choice_payment_no"
+            "ref": "choice_payment_reloadly_no"
           }
         ],
         "allow_multiple_selection": false,
@@ -89,7 +89,7 @@
     },
     {
       "type": "multiple_choice",
-      "ref": "operator",
+      "ref": "operator_reloadly",
       "title": "Please select your mobile network operator. For testing, select MTN Nigeria.",
       "properties": {
         "choices": [
@@ -115,7 +115,7 @@
     },
     {
       "type": "phone_number",
-      "ref": "phone",
+      "ref": "phone_reloadly",
       "title": "Enter your phone number. For testing, use +2348061147388 (MTN Nigeria).",
       "properties": {
         "default_country_code": "ng"
@@ -126,18 +126,18 @@
     },
     {
       "type": "statement",
-      "ref": "payment_wait",
-      "title": "Processing 300 NGN mobile credit payment...",
+      "ref": "payment_wait_reloadly",
+      "title": "Processing 300 NGN mobile credit payment via Reloadly...",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue",
-        "description": "{\"type\":\"wait\",\"wait\":{\"type\":\"external\",\"value\":{\"type\":\"payment:reloadly\",\"id\":\"smokepay1\"}},\"payment\":{\"provider\":\"reloadly\",\"key\":\"vlab\",\"details\":{\"number\":\"{{field:phone}}\",\"amount\":300,\"country\":\"NG\",\"operator\":\"{{field:operator}}\",\"tolerance\":0,\"id\":\"smokepay1\"}}}"
+        "description": "{\"type\":\"wait\",\"wait\":{\"type\":\"external\",\"value\":{\"type\":\"payment:reloadly\",\"id\":\"smokepay1\"}},\"payment\":{\"provider\":\"reloadly\",\"key\":\"vlab\",\"details\":{\"number\":\"{{field:phone_reloadly}}\",\"amount\":300,\"country\":\"NG\",\"operator\":\"{{field:operator_reloadly}}\",\"tolerance\":0,\"id\":\"smokepay1\"}}}"
       }
     },
     {
       "type": "statement",
-      "ref": "payment_success",
-      "title": "Payment succeeded! 300 NGN mobile credit has been sent to your number.",
+      "ref": "payment_success_reloadly",
+      "title": "Reloadly payment succeeded! 300 NGN mobile credit has been sent to your number.",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue"
@@ -145,8 +145,8 @@
     },
     {
       "type": "statement",
-      "ref": "payment_failure",
-      "title": "Payment failed. Error: {{hidden:e_payment_reloadly_error_message}}",
+      "ref": "payment_failure_reloadly",
+      "title": "Reloadly payment failed. Error: {{hidden:e_payment_reloadly_error_message}}",
       "properties": {
         "hide_marks": false,
         "button_text": "Continue"
@@ -154,17 +154,108 @@
     },
     {
       "type": "multiple_choice",
-      "ref": "try_again",
-      "title": "Would you like to try again with a different number?",
+      "ref": "try_again_reloadly",
+      "title": "Would you like to try the Reloadly payment again with a different number?",
       "properties": {
         "choices": [
           {
             "label": "Yes",
-            "ref": "choice_yes"
+            "ref": "choice_try_again_reloadly_yes"
           },
           {
             "label": "No",
-            "ref": "choice_no"
+            "ref": "choice_try_again_reloadly_no"
+          }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": {
+        "required": false
+      }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "test_payment_dingconnect",
+      "title": "Would you like to test the DingConnect payment feature? This sends 5 BOB of real mobile credit to a Bolivian number.",
+      "properties": {
+        "choices": [
+          {
+            "label": "Yes",
+            "ref": "choice_payment_dingconnect_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_payment_dingconnect_no"
+          }
+        ],
+        "allow_multiple_selection": false,
+        "vertical_alignment": true
+      },
+      "validations": {
+        "required": false
+      }
+    },
+    {
+      "type": "short_text",
+      "ref": "ding_run_tag",
+      "title": "Type a short tag for this payment attempt, letters and digits only (e.g. 0904a). DingConnect refuses a repeated reference, so every attempt needs a tag you have not used before.",
+      "validations": {
+        "required": false
+      }
+    },
+    {
+      "type": "phone_number",
+      "ref": "phone_dingconnect",
+      "title": "Enter a Bolivian mobile number that can receive top-up, with the country code: +591 7XXXXXXX.",
+      "properties": {
+        "default_country_code": "bo"
+      },
+      "validations": {
+        "required": false
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "payment_wait_dingconnect",
+      "title": "Processing 5 BOB mobile credit payment via DingConnect...",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue",
+        "description": "{\"type\":\"wait\",\"responseMessage\":\"Still working on the payment, one moment.\",\"wait\":{\"type\":\"external\",\"value\":{\"type\":\"payment:dingconnect\",\"id\":\"smokeding1\"}},\"payment\":{\"provider\":\"dingconnect\",\"key\":\"DINGCONNECT_API_KEY\",\"details\":{\"id\":\"smokeding1\",\"account_number\":\"{{field:phone_dingconnect|e164}}\",\"distributor_ref\":\"smokeding_{{field:ding_run_tag}}\",\"amount\":5,\"amount_currency\":\"BOB\",\"tolerance\":5}}}"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "payment_success_dingconnect",
+      "title": "DingConnect payment succeeded! 5 BOB mobile credit has been sent.\npath: {{hidden:e_payment_dingconnect_resolution_path}}\noperator: {{hidden:e_payment_dingconnect_resolution_operator}}\nsku: {{hidden:e_payment_dingconnect_resolution_sku_code}} at {{hidden:e_payment_dingconnect_resolution_send_value}} USD\ndelivered: {{hidden:e_payment_dingconnect_resolution_delivered}} {{hidden:e_payment_dingconnect_resolution_currency}}",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "statement",
+      "ref": "payment_failure_dingconnect",
+      "title": "DingConnect payment failed.\nerror_code: {{hidden:e_payment_dingconnect_error_code}}\nresolution_reason: {{hidden:e_payment_dingconnect_resolution_reason}}\n{{hidden:e_payment_dingconnect_error_message}}",
+      "properties": {
+        "hide_marks": false,
+        "button_text": "Continue"
+      }
+    },
+    {
+      "type": "multiple_choice",
+      "ref": "try_again_dingconnect",
+      "title": "Would you like to try the DingConnect payment again with a new tag and number?",
+      "properties": {
+        "choices": [
+          {
+            "label": "Yes",
+            "ref": "choice_try_again_dingconnect_yes"
+          },
+          {
+            "label": "No",
+            "ref": "choice_try_again_dingconnect_no"
           }
         ],
         "allow_multiple_selection": false,
@@ -627,6 +718,16 @@
     "pageid",
     "e_payment_reloadly_success",
     "e_payment_reloadly_error_message",
+    "e_payment_dingconnect_success",
+    "e_payment_dingconnect_error_message",
+    "e_payment_dingconnect_error_code",
+    "e_payment_dingconnect_resolution_reason",
+    "e_payment_dingconnect_resolution_path",
+    "e_payment_dingconnect_resolution_operator",
+    "e_payment_dingconnect_resolution_sku_code",
+    "e_payment_dingconnect_resolution_send_value",
+    "e_payment_dingconnect_resolution_delivered",
+    "e_payment_dingconnect_resolution_currency",
     "e_handover_metadata_smoke_echo",
     "e_handover_metadata_echo_text",
     "e_moviehouse_play_id",
@@ -840,14 +941,14 @@
     },
     {
       "type": "field",
-      "ref": "test_payment",
+      "ref": "test_payment_reloadly",
       "actions": [
         {
           "action": "jump",
           "details": {
             "to": {
               "type": "field",
-              "value": "operator"
+              "value": "operator_reloadly"
             }
           },
           "condition": {
@@ -855,11 +956,11 @@
             "vars": [
               {
                 "type": "field",
-                "value": "test_payment"
+                "value": "test_payment_reloadly"
               },
               {
                 "type": "choice",
-                "value": "choice_payment_yes"
+                "value": "choice_payment_reloadly_yes"
               }
             ]
           }
@@ -869,7 +970,7 @@
           "details": {
             "to": {
               "type": "field",
-              "value": "test_handoff"
+              "value": "test_payment_dingconnect"
             }
           },
           "condition": {
@@ -881,14 +982,14 @@
     },
     {
       "type": "field",
-      "ref": "payment_wait",
+      "ref": "payment_wait_reloadly",
       "actions": [
         {
           "action": "jump",
           "details": {
             "to": {
               "type": "field",
-              "value": "payment_success"
+              "value": "payment_success_reloadly"
             }
           },
           "condition": {
@@ -910,7 +1011,7 @@
           "details": {
             "to": {
               "type": "field",
-              "value": "payment_failure"
+              "value": "payment_failure_reloadly"
             }
           },
           "condition": {
@@ -922,7 +1023,149 @@
     },
     {
       "type": "field",
-      "ref": "payment_success",
+      "ref": "payment_success_reloadly",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "test_payment_dingconnect"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "try_again_reloadly",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "operator_reloadly"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "try_again_reloadly"
+              },
+              {
+                "type": "choice",
+                "value": "choice_try_again_reloadly_yes"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "test_payment_dingconnect"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "test_payment_dingconnect",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "ding_run_tag"
+            }
+          },
+          "condition": {
+            "op": "is",
+            "vars": [
+              {
+                "type": "field",
+                "value": "test_payment_dingconnect"
+              },
+              {
+                "type": "choice",
+                "value": "choice_payment_dingconnect_yes"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "test_handoff"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "payment_wait_dingconnect",
+      "actions": [
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "payment_success_dingconnect"
+            }
+          },
+          "condition": {
+            "op": "equal",
+            "vars": [
+              {
+                "type": "hidden",
+                "value": "e_payment_dingconnect_success"
+              },
+              {
+                "type": "constant",
+                "value": "true"
+              }
+            ]
+          }
+        },
+        {
+          "action": "jump",
+          "details": {
+            "to": {
+              "type": "field",
+              "value": "payment_failure_dingconnect"
+            }
+          },
+          "condition": {
+            "op": "always",
+            "vars": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "field",
+      "ref": "payment_success_dingconnect",
       "actions": [
         {
           "action": "jump",
@@ -941,14 +1184,14 @@
     },
     {
       "type": "field",
-      "ref": "try_again",
+      "ref": "try_again_dingconnect",
       "actions": [
         {
           "action": "jump",
           "details": {
             "to": {
               "type": "field",
-              "value": "operator"
+              "value": "ding_run_tag"
             }
           },
           "condition": {
@@ -956,11 +1199,11 @@
             "vars": [
               {
                 "type": "field",
-                "value": "try_again"
+                "value": "try_again_dingconnect"
               },
               {
                 "type": "choice",
-                "value": "choice_yes"
+                "value": "choice_try_again_dingconnect_yes"
               }
             ]
           }

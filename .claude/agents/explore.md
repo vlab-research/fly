@@ -13,6 +13,7 @@ Every task you perform MUST include updating living documentation:
 - **Project `README.md`** — update the relevant `<project>/README.md` with any architectural decisions, patterns discovered, or setup changes
 - **Never overwrite** existing README.md content — append or update relevant sections
 - **Document the "why"** — capture reasoning, trade-offs, and alternatives considered
+- **The "why" goes in markdown, not code comments.** Code comments follow the "Code Comments" rules in CLAUDE.md: no changelogs, no notes to reviewers, only decisions and intent the code cannot express
 - If you discover something about the codebase that isn't documented, document it before finishing
 
 ## Exploration Process

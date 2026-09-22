@@ -1,17 +1,20 @@
 # Run `devops/backfill` as an in-cluster Job (Phase 1.5)
 
-**Status 2026-08-26 23:30 UTC: THE PRODUCTION BACKFILL IS RUNNING.** Everything
-that had to be built is built, tested and shipped; the run itself is in flight
-and unattended. This is the last step of the conversation-identity rollout, and
-finishing it completes Phase 1.
+**Status 2026-09-04: THE PRODUCTION BACKFILL IS COMPLETE AND CLOSED OUT.**
+It finished **2026-08-29 00:20:53 UTC** — 5,351 batches, 106,931,189 rows,
+`chatroach.backfill_cursor done=t`, **48.8 h wall clock**. Phase 1 of the
+conversation-identity rollout is done; **2.1 is next**
+(`planning/multi-platform-plan.md`).
 
-**If you are picking this up cold, read three sections and skip the rest:**
-[YOU ARE HERE](#-you-are-here--the-run-is-in-flight-started-2026-08-26-233024-utc)
-for state and how to check on it,
-[WHEN IT FINISHES](#-when-it-finishes--do-these-in-this-order) for what to do
-next, [IF SOMETHING GOES WRONG](#-if-something-goes-wrong) for recovery.
-Everything below those is the record of how it was built and why — reference, not
-instructions.
+**There is nothing to do here.** This file is now a record, not a runbook.
+
+**If you are picking this up cold:** read
+[YOU ARE HERE](#-you-are-here--close-out-2026-09-04) — it has the outcome, the
+state of all four close-out steps, and the three things this runbook did not
+anticipate. The captured pod logs and their reconciliation live in
+`devops/backfill-logs/README.md`. Everything else below is the record of how it
+was built and why, kept because the next one-shot Job in this chart will hit the
+same traps — reference, not instructions.
 
 | the work | state |
 |---|---|
@@ -25,8 +28,8 @@ instructions.
 | the Job **rehearsed in-cluster on vstag** | **DONE, PASSED** — see below |
 | migration 31 applied to **vprod** | **DONE 2026-08-26** — 7 columns, `hsh`/`userid` nullable, `root` ALL, no grant to the service user |
 | bounded first pass on vprod (`maxBatches: 20`) | **DONE** — 399,779 rows, measured 30.1 s/batch for committed writes |
-| **the backfill itself** | **RUNNING since 2026-08-26 23:30:24 UTC** (revision 652), projected finish 2026-08-28 ~14:40–20:00 UTC |
-| disarming it afterwards | **NOT DONE — this is the next human action.** See "WHEN IT FINISHES" |
+| **the backfill itself** | **DONE — 2026-08-26 23:30:24 → 2026-08-29 00:20:53 UTC**, 5,351 batches, 106,931,189 rows, `done=t` |
+| disarming it afterwards | **DONE 2026-09-04** — `enabled: false` applied at helm revision 660; Job pruned, `NotFound` |
 
 ### The in-cluster rehearsal, vstag 2026-08-26 (helm revision 87)
 
@@ -100,24 +103,125 @@ deployment strategy.
 
 ---
 
-## ⏳ YOU ARE HERE — the run is in flight, started 2026-08-26 23:30:24 UTC
+## ✅ YOU ARE HERE — close-out, 2026-09-04
 
-helm revision 652 on vprod, `messagesBackfill.enabled: true`,
-`maxBatches: 20000`. **Nothing needs doing while it runs.** It is unattended by
-design: the cursor is durable and `backoffLimit: 3` restarts it on failure.
+**The run is over and closed out. Nothing here is an instruction.**
 
-**Projected finish: 2026-08-28, between ~14:40 and ~20:00 UTC.** The spread is
-real, not hedging — the bounded pass measured 30.1 s/batch and the first 47
-batches of the full run ran at 26.4 s/batch. Re-derive from the cursor rather
-than trusting either:
+### Outcome
+
+| | |
+|---|---|
+| started | 2026-08-26 23:30:24 UTC (Job created 23:30:40), helm revision 652 |
+| **finished** | **2026-08-29 00:20:53.957156 UTC** (Job completed 00:20:58) |
+| **duration** | **48.8 h** actual |
+| batches | **5,351** |
+| rows updated | **106,931,189** |
+| cursor | `done = t` |
+| Job status | `succeeded: 1`, **`failed: 3`** |
+
+Read back from the database, not from the tool:
 
 ```sql
 SELECT batches, rows_updated, done, updated_at FROM chatroach.backfill_cursor;
+-- messages-account-backfill | 5351 | 106931189 | t | 2026-08-29 00:20:53.957156+00
 ```
 
-`batches` counts from the very beginning (the bounded pass's 20 included), and
-~5,350 is the whole table. That query is the cheap progress check — it does not
-scan `messages`.
+The captured pod logs reconcile to that row exactly — `5090 + 110 + 5 + 146 =
+5,351` and `101,729,634 + 2,198,295 + 99,939 + 2,903,321 = 106,931,189`. Full
+record, including the pod chain and the gapless handoffs:
+`devops/backfill-logs/README.md`.
+
+### The projection was ~10 h optimistic — and the same method will size 3.2
+
+Projected finish was 2026-08-28 ~14:40–20:00 UTC, from the bounded pass's
+**30.1 s/batch** and the full run's first 47 batches at **26.4 s/batch**. The run
+sustained **~32.8 s/batch** and landed 2026-08-29 00:20 — roughly **10 hours**
+past the late end of the window.
+
+**The early sample was optimistic, not the late one.** An early window catches a
+cold cache, low MVCC garbage and an uncontended cluster; the cost per row rises as
+the run's own garbage accumulates. **Phase 3.2's sentinel pass will be sized by
+exactly this method** (`planning/messages-account-not-null-todo.md`) — size it off
+32.8 s/batch sustained, and treat any first-hour measurement as a floor.
+
+### The four close-out steps, as actually done
+
+**1. Capture the logs — DONE**, to `devops/backfill-logs/` (three pod logs,
+`job.yaml`, `job-describe.txt`, `pods.yaml`), committed before anything was
+disarmed.
+
+> ⚠️ **One pod's log was lost, and not to this process.** `backoffLimit: 3` was
+> consumed in full, so **four** pods ran and only **three** survived: routine
+> Kubernetes garbage collection had already taken the first, and with it the
+> per-batch detail for **batches 1–5090 of 5,351 (95.1%)** — roughly the first
+> 44 hours. **That loss predates the capture and is not recoverable.** The
+> *totals* are fully reconciled against the cursor, so the outcome is not in
+> doubt; only the per-batch timing history of the bulk of the run is gone.
+
+**2. Migration 26's §4 REMOVAL GATE — DELIBERATELY NOT RUN.**
+`devops/migrations/26-messages-account.sql:154-165`. This step of the runbook was
+skipped on purpose, and the reasoning is recorded so nobody runs it by accident:
+
+- Costed at **399.3 GiB / 16,532 ranges**, no writes.
+- `statement_timeout` on this cluster is **`0` — unlimited**. Nothing will stop
+  it.
+- All three pod failures during the run were `57P01 server is shutting down`,
+  i.e. CockroachDB nodes restarting under it. A single unbatched scan that meets
+  one returns **nothing** after hours of work.
+
+**Recommendation on record: slice it over the `hsh` keyspace and sum the
+slices**, the same way the backfill itself walked the table. Schedule it
+deliberately. **Do not run it casually, and do not put it on a dashboard.**
+
+**3. Disarm — DONE AND APPLIED 2026-09-04.**
+`messagesBackfill.enabled: false` in `devops/values/production.yaml:1415`, applied
+with `helm upgrade` → **revision 660** (2026-09-04 21:07:43). Helm pruned the Job:
+`kubectl get job -n vprod gbv-messages-backfill` now returns
+`Error from server (NotFound)`. Re-arming would be inert anyway — the cursor
+records `done=t`, so the tool exits `ALREADY DONE`.
+
+**4. Unattributable count — RECORDED, and it is 18x the planned figure.**
+`SHOW STATISTICS FOR TABLE messages` gives `{account_id} | row_count 108,074,354 |
+null_count 54,960 | created 2026-09-03 15:47:18+00` — **~55,000, against the
+~3,000 Phase 3.2 was written around**, and consistent with the bounded pass's
+independent ~48,800 extrapolation. It is a **statistics estimate, not an exact
+count**; the exact number is what step 2's gate would produce. Consequences for
+the sentinel pass live in **`planning/messages-account-not-null-todo.md`**, which
+now leads with the correction.
+
+### Three things this runbook did not anticipate
+
+Each cost something, and each generalises to the next one-shot Job in this chart.
+
+1. **`backoffLimit: 3` was not headroom — it was *exact*.** It permits four pods;
+   four ran. One more `57P01` in that ~68-minute window on 08-28 would have marked
+   the Job `Failed` and stranded the run **261 batches from the end**, needing the
+   manual delete-and-reapply below. This file called it ample. **Future one-shots
+   should set a much larger `backoffLimit`**: resume is free and idempotent (the
+   durable cursor plus `AND account_id IS NULL`), so extra retries cost nothing
+   and a bounded one nearly cost the run.
+2. **Routine pod GC takes logs while the Job still sits `Complete`.** "Capture the
+   logs before disarming" was correct and insufficient — nothing deletes the *Job*
+   on its own, but Kubernetes had already reclaimed the first pod long before
+   anyone reached the close-out, taking 95% of the per-batch history. **Capture
+   per-pod as the run goes**, on each restart, not once at the end.
+3. **The final pod's `DONE` line reports only its own counters — it under-reports
+   the run by 40x.** Pod 3 printed `DONE: reached the end of the table. 2903321
+   rows updated across 146 batches.` The run was 106,931,189 rows across 5,351
+   batches. The cumulative figures live **only** in `backfill_cursor` and in each
+   pod's `RESUMING` line. Anyone reading the last pod's log alone will record the
+   wrong number.
+
+---
+
+### Historical: how it was watched while it ran
+
+```bash
+kubectl get job -n vprod gbv-messages-backfill
+kubectl logs -n vprod job/gbv-messages-backfill --tail=5      # never -f for two days
+for p in 0 1 2 3; do kubectl exec -n vprod gbv-cockroachdb-$p -- \
+  df -h /cockroach/cockroach-data | tail -1; done
+```
 
 It **resumed** rather than restarted when it was widened, which is the durable
 cursor working across a Job deletion in production:
@@ -129,29 +233,33 @@ batch 1: updated 19996 rows (total 19996) cursor hsh=-9151006287849897919 ...
 ```
 
 Batch 1 begins immediately past the bounded pass's batch-20 boundary — no gap,
-no overlap.
+no overlap. It did the same thing three more times, across three node restarts.
 
-### Checking on it
-
-```bash
-kubectl get job -n vprod gbv-messages-backfill
-kubectl logs -n vprod job/gbv-messages-backfill --tail=5      # never -f for two days
-for p in 0 1 2 3; do kubectl exec -n vprod gbv-cockroachdb-$p -- \
-  df -h /cockroach/cockroach-data | tail -1; done
-```
-
-Byte-exact disk at the start, for comparison: **405.28 GiB used / 538.36 GiB
-available** across the four nodes. Projected garbage ~335 GiB, so ~203 GiB
-margin — and `gc.ttlseconds` is 90000 (25 h), so on a ~40-hour run the first
-~15 hours of garbage is collected *during* it. Peak will land below 335 GiB.
+Byte-exact disk at the start: **405.28 GiB used / 538.36 GiB available** across
+the four nodes. Projected garbage ~335 GiB, ~203 GiB margin, `gc.ttlseconds`
+90000 (25 h) so the first ~15 hours of garbage was collected *during* the run.
+Disk never became a problem.
 
 ---
 
 ## ▶ WHEN IT FINISHES — do these, in this order
 
+> **HISTORICAL. All five steps were worked through on 2026-09-04.** What actually
+> happened — including step 2 being deliberately deferred, and the log capture
+> arriving after Kubernetes had already GC'd the first pod — is in "YOU ARE HERE"
+> above. This is kept as the checklist a future one-shot Job should start from.
+
 **1. Capture the logs BEFORE anything else.** There is no `ttlSecondsAfterFinished`,
 so nothing deletes the Job on its own — but step 3 does, and it takes the pod and
 its logs with it.
+
+> ⚠️ **Necessary but not sufficient, learned the hard way.** Nothing deletes the
+> *Job*, but Kubernetes garbage-collects individual *pods* on its own schedule
+> while the Job sits `Complete`. On this run that took the first pod and 95% of
+> the per-batch history before anyone got here. **Capture per-pod as the run goes
+> — on every restart — not once at the end.** And use
+> `kubectl logs -l job-name=<job> --tail=-1` per pod: `logs job/<name>` reads one
+> pod of however many ran.
 
 ```bash
 kubectl logs -n vprod job/gbv-messages-backfill > /tmp/backfill-prod-final.log
@@ -164,6 +272,14 @@ Success looks like `DONE: reached the end of the table. N rows updated across M
 batches.` and `1 succeeded, 0 failed`. Anything ending `STOPPED at --max-batches`
 means it hit the safety stop rather than the table's end — see "If it stops
 short" below.
+
+> ⚠️ **`N` and `M` on that `DONE` line are the LAST POD's counters, not the
+> run's.** This run ended `2903321 rows updated across 146 batches` and had
+> actually done **106,931,189 rows across 5,351** — an under-report by **40x**.
+> The cumulative totals live only in `chatroach.backfill_cursor` and in each
+> pod's `RESUMING` line. Take the numbers from step 2, never from step 1.
+> (`1 succeeded, 0 failed` is also not what success looked like: it was
+> `1 succeeded, 3 failed`, all three node restarts.)
 
 **2. Verify against the database, not the tool's output.** This project has been
 burned by tools reporting success they did not achieve (`run-migration.sh`, see
@@ -178,8 +294,13 @@ SELECT count(*) AS total, count(account_id) AS with_acct,
 
 `still_null` **will not be zero and should not be** — those are the permanently
 unattributable rows. The real gate is migration 26 §4: rows still *attributable
-but not yet attributed* must be **0**. Run that one, it is the only one that
-proves completion.
+but not yet attributed* must be **0**. It is the only one that proves completion.
+
+> ⚠️ **On this run that gate was deliberately NOT run**, and completion rests on
+> the cursor's `done=t` plus the pod-log reconciliation instead. The gate is a
+> **399.3 GiB / 16,532-range** scan against an unlimited `statement_timeout`, on a
+> cluster that restarted nodes under this Job three times. **Slice it over the
+> `hsh` keyspace and sum**; schedule it. See "YOU ARE HERE" step 2.
 
 **3. Disarm it.** `messagesBackfill.enabled: false` in
 `devops/values/production.yaml`, then `helm upgrade gbv vlab -f
@@ -187,16 +308,23 @@ values/production.yaml -n vprod`. Helm prunes the Job. A one-shot must not be
 left armed. (Re-enabling later would exit immediately with `ALREADY DONE`
 anyway, because the cursor row records `done`.)
 
-**4. Record the unattributable count — Phase 3.2 depends on it.** Take
-`still_null` from step 2 to `planning/messages-account-not-null-todo.md`, which
-is written around ~3,000 and is **probably wrong by an order of magnitude**: the
-bounded pass implies ~48,800. That document carries the correction and the
-reasoning; replace the estimate with the real number.
+**4. Record the unattributable count — Phase 3.2 depends on it. DONE, and it was
+18x the planned figure.** `SHOW STATISTICS FOR TABLE messages`:
+`{account_id} | row_count 108,074,354 | null_count 54,960 | created 2026-09-03
+15:47:18+00`. So **~55,000**, not the ~3,000
+`planning/messages-account-not-null-todo.md` was written around — corroborated by
+the bounded pass's independent ~48,800. **It is a statistics estimate, not an
+exact count**; the exact number is what step 2's gate would give. That document
+now leads with the correction and with what ~55,000 does to the sentinel pass
+(batching becomes mandatory; `''` becomes a 55k-row population).
 
-**5. Update the plans.** `planning/multi-platform-plan.md` 1.5 → DONE with the
-figures, and the "Status" line at its head. Then Phase 1 is complete and **2.1 is
+**5. Update the plans. DONE 2026-09-04.** `planning/multi-platform-plan.md` 1.5 →
+DONE with the figures, its "Status" line, its "State of the world" table, and
+`CLAUDE.md` § "Work Currently In Flight". Phase 1 is complete and **2.1 is
 next** (`STRICT_EVENT_ENVELOPE` → true, gated on `CHAT_EVENTS_ENVELOPE_MISSING`
-reading zero for 24h).
+reading zero for 24h) — **but read 2.1's entry first: its recorded risk
+assessment assumes WhatsApp is test-only, and WhatsApp is now 90% of live
+conversations.**
 
 Optionally drop the cursor row — but keeping it is free and is the only durable
 record that this ran:
@@ -212,8 +340,15 @@ DELETE FROM chatroach.backfill_cursor WHERE cursor_key = 'messages-account-backf
 
 **The pod died / restarted.** Nothing to do. `backoffLimit: 3` recreates it and
 it resumes from `chatroach.backfill_cursor` automatically — verified in
-production. Confirm with `kubectl get job` (`BACKOFF` count) and check the new
-pod's log says `RESUMING from the stored cursor:`.
+production, three times over. Confirm with `kubectl get job` (`BACKOFF` count) and
+check the new pod's log says `RESUMING from the stored cursor:`.
+
+> ⚠️ **`backoffLimit: 3` was treated here as ample headroom. It was not — it was
+> exact.** It permits four pods and exactly four ran (three `57P01 server is
+> shutting down`, one success). A fourth failure would have marked the Job
+> `Failed` **261 batches from the end**. Since resume is free and idempotent,
+> **a future one-shot should set a far larger `backoffLimit`.** Also capture each
+> failed pod's log at the moment it fails — see step 1 above.
 
 **It exhausted `backoffLimit` (Job shows failed).** Read the last log lines for
 the real error, then delete the Job and re-apply — it resumes. A Job's spec is

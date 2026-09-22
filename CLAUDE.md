@@ -106,11 +106,26 @@ the **multiplatform** migration, the **conversation-identity** rollout, or the
 | hazards, gates, traps | `planning/conversation-identity.md` §5 |
 | the wire contract | `planning/event-envelope-contract.md`, `documentation/event-envelope.md` |
 | Phase 3.2 (`account_id` NOT NULL) | `planning/messages-account-not-null-todo.md` |
+| the live two-bug incident (`md` erased, then platform fabricated) | `planning/platform-guess-expiry.md` |
 
-**As of 2026-08-26:** Phase 1 is complete except 1.5, and 1.5 — the ~44-hour
-production backfill of 107M rows — is RUNNING. It is unattended; the plan says
-what to do when it ends. Do not delete anything in this cluster before Phase 3
-lands; `multi-platform-plan.md` § "Doc hygiene" says what already went and why.
+**As of 2026-09-04: Phase 1 is DONE.** The production backfill (1.5) finished
+**2026-08-29 00:20:53 UTC** — 5,351 batches, 106,931,189 rows,
+`chatroach.backfill_cursor done=t` — and its close-out is complete: logs
+committed to `devops/backfill-logs/`, `messagesBackfill.enabled: false` applied
+(vprod helm revision 660, the Job pruned). Migration 26's removal gate is
+deliberately still unrun. **2.1 is next.**
+
+**Two things changed the ground under the later phases.** WhatsApp is now **90%**
+of live conversations, not a handful of test users (vprod, 7-day window,
+2026-09-03/05) — which means Phase 2.1's recorded "low risk" judgement is
+inverted and needs a human decision. And an incident has been open on `vprod`
+since 2026-09-02 in which a blocked conversation's `md` is erased by a
+pointer-truncated replay and Dean then fabricates `messenger` over the resulting
+NULL. Read **`planning/platform-guess-expiry.md`** before touching platform
+resolution, Dean, or `states.platform`.
+
+Do not delete anything in this cluster before Phase 3 lands;
+`multi-platform-plan.md` § "Doc hygiene" says what already went and why.
 
 When this migration finishes, delete this section.
 
@@ -121,6 +136,20 @@ When this migration finishes, delete this section.
 | **`<project>/README.md`** | Describe the PARTS | Architecture, structure, setup, dependencies — **read before working in that app; update when app structure changes** |
 | **`documentation/<feature>.md`** | Describe the FEATURES | Cross-component behavior, data flows — **read before exploring code; update after exploration** |
 | **`planning/`** | Plans for WORK | Implementation plans, findings (temporary) |
+
+## Code Comments
+
+A comment lives exactly as long as the lines it annotates, so write only what will stay true for that long.
+
+1. **Comments are not a changelog.** Don't narrate the change: no "previously", "now", "changed from X to Y", "fixed the bug where", dates, or incident stories. That history goes in the commit message, and in `planning/` if it needs more room.
+2. **Comments are not notes to a reviewer.** Don't justify the diff, answer review feedback, or record what you were asked to do ("as requested", "this addresses", "note: I also"). That goes in the PR description.
+3. **Comments explain what the code can't.** Write one when a decision isn't evident from the code (why this approach, why this value, why the obvious simpler version is wrong) or when the intent is ambiguous. If the code already says it, don't comment.
+
+In practice:
+- Before writing a comment, ask: would it be true and useful to someone reading this file in a year who never saw this change? If not, it doesn't belong in the code.
+- A guard against a real failure deserves a comment. State the failure it prevents ("Kafka can redeliver on rebalance, so this must be idempotent"), not when or how it was discovered.
+- Keep it to a line or two. Rationale that needs a paragraph belongs in `documentation/` or the app `README.md`; the comment can point there.
+- Don't grow an existing comment to describe your change. Rewrite it to describe the code as it now is, or delete it if the code no longer needs it.
 
 ## Git Worktree Workflow
 

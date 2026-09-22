@@ -1,8 +1,47 @@
 # Replybot: the RESTORE_STATE short-circuit was dropped in a refactor
 
 **Found:** 2026-07-26, while preparing the staging → production promotion.
-**Status:** not fixed. Present on `staging` (replybot `v0.0.210-wa`). Absent from
-the production line (`v0.0.204`), which still has the correct behaviour.
+
+> ## ⚠️ STATUS UPDATED 2026-09-04 — IT HAS SHIPPED, AND IT IS A PREREQUISITE
+>
+> **The status below is STALE.** It said the regression was staging-only and that
+> the production line (`v0.0.204`) still had the correct behaviour. **The
+> promotion happened. Production has the regression.** Verified at the tags:
+>
+> ```
+> replybot-v0.0.204 :106   if (output.action === 'RESET' || output.action === 'RESTORE_STATE') {
+> replybot-v0.0.224 :139   if (output.action === 'RESET') {
+> ```
+>
+> **Production runs `v0.0.224`** — `ghcr.io/vlab-research/replybot:v0.0.224`,
+> `kubectl get deploy -n vprod`, 2026-09-04. The working tree matches v0.0.224 at
+> `replybot/lib/typewheels/transition.js:139`, and
+> `grep -ci restore replybot/lib/typewheels/{machine,transition}.test.js` returns
+> **0 / 0** — still no test that would catch it.
+>
+> **So the recovery tool is degraded in production right now.** A `RESTORE_STATE`
+> output falls past the short-circuit into `actionsResponses()` and performs the
+> `getPageToken`/`getForm`/`getUser` IO the snapshot exists to skip. Nothing is
+> *sent* to the participant — `act()` has no `RESTORE_STATE` case — so the failure
+> mode is not a spurious message. But that IO **can throw**, and
+> `getForm(pageId, shortcode, startTime)` is precisely where a wrong or missing
+> `md.startTime` fails.
+>
+> **This is now E0, a PREREQUISITE**, not a fast-follow. It blocks Task E
+> (snapshot-in-log) in `planning/platform-guess-expiry.md` §7: Task E emits a
+> `restore_state` on **every block**, against an armed population of 11,492
+> conversations on one account. Doing that on top of the degraded short-circuit
+> means every one of those blocks performs the IO the design exists to avoid.
+>
+> **FIXED on branch `fix/husk-restore-state`, commit `48e12233`** — *"fix(replybot):
+> restore the RESTORE_STATE short-circuit in transition.js"*: the two-line clause
+> plus its explanatory comment, and the tests recovered from `5986b3e4`
+> (`transition.js` +15, `transition.test.js` +53, `machine.test.js` +77).
+> **Unpushed and undeployed** as of 2026-09-04.
+
+**Status (as written 2026-07-26, now superseded — see above):** not fixed.
+Present on `staging` (replybot `v0.0.210-wa`). Absent from the production line
+(`v0.0.204`), which still has the correct behaviour.
 **Blocker?** No. Explicitly agreed as a fast-follow, not a promotion blocker.
 
 ## Summary
@@ -127,6 +166,10 @@ Worth recording, because it was suspected and cleared:
 
 ## Proposed fix
 
+**Steps 1–3 are IMPLEMENTED on `fix/husk-restore-state`, commit `48e12233`
+(2026-09-04, unpushed).** Step 4 was not done. The text is kept as written
+because it is the spec that commit was built from.
+
 1. Restore the clause in `replybot/lib/typewheels/transition.js`:
 
    ```js
@@ -150,10 +193,13 @@ Worth recording, because it was suspected and cleared:
 
 ## Sequencing note
 
-Because the intent is for production to run exactly what staging runs, the fix
-belongs **on `staging` first**, followed by a new replybot tag. Fixing it
-post-promotion means production temporarily loses a recovery capability it
-currently has.
+⚠️ **Overtaken by events.** This said the fix belongs on `staging` first because
+"fixing it post-promotion means production temporarily loses a recovery
+capability it currently has". **The promotion already happened and production
+already lost it** (see the status box at the top). There is no pre-promotion
+window left to protect; the remaining sequencing constraint is simply
+**E0 → E**: ship `48e12233` before Task E starts emitting `restore_state` on
+every block. `planning/platform-guess-expiry.md` §8.
 
 ## Explicitly not done
 

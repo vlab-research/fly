@@ -394,8 +394,12 @@ Conditions-based bails read their targets from `states`, and `exodus/query/build
 selects `COALESCE(s.platform, 'messenger') AS platform`. So they are **compliant with the
 contract** — the field is always populated and they will not 400 once the gate is on — but the
 value is an **assumption** on most rows: `states.platform` is a computed column over
-`state_json->'md'->>'platform'` and is **NULL for 97.8% of rows**, so the default is
-load-bearing rather than cosmetic.
+`state_json->'md'->>'platform'` and is **NULL for 95.7% of rows** (1,066,578 of
+1,114,066, vprod 2026-09-04; it read 97.8% when first measured 2026-08-17), so the
+default is load-bearing rather than cosmetic. ⚠️ **And "assumption" understates it
+— see the correction under "What blocks step 4" below**: the account's true
+transport is a join away, and asserting `messenger` over a NULL on a WhatsApp
+account is what took Dean's sweeps down in production on 2026-09-02.
 
 Two details worth keeping:
 
@@ -472,12 +476,49 @@ conversation identity:
    `[INCOMPLETE_CONVERSATION]` would declare the rollout safe while WhatsApp webview links were
    still mis-attributed. Closing this is the `link_tracking` survey migration, not a code
    change.
-2. **exodus's `COALESCE` default applies to 97.8% of rows**, so the great majority of
-   conditions-based bails carry an assumed platform. Nothing counts that today.
+2. **exodus's `COALESCE` default applies to the great majority of rows** — 97.8%
+   as measured 2026-08-17, **95.7% as re-measured 2026-09-04** (1,066,578 NULL
+   `states.platform` of 1,114,066) — so most conditions-based bails carry an
+   assumed platform. Nothing counts that today.
 
-Neither is caught by a presence check, which is all we have: both send a platform, it is
-just the wrong one. Detecting a present-but-wrong platform would need something that knows
-which platform an account actually belongs to, and no such thing exists today.
+Neither is caught by a presence check: both send a platform, it is just the wrong one.
+
+> ⚠️ **Corrected 2026-09-04.** This paragraph used to end: *"Detecting a
+> present-but-wrong platform would need something that knows which platform an
+> account actually belongs to, and no such thing exists today."* **That is false,
+> and the sentence did real damage — it framed a one-join fix as a data-model
+> gap.**
+>
+> Such a thing does exist, and has: **`credentials.entity`**, guarded by the
+> **`unique_messaging_account`** partial unique index on `key`
+> (`SHOW CREATE TABLE credentials`, vprod 2026-09-05):
+>
+> ```
+> UNIQUE INDEX unique_messaging_account (key ASC) STORING (details, userid)
+>   WHERE entity IN ('facebook_page', 'whatsapp_business')
+> ```
+>
+> Unique on `key` across both messaging entities means **at most one row per
+> account id**, so the mapping account → transport is total, single-valued and
+> deterministic: `facebook_page → messenger`, `whatsapp_business → whatsapp`.
+> A claimed platform can be checked against it with a join. This is the same index
+> the TokenStore fallback already relies on, and the same one formcentral resolves
+> surveys through.
+>
+> It is not free — 64 messaging rows today (62 `facebook_page` + 2
+> `whatsapp_business`, vprod 2026-09-05), and the index STOREs `details`/`userid`
+> but **not `entity`**, so reading `entity` costs a second lookup into
+> `credentials@primary`. At this row count that is nothing.
+>
+> **This has since been done, in the one place that was actively lying.**
+> `dean/queries.go` had seven `COALESCE(platform, 'messenger')` sites; all seven
+> now resolve against `credentials.entity`
+> (`planning/platform-guess-expiry.md` Task B). exodus still carries the default.
+> The one real caveat is not detectability: `credentials` CASCADES on user delete,
+> so a resolution must `LEFT JOIN` (an inner join silently drops conversations
+> whose owning user was removed), and the durable answer is for the row to carry
+> its own correct platform rather than derive it at read time. Full picture:
+> `documentation/platform-resolution.md`.
 
 Because `linksniffer:click` is what `wait` conditions on webview fields resolve against, a
 wrong platform hangs the conversation just as surely as a rejected event does — it simply

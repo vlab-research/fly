@@ -220,6 +220,21 @@ mounted at SurveyScreen level so the badge works without entering the tab;
 known state) and `StatesExplorer/healthNav.js` (pure helpers: badge logic +
 `action.dest` → URL mapping; unknown dests render without a link).
 
+### Polling Behavior
+
+The dashboard polls several endpoints at fixed intervals while in active use:
+
+| Feature | Endpoint | Interval | Trigger | Code |
+|---------|----------|----------|---------|------|
+| Survey health | `GET /surveys/:surveyName/health` | 60 seconds | Continuous while Monitor tab is mounted | `SurveyScreen/useSurveyHealth.js` `POLL_INTERVAL_MS = 60000` |
+| Message templates | `GET /message-templates` | 4 seconds | While any template status is `PENDING` | `MessageTemplates.js` `POLL_INTERVAL_MS = 4000` |
+| Export progress | `GET /exports/status/survey?survey=` | 4 seconds | While any export status is in-progress or non-stale (< 4h old) | `SurveyScreen.js` line 296 `fetchExports` called via `setInterval(…, 4000)` |
+
+### Dead Code and Unrouted Containers
+
+- **`services/api/getCSV.js`** — has no call sites; the endpoint `GET /responses/csv` is dead. Response CSV export is handled through `POST /exports?survey=` with `export_type: "responses"`.
+- **`containers/Settings/`** and **`containers/FormConfig/`** — not routed to any URL path; may be remnants from an earlier design.
+
 ### API Client
 
 The API client in `src/services/api/` handles all communication with the dashboard-server backend:

@@ -240,7 +240,7 @@ WHERE key = $1 AND entity IN ('facebook_page', 'whatsapp_business')
 
 | Consumer | Notes |
 |----------|-------|
-| `message-worker/tokenstore.go` `GetToken(ctx, accountID)` | platform selects the API client (Messenger vs WhatsApp), never the credential |
+| `message-worker/tokenstore.go` `GetToken(ctx, platform, platformAccountID)` | ⚠️ Corrected 2026-09-04: platform selects the API client **and** the credential `entity` via `platformToEntity` (`tokenstore.go:29-32`). A wrong platform therefore misses a credential that exists. See `platform-resolution.md`. |
 | `formcentral/db.go` `getSurveyByParams` | pageid on `/surveys` is the account id |
 | `dinersclub/provider.go` `GenericGetUser` | `PaymentEvent.Pageid` is the account id |
 | `dean/queries.go` `FollowUps` | join `ON pageid = c.key AND c.entity IN (...)` — NOTE: a 9th consumer missed by the original 8-consumer inventory |
@@ -301,6 +301,18 @@ Platform ('messenger' | 'whatsapp') flows end-to-end as a **conversation attribu
 - Survives form stitches and state transitions in Redis and states table
 - `states.platform` is a STORED computed column derived from `state_json->'md'->>'platform'` (NULL for legacy rows pre-WhatsApp)
 - Consumers default to `COALESCE(platform, 'messenger')` for backward compatibility
+
+  ⚠️ **Correction, 2026-09-04 — that default is a guess, and it broke production.**
+  `states.platform` is NULL for **95.7%** of rows (1,066,578 of 1,114,066, vprod
+  2026-09-04), so on most rows the `COALESCE` *is* the answer rather than a
+  fallback. When the account is a `whatsapp_business` one, it asserts `messenger`
+  on a WhatsApp conversation and the send then looks for a `facebook_page`
+  credential that cannot exist. **Dean no longer guesses**: all seven sites in
+  `dean/queries.go` resolve the platform from `credentials.entity` instead —
+  `planning/platform-guess-expiry.md` Task B. Other consumers still carry the
+  default (exodus among them; see `documentation/event-envelope.md`).
+  **The full mechanism, the blast radius and why it cannot self-heal are in
+  `documentation/platform-resolution.md` — read that, not this bullet.**
 
 **Synthetic Re-Entry Logic (transition.js:32-34):**
 - Non-synthetic events: platform = `event.source.type` (direct from normalizer: 'messenger' or 'whatsapp')
@@ -609,10 +621,33 @@ Inbound text without a referral object that does NOT match the form-ref pattern 
 
 **File:** `message-worker/tokenstore.go`
 
-The token store's `GetToken(ctx, accountID)` signature unchanged; dispatcher logic selects platform-specific credentials:
+The token store's `GetToken(ctx, platform, platformAccountID)` takes the platform (⚠️ corrected 2026-09-04 — an earlier draft said the signature was unchanged and that platform never selected the credential; both were wrong); dispatcher logic selects platform-specific credentials:
 - `messenger` + `account_id` → look up `facebook_page` entity
 - `whatsapp` + `account_id` → look up `whatsapp_business` entity
 - No platform hint → fall back to uniform `WHERE key = $1 AND entity IN (...)` query (safe due to unique_messaging_account index)
+
+⚠️ **Correction, 2026-09-04 — that third bullet is structurally unreachable from a
+real send, and should not be relied on as a safety net.** `GetToken` is never
+called with a platform that came off the wire. `worker.go:163` selects the client
+by `cmd.Platform`, and each client then calls `GetToken` with **its own hardcoded
+constant** — `messenger_client.go:80` passes `types.PlatformMessenger`,
+`whatsapp_client.go:73` passes `types.PlatformWhatsApp`. Both are keys of
+`platformToEntity` (`tokenstore.go:29-32`), so the `if entity, ok := ...` branch
+always wins and the key-only `else` at `tokenstore.go:103` cannot be reached.
+Client selection has already narrowed the platform to one of the two mapped
+values before the credential is ever looked up.
+
+**This matters because it changes what a `token not found for platform account`
+error means.** It is not the fallback failing to cover a missing hint; it is the
+asserted `(entity, key)` pair genuinely not existing — a producer claiming a
+platform the account does not have. **That is the correct, fail-loud behaviour and
+must not be "fixed" by making the fallback reachable**: by the time the token
+lookup runs, the wrong platform has already branched message translation
+(`worker.go:130-157`) and selected the API client, so a successful key-only lookup
+would hand a WhatsApp token to the Messenger client and POST a Messenger-shaped
+payload to the Graph API. See `planning/platform-guess-expiry.md` § Task C
+(dropped, with the rejected fallback spelled out) and
+`documentation/platform-resolution.md`.
 
 ---
 

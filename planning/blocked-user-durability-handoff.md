@@ -143,6 +143,17 @@ Not a deliberate unblock: `UNBLOCK` only applies to `state === 'BLOCKED'`, not
 
 ### Why this is not a one-liner
 
+> **Superseded 2026-09-05.** The premise of the second paragraph below was measured
+> and is false: blocked users have **short** logs. On vprod, 2026-09-05, the 13,469
+> `USER_BLOCKED` conversations max out at **6,209** events; only 2 exceed 5k and none
+> exceed 10k. The pointer was protecting against a cost that does not exist for this
+> population, and the "OOM" concern is a separate one — a log that is large for *any*
+> reason — which now has its own explicit mechanism (`HISTORY_LIMIT`, a hard cap in
+> `StateStore`). So the resolution is the "one-liner" this section argued against:
+> **drop the pointer from `BLOCK_USER`, drop the `START` guard, and let the fold rebuild
+> the block from the full log.** See `planning/block-without-pointer-plan.md`. The
+> paragraphs below are kept as the reasoning that was in force until then.
+
 `BLOCK_USER` **derives** its result from live state (`forms: state.forms`). During a refold
 that starts *after* the history it derived from, there is nothing to derive from. Removing
 the `state === 'START'` guard would make the block itself replay, but `forms` and `md` would
@@ -154,6 +165,50 @@ is precisely the OOM the pointer exists to prevent.
 So the event has to **carry** the state rather than derive it.
 
 ### Recommended approach: snapshot-in-log
+
+> ## ❌ ABANDONED 2026-09-05 — replaced by `planning/block-without-pointer-plan.md`
+>
+> Snapshot-in-log was implemented (`fca55375`) and then dropped before deploy. It
+> solved the wrong layer: a second HTTP round trip per block, ordering against
+> botserver outages, a loop guard, a new error tag (`MISSING_METADATA`), a ~11.5k-row
+> backfill — and every refold still read all the post-block spam, because the
+> snapshot sat *after* it in the log. Once the blocked population's log sizes were
+> measured (max 6,209 events; see "Why this is not a one-liner" above), the pointer
+> turned out to be protecting nothing, and the fix collapsed to: `BLOCK_USER` sets
+> **no pointer** and has **no `START` guard**, the fold rebuilds the block from the
+> full log, and an unbounded log is guarded by an explicit cap (`HISTORY_LIMIT`)
+> instead. That ships on `fix/block-without-pointer`. `48e12233` (E0, the
+> `RESTORE_STATE` short-circuit) is an independent regression fix and ships on its
+> own branch, `fix/restore-state-short-circuit`. PR #166 is closed.
+>
+> Gap 3 is **resolved** by that plan, with no backfill: the ~13.5k already-blocked
+> rows land on a pointer-less `USER_BLOCKED` on their first Redis miss and recover
+> `forms`/`md` on the second. The rest of this callout is history.
+>
+> ## ~~✅ THIS SECTION IS THE ACTIVE SPEC FOR TASK E~~
+>
+> **Marked 2026-09-04.** `planning/platform-guess-expiry.md` §7 Task E adopts this
+> design verbatim as the root fix for a live production incident: the same `md`
+> erasure, arriving on WhatsApp at a scale Messenger never produced — **11,492
+> armed `USER_BLOCKED` conversations on one account** against 2,012 across 34
+> Messenger accounts, with ~153 participants already broken and paging. Read that
+> file for the incident, the gates (G1–G7) and the sequencing; read **this section**
+> for the design. Do not re-derive it, and in particular do not re-propose "just
+> don't advance the pointer" — this section already rejects it, for the right
+> reason, two paragraphs up.
+>
+> **Status: implemented on branch `fix/husk-restore-state`, commit `fca55375`
+> (2026-09-04, unpushed and undeployed).** Details under "Suggested order of work"
+> below.
+>
+> ⚠️ **It has a prerequisite this doc does not know about (E0).** The
+> `RESTORE_STATE` short-circuit in `transition.js` `run()` — the thing that makes
+> a restore skip IO — was deleted by refactor `675c31bd` and has **shipped to
+> production** (v0.0.224). Emitting a snapshot on every block without it means
+> every block does the `getPageToken`/`getForm`/`getUser` IO this design exists to
+> avoid, at 11,492-conversation scale. See
+> `planning/replybot-restore-state-transition-regression.md`; fixed in the
+> preceding commit `48e12233` on the same branch.
 
 Use the mechanism that already exists and that you already use for manual unblocks.
 `RESTORE_STATE` (`machine.js:290`) takes a full state in `nxt.payload.state`, applies it
@@ -170,10 +225,12 @@ Proposed flow:
 4. A later refold starts *at* the snapshot and rehydrates `USER_BLOCKED` with `forms` and
    `md` intact. Every subsequent event no-ops (given Gap 2 is fixed).
 
-Plumbing already exists end to end: `publishReport` (`index.js:14`) POSTs synthetic events
-to `${BOTSERVER_URL}/synthetic`, and those land in `messages` — that is how `machine_report`
-events get into the log today. `categorizeEvent` maps `synthetic_restore_state` →
-`RESTORE_STATE`.
+Plumbing already exists end to end: `publishReport` (~~`index.js:14`~~ —
+**`replybot/lib/index.js:13`**; there is no `index.js` at the replybot root, so the
+citation as written does not resolve. Corrected 2026-09-04 while implementing this)
+POSTs synthetic events to `${BOTSERVER_URL}/synthetic`, and those land in
+`messages` — that is how `machine_report` events get into the log today.
+`categorizeEvent` maps `synthetic_restore_state` → `RESTORE_STATE`.
 
 Nice property: blocking and manual unblocking become the same mechanism with different
 payloads.
@@ -211,13 +268,67 @@ simpler and self-healing.
 
 ## Suggested order of work
 
-1. **Gap 1** (`md: state.md`) — one line, unblocks the ~50 stuck states from recurring.
-2. **Gap 2** (handover guard) — one line.
-3. **Gap 3** (snapshot-in-log) — the real work. Do it after 1, because making blocks
-   permanent **closes the escape hatch that currently heals `md` loss**: today an
-   `md`-less blocked user who goes quiet 24h evaporates and returns clean. Make blocks
-   durable without Gap 1 and they stay broken forever instead.
-4. **Backfill** the existing stuck states — see below.
+> ## ⚠️ CORRECTED 2026-09-04 — GAPS 1 AND 2 ALREADY SHIPPED
+>
+> **This list presents Gaps 1 and 2 as prerequisites. Both were already in `main`
+> when Task E began**, so a reader working the list in order looks for work that is
+> not there and may conclude the doc is stale in general. It is not — **only Gap 3
+> was ever outstanding.** Verified in the working tree:
+>
+> | gap | state | evidence |
+> |---|---|---|
+> | **Gap 1** — `md: state.md` on `BLOCK_USER` | **shipped** | `replybot/lib/typewheels/machine.js:519`, with a comment citing `documentation/states-debugging.md` by name |
+> | **Gap 2** — `HANDOVER_EVENT` `USER_BLOCKED` guard | **shipped** | `replybot/lib/typewheels/machine.js:475` — `if (state.state === 'USER_BLOCKED') return _noop()`, inside `case 'HANDOVER_EVENT'` at `:469` |
+> | **Gap 3** — ~~snapshot-in-log~~ block without a pointer | **resolved 2026-09-05** on `fix/block-without-pointer` (`planning/block-without-pointer-plan.md`); `fca55375` dropped, PR #166 closed | `BLOCK_USER` sets no pointer and has no `START` guard; `HISTORY_LIMIT` cap in `StateStore` |
+>
+> **Gap 1 shipping is exactly why this bug looked fixed and was not.** The state
+> that gets *written* carries `md` correctly. The loss happens on the *replay*:
+> `BLOCK_USER` advances `pointer`, `replybot/lib/chatbase/chatbase.js:86` truncates
+> the fold at `message_pointer`, and after the 24h Redis TTL the re-fold starts at
+> the block with the `md`-creating referral outside the window. Gap 3 is the whole
+> fix; Gaps 1 and 2 were necessary and not sufficient.
+>
+> ### What `fca55375` implements, and one deviation from this spec
+>
+> `exec()`'s `BLOCK_USER` sets `snapshot: true`; `run()` passes it out on the
+> report; `replybot/lib/index.js` POSTs the trimmed `newState` to botserver's
+> `/synthetic` as a `restore_state` — the same mechanism the manual unblocks use.
+> Only `BLOCK_USER` sets it, so the chain terminates in one step. The POST is last
+> in the handler deliberately: posting before the state write would let a botserver
+> outage trade a durable block for no block at all.
+>
+> **Deviation worth knowing: the `transition.js` guard was widened beyond `!md`.**
+> It is now `if (!newState.md || !newState.md.startTime)`. A bare `!newState.md`
+> misses the dominant production shape — `{ ...undefined, ...eventMetadata }` is
+> `{}`, which is **truthy**, sails past the guard, and dies one line later inside
+> `getForm`, where `iowrap` relabels it **`INTERNAL`**. `INTERNAL` is also in
+> `DEAN_ERROR_TAGS` and also pages, so the narrow guard just moved the same fault
+> to a different tag. Both shapes are one fault and both are terminal (nothing
+> regenerates `md`), so both now throw `MissingMetadataError` with the new tag
+> **`MISSING_METADATA`** — which sits outside `DEAN_ERROR_TAGS`,
+> dashboard-server's `PLATFORM_ERROR_TAGS` and the `PlatformInternalErrors` alert,
+> all three being allow-lists. So a damaged record lands in a visible, counted
+> ERROR that nothing retries and nobody is paged for.
+
+1. ~~**Gap 1** (`md: state.md`)~~ — **already shipped**, `machine.js:519`.
+2. ~~**Gap 2** (handover guard)~~ — **already shipped**, `machine.js:475`.
+3. **Gap 3** — the real work, and the only one that was outstanding. **Resolved
+   2026-09-05 on `fix/block-without-pointer`**, by dropping the pointer rather than by
+   snapshot-in-log (`fca55375`, abandoned — see the callout under "Recommended
+   approach"). E0 (`48e12233`) ships separately on `fix/restore-state-short-circuit`.
+   The original reasoning for ordering it after Gap 1 still holds and is worth
+   keeping: making blocks permanent **closes the escape hatch that currently heals
+   `md` loss** — an `md`-less blocked user who goes quiet 24h evaporates and
+   returns clean. Durable blocks without Gap 1 would have made them stay broken
+   forever instead.
+4. ~~**Backfill** the existing stuck states~~ — **not needed** under the no-pointer
+   fix: the already-blocked rows heal on their own Redis misses
+   (`documentation/states-debugging.md` § "Draining the existing population"), and
+   Task D in `planning/platform-guess-expiry.md` §7 is withdrawn. What follows is kept
+   for the record. This was Task D, which rewrites it: ⚠️ the Redis-clearing
+   approach does **not** work (the truncation is `message_pointer` in Postgres, not
+   the cache), and `md.startTime` selects the survey version, so a synthesized one
+   silently moves a participant onto a different version of their own survey.
 
 ---
 

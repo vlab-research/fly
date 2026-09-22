@@ -11,34 +11,41 @@ describes the conversation-identity rollout in depth — the hazards, the gates,
 traps — but the phase order lives here. If the two disagree, this file wins and the
 other is stale.
 
-**Status 2026-08-26 23:30 UTC:** Phase 1 is complete except 1.5, and **1.5 is
-RUNNING** — the production backfill is in flight as an in-cluster Job, projected
-to finish 2026-08-28 between ~14:40 and ~20:00 UTC. Production runs the full
+**Status 2026-09-04:** **Phase 1 is COMPLETE.** 1.5 — the production backfill —
+finished **2026-08-29 00:20:53 UTC**: 5,351 batches, 106,931,189 rows,
+`chatroach.backfill_cursor done=t` (verified against the cursor row on vprod,
+2026-09-04, not from the tool's output). Its close-out is done too: logs captured
+to `devops/backfill-logs/`, `messagesBackfill.enabled: false` **applied** at helm
+revision 660 (2026-09-04 21:07:43) and the Job pruned. Production runs the full
 nine-service stack at staging parity; migrations 19/26/27/28a/28b/31 applied and
-verified; new rows arrive stamped with `account_id`. Messenger is the only live
-transport.
+verified; new rows arrive stamped with `account_id`.
 
-**Next human action:** nothing until the backfill finishes — it is unattended by
-design. Then follow the completion runbook in
-`planning/backfill-in-cluster-job.md` ("WHEN IT FINISHES"): capture the logs
-*before* disarming, verify the migration 26 §4 gate reads 0, set
-`messagesBackfill.enabled: false`, record the unattributable count into
-`planning/messages-account-not-null-todo.md`, then Phase 1 is done and **2.1 is
-next**.
+**Next human action: Phase 2.1** — but read its entry first. Its recorded risk
+assessment was written when WhatsApp was test-only and is now **inverted**:
+WhatsApp is 90% of live conversations. That is a human decision, not a
+bookkeeping correction.
+
+**Also live, and not part of this plan's phases:** an incident on `vprod` since
+2026-09-02 in which a blocked conversation's `md` is erased by a
+pointer-truncated replay and Dean then fabricates `messenger` over the resulting
+NULL `states.platform`. That is the W2 hazard this file names, arriving early.
+Spec and gates: **`planning/platform-guess-expiry.md`**.
 
 **Phase 0 is COMPLETE (0.3 finished 2026-08-24).** All of 0.1-0.5 are done and
-verified. **Phase 1 is complete except 1.5, which is running.** Phase 1 was
+verified. **Phase 1 is COMPLETE (1.5 finished 2026-08-29).** Phase 1 was
 entirely production work and production has now had all of it.
 
 ---
 
 ## Start here if you are new to this
 
-**Shortcut, while 1.5 is in flight:** if you are here to deal with the running
-backfill and nothing else, go straight to
-`planning/backfill-in-cluster-job.md` — it opens with "YOU ARE HERE", the
-completion runbook and the failure runbook, and it is self-contained. Come back
-here afterwards for what Phase 2 needs.
+**Shortcut, for the backfill:** it is done and closed out. If you are here for
+the record of what 1.5 actually did — timings, the pod chain, the three `57P01`
+restarts, what the runbook got wrong — go to
+`planning/backfill-in-cluster-job.md` (its "YOU ARE HERE" is now the close-out)
+and `devops/backfill-logs/README.md` (the captured logs and their
+reconciliation). Neither is something you need to act on. Come back here for
+what Phase 2 needs.
 
 Otherwise read in this order, and do not skip the first one:
 
@@ -60,23 +67,43 @@ its rows are ~25x fatter than production's, its `responses` had zero NULL `pagei
 where production has 1,818,162, and its single CRDB node hides the multi-node case.
 **Re-measure on production. Inherit nothing.**
 
-### State of the world, 2026-08-26
+### State of the world, 2026-08-26 (backfill rows updated 2026-09-04)
 
 | | staging (`vstag`) | production (`vprod`) |
 |---|---|---|
 | migrations 26/27/28a/28b/30 | applied | **applied, guards passed** |
 | migration 29, 19 | applied — `messages` is `primary` + `messages_userid_account_timestamp_idx` only | **19 applied 2026-08-25, GC completed**; 29 not applied. 3 indexes, one NOT VISIBLE |
 | migration 31 (backfill cursor) | applied 2026-08-26 | **applied 2026-08-26** |
-| `devops/backfill` | **run for real 2026-08-24, verified**; Job rehearsed in-cluster 2026-08-26 | **RUNNING since 2026-08-26 23:30 UTC** as an in-cluster Job |
-| `messagesBackfill` (helm) | `false` (rehearsed, then disarmed at rev 88) | **`true` — disarm when the run ends** |
+| `devops/backfill` | **run for real 2026-08-24, verified**; Job rehearsed in-cluster 2026-08-26 | **COMPLETE 2026-08-29 00:20:53 UTC** — 5,351 batches, 106,931,189 rows, `done=t`, 48.8 h wall clock |
+| `messagesBackfill` (helm) | `false` (rehearsed, then disarmed at rev 88) | **`false` — disarmed AND APPLIED**, helm rev 660 (2026-09-04 21:07:43); Job `gbv-messages-backfill` is `NotFound`, pruned |
 | linksniffer | **v0.0.9** | **v0.0.9**, on ghcr |
 | moviehouse | `staging` branch deploy, current | shipped to `main` |
 | `STRICT_EVENT_ENVELOPE` | `true`, live since 2026-08-22 18:36 | `false` — **this is 2.1, the next phase** |
 | `SYNTHETIC_REQUIRE_CONVERSATION` | `false` | `false` |
 | smoke-test form-a | deployed to Typeform, 42 fields | **still the OLD 38-field form** — see 1.3 |
 
-Production now runs the full nine-service stack at staging parity. Messenger is
-the only live transport; WhatsApp is a handful of test users.
+Production now runs the full nine-service stack at staging parity.
+
+⚠️ **"Messenger is the only live transport; WhatsApp is a handful of test users"
+stood here until 2026-09-04 and is FALSE.** It stopped being true without any
+code changing, and several judgements in this file still rest on it. Measured on
+vprod, conversations updated in the last 7 days:
+
+| `states.platform` | 2026-09-03 | 2026-09-05 |
+|---|---|---|
+| `whatsapp` | 14,374 (**90%**) | 14,412 (**90%**) |
+| `messenger` | 1,515 | 1,584 |
+| NULL | 70 | 83 |
+
+```sql
+SELECT coalesce(platform,'NULL'), count(*) FROM states
+ WHERE updated > now() - INTERVAL '7 days' GROUP BY 1;
+```
+
+**WhatsApp is the dominant transport.** Anywhere below that reasons from "WhatsApp
+is test-only" — 2.1 in particular — is reasoning from a dead premise. The moment
+was knowable and nobody was watching for it; see the WhatsApp launch checklist
+and `planning/platform-guess-expiry.md` §5.
 
 **The "re-measure on production" rule above kept earning its keep.** Two examples
 from 1.5 alone: the `chatroach` service user turned out to hold only
@@ -154,9 +181,17 @@ predictable from staging or from the docs.
 
   **8,791 rows are permanently unattributable here** (162,567 needing a backfill
   minus 153,776 attributable): synthetic events carrying no account in `content`.
-  That is far more than the ~3,000 this doc cites for production, because staging's
-  data is synthetic-heavy. It does NOT transfer — re-derive it on production, and
-  see `planning/messages-account-not-null-todo.md`.
+  It does NOT transfer — re-derive it on production, and see
+  `planning/messages-account-not-null-todo.md`.
+
+  ⚠️ *This paragraph used to end "far more than the ~3,000 this doc cites for
+  production, because staging's data is synthetic-heavy." **Production's figure
+  is ~55,000** (`null_count 54,960` from `SHOW STATISTICS FOR TABLE messages`,
+  created 2026-09-03; a statistics estimate, not an exact count). The ~3,000 came
+  from a 300,000-row sample that counted two specific causes rather than every row
+  the extraction rule returns NULL for. Staging is still proportionally
+  synthetic-heavier — 5.4% against production's 0.05% — but the "~3,000" half of
+  the comparison was wrong by 18x. See 3.2.*
 
   **The remaining command** (port-forward first; the tool is resumable and every
   batch carries `AND account_id IS NULL`, so re-running is a no-op):
@@ -321,15 +356,56 @@ predictable from staging or from the docs.
     separate production diff and 1.3 is when it bites.
 - **1.4 Soak 24h** on the §5.3 gates. Staging's soak proved little: it is idle
   (1 index read in 5h) and its data is unrepresentative.
-- **1.5 Run `devops/backfill` on production. PACKAGING DONE 2026-08-26; THE
-  BACKFILL HAS NOT BEEN RUN. See `planning/backfill-in-cluster-job.md`.**
+- **1.5 Run `devops/backfill` on production. DONE — COMPLETED 2026-08-29
+  00:20:53 UTC. Closed out 2026-09-04. See `planning/backfill-in-cluster-job.md`
+  and `devops/backfill-logs/`.**
+
+  | | |
+  |---|---|
+  | batches | **5,351** |
+  | rows updated | **106,931,189** |
+  | cursor | `done = t`, `2026-08-29 00:20:53.957156+00` |
+  | wall clock | **48.8 h** (Job created 2026-08-26 23:30:40, completed 2026-08-29 00:20:58) |
+  | Job status | `succeeded: 1`, **`failed: 3`** — three `57P01 server is shutting down`, each resumed automatically from the cursor |
+
+  ```sql
+  SELECT batches, rows_updated, done, updated_at FROM chatroach.backfill_cursor;
+  ```
+
+  That is the source of the four figures, read back from vprod rather than taken
+  from the tool's output — and the captured pod logs reconcile to it exactly
+  (`devops/backfill-logs/README.md` § Reconciliation). **Do not read the last
+  pod's `DONE:` line as the run total**: it reports only that pod's own counters
+  and under-reports by 40x.
+
+  **Sustained cost was 32.8 s/batch, not the 26.4–30.1 s/batch projected.** The
+  projection was built on the bounded pass plus the first 47 batches of the full
+  run and was ~10 h optimistic. The sentinel pass in 3.2 will be sized by the same
+  method; size it off the sustained figure, not off an early sample.
+
+  **Close-out, all four steps (2026-09-04):**
+
+  | step | state |
+  |---|---|
+  | 1. capture the logs | **done** — `devops/backfill-logs/`. ⚠️ One pod's log was garbage-collected by routine k8s GC *before* capture, losing per-batch detail for batches 1–5090 (~95%, ~44 h). Unrecoverable; it predates the capture. Totals still reconcile exactly. |
+  | 2. migration 26 §4 removal gate | **deliberately NOT RUN.** Costed at **399.3 GiB / 16,532 ranges**, no writes. `statement_timeout` is `0` (unlimited) on this cluster and all three pod failures were node restarts, so an unbatched run risks hours and returns nothing on a restart. Recommendation on record: slice it over the `hsh` keyspace and sum. **Do not run it casually.** |
+  | 3. disarm | **done AND applied** — `messagesBackfill.enabled: false` at `devops/values/production.yaml:1415`, `helm upgrade` → **revision 660** (2026-09-04 21:07:43). Job `gbv-messages-backfill` is `NotFound`. |
+  | 4. record the unattributable count | **done** — and it is **~55,000, not ~3,000**. See 3.2 and `planning/messages-account-not-null-todo.md`. |
+
+  Historical record of how it was packaged and run follows.
+
+  **PACKAGING DONE 2026-08-26.**
 
   The delivery mechanism it needed now exists and is tested: a Dockerfile whose
   build context is `devops/`, the `release.yml` change that lets the workflow
   express that (a `file:` input — `backfill` is the only service whose Dockerfile
   is not at `<context>/Dockerfile`), and
   `devops/vlab/templates/messages-backfill-job.yaml` gated on
-  `messagesBackfill.enabled`, which is **false** in `production.yaml`.
+  `messagesBackfill.enabled`. That flag was flipped to `true` to start the run
+  and is **back to `false` and applied** as of 2026-09-04 (helm rev 660).
+  *(An earlier version of this file said "false" here while the "State of the
+  world" table said "true — disarm when the run ends". Both were describing
+  different moments of the same flag; both are now moot.)*
 
   The recommended cursor persistence was done rather than skipped:
   `--cursor-key` writes the position to `chatroach.backfill_cursor`
@@ -356,16 +432,20 @@ predictable from staging or from the docs.
   `messages` unchanged at 162,691 / 153,900 / 8,791 afterwards. Turned back off
   at revision 88 and pruned cleanly. It proves nothing about duration or disk.
 
-  **THE FULL RUN IS IN FLIGHT — started 2026-08-26 23:30:24 UTC**, helm revision
-  652. Projected finish **2026-08-28, ~14:40–20:00 UTC** (the spread is real: the
-  bounded pass measured 30.1 s/batch, the first 47 batches of the full run ran at
-  26.4). Migration 31 is applied to vprod; the image is published as
+  **The full run started 2026-08-26 23:30:24 UTC**, helm revision 652, and
+  **finished 2026-08-29 00:20:53 UTC** — 48.8 h against a projection of
+  2026-08-28 ~14:40–20:00 UTC. The projection came from the bounded pass's
+  30.1 s/batch and the full run's first 47 batches at 26.4; the run sustained
+  **32.8 s/batch**, so the projection was ~10 h optimistic. Migration 31 is
+  applied to vprod; the image is published as
   `ghcr.io/vlab-research/backfill:v0.1.0`.
 
-  **It is unattended. Nothing needs doing while it runs.** The cursor is durable
-  and `backoffLimit: 3` restarts it on failure. Cheap progress check, no table
-  scan: `SELECT batches, rows_updated, done FROM chatroach.backfill_cursor;`
-  (~5,350 batches is the whole table).
+  **It ran unattended, as designed, and needed it.** The cursor is durable and
+  `backoffLimit: 3` restarted it three times — each a `57P01 server is shutting
+  down` from a CockroachDB node restart, not a tool defect. ⚠️ Four pods are all
+  `backoffLimit: 3` permits and exactly four ran: one more restart would have
+  marked the Job `Failed` 261 batches from the end. Give a future one-shot more
+  headroom — resume is free and idempotent.
 
   A bounded `--max-batches=20` pass went first, to measure what a rehearsal
   cannot: **399,779 rows in 603 s = 30.1 s/batch for committed writes**, only
@@ -373,15 +453,16 @@ predictable from staging or from the docs.
   then RESUMED from the stored cursor across a Job deletion, beginning
   immediately past batch 20's boundary — no gap, no overlap.
 
-  **When it finishes, follow the runbook in
-  `planning/backfill-in-cluster-job.md` § "WHEN IT FINISHES".** In short: capture
-  the logs FIRST (disarming prunes the Job and its logs), verify the migration 26
-  §4 gate reads 0 rather than trusting the tool's output, set
-  `messagesBackfill.enabled: false`, and record the real unattributable count.
-  That last one matters beyond bookkeeping: the bounded pass implies **~48,800**
-  such rows against the **~3,000** that
-  `planning/messages-account-not-null-todo.md` is written around — a correction
-  already noted in that file, to be replaced with the measured number.
+  **The close-out runbook is `planning/backfill-in-cluster-job.md` § "WHEN IT
+  FINISHES"; all four steps are recorded above.** The one that mattered beyond
+  bookkeeping was step 4, the unattributable count. Two independent methods now
+  agree on its magnitude: the bounded pass extrapolated **~48,800**, and
+  `SHOW STATISTICS FOR TABLE messages` reports **54,960** NULL `account_id` rows
+  (`created 2026-09-03 15:47:18+00`) — **~55,000, 18x the ~3,000 that
+  `planning/messages-account-not-null-todo.md` was written around.** That file
+  now leads with the correction. Note the 54,960 is a **statistics estimate**,
+  not an exact count; the exact number needs migration 26's removal gate, which
+  is deliberately unrun.
 
   Everything 1.5 depends on is done and verified: migrations 26/27/28a/28b, the
   1.3 deploy, and migration 19 whose GC has completed and returned the space.
@@ -413,12 +494,45 @@ predictable from staging or from the docs.
 ## Phase 2 · Tighten the gates — ~2 days
 
 - **2.1 production `STRICT_EVENT_ENVELOPE` → `"true"`**, once
-  `CHAT_EVENTS_ENVELOPE_MISSING` reads zero for 24h. Lower risk than §5.4 implies
-  while WhatsApp is test-only: refusing drops the WhatsApp echo, and there is barely
-  any WhatsApp traffic. **That reprieve expires at W3.**
+  `CHAT_EVENTS_ENVELOPE_MISSING` reads zero for 24h.
+
+  > 🛑 **THE RISK ASSESSMENT BELOW IS INVERTED. A HUMAN MUST RE-JUDGE THIS BEFORE
+  > 2.1 SHIPS.** It is left in place rather than quietly rewritten, because the
+  > judgement was someone's and only they should change it.
+  >
+  > The recorded reasoning was: *"Lower risk than §5.4 implies while WhatsApp is
+  > test-only: refusing drops the WhatsApp echo, and there is barely any WhatsApp
+  > traffic. That reprieve expires at W3."*
+  >
+  > **The premise is dead.** WhatsApp is **90%** of conversations updated in the
+  > last 7 days (14,374 of ~15,959, vprod 2026-09-03; 14,412 on 2026-09-05 — see
+  > "State of the world" above). "Refusing drops the WhatsApp echo" now describes
+  > the dominant transport, so what was argued as a small blast radius is a large
+  > one. Whether that makes 2.1 *more* urgent or *less* safe is a call, not a
+  > correction — the same flip that raises the cost of a wrong envelope also
+  > raises the cost of tolerating one.
+  >
+  > **W3 is "re-check 2.1", and W3 is the thing that already came due.** Do 2.1's
+  > risk assessment and W3 as one piece of work, against measured traffic, not
+  > against this paragraph. See the WhatsApp launch checklist below and
+  > `planning/platform-guess-expiry.md` §5.
+
 - **2.2 `SYNTHETIC_REQUIRE_CONVERSATION` → `"true"`.** Unblocked by assume-messenger:
   every synthetic producer now emits a full triple. Verify against live traffic
   first. After this an unstamped event cannot enter the system at all.
+
+  ⚠️ **That is a PRESENCE gate, and presence is not correctness.** It closes
+  *missing* platform. It does nothing about *wrong* platform, and wrong platform
+  is what actually broke production: Dean's events were fully stamped — with
+  `messenger`, on a WhatsApp account — so they satisfy 2.2 completely and still
+  send the conversation to a credential that cannot exist
+  (`planning/platform-guess-expiry.md` §3). Two producers have now done this;
+  `devops/values/production.yaml:113-127` records the first (dinersclub,
+  2026-08-25).
+
+  **Closing the mis-stamping class is W2, not Phase 2.** Do not read a green 2.2
+  as "unstamped and mis-stamped events can no longer enter the system" — only the
+  first half is true.
 
 ## Phase 3 · Remove the scaffolding — ~1 week
 
@@ -427,7 +541,14 @@ predictable from staging or from the docs.
   B8-5b **in the same change**.
 - **3.2 `messages.account_id` → NOT NULL.** See
   `planning/messages-account-not-null-todo.md`. Needs a `''` sentinel pass for the
-  ~3,000 permanently unattributable rows.
+  permanently unattributable rows — **~55,000 of them, not ~3,000.**
+  `SHOW STATISTICS FOR TABLE messages` gives `{account_id} | row_count
+  108,074,354 | null_count 54,960 | created 2026-09-03 15:47:18+00`, and the
+  bounded backfill pass independently extrapolated ~48,800. **This is a
+  statistics estimate, not an exact count**; the exact number needs migration 26's
+  removal gate (a scheduled 399 GiB scan, deliberately unrun). At this magnitude
+  the sentinel `UPDATE` must be batched, and `''` becomes a ~55k-row population
+  every consumer of `messages` has to tolerate.
 - **3.3 Migration 19 on production. DONE 2026-08-25 00:44 UTC — ran EARLY, ahead of
   Phase 1, and verified.** This is a deliberate departure from the original phase
   order; the reasoning is below and the preconditions were resolved first.
@@ -490,7 +611,7 @@ island:
 |---|---|
 | `conversation-identity.md` | §5.1–5.5 are cited by name in this file's "Start here" |
 | `messages-account-not-null-todo.md` | it *is* Phase 3.2's spec |
-| `backfill-in-cluster-job.md` | the 1.5 runbook, live |
+| `backfill-in-cluster-job.md` | was the 1.5 runbook; since 2026-09-04 it is the close-out record — what the run actually cost, and the three things the runbook did not anticipate. Paired with `devops/backfill-logs/`. |
 | `event-envelope-contract.md` | the wire contract 2.1/2.2's gates enforce; cited by `documentation/event-envelope.md` |
 | `moviehouse-conversation-identity.md` | **referenced from code** — `moviehouse/src/identity.js`, `replybot/lib/generic-translator.js`, `form.js` |
 | `whatsapp-webview-exposure.md` | the exposure picture W1–W3 rests on |
@@ -516,22 +637,64 @@ sentinel buys far less than `account_id`'s did.
 
 ## WhatsApp launch checklist
 
+> ## 🛑 THE PRECONDITION HAS EXPIRED. THIS CHECKLIST IS OVERDUE, NOT PENDING.
+>
+> "Before WhatsApp carries production traffic" was the trigger. **WhatsApp
+> carries 90% of production traffic** (14,374 of ~15,959 conversations updated in
+> the last 7 days, vprod 2026-09-03; 14,412 on 2026-09-05). W1–W3 were never
+> done, and the debt has now been called **twice**:
+>
+> 1. **2026-08-25 — dinersclub.** Recorded at
+>    `devops/values/production.yaml:113-127`: v0.0.46 emitted payment events in
+>    the legacy shape with no platform, assume-messenger kicked in, and a WhatsApp
+>    participant went BLOCKED. That note names the diagnosis itself — *"This is
+>    exactly the W1 hazard in planning/multi-platform-plan.md"* — and was fixed by
+>    threading the real platform through one producer.
+> 2. **2026-09-02 onward — Dean.** The same bug through a different producer,
+>    still firing, currently paging. `planning/platform-guess-expiry.md` is the
+>    spec and the gates; **its Task B is W2 for Dean specifically.**
+>
+> **Fixing producers one at a time does not converge** — there are eight hops and
+> seven synthetic posters. The general case is W2.
+
 Assume-messenger is correct **only while Messenger is the only live transport**. It
 buys backwards compatibility by borrowing against a future WhatsApp launch, and the
-debt comes due at a knowable moment. Before WhatsApp carries production traffic:
+debt comes due at a knowable moment. That moment has passed.
 
-- **W1** Legacy moviehouse/linksniffer URLs must be gone, **or** platform must come
-  from a lookup rather than an assumption. A legacy moviehouse URL clicked by a
-  WhatsApp participant reproduces the **2026-08-13** incident exactly: a play event
-  addressed to a Messenger page, at one heartbeat per 30s, leaving a phantom
-  conversation BLOCKED in production.
+- **W1 — NOT CLOSEABLE. Assessed 2026-09-04:
+  `planning/w1-legacy-webview-audit.md`.** Legacy moviehouse/linksniffer URLs must
+  be gone, **or** platform must come from a lookup rather than an assumption. A
+  legacy moviehouse URL clicked by a WhatsApp participant reproduces the
+  **2026-08-13** incident exactly: a play event addressed to a Messenger page, at
+  one heartbeat per 30s, leaving a phantom conversation BLOCKED in production.
+
+  The audit found **802 legacy hand-authored `webview` fields across 131 current
+  surveys**, of which 110 fields / 53 surveys are on a live host, 92 carry a
+  literal hardcoded account id, and 49 `wait` on the tracked event (so they hang
+  rather than degrade). **Zero of the 802 carry any platform parameter**, and
+  there is a confirmed still-stuck WhatsApp casualty. So the first branch of W1
+  cannot be satisfied by cleanup on any near horizon — **W1 has to be met by the
+  lookup, i.e. by W2.**
+
 - **W2** The lookup exists and is deterministic, not a guess: `credentials.entity`
   maps account → transport (`facebook_page` 62 keys, `whatsapp_business` 2, measured
-  on prod 2026-08-22), and formcentral already resolves surveys through it.
-  Caveat: `credentials` CASCADES on user delete, so **resolve and store**, never
-  derive at read time. hermes has no DB access today — this is real work.
-- **W3** Re-check 2.1. The WhatsApp echo is the only thing advancing those
-  conversations, so the "low risk" of `STRICT_EVENT_ENVELOPE` expires here.
+  on prod 2026-08-22 and unchanged 2026-09-05), and formcentral already resolves
+  surveys through it. The `unique_messaging_account` partial unique index on `key`
+  (`WHERE entity IN ('facebook_page','whatsapp_business')`) makes the join
+  single-valued.
+
+  **`planning/platform-guess-expiry.md` is W2's spec**, written against the live
+  incident. Its Task B removes the guess from Dean's seven sweep queries and is
+  committed unpushed.
+
+  Caveat, still standing: `credentials` CASCADES on user delete, so **resolve and
+  store**, never derive at read time. Task B derives at read time — it stops the
+  incident and is a mitigation with a known lifetime, not the end state. hermes
+  has no DB access today; that half is still real work.
+
+- **W3 — this is the one that already came due.** Re-check 2.1. The reasoning
+  recorded at 2.1 assumes barely any WhatsApp traffic and is inverted at 90%. Do
+  W3 and 2.1's risk assessment as one piece of work.
 
 ## What actually unlocks multi-platform
 

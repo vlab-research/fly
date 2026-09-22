@@ -369,6 +369,14 @@ VALUES ('user-uuid', 'dingconnect', 'prod-key', '{"api_key": "dc_live_xxxxx..."}
 
 The `key` field allows multiple DingConnect accounts per user (e.g., 'prod', 'staging', 'test'). The `details` JSON must contain an `api_key` field with the DingConnect API key from your account.
 
+**Exercised live by the smoke test.** `smoke-test/form-a.json` pays 5 BOB to a
+Bolivian number on the declared-intent, *un-pinned* path — the one no production
+survey covers, since the LAC surveys all pin their operators. Its README
+(→ *The two payment blocks*) is the runbook. Note the credential is per cluster:
+as of 2026-09-04 the `DINGCONNECT_API_KEY` Generic Secret exists in **vprod
+only**, so the DingConnect leg cannot be walked against staging until one is
+created there.
+
 #### Configuring a payment: declare the intent, pin the resolution
 
 A DingConnect `sku_code` identifies **one operator's** product, and its

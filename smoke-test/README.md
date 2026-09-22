@@ -5,7 +5,7 @@ through by a human via the Messenger `m.me` link. Unlike the automated tiers
 (`documentation/testing.md`: testcontainers + k8s smoke), this exercises the
 *live* production pipeline end-to-end — the actual page, tokens, replybot,
 message-worker, dinersclub, dean, and the external services (Reloadly,
-smoke-echo, moviehouse) — the way a real respondent would.
+DingConnect, smoke-echo, moviehouse) — the way a real respondent would.
 
 - `form-a.json` → shortcode **`flysmoke`** — the main feature gauntlet.
 - `form-b.json` → shortcode **`flysmokeb`** — reached via a stitch from A; tests
@@ -23,10 +23,29 @@ python3 deploy.py refs form-a        # print field/choice refs (verify logic tar
 python3 deploy.py status             # ids, urls, field/logic counts
 ```
 
+**Pushing to Typeform is only half of a deploy.** replybot reads the survey from
+`chatroach.surveys`, not from Typeform, and each cluster holds its own snapshot
+taken at registration time — so a form-a.json change is invisible to a
+participant until a **new survey version** is registered against form id
+`QJ6d4JHE` in that cluster (`POST /api/v1/surveys`, the dashboard's survey
+screen, or the `create_survey_version` MCP tool; they all land on
+`registerSurveyVersion` in `dashboard-server/api/surveys/survey.service.js`).
+Do it once per environment you intend to walk — vprod and vstag are separate
+databases — and keep `survey_name: "Test Surveys"`, `title: "Fly Smoke Test -
+Part A"`. A conversation already in flight keeps the version it started on.
+
 Then open the survey on the smoke page: `m.me/<PAGE>?ref=form.flysmoke` and walk
 it. Every path converges through the media + moviehouse sections and stitches
 into Part B, so a single run covers everything below.
 
+> **A hidden field's name is capped at 50 characters.** Over that, `update`
+> fails with HTTP 400 `VALIDATION_ERROR` / `PATTERN` naming only the *index*
+> into the `hidden` array — `"field": "/hidden/15"` — and nothing else, so map
+> the index back yourself. This is why the DingConnect success statement echoes
+> `delivered` but not `expected_delivered`: the hidden name for the latter is 51
+> characters and cannot be declared, so it is readable only in the event row
+> (see [The two payment blocks](#the-two-payment-blocks-reloadly-and-dingconnect)).
+>
 > **Every `{{hidden:X}}` must also appear in the form's top-level `hidden`
 > array**, or `update` fails with HTTP 400 `INVALID_PIPING` / *"Invalid
 > reference {{hidden:X}}"* naming the offending field index. Typeform only
@@ -150,7 +169,7 @@ than once. That fires on `choice_red`, `choice_env_staging` and friends — whic
 are the **correct** pattern (explicit ref in the repo, stable across pushes),
 not a problem.
 
-`operator` is the standing counter-example: four unref'd choices, no logic keyed
+`operator_reloadly` is the standing counter-example: four unref'd choices, no logic keyed
 on them, so its ULIDs churn freely and harmlessly. **Give a choice an explicit
 `ref` the moment any logic targets it.**
 
@@ -166,13 +185,14 @@ accepted).
 | Section (field refs) | Feature exercised | Type / mechanism |
 |---|---|---|
 | `welcome` | Bot-sent **image** attachment + auto-advance | `attachment` (`keepMoving`) |
-| `favorite_color`, `test_payment`, `try_again`, `test_handoff`, `test_utility`, `test_attachments` | Quick-reply questions + **field logic jumps** | `multiple_choice` |
-| `why_red` / `feedback` (B) | Free-text answer | `short_text` |
+| `favorite_color`, `test_payment_<provider>`, `try_again_<provider>`, `test_handoff`, `test_utility`, `test_attachments` | Quick-reply questions + **field logic jumps** | `multiple_choice` |
+| `why_red` / `ding_run_tag` / `feedback` (B) | Free-text answer | `short_text` |
 | `siblings` | Numeric answer + validation | `number` |
-| `phone` | Phone answer + normalization | `phone_number` |
-| `payment_wait` → `payment_success`/`payment_failure` | **Payment** (Reloadly) via `wait: external` + **hidden-field logic** | `wait` / `payment:reloadly`; branch on `e_payment_reloadly_success` |
+| `phone_reloadly` / `phone_dingconnect` | Phone answer + normalization; `phone_dingconnect` is also the only `\|e164` transform in the suite | `phone_number` |
+| `payment_wait_reloadly` → `payment_success_reloadly`/`payment_failure_reloadly` | **Payment, Reloadly** via `wait: external` + **hidden-field logic**. 300 NGN to MTN Nigeria | `wait` / `payment:reloadly`; branch on `e_payment_reloadly_success` |
+| `test_payment_dingconnect` → `ding_run_tag` → `phone_dingconnect` → `payment_wait_dingconnect` → `payment_success_dingconnect`/`payment_failure_dingconnect` | **Payment, DingConnect** on the declared-intent surface — 5 BOB to a Bolivian number, resolved from the live catalogue. See [The two payment blocks](#the-two-payment-blocks-reloadly-and-dingconnect) | `wait` / `payment:dingconnect`; branch on `e_payment_dingconnect_success`, echo the whole `resolution` block |
 | `handoff_statement` → `handoff_result` | **Thread-control handoff** round trip + metadata flattening | `handoff`; interpolates `e_handover_metadata_*` (needs `smoke-echo`) |
-| `test_utility` → `utility_message` | Facebook **UTILITY template** message, gated behind a yes/no like `test_payment`/`test_handoff` — answering No skips straight to `test_environment` (choices must match the page's approved button labels — [see below](#the-utility_message-field-page-specific-not-env-specific)) | `multiple_choice` → `utility_message` |
+| `test_utility` → `utility_message` | Facebook **UTILITY template** message, gated behind a yes/no like the payment gates and `test_handoff` — answering No skips straight to `test_environment` (choices must match the page's approved button labels — [see below](#the-utility_message-field-page-specific-not-env-specific)) | `multiple_choice` → `utility_message` |
 | `test_environment` | **Env pick, asked once up front.** Drives *two* branches: the five environment-scoped media fields (`media_third_party_url` logic) and the moviehouse webview host (`confirm_attachment` logic). Both exist because the same Typeform form is deployed to prod and staging, while asset rows, attachment ids and the moviehouse player host are all per-environment | quick-reply; read by `media_third_party_url` and `confirm_attachment` logic |
 | `test_attachments` → `media_third_party_url` → `media_legacy_attachment_id_<env>` → `media_asset_image_<env>` → `media_asset_repeat_<env>` → `media_asset_video_<env>` → `media_asset_file_<env>` → `confirm_attachment` | Six media-abstraction paths back to back, gated behind a yes/no — the question text warns the sends are slow so the pause after tapping Yes isn't mistaken for the bot hanging; answering No skips the whole block straight to the moviehouse webview. One shared third-party field, then a five-field prod or staging chain — see [Media fields](#media-fields-what-each-one-proves) below | `multiple_choice` → `attachment` (`keepMoving`), one legacy `attachment_id`, one not-uploaded `url`, four uploaded-asset `url`s |
 | `confirm_attachment` | **Did they actually arrive?** A failed send is reported and its offset committed, so the survey walks on regardless — this is the only signal that a media send silently failed. Also carries the env branch into the moviehouse webview | `multiple_choice` |
@@ -192,6 +212,180 @@ types (`yes_no`/`legal`, `opinion_scale`, `rating`, `dropdown`, `email`,
 / one-time-notification, and `user_reaction` (message emoji reacts, which the
 machine intentionally ignores). Add them if a regression ever touches those
 paths.
+
+## The two payment blocks (Reloadly and DingConnect)
+
+The survey pays twice, through two different providers, behind two independent
+yes/no gates. Both send **real money** and both are skippable — answering No to
+either walks straight past it.
+
+```
+siblings
+  └─► test_payment_reloadly ──No──────────────────────────► DingConnect gate
+        └─Yes─► operator_reloadly ─► phone_reloadly ─► payment_wait_reloadly
+                     ▲                    ├─ success ─► payment_success_reloadly ─► DingConnect gate
+                     │                    └─ failure ─► payment_failure_reloadly
+                     └──── Yes ──── try_again_reloadly ── No ──────────────► DingConnect gate
+
+  test_payment_dingconnect ──No───────────────────────────► test_handoff
+        └─Yes─► ding_run_tag ─► phone_dingconnect ─► payment_wait_dingconnect
+                     ▲                    ├─ success ─► payment_success_dingconnect ─► test_handoff
+                     │                    └─ failure ─► payment_failure_dingconnect
+                     └──── Yes ──── try_again_dingconnect ── No ─────────► test_handoff
+```
+
+`payment_failure_<provider>` falls through to `try_again_<provider>` in natural
+field order, with no logic rule; every other edge above is one.
+
+**Every ref in both blocks carries its provider.** `payment_wait_reloadly`, not
+`payment_wait`. The two blocks are otherwise near-identical in shape, and a bare
+`payment_failure` on screen next to a provider-suffixed sibling is exactly how a
+tester ends up reading the wrong provider's outcome. The rename was mechanical
+(`test_payment` → `test_payment_reloadly` and friends) and touched nothing else;
+`deploy.py` PUTs the whole form, so on Typeform's side it is a delete-and-add,
+and nothing outside this file names those refs.
+
+### Reloadly — unchanged
+
+300 NGN of mobile credit to MTN Nigeria, `key: vlab`, operator picked from a
+quick-reply and interpolated as `{{field:operator_reloadly}}`. Branches on
+`e_payment_reloadly_success`.
+
+### DingConnect — the declared-intent surface
+
+5 BOB of mobile credit to a Bolivian number. The parameters are lifted from the
+live LAC surveys (`lacbopay1es` and siblings in vprod), so the smoke test
+declares the same intent production does:
+
+```json
+{
+  "id": "smokeding1",
+  "account_number": "{{field:phone_dingconnect|e164}}",
+  "distributor_ref": "smokeding_{{field:ding_run_tag}}",
+  "amount": 5,
+  "amount_currency": "BOB",
+  "tolerance": 5
+}
+```
+
+`amount` is a **floor on what is delivered**, not a cap on spend, so the window
+is `[5, 10]` BOB. `dinersclub/README.md` → *Configuring a payment* is the full
+contract.
+
+The amount and currency are LAC's; **the tolerance is not** — LAC declares `1`
+and this declares `5`. Bolivia rounds receive values down to whole bolivianos,
+and a smoke test resolving against the live catalogue has no pin holding it to
+one product, so a narrow window is the one thing here that could hard-fail as
+`IMPOSSIBLE_AMOUNT` over a rounding step rather than over anything the pipeline
+did. Paying up to 10 BOB instead of up to 6 is the cheaper mistake.
+
+**Deliberately no `operators` pin.** The LAC surveys pin all three Bolivian
+carriers (`ENBO`, `NVBO`, `TIBO`); this one pins none, so `Pay` detects the
+operator with `AccountLookup` and resolves the product from the **live
+catalogue** — `resolution.path == "catalogue"`. Two reasons:
+
+- LAC already exercises the pinned path against production every day. Duplicating
+  it here buys nothing; covering the un-pinned path covers something no other
+  live survey does.
+- **A pin rots into a false alarm.** A commission change turns a stale
+  `send_value` into a permanent `PIN_DRIFT`, and a smoke test that fails for a
+  reason unrelated to the pipeline is worse than no smoke test.
+
+The cost is that there is **no discovery fallback**: with no pins, an
+inconclusive `AccountLookup` fails as `COULD_NOT_AUTO_DETECT_OPERATOR` rather
+than trying candidates. If that starts happening, paste LAC's `operators` map
+into the block — it is a one-line change and it moves the run onto
+`resolution.path == "discovery"`.
+
+### `ding_run_tag` — why the survey asks for one
+
+`distributor_ref` is DingConnect's **idempotency key**. A fixed one would pay on
+the first run and return `DuplicateTransactionPrevented` on every run after it,
+which is the guard working correctly and a useless smoke test. replybot offers no
+per-run entropy — `{{hidden:seed_N}}` is `hash(form + userid)`, stable for a
+given tester forever — so the survey asks the tester for a short tag and builds
+the ref as `smokeding_<tag>`. `try_again_dingconnect` loops back to that field
+rather than to the phone question, so a retry always carries a fresh reference.
+
+Keep the tag short and to letters and digits: the reference is what you search
+DingConnect's own transfer records by, and on the discovery path it also gets a
+`_<sku_code>` suffix per candidate against a 64-character ceiling.
+
+### What to read on the screen
+
+This is the part that makes the DingConnect leg worth walking. dinersclub
+flattens its whole `resolution` block into the respondent's metadata
+(`Result.Resolution` → `e_payment_dingconnect_resolution_*`), and both statements
+echo it back:
+
+| on success | assert |
+|---|---|
+| `path` | **`catalogue`** — anything else means the block resolved by a route this test did not intend |
+| `operator`, `sku_code`, `send_value` | what the catalogue actually chose; `send_value` is USD |
+| `delivered`, `currency` | what actually landed — **5 to 10 BOB**, the declared window |
+
+`expected_delivered` is **not** on screen: its hidden-field name is 51
+characters and Typeform caps them at 50. It is the other half of the amount
+contract — a gap between it and `delivered` means the transfer completed while
+paying an amount the catalogue did not predict, which is the exact failure the
+declared-intent design exists to catch. Read it from the event row with the SQL
+below, or let it find you: `checkDelivered` logs it loudly and increments
+`dinersclub_dingconnect_delivered_out_of_window_total`.
+
+On failure the statement prints **both** signals, because they answer different
+questions and are never interchangeable:
+
+- `error_code` — **DingConnect refused** (`AccountNumberInvalid`,
+  `InsufficientBalance`, `RechargeNotAllowed`, `DuplicateTransactionPrevented`…).
+- `resolution_reason` — **we refused to send**, and no money moved
+  (`OperatorNotDetermined`, `ImpossibleAmount`, `CurrencyMismatch`…).
+
+`dinersclub/README.md` → *What a survey can branch on* carries the full value
+space for both.
+
+### Prerequisites — per environment, and staging is not ready
+
+The same Typeform form serves prod and staging, but the credential does not:
+Generic Secrets are rows in each cluster's own database.
+
+| | vprod | vstag |
+|---|---|---|
+| `dingconnect` in `DINERSCLUB_PROVIDERS` | yes (2026-09-02) | yes |
+| Generic Secret `DINGCONNECT_API_KEY` | **yes** (2026-09-04) | **missing** |
+
+With the secret absent the payment fails immediately, before any HTTP call, as
+`INVALID_PAYMENT_DETAILS`: *No Generic Secret named "DINGCONNECT_API_KEY" was
+found.* Create it in the **staging** dashboard under Connected Accounts, for the
+same account that owns `flysmoke` there, before walking the DingConnect leg
+against staging. The Reloadly leg needs nothing new.
+
+The researcher's DingConnect wallet also has to hold a balance —
+`InsufficientBalance` comes back with HTTP 500, and `dinersclub/README.md`
+records why classification keys on the code and never the status.
+
+### Verifying it off-screen
+
+```sql
+SELECT "timestamp" AS at,
+       content::JSONB->'event'->'value'->>'success'  AS ok,
+       content::JSONB->'event'->'value'->'resolution' AS resolution,
+       content::JSONB->'event'->'value'->'error'      AS error
+  FROM chatroach.messages
+ WHERE userid = '<participant user id>'
+   AND content::JSONB->'event'->'value'->>'type' = 'payment:dingconnect'
+ ORDER BY "timestamp" DESC LIMIT 5;
+```
+
+and on the dinersclub side:
+
+```bash
+kubectl logs -n vprod deployment/gbv-dinersclub | grep -i dingconnect
+```
+
+A `PIN DRIFT` or `DELIVERED … but expected …` line there is the loud half of the
+amount contract; the counters are
+`dinersclub_dingconnect_pin_drift_total` and
+`dinersclub_dingconnect_delivered_out_of_window_total`.
 
 ## Conversation identity — the four link paths
 

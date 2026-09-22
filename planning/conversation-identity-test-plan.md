@@ -92,6 +92,26 @@ this phase must guarantee.
 > carry no account at all and are permanently unattributable. See
 > `planning/messages-account-not-null-todo.md`.
 
+**Correction, 2026-09-04 — the "~3,000" in the box above is wrong; the number is
+~55,000.** The prose above is left exactly as written because the B8-6 integration
+test (`facebot/testrunner/test.tc.ts:2227`) greps this file for the marker
+`NULL-ACCOUNT-ID TOLERANCE REMOVAL CONDITION` and for the literal string
+`account_id IS NULL`; editing that block risks the test, and the removal condition
+it states is unaffected either way.
+
+What changed is only the size of the permanently-unattributable population.
+`SHOW STATISTICS FOR TABLE chatroach.messages` on vprod reports
+`{account_id} | row_count 108,074,354 | null_count 54,960 | created 2026-09-03
+15:47:18+00` — **18x the ~3,000 above**, and independently corroborated by the
+production backfill's own bounded pass, which extrapolated ~48,800. It is a
+**statistics estimate, not an exact count**; the exact figure needs migration 26's
+removal gate (`devops/migrations/26-messages-account.sql:154-165`), a 399 GiB scan
+that is deliberately unrun. Full write-up and the consequences for the sentinel
+pass: `planning/messages-account-not-null-todo.md`.
+
+For the record: the production backfill referenced by that document completed
+**2026-08-29 00:20:53 UTC** (5,351 batches, 106,931,189 rows, `done=t`).
+
 ### The refusals — `replybot/lib/typewheels/`
 
 `machine.test.js` and `transition.test.js`. Both refusals return `_noop()`:
