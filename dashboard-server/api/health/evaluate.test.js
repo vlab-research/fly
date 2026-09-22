@@ -30,6 +30,7 @@ function bag(overrides = {}) {
       },
       stuck_users: 0,
       expired_waits: 0,
+      awaiting_payment: 0,
       by_form: {},
     },
     overrides
@@ -191,6 +192,17 @@ describe('health evaluate (pure rule engine)', () => {
     findings[0].level.should.equal('action');
     findings[0].id.should.equal('template-missing');
     findings.slice(1).forEach(f => f.level.should.equal('note'));
+  });
+
+  it('raises an action for a single respondent still waiting to be paid', () => {
+    // Deterministic, so no proportion: one in ten thousand is still one
+    // person who did the work and has not been paid.
+    const b = bag({ active_users: 10000, awaiting_payment: 1 });
+    const findings = evaluate(b, rules, quiet);
+    findings.length.should.equal(1);
+    findings[0].id.should.equal('awaiting-payment');
+    findings[0].level.should.equal('action');
+    findings[0].message.should.contain('1 respondent(s)');
   });
 
   it('produces no finding for stuck respondents (rule removed 2026-07-29)', () => {

@@ -207,7 +207,25 @@ const STATE_MACHINE_STATES = [
 // fb_category when state === 'BLOCKED' — but do not "fix" it by narrowing the
 // CASE without checking that guard, and do not read fb_category for
 // non-BLOCKED rows.
+// A respondent parked on a payment that has not landed. The predicate is
+// dean's Payments query (dean/queries.go): an external wait on a payment:*
+// event, older than DEAN_PAYMENT_GRACE, which is how long a payment that is
+// merely slow can take. dinersclub withholds every payment failure the
+// respondent cannot fix, so nothing else in a state says a payment is failing.
+const PAYMENT_WAIT_GRACE_HOURS = 2;
+const AWAITING_PAYMENT_SQL = `(
+  states.current_state = 'WAIT_EXTERNAL_EVENT'
+  AND states.state_json->'wait'->>'type' = 'external'
+  AND states.state_json->'wait'->'value'->>'type' LIKE 'payment:%'
+  AND CEILING((states.state_json->>'waitStart')::INT/1000)::INT::TIMESTAMPTZ
+      < NOW() - INTERVAL '${PAYMENT_WAIT_GRACE_HOURS} hours'
+)`;
+
+// Everything is counted over the last HEALTH_WINDOW_HOURS except
+// awaiting_payment: someone still owed money does not stop being owed when
+// their state stops changing, which it does once dean's retries run out.
 async function healthSummary(email, surveyName, shortcodes) {
+  const inWindow = `states.updated > NOW() - INTERVAL '${HEALTH_WINDOW_HOURS} hours'`;
   const query = `
     SELECT
       states.current_form AS form,
@@ -223,13 +241,16 @@ async function healthSummary(email, surveyName, shortcodes) {
           OR states.fb_error_code = '0'    THEN 'provider_unreachable'
         ELSE 'other'
       END AS fb_category,
-      COUNT(*) FILTER (WHERE states.stuck_on_question IS NOT NULL)::int AS stuck,
-      COUNT(*) FILTER (WHERE states.current_state = 'WAIT_EXTERNAL_EVENT'
+      COUNT(*) FILTER (WHERE ${inWindow}
+                         AND states.stuck_on_question IS NOT NULL)::int AS stuck,
+      COUNT(*) FILTER (WHERE ${inWindow}
+                         AND states.current_state = 'WAIT_EXTERNAL_EVENT'
                          AND states.timeout_date < NOW())::int AS expired,
-      COUNT(*)::int AS count
+      COUNT(*) FILTER (WHERE ${AWAITING_PAYMENT_SQL})::int AS awaiting_payment,
+      COUNT(*) FILTER (WHERE ${inWindow})::int AS count
     ${SCOPE_SQL}
       AND states.current_state = ANY($4)
-      AND states.updated > NOW() - INTERVAL '${HEALTH_WINDOW_HOURS} hours'
+      AND (${inWindow} OR ${AWAITING_PAYMENT_SQL})
     GROUP BY 1, 2, 3, 4
   `;
 

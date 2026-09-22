@@ -80,6 +80,23 @@ module.exports.rules = [
     },
   },
 
+  // A payment failure the respondent cannot fix is withheld from them
+  // (dinersclub/classify.go), so they are told nothing and wait. That makes
+  // this finding the only place a researcher sees it. Deterministic: one
+  // person here is one person who did the work and has not been paid.
+  {
+    id: 'awaiting-payment',
+    when: { metric: 'awaiting_payment', count_gte: 1 },
+    level: 'action',
+    message:
+      '{count} respondent(s) have finished a payment step and have not been paid. They have not been told anything and the payment is retried automatically, but it keeps failing until the cause is fixed. The usual causes are an empty balance in your payment provider account, or a payment amount the provider no longer offers. Check the account; if it looks healthy, please contact support.',
+    action: {
+      label: 'View affected respondents',
+      dest: 'states-list',
+      filter: { state: 'WAIT_EXTERNAL_EVENT' },
+    },
+  },
+
   // ---- stochastic degradation: proportion + floor --------------------
   {
     id: 'error-spike',

@@ -117,6 +117,33 @@ describe('Health API', () => {
         state_json: { ...formStartJson, forms: [shortcode1], qa: [['Q1', 'A1'], ['Q2', 'A2'], ['Q2', 'A3'], ['Q2', 'A4']] },
         updated: now,
       },
+      // payment not landed after dean's grace, and the state long since
+      // stopped changing -> still counted: owed money does not age out
+      {
+        userid: 'health-user-unpaid',
+        current_state: 'WAIT_EXTERNAL_EVENT',
+        state_json: {
+          ...formStartJson,
+          forms: [shortcode2],
+          qa: [],
+          wait: { type: 'external', value: { type: 'payment:reloadly', id: 'p1' } },
+          waitStart: Date.now() - 26 * 60 * 60 * 1000,
+        },
+        updated: stale,
+      },
+      // payment sent a minute ago -> inside the grace, not a finding
+      {
+        userid: 'health-user-paying',
+        current_state: 'WAIT_EXTERNAL_EVENT',
+        state_json: {
+          ...formStartJson,
+          forms: [shortcode2],
+          qa: [],
+          wait: { type: 'external', value: { type: 'payment:reloadly', id: 'p1' } },
+          waitStart: Date.now() - 60 * 1000,
+        },
+        updated: now,
+      },
       // stale platform error, outside the 24h window -> invisible
       {
         userid: 'health-user-stale-error',
@@ -180,8 +207,9 @@ describe('Health API', () => {
       response.body.window_hours.should.equal(24);
       const agg = response.body.aggregates;
 
-      // 7 in-window rows; the stale row and the foreign-page row are invisible.
-      agg.active_users.should.equal(7);
+      // 8 in-window rows; the stale rows and the foreign-page row do not count
+      // as active.
+      agg.active_users.should.equal(8);
       agg.error.platform.should.equal(1); // stale INTERNAL excluded
       agg.error.study.should.equal(1);
       agg.blocked.template_missing.should.equal(1);
@@ -189,6 +217,7 @@ describe('Health API', () => {
       agg.blocked.rate_limit.should.equal(0);
       agg.stuck_users.should.equal(1);
       agg.expired_waits.should.equal(1);
+      agg.awaiting_payment.should.equal(1); // the stale one; the fresh one is in grace
 
       // by_form mirrors the shape per shortcode
       agg.by_form[shortcode1].error.platform.should.equal(1);
@@ -207,7 +236,8 @@ describe('Health API', () => {
 
       ids.should.include('template-missing');
       ids.should.include('platform-errors');
-      ids.should.include('error-trickle'); // 1/7 -> note, not spike (count < 3)
+      ids.should.include('error-trickle'); // 1/8 -> note, not spike (count < 3)
+      ids.should.include('awaiting-payment');
       ids.should.include('expired-waits');
       ids.should.not.include('error-spike');
       // stuck_users is still aggregated (asserted above) but reads by no rule
