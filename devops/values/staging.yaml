@@ -39,7 +39,9 @@ versionHermes: &vhermes v0.0.5
 #
 # Production stays on v0.0.219 until this soaks 24h. See
 # planning/conversation-identity.md §5.
-versionReplybot: &vreplybot v0.0.228
+# v0.0.229: stamps state_json.lastInbound, the respondent's last own message
+#   (PR #180). Deploy BEFORE migration 33 and dean v0.0.48; harmless alone.
+versionReplybot: &vreplybot v0.0.229
 versionLinksniffer: &vlinksniffer v0.0.9
 versionDean: &vdean v0.0.47
 versionScribble: &vscribble v0.0.34
