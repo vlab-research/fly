@@ -20,7 +20,8 @@ exporterTopic: &exportertopic "vlab-staging-exports"
 chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
-versionDashboard: &vdashboard v0.0.78
+# v0.0.79: `awaiting-payment` health finding; see production.yaml.
+versionDashboard: &vdashboard v0.0.79
 versionBotserver: &vbotserver v0.0.12
 # Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
 # suffix guards WhatsApp work from reaching production, and WhatsApp is in
@@ -50,7 +51,9 @@ versionScribble: &vscribble v0.0.34
 # (ValidateOnly omitted when false); see production.yaml for the full note.
 # v0.0.53: go-dingconnect v0.3.2 -- discovery advances on AccountNumberInvalid,
 # so Tigo Honduras numbers are reached (VIR-54); see production.yaml.
-versionDinersclub: &vdinersclub v0.0.53
+# v0.0.54: only failures another number could fix reach the form; the rest are
+# withheld and re-driven; see production.yaml.
+versionDinersclub: &vdinersclub v0.0.54
 versionFormcentral: &vformcentral v0.0.14-wa
 versionExporter: &vexporter v0.6.12
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
