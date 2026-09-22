@@ -88,7 +88,10 @@ versionLinksniffer: &vlinksniffer v0.0.9
 # PRODUCER (timeout events). An unstamped synthetic event triggers
 # assume-messenger, which is silently correct on Messenger and BLOCKS the
 # conversation on WhatsApp -- see versionDinersclub below for the incident.
-versionDean: &vdean v0.0.47
+# v0.0.48: FollowUps measures from states.last_inbound and only nudges
+#   someone who has answered (PR #180). REQUIRES MIGRATION 33 -- the query
+#   names the column -- and DEAN_FOLLOWUP_MAX of 23 hours below.
+versionDean: &vdean v0.0.48
 # ############################################################################
 # DO NOT APPLY THIS VALUE BEFORE MIGRATION 28a HAS COMPLETED.
 #
