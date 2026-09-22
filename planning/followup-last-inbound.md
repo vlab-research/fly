@@ -152,6 +152,13 @@ long it took.
 
 replybot first (it only adds a field), then the migration, then dean with the
 new query and `MAX`. Between the migration and the dean deploy nothing changes.
+
+Done 2026-09-22 (replybot v0.0.229, dean v0.0.48, PRs #180/#181). Migration
+33 took 12 s on vstag (1,314 rows) and 113 s on vprod (1,124,891 rows),
+column and index together, as an online schema change with replybot serving
+throughout; 22 rows were stamped within three minutes of the replybot
+rollout. Dean went live between the 19:00 and 05:00 UTC follow-up runs, so
+the old query never ran against the new column.
 After the dean deploy, the first `followups` run should select only
 participants whose last message was 12–23 h ago and who have answered
 something; verify with the query against vprod before enabling and count the
