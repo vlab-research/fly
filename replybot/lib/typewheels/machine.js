@@ -225,6 +225,23 @@ function categorizeEvent(nxt) {
 
 }
 
+// The respondent's own acts. A referral counts: tapping the ad is what opens
+// the conversation. Receipts (WATERMARK) acknowledge something we sent, an
+// ECHO is our own message, and synthetics are ours too.
+const INBOUND = new Set(['REFERRAL', 'OPTIN', 'TEXT', 'MEDIA', 'POSTBACK', 'QUICK_REPLY', 'REACTION'])
+
+function isInbound(event) {
+  return INBOUND.has(categorizeEvent(event))
+}
+
+// lastInbound is when the respondent last wrote to us, whatever the machine did
+// with it. It is what the messaging platforms' 24-hour windows count from, so
+// it is what dean's follow-up rule reads (states.last_inbound). Stamped outside
+// exec/apply so both stay pure, and so a replay rebuilds it.
+function stampInbound(state, event) {
+  return isInbound(event) ? { ...state, lastInbound: event.timestamp } : state
+}
+
 function _noop() {
   return { action: 'NONE' }
 }
@@ -722,21 +739,26 @@ function apply(state, output) {
         qa: updateQA(state.qa, update(output))
       }
 
+    // Every rebuild from _initialState() carries lastInbound: a stitch, a reset
+    // or a restore must not make the respondent look like they never wrote.
     case 'RESPOND_AND_RESET':
       return {
         ..._initialState(),
+        lastInbound: state.lastInbound,
         ...output.stateUpdate,
       }
 
     case 'RESET':
       return {
         ..._initialState(),
+        lastInbound: state.lastInbound,
         ...output.stateUpdate,
       }
 
     case 'RESTORE_STATE':
       return {
         ..._initialState(),
+        lastInbound: state.lastInbound,
         ...output.stateUpdate,
       }
 
@@ -758,6 +780,7 @@ function apply(state, output) {
         state: 'RESPONDING',
         forms: [...state.forms, output.form],
         pointer: state.pointer, // keep pointer always!
+        lastInbound: state.lastInbound,
         md: output.md
       }
 
@@ -1047,7 +1070,7 @@ function getState(log) {
   if (!log || !log.length) {
     return _initialState()
   }
-  return log.reduce((s, e) => apply(s, exec(s, e)), _initialState())
+  return log.reduce((s, e) => stampInbound(apply(s, exec(s, e)), e), _initialState())
 }
 
 function getMessage(log, form, user, page) {
@@ -1063,6 +1086,7 @@ module.exports = {
   getState,
   exec,
   apply,
+  stampInbound,
   act,
   update,
   getMessage,

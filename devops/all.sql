@@ -287,3 +287,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS unique_messaging_account
 
 -- 21-states-platform.sql: conversation platform from state_json md (NULL predates md.platform persistence; COALESCE to 'messenger')
 ALTER TABLE chatroach.states ADD COLUMN IF NOT EXISTS platform VARCHAR AS (state_json->'md'->>'platform') STORED;
+
+-- 33-states-last-inbound.sql: when the respondent last wrote to us (NULL predates the stamp); what FollowUps measures from
+ALTER TABLE chatroach.states ADD COLUMN IF NOT EXISTS last_inbound TIMESTAMPTZ AS (CEILING((state_json->>'lastInbound')::INT8 / 1000)::INT8::TIMESTAMPTZ) STORED;
+CREATE INDEX IF NOT EXISTS states_followup_idx ON chatroach.states (current_state, previous_is_followup, previous_with_token, last_inbound) STORING (state_json);

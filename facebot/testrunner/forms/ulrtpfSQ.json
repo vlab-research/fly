@@ -60,6 +60,16 @@
       "type": "multiple_choice"
     },
     {
+      "id": "6jwUKWwNiPEv",
+      "title": "And why?",
+      "ref": "and_why",
+      "properties": {},
+      "validations": {
+        "required": false
+      },
+      "type": "short_text"
+    },
+    {
       "id": "DefaultTyScreen",
       "ref": "default_tys",
       "title": "Done! Your information was sent perfectly.",

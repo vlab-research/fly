@@ -1,4 +1,4 @@
-const { exec, apply, act, update } = require('./machine')
+const { exec, apply, stampInbound, act, update } = require('./machine')
 const { eventPlatform } = require('./utils')
 const { getForm } = require('./ourform')
 const { responseVals } = require('../responses/responser')
@@ -36,7 +36,7 @@ class Machine {
     // which is also where the missing-platform guess is logged).
     const platform = eventPlatform(parsedEvent)
     const output = exec(state, parsedEvent)
-    const newState = apply(state, output)
+    const newState = stampInbound(apply(state, output), parsedEvent)
     return { newState, output, page, platform }
   }
 

@@ -18,19 +18,26 @@ describe('machine.run', () => {
       error: { tag: 'HISTORY_LIMIT', message: 'history exceeds 10000 events', ts: 1 }
     }
 
-    const arrivals = { text, multipleChoice, qr, read, delivery, echo }
+    // The respondent's own events still stamp lastInbound; the rest change nothing.
+    const arrivals = {
+      text: { ...capped, lastInbound: 5000 },
+      multipleChoice: { ...capped, lastInbound: 5000 },
+      qr: { ...capped, lastInbound: 5000 },
+      read: capped, delivery: capped, echo: capped
+    }
+    const events = { text, multipleChoice, qr, read, delivery, echo }
 
-    for (const [name, ev] of Object.entries(arrivals)) {
+    for (const [name, expected] of Object.entries(arrivals)) {
       it(`no-ops a ${name} event without touching getForm and keeps the capped state`, async () => {
         const m = new Machine()
         let getFormCalls = 0
         m.getForm = async () => { getFormCalls++; return [{}, 'survey'] }
 
-        const report = await m.run(capped, USER_ID, JSON.stringify({ ...ev, timestamp: 5000 }))
+        const report = await m.run(capped, USER_ID, JSON.stringify({ ...events[name], timestamp: 5000 }))
 
         should.not.exist(report.error)
         report.publish.should.be.false
-        report.newState.should.eql(capped)
+        report.newState.should.eql(expected)
         getFormCalls.should.equal(0)
       })
     }
@@ -527,7 +534,7 @@ describe('Machine integrated', () => {
     should.not.exist(report.error)
     report.timestamp.should.equal(text.timestamp)
     report.publish.should.be.false
-    report.newState.should.eql(state)
+    report.newState.should.eql({ ...state, lastInbound: text.timestamp })
     should.not.exist(report.commands)
   })
 
@@ -693,10 +700,10 @@ describe('Machine integrated', () => {
       return m.run(live, USER_ID, rawGetStarted)
     }
 
-    it('leaves the live conversation exactly as it was', async () => {
+    it('leaves the live conversation as it was, but for lastInbound', async () => {
       const report = await refused()
 
-      report.newState.should.eql(live)
+      report.newState.should.eql({ ...live, lastInbound: rawGetStarted.timestamp })
     })
 
     it('does not switch the participant onto FALLBACK_FORM', async () => {

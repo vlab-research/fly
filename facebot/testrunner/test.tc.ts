@@ -976,25 +976,31 @@ describe('Test Bot flow Survey Integration Testing', () => {
       const userId = uuid();
       const fields = getFields('forms/ulrtpfSQ.json');
 
-      const followUp = makeRepeat(fields[0], 'this is a follow up');
+      const followUp = makeRepeat(fields[1], 'this is a follow up');
 
+      // Dean only nudges someone who has answered something -- a bare ad tap
+      // is never followed up -- so answer the first question and stall on the
+      // second.
       await sendMessage(makeReferral(userId, 'ulrtpfSQ'));
       await flowMaster(userId, [
-        [ok, fields[0], []],
+        [ok, fields[0], [makeQR(fields[0], userId, 0)]],
+        [ok, fields[1], []],
       ]);
-      // Dean's followups query only matches current_state = 'QOUT'; waiting for
-      // just any state row races the scribble upsert and dean finds 0 users.
+      // Dean's followups query only matches current_state = 'QOUT' on the
+      // stalled question; waiting for just any QOUT row races the scribble
+      // upsert of the answer and dean finds 0 users.
+      const stalledRef = JSON.parse(fields[1].metadata || '{}').ref;
       await waitFor(async () => {
         const s = await getState(chatbase, userId);
-        return s?.current_state === 'QOUT' ? s : null;
+        return s?.current_state === 'QOUT' && s.state_json?.question === stalledRef ? s : null;
       }, 30000);
       await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'followups');
       await snooze(5000);
       // Bot sends the followup message and continues
       await flowMaster(userId, [
         [ok, followUp, []],
-        [ok, makeRepeated(fields[0]), [makeQR(fields[0], userId, 0)]],
-        [ok, fields[1], []],
+        [ok, makeRepeated(fields[1]), [makeTextResponse(userId, 'because')]],
+        [ok, fields[2], []],
       ]);
     });
 

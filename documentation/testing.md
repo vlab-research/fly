@@ -177,11 +177,16 @@ Example timeout test:
 it('sends followup after timeout', async () => {
   const userId = 'test-user-1';
   
-  // User starts form, gets first question
+  // User starts form, answers the first question, gets the second. Dean only
+  // follows up someone who has answered something, measured from their last
+  // message (states.last_inbound).
   await sendMessage(makeReferral(userId, 'timeoutForm'));
-  await flowMaster(userId, [[ok, firstQuestion, []]]);
+  await flowMaster(userId, [
+    [ok, firstQuestion, [makeQR(firstQuestion, userId, 0)]],
+    [ok, secondQuestion, []],
+  ]);
   
-  // No user response; trigger dean to check for overdue messages
+  // No response to the second question; trigger dean to check for overdue messages
   await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'followups');
   
   // Followup is now queued
