@@ -48,12 +48,12 @@ func TestMetricsExposeWhatTheAlertsSelectOn(t *testing.T) {
 	assert.Contains(t, page,
 		`dinersclub_payment_results_total{code="",outcome="success",provider="reloadly",recovery=""} 1`)
 
-	// An unknown code is counted as permanent under a fixed `unclassified`
+	// An unknown code is counted as a precondition under a fixed `unclassified`
 	// label, so one unrecognised provider code cannot grow the label space of
 	// the main counter. The real code goes to its own counter, which is what
 	// PaymentUnclassifiedErrorCode reads.
 	assert.Contains(t, page,
-		`dinersclub_payment_results_total{code="unclassified",outcome="failure",provider="reloadly",recovery="permanent"} 1`)
+		`dinersclub_payment_results_total{code="unclassified",outcome="failure",provider="reloadly",recovery="precondition"} 1`)
 	assert.Contains(t, page,
 		`dinersclub_unclassified_error_codes_total{code="A_BRAND_NEW_CODE",provider="reloadly"} 1`)
 	assert.NotContains(t, page,

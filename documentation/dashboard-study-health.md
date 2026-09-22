@@ -123,6 +123,7 @@ miscalibrated, and re-tuning on no data would be guessing.
   blocked: { attrition: 5, template_missing: 2, rate_limit: 0, unsupported: 0, other: 0 },
   stuck_users: 0,
   expired_waits: 0,
+  awaiting_payment: 0,           // NOT windowed, see §4
   by_form: { "XYZ12": { /* same shape per form */ } }
 }
 ```
@@ -133,6 +134,14 @@ miscalibrated, and re-tuning on no data would be guessing.
   it): `blocked.template_missing`, `blocked.rate_limit`, `error.platform`
   (INTERNAL/STATE_ACTIONS/NETWORK tags). **Alarm (`action`) at count ≥ 1** —
   1-in-1000 here is not a 0.1% error rate; it's proof the door is locked.
+- **`awaiting_payment`** is deterministic too: a respondent in
+  `WAIT_EXTERNAL_EVENT` on a `payment:*` wait for longer than dean's payment
+  grace (2h). **`action` at count ≥ 1.** dinersclub withholds every payment
+  failure the respondent cannot fix (`dinersclub/classify.go`), so the
+  respondent is told nothing and no state records the failure; this finding is
+  the only place the researcher sees it. It is the one aggregate that ignores
+  the 24h window: a parked state stops changing once dean's retries run out,
+  and someone still owed money must not age out of view.
 - **Stochastic degradation** (distributed over the population):
   `error.study` (tag `none`/`FORM_NOT_FOUND`/unknown), `expired_waits`.
   **`action` on proportion (≥5%) + absolute floor (≥3); below that, a muted

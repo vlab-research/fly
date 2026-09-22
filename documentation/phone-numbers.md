@@ -141,8 +141,8 @@ respondent is paid on.
 **When nothing resolves**, `|e164` passes the raw answer through unchanged
 rather than emptying the field. DingConnect then rejects it with
 `AccountNumberInvalid`, which `dinersclub/classify.go` classifies as
-`RecoveryPermanent` — no retry loop, the respondent's failure surfaces through
-the normal payment-failure path (`documentation/payment-recovery.md`). A
+`RecoveryRespondent` — no retry loop, the failure is delivered to the form so it
+can ask for another number (`documentation/payment-recovery.md`). A
 rejected payment is recoverable by a human; a payment to a plausible wrong
 number is not.
 

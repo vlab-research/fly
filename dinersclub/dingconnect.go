@@ -97,9 +97,9 @@ type DingConnectOperatorPin struct {
 // additive and needs no migration. v1 deliberately does not build it.
 const onDriftFail = "fail"
 
-// Result error codes produced by this provider. All are permanent in
-// classify.go: they are configuration faults a retry cannot clear, and parking
-// someone for dean's 14 days on one would hide it.
+// Result error codes produced by this provider. All are preconditions in
+// classify.go: they are configuration faults the respondent cannot clear, and
+// PaymentPinDrift is what stops a withheld one from going unnoticed.
 const (
 	codePinDrift               = "PIN_DRIFT"
 	codeAmountCurrencyMismatch = "AMOUNT_CURRENCY_MISMATCH"

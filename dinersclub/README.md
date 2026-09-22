@@ -194,7 +194,7 @@ Call provider.Payout() with exponential backoff retry
 Classify the result
     ↓
     ├─ success ..................... send to botserver
-    ├─ permanent failure ........... send to botserver
+    ├─ respondent failure .......... send to botserver
     └─ transient / precondition .... SEND NOTHING, record a metric
                                      (respondent stays in WAIT_EXTERNAL_EVENT;
                                       dean re-drives the payment)
@@ -434,7 +434,7 @@ on the survey's phone question. For Argentina that string deliberately omits the
 mobile `9` (`+541164018373`), because that is the shape this account's
 Argentine transfers are accepted in. A value replybot could not resolve is
 passed through raw, and DingConnect's `AccountNumberInvalid` for it is
-`RecoveryPermanent` (`classify.go`). A wrong-but-valid number is not caught here
+`RecoveryRespondent` (`classify.go`). A wrong-but-valid number is not caught here
 at all — it is paid. See `documentation/phone-numbers.md`.
 
 > ### ⚠️ `tolerance` defaults to zero, and zero means exact match
@@ -447,7 +447,8 @@ at all — it is paid. See `documentation/phone-numbers.md`.
 > Bolivia, receive values round down to whole bolivianos. A pin sitting on a
 > rounding boundary can therefore flip to `PinOutOfWindow` and **hard-fail the
 > payment on a rounding artefact rather than a real commission change** — and
-> the failure is permanent, so the respondent is told their payment failed.
+> the failure is withheld as a `precondition`, so the respondent stays parked
+> and is told nothing.
 >
 > dinersclub logs a loud warning for any payment declaring `tolerance: 0` and
 > pays anyway. **It does not invent a non-zero default**, deliberately: widening
@@ -634,6 +635,11 @@ value space:
 
 **Every one of these means no money moved.** A respondent seeing any of them was
 not paid and was not partially paid.
+
+**Only `OperatorNotDetermined` reaches a survey.** `COULD_NOT_AUTO_DETECT_OPERATOR`
+is `respondent`; every other row maps to a `precondition` code, so its Result is
+withheld (see "Recovery classes") and the code is visible only in dinersclub's
+logs and metrics.
 
 The rest of the resolution block is available too:
 `e_payment_dingconnect_resolution_{path,operator,country,sku_code,send_value,expected_delivered,delivered,currency}`.
@@ -852,8 +858,8 @@ decisions, and dinersclub cannot see them.
 | class | meaning | dinersclub does | examples |
 |---|---|---|---|
 | `transient` | the same call, later, may just work | retries in-process, then **sends nothing** | provider 5xx, `OPERATOR_UNAVAILABLE_OR_CURRENTLY_INACTIVE`, `TRANSACTION_CANNOT_BE_PROCESSED_AT_THE_MOMENT` |
-| `precondition` | a human off-stage must act first | **sends nothing** | `INSUFFICIENT_BALANCE`, `AUTH_ERROR` |
-| `permanent` | never going to work as configured | **sends the failure Result** | `INVALID_RECIPIENT_PHONE`, `IMPOSSIBLE_AMOUNT`, `PHONE_RECENTLY_RECHARGED` |
+| `precondition` | a human off-stage must act first, and the respondent has no part in it | **sends nothing** | `INSUFFICIENT_BALANCE`, `AUTH_ERROR`, `IMPOSSIBLE_AMOUNT`, `PIN_DRIFT`, `INVALID_PAYMENT_DETAILS`, `RateLimited` |
+| `respondent` | only the respondent can change the outcome, by giving a different number | **sends the failure Result** | `INVALID_RECIPIENT_PHONE`, `PHONE_RECENTLY_RECHARGED`, `TRANSACTION_REJECTED_BY_OPERATOR` |
 
 **Sending is releasing.** replybot's wait matcher is a subset check over `type`
 and `id` and never looks at `success`, so *any* Result takes the respondent out
@@ -863,9 +869,18 @@ This is why the behavioural axis is a binary even though there are three
 classes: `transient` and `precondition` are kept apart because they differ in
 what a *human* should do, which is what the metrics and alerts read.
 
-**An unrecognised code is `permanent`** — it is sent, exactly as every failure
-was sent before classification existed. New behaviour applies only where we can
-name the reason, and the mistake is cheap to correct: the code is counted by
+**A failure is sent only when another number could fix it.** A form's only
+answer to a delivered failure is to ask for another phone number, so every
+failure that is ours or the provider's is withheld: sending it would tell the
+respondent their number is wrong when it is not. The duplicate-reference codes
+(`CUSTOM_IDENTIFIER_ALREADY_USED`, `DUPLICATE_REFERENCE`,
+`DuplicateTransactionPrevented`) are the one exception, sent although the
+respondent cannot fix them — see the comment on those rows in `classify.go`.
+
+**An unrecognised code is `precondition`** — it is withheld. A code nobody has
+looked at says nothing about the respondent's number, so asking them for another
+one would be a guess. The cost of being wrong is a respondent parked until the
+row is added: the code is counted by
 `dinersclub_unclassified_error_codes_total` and the
 `PaymentUnclassifiedErrorCode` alert asks someone to add a row.
 
@@ -883,15 +898,15 @@ non-2xx. A "5xx means transient" rule would retry an empty wallet forever.
 
 | Code | Meaning | Class | Next Step |
 |------|---------|-------|-----------|
-| INVALID_PROVIDER | Provider not in DINERSCLUB_PROVIDERS list | permanent | Check provider name and configuration |
+| INVALID_PROVIDER | Provider not in DINERSCLUB_PROVIDERS list | **precondition** | Check provider name and configuration; alerts as `PaymentsBlockedByConfiguration` |
 | AUTH_ERROR | Provider authentication failed | **precondition** | Fix credentials; parked payments land on dean's next sweep |
 | INSUFFICIENT_BALANCE | Researcher's provider wallet is empty | **precondition** | Top the account up — pages as `PaymentWalletEmpty` |
-| INVALID_JSON_FORMAT | Payment details JSON malformed | permanent | Check JSON format of details |
-| MISSING_SECRET | HTTP provider missing interpolation secret | permanent | Add secret to credentials table |
-| BAD_HTTP_REQUEST | HTTP provider request invalid | permanent | Check URL and headers |
+| INVALID_JSON_FORMAT | Payment details JSON malformed | **precondition** | Check JSON format of details |
+| MISSING_SECRET | HTTP provider missing interpolation secret | **precondition** | Add secret to credentials table |
+| BAD_HTTP_REQUEST | HTTP provider request invalid | **precondition** | Check URL and headers |
 | HTTP_REQUEST_FAILED | Never reached the provider | **transient** | Check network/API availability |
 | HTTP 5xx / 429 | Server-side fault or throttling | **transient** | Retried, then deferred to dean |
-| HTTP 4xx | Request the provider refused | permanent | Check API response/logs |
+| HTTP 400 / 404 | Request the provider refused | **precondition** | Check API response/logs |
 
 DingConnect's own codes arrive verbatim (`e.Code()`, `dingconnect.go`), so they
 sit in the same table in CamelCase:
@@ -900,9 +915,9 @@ sit in the same table in CamelCase:
 |------|---------|-------|-----------|
 | ProviderError | The mobile operator failed the transfer | **transient** | Retried, then deferred to dean. Transient **against** the library's `Retryable()` — see the row in `classify.go` |
 | TransientProviderError | The operator was briefly unable | **transient** | Same; DingConnect's explicitly retryable variant, unobserved so far |
-| AccountNumberInvalid | The number is refused or malformed | permanent | The respondent's to fix by giving a different number |
-| ParameterInvalid | DingConnect refused a parameter of ours | permanent | Our request to fix; a retry sends the same body |
-| RateLimited | Throttling **or** a per-number fraud rule | permanent | Never retried, and the cascade never advances past it — the ambiguity resolves to "stop" |
+| AccountNumberInvalid | The number is refused or malformed | respondent | The respondent's to fix by giving a different number |
+| ParameterInvalid | DingConnect refused a parameter of ours | **precondition** | Our request to fix; a retry sends the same body |
+| RateLimited | Throttling **or** a per-number fraud rule | **precondition** | Never retried in-process, and the cascade never advances past it — the ambiguity resolves to "stop". Not `transient` on purpose: the in-process retry would replay the whole cascade. dean re-drives it on its normal cadence |
 | InsufficientBalance | Researcher's DingConnect wallet is empty | **precondition** | Top up; parked payments land on dean's next sweep |
 
 The full table, with production frequencies, is `recoveryByCode` in
@@ -912,13 +927,13 @@ The full table, with production frequencies, is `recoveryByCode` in
 
 **Sent to the respondent** (Result delivered, wait fulfilled, message consumed):
 - Successful payments
-- `permanent` payment failures, including unrecognised error codes
-- Provider not found or not enabled
+- `respondent` payment failures
 
 **Withheld** (nothing sent, respondent stays in `WAIT_EXTERNAL_EVENT`, message
 consumed, dean re-drives):
 - `transient` payment failures that outlived the retry budget
-- `precondition` payment failures
+- `precondition` payment failures, including unrecognised error codes and a
+  provider that is not found or not enabled (`INVALID_PROVIDER`)
 - Provider calls that never produced a verdict at all (every attempt a system
   fault)
 
@@ -1106,7 +1121,7 @@ tolerance.
 after money has moved, so it cannot fail the payment, and it is the sole true
 detector of a respondent silently receiving the wrong incentive.
 
-`recovery != "permanent"` is precisely the set of failures the respondent was
+`recovery != "respondent"` is precisely the set of failures the respondent was
 never told about.
 
 **`dinersclub_up` exists because a `CounterVec` with no observations exports no

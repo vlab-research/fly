@@ -48,7 +48,7 @@ spec:
     - name: payment-health-recordings
       interval: 1m
       rules:
-        # Failures the respondent was NOT told about, by class. `permanent` is
+        # Failures the respondent was NOT told about, by class. `respondent` is
         # excluded because that is precisely the set that WAS delivered -- the
         # wait matcher ignores `success`, so any Result released the
         # respondent (planning/external-event-taxonomy.md §1).
@@ -58,7 +58,7 @@ spec:
         - record: payment:withheld:rate5m
           expr: |
             sum by (namespace, provider, recovery) (
-              rate(dinersclub_payment_results_total{outcome="failure", recovery!="permanent"}[5m])
+              rate(dinersclub_payment_results_total{outcome="failure", recovery!="respondent"}[5m])
             )
 
         - record: payment:results:rate5m
@@ -159,11 +159,11 @@ spec:
 
         # ---- The classifier has a gap --------------------------------------
         #
-        # An error code that dinersclub/classify.go does not recognise. It
-        # defaulted to `permanent`, so the respondent WAS told the payment
-        # failed — which is the old behaviour and may well be wrong for this
-        # code. If it is really transient or a precondition, someone was told a
-        # falsehood and lost a payment dean could have recovered.
+        # An error code that dinersclub/classify.go does not recognise. It was
+        # withheld as a `precondition`, so the respondent was NOT told and is
+        # parked. If the code really means their number cannot be paid, they
+        # stay parked until the row is added, because only a `respondent`
+        # failure releases them to give another number.
         #
         # Low threshold on purpose: this is not measuring a fault rate, it is
         # asking someone to add a row to recoveryByCode. It should be rare, and
@@ -182,11 +182,38 @@ spec:
             description: >-
               dinersclub saw {{`{{ $value | printf "%.0f" }}`}} payment failures with
               error code {{`{{ $labels.code }}`}}, which is not in recoveryByCode
-              (dinersclub/classify.go). It was treated as permanent, so those
-              respondents were told their payment failed. Decide whether that is
-              right and add the code to the table — if it is actually transient or
-              a precondition, those payments were recoverable and are now lost.
+              (dinersclub/classify.go). It was withheld as a precondition, so
+              those respondents were told nothing and are parked. Decide what the
+              code means and add it to the table — if it means the number cannot
+              be paid, classify it `respondent` so the form can ask for another.
             runbook_url: "{{ $runbook }}#paymentunclassifiederrorcode"
+
+        # ---- something on our side is refusing payments -------------------
+        #
+        # Every precondition that is not the wallet and not pin drift, which
+        # have their own alerts above and below: a malformed payment block, a
+        # missing secret, an amount the provider will not send, DingConnect's
+        # rate limit. None of them self-heal and none reach the respondent, so
+        # this is the only place they are seen.
+        - alert: PaymentsBlockedByConfiguration
+          expr: |
+            sum by (provider, code) (
+              increase(dinersclub_payment_results_total{outcome="failure", recovery="precondition", code!~"INSUFFICIENT_BALANCE|InsufficientBalance|PIN_DRIFT|AMOUNT_CURRENCY_MISMATCH|NO_PIN_FOR_OPERATOR|unclassified", namespace="{{ $p.namespace }}"}[6h])
+            ) > {{ $p.preconditionThreshold }}
+          for: {{ $p.preconditionFor }}
+          labels:
+            severity: warning
+            component: payments
+          annotations:
+            summary: "{{`{{ $labels.provider }}`}} payments withheld: {{`{{ $labels.code }}`}}"
+            description: >-
+              {{`{{ $value | printf "%.0f" }}`}} {{`{{ $labels.provider }}`}} payments
+              failed with {{`{{ $labels.code }}`}} in the last 6h. The respondent
+              cannot fix this, so they were told nothing and are parked in
+              WAIT_EXTERNAL_EVENT; dean re-drives them, but the same failure
+              returns until the cause is fixed. recoveryByCode in
+              dinersclub/classify.go says what each code means.
+            runbook_url: "{{ $runbook }}#paymentsblockedbyconfiguration"
 
         # ---- the researcher's declared amounts no longer hold --------------
         #

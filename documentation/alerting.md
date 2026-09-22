@@ -924,7 +924,7 @@ those payments are lost silently.
    `payment:results:rate5m{outcome="success"}` climb and the alert resolve an
    hour after the last failure.
 
-> **Do not "fix" this by reclassifying `INSUFFICIENT_BALANCE` as permanent** so
+> **Do not "fix" this by reclassifying `INSUFFICIENT_BALANCE` as `respondent`** so
 > respondents get told. That converts a recoverable delay into a permanent
 > failure for every parked person at once, and it is precisely the behaviour
 > this design replaced.
@@ -964,9 +964,10 @@ retune — and prefer lengthening `transientFor` to raising the count.
 by provider and code, for **15m** — **warning**.
 
 A provider returned an error code that `recoveryByCode` in
-`dinersclub/classify.go` does not know. It defaulted to `permanent`, so **the
-respondent was told the payment failed** — which is the pre-classification
-behaviour, and may well be wrong for this code.
+`dinersclub/classify.go` does not know. It defaulted to `precondition`, so **the
+failure was withheld: the respondent was told nothing and is parked** in
+`WAIT_EXTERNAL_EVENT`. A code nobody has looked at says nothing about the
+respondent's number, so asking them for another one would be a guess.
 
 This alert is not measuring a fault rate. It is asking someone to add a row to a
 table, and the threshold is `0` for that reason. If it fires often, the
@@ -979,10 +980,54 @@ frequency is itself the finding.
    test asserts that every code in the map is pinned there, so an unpinned
    addition fails the build. That is intentional: a code's class changes what a
    respondent is told, so it should never move as a side effect.
-3. **If the code turns out to be transient or a precondition, the payments
-   already released are lost** — those respondents were taken out of the wait
-   and dean will not re-drive them. Worth checking how many before deciding the
-   change is routine.
+3. **If the code means the number cannot be paid, classify it `respondent`.**
+   Until the row exists those respondents stay parked, and dean's re-drive draws
+   the same refusal each time. Once it is deployed, the next re-drive delivers
+   the failure and the form can ask them for another number. If it is transient
+   or a precondition nothing was lost: they are still in the wait and dean
+   re-drives them.
+
+### PaymentsBlockedByConfiguration
+`increase(dinersclub_payment_results_total{outcome="failure", recovery="precondition", code!~"INSUFFICIENT_BALANCE|InsufficientBalance|PIN_DRIFT|AMOUNT_CURRENCY_MISMATCH|NO_PIN_FOR_OPERATOR|unclassified"}[6h]) > 3`
+by provider and code, for **30m** — **warning**.
+
+Something on our side of the wire is refusing payments: a malformed payment
+block, a missing secret, an amount the provider will not send, revoked
+credentials, DingConnect's rate limit. It is every `precondition` code that has
+no alert of its own — the wallet, pin drift and unclassified codes are excluded
+because `PaymentWalletEmpty`, `PaymentPinDrift` and
+`PaymentUnclassifiedErrorCode` cover them.
+
+**The respondent cannot fix any of these, so they were told nothing** and are
+parked in `WAIT_EXTERNAL_EVENT`. A form's only answer to a delivered failure is
+to ask for another phone number, which would be the wrong question here. None of
+these self-heal and none leave a trace in state, so this alert is the only place
+they are seen.
+
+The window is 6h because dean re-drives a parked respondent every 6h, so a
+standing fault keeps the count up. The threshold is above `0` so one malformed
+test payment stays quiet.
+
+1. The `code` label says what is wrong; `recoveryByCode` in
+   `dinersclub/classify.go` says what each code means, and the dinersclub log
+   line `DinersClub withholding <provider> failure for user ...` carries the
+   user alongside it.
+2. **Decide whose it is.** `AUTH_ERROR` / `AuthenticationFailed` is the
+   researcher re-authorising. `IMPOSSIBLE_AMOUNT`, `INVALID_AMOUNT*`,
+   `INVALID_SKU_CODE`, `INVALID_PAYMENT_DETAILS` and the JSON codes are the
+   survey's payment block. `MISSING_SECRET`, `INVALID_PROVIDER` and
+   `BAD_HTTP_REQUEST` are credentials or deployment configuration.
+   `RateLimited` is DingConnect throttling **or** a per-account-number fraud
+   rule, and it does not say which; it is never retried in-process, only by
+   dean.
+3. Size the backlog with the query under `PaymentWalletEmpty`, narrowed to the
+   provider's wait type (`payment:<provider>`).
+4. **A fix outside the form pays everyone parked** on dean's next sweep
+   (`0 */6 * * *`): credentials, a secret, the provider list. **A fix to the
+   payment block does not**, for the reason given under `PaymentPinDrift` step 4:
+   the re-drive rebuilds the payment from the form version the respondent
+   started on. Bail those respondents into the corrected form
+   (`documentation/bail-systems.md`).
 
 ### PaymentPinDrift
 `increase(dinersclub_dingconnect_pin_drift_total[6h]) > 5` by reason, for
@@ -994,9 +1039,10 @@ pin that was right when the survey was written drifts until it delivers
 something else — and dinersclub refuses the payment rather than silently paying
 the wrong incentive (`planning/dingconnect-amount-resolution.md`).
 
-**Refusing is correct. Being invisible was not.** `PIN_DRIFT` is classified
-permanent, so the respondent is just told the payment failed, and nothing in the
-platform distinguishes that from any other decline. Nothing self-heals: until
+**Refusing is correct. Being invisible was not.** `PIN_DRIFT`,
+`AMOUNT_CURRENCY_MISMATCH` and `NO_PIN_FOR_OPERATOR` are classified
+`precondition`, so the failure is withheld: the respondent is told nothing,
+stays parked, and no state records the code. Nothing self-heals: until
 the researcher re-declares the pin, **every** respondent reaching that payment
 point fails. On 2026-09-10 this was 51 refused payments over 48h on vprod — the
 single largest DingConnect failure mode — with no alert watching it.
@@ -1005,13 +1051,17 @@ single largest DingConnect failure mode — with no alert watching it.
    delivers, and the window the survey declared. E.g. *"pinned SkuCode
    BO_NV_TopUp at SendValue 2.75 now delivers 27.33 BOB, outside the declared
    window 11-17 BOB; a commission rate has moved"*.
-2. Find the affected form:
+2. Find the affected form. A withheld failure writes nothing to `md`, so look
+   for the form whose respondents are parked on a DingConnect payment:
    ```sql
    SELECT current_form, count(*), max(updated)
    FROM states
-   WHERE state_json->'md'->>'e_payment_dingconnect_error_code' = 'PIN_DRIFT'
+   WHERE current_state = 'WAIT_EXTERNAL_EVENT'
+     AND state_json->'wait'->'value'->>'type' = 'payment:dingconnect'
    GROUP BY 1 ORDER BY 3 DESC;
    ```
+   This counts everyone waiting on DingConnect, not only drift; the user id in
+   the `PIN DRIFT` log line ties a form to the drift.
 3. **This is the researcher's to fix, not ours.** The pin has to be re-declared
    against the current catalogue. `reason="out_of_window"` means the SendValue
    still resolves but delivers outside the declared tolerance;
@@ -1020,9 +1070,18 @@ single largest DingConnect failure mode — with no alert watching it.
    nobody chose. The structural answer is `on_drift: "resolve"`, which is
    **accepted as config but not implemented** (`dinersclub/dingconnect.go:330`
    rejects it); if this alert becomes routine, implementing it is the work.
-4. **Respondents already refused are not recoverable by dean** — permanent means
-   the Result was sent and they were released from the wait. Count them before
-   deciding how urgent the re-declaration is; they need paying by hand.
+4. **Respondents already refused are not recovered by re-declaring the pin.**
+   They are still parked and dean re-drives them every 6h, but the re-drive
+   rebuilds the payment from the form version the respondent started on
+   (`replybot/lib/typewheels/transition.js` resolves the form at
+   `md.startTime`; `MAKE_PAYMENT` in `machine.js` reads the payment block from
+   it), which carries the same stale pin. The corrected pin is a new version
+   that only new respondents get. That is by design, and the recovery is a
+   bail (`documentation/bail-systems.md`): once the pin is re-declared, move
+   the parked respondents into the corrected form, where they enter on the
+   current version. Count them first to size the bail. On WhatsApp a bail's
+   first message to anyone outside the 24-hour window must be an approved
+   template (`documentation/whatsapp-templates.md`).
 
 ### DinersClubProcessingFaults
 `increase(dinersclub_processing_faults_total[30m]) > 10` by stage, for **15m** —

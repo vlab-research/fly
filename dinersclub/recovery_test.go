@@ -58,19 +58,19 @@ func failingPaymentMessage(code string) string {
 	}`, code)
 }
 
-func TestPermanentFailureReachesTheRespondent(t *testing.T) {
+func TestRespondentFailureReachesTheRespondent(t *testing.T) {
 	var received int32
 	var last string
 	ts := countingBotserver(&received, &last)
 	defer ts.Close()
 
-	// IMPOSSIBLE_AMOUNT: the survey's payment block cannot pay this person,
-	// and no retry changes that. Releasing them beats a silent 14-day park.
-	err := getDC(ts).Process(makeMessages([]string{failingPaymentMessage("IMPOSSIBLE_AMOUNT")}))
+	// INVALID_RECIPIENT_PHONE: only a different number can be paid, and only
+	// the respondent has one, so they have to be released to give it.
+	err := getDC(ts).Process(makeMessages([]string{failingPaymentMessage("INVALID_RECIPIENT_PHONE")}))
 
 	assert.Nil(t, err)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&received))
-	assert.Contains(t, last, `"code":"IMPOSSIBLE_AMOUNT"`)
+	assert.Contains(t, last, `"code":"INVALID_RECIPIENT_PHONE"`)
 	assert.Contains(t, last, `"success":false`)
 }
 
@@ -130,14 +130,14 @@ func TestTransientFailureIsActuallyRetried(t *testing.T) {
 	assert.Equal(t, int32(0), atomic.LoadInt32(&received))
 }
 
-func TestPermanentFailureIsNotRetried(t *testing.T) {
+func TestRespondentFailureIsNotRetried(t *testing.T) {
 	var received int32
 	var last string
 	ts := countingBotserver(&received, &last)
 	defer ts.Close()
 
 	// The mirror of the test above, and the reason the classifier has to be
-	// right in both directions: retrying a permanent failure burns the whole
+	// right in both directions: retrying a respondent failure burns the whole
 	// budget on a call that cannot succeed, which is how a batch outruns the
 	// Kafka poll interval.
 	var attempts int32
@@ -153,20 +153,18 @@ func TestPermanentFailureIsNotRetried(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&received))
 }
 
-func TestUnclassifiedCodeReachesTheRespondent(t *testing.T) {
+func TestUnclassifiedCodeIsWithheld(t *testing.T) {
 	var received int32
 	var last string
 	ts := countingBotserver(&received, &last)
 	defer ts.Close()
 
-	// An unknown code defaults to permanent, i.e. to exactly the behaviour
-	// every failure had before classification existed. New behaviour applies
-	// only where we can name the reason.
+	// An unknown code says nothing about the respondent's number, so it must
+	// not reach a form that can only answer by asking for another one.
 	err := getDC(ts).Process(makeMessages([]string{failingPaymentMessage("A_CODE_NOBODY_HAS_SEEN")}))
 
 	assert.Nil(t, err)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&received))
-	assert.Contains(t, last, "A_CODE_NOBODY_HAS_SEEN")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&received))
 }
 
 func TestAuthFailureIsWithheld(t *testing.T) {

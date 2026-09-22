@@ -51,6 +51,7 @@ function emptyBag() {
     blocked,
     stuck_users: 0,
     expired_waits: 0,
+    awaiting_payment: 0,
   };
 }
 
@@ -60,6 +61,7 @@ function foldRow(bag, row) {
   bag.active_users += count;
   bag.stuck_users += Number(row.stuck) || 0;
   bag.expired_waits += Number(row.expired) || 0;
+  bag.awaiting_payment += Number(row.awaiting_payment) || 0;
 
   if (row.state === 'ERROR') {
     const tag = row.error_tag || 'none';
@@ -81,7 +83,8 @@ function foldRow(bag, row) {
   return bag;
 }
 
-// rows: [{ form, state, error_tag, fb_category, stuck, expired, count }]
+// rows: [{ form, state, error_tag, fb_category, stuck, expired,
+//          awaiting_payment, count }]
 // -> aggregate bag (top-level totals + the same shape per form under
 // by_form, for copy like "in form XYZ12").
 function buildAggregates(rows, windowHours) {

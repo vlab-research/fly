@@ -209,8 +209,8 @@ func (dc *DC) payout(provider Provider, pe *PaymentEvent) (*Result, error) {
 
 // deliver files the outcome and decides whether the respondent hears about it.
 //
-// A permanent failure is sent, exactly as every failure was sent before this
-// change. A transient or precondition failure is withheld, which leaves the
+// A failure only the respondent can fix is sent, so the form can ask for
+// another number. A transient or precondition failure is withheld, which leaves the
 // respondent in WAIT_EXTERNAL_EVENT so dean's Payments sweep re-drives the
 // payment -- for up to 14 days, which is long enough for a provider to come
 // back or a researcher to top up a wallet. Sending would end that: the wait
@@ -238,7 +238,7 @@ func (dc *DC) deliver(pe *PaymentEvent, res *Result) error {
 	}
 
 	if !known {
-		log.Printf("DinersClub saw an unclassified %s error code %q for user %s -- treating it as permanent and telling the respondent. Add it to recoveryByCode in classify.go.",
+		log.Printf("DinersClub saw an unclassified %s error code %q for user %s -- withholding it as a precondition. Add it to recoveryByCode in classify.go.",
 			pe.Provider, code, pe.Userid)
 	}
 
