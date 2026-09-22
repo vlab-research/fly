@@ -73,12 +73,28 @@ encode who retries, who is alerted, or what state the respondent ends up in.
 | class | meaning | dinersclub sends | respondent | recovery |
 |---|---|---|---|---|
 | `transient` | the same call, later, may just work | **nothing** | stays parked | retried in-process, then dean |
-| `precondition` | a human off-stage must act first | **nothing** | stays parked | researcher tops up / re-authorises, dean's next sweep pays everyone waiting |
-| `permanent` | never going to work as configured | **the failure Result** | released to the form | none; the form tells them |
+| `precondition` | a human off-stage must act first, and the respondent has no part in it | **nothing** | stays parked | researcher tops up / re-authorises / fixes the payment block, dean's next sweep re-drives everyone waiting |
+| `respondent` | only the respondent can change the outcome, by giving a different number | **the failure Result** | released to the form | the form asks for another number and the payment runs again |
 
-Examples: a provider 5xx is `transient`; `INSUFFICIENT_BALANCE` and
-`AUTH_ERROR` are `precondition`; a bad number, `IMPOSSIBLE_AMOUNT` and an
-operator refusal are `permanent`.
+Examples: a provider 5xx is `transient`; `INSUFFICIENT_BALANCE`, `AUTH_ERROR`,
+`IMPOSSIBLE_AMOUNT`, `PIN_DRIFT`, a malformed payment block and DingConnect's
+`RateLimited` are `precondition`; a number the operator does not know, a line
+that cannot take a top-up and an operator refusal of that number are
+`respondent`.
+
+**A failure is delivered only when another number could fix it.** A form's only
+answer to a delivered failure is to ask for another phone number, so delivering
+a stale pin, a rate limit or a malformed payment block tells the respondent
+their number is wrong when it is not. That leaves three outcomes: the payment
+succeeded; it failed and the fault is ours or the provider's (withheld, logged,
+alerted on, re-driven by dean); it failed and only the respondent can fix it
+(delivered).
+
+`RateLimited` is `precondition` rather than `transient` because only `transient`
+re-enters dinersclub's in-process `backoff.Retry`, which re-invokes the payout
+wholesale and would replay the DingConnect discovery cascade from its first
+candidate. Withheld, it is re-driven by dean on its normal cadence like any
+other parked payment.
 
 **One payment point produces exactly one classified Result, however many
 provider calls it took.** DingConnect can try several operators for one payment
@@ -114,10 +130,11 @@ own — otherwise one payment point would inflate the metrics and the
 > `INVALID_RESPONSE`, `HTTP_REQUEST_FAILED`, `PAYMENT_FAILED`); everything else
 > is the provider's, so check `go-dingconnect/errors.go` before adding a row.
 
-**An unrecognised code is `permanent`**, i.e. it is sent, i.e. it behaves
-exactly as every failure behaved before classification existed. Silence is the
-new behaviour and applies only where we can name the reason. The code is counted
-by `dinersclub_unclassified_error_codes_total` and
+**An unrecognised code is `precondition`**, i.e. it is withheld. A code nobody
+has looked at says nothing about the respondent's number, so asking them for
+another one would be a guess made in their chat. The cost of being wrong is a
+respondent parked until the row is added: the code is counted by
+`dinersclub_unclassified_error_codes_total` and
 `PaymentUnclassifiedErrorCode` asks someone to classify it.
 
 ### Why `precondition` is the point
@@ -181,7 +198,7 @@ only application service in this repo that Prometheus scrapes.
 | `dinersclub_dingconnect_pin_drift_total{reason}` | a DingConnect pin no longer delivers the declared amount — alerts as `PaymentPinDrift` |
 | `dinersclub_up` | is anyone scraping this at all |
 
-`recovery != "permanent"` is precisely the set of failures the respondent was
+`recovery != "respondent"` is precisely the set of failures the respondent was
 not told about. Alerts and runbooks: `documentation/alerting.md` §12.
 
 Metrics carry a `namespace` label, because Prometheus is a singleton across
@@ -201,7 +218,7 @@ of Live Traffic:
 | metric | what it answers |
 |---|---|
 | `survey_payment_waiting{window,provider,…}` | respondents parked on a `payment:*` wait, by when the wait **started** (`1h`/`6h`/`24h`); `14d` is everyone dean is still retrying |
-| `survey_payment_results{window,provider,outcome,code,…}` | Results that **reached** the respondent (successes and `permanent` failures), counted per Result from `externalEvents` |
+| `survey_payment_results{window,provider,outcome,code,…}` | Results that **reached** the respondent (successes and `respondent` failures), counted per Result from `externalEvents` |
 
 The two sources are complementary, not redundant:
 
@@ -268,7 +285,20 @@ to the respondent.
   occurrences), but 1,483 of the 2,393 states carrying it also record
   `success=true` — most of those people were paid. The honest fix is a stable,
   event-derived `custom_identifier` so the duplicate is never submitted, not
-  rewriting the response to a success we cannot confirm.
+  rewriting the response to a success we cannot confirm. It and DingConnect's
+  `DuplicateTransactionPrevented` are classed `respondent` and sent although the
+  respondent cannot fix them: withholding would park people who were mostly
+  paid, mid-survey, on a re-drive that can only draw the same duplicate again.
+- **A withheld `PIN_DRIFT` is not healed by re-declaring the pin.** dean's
+  re-drive rebuilds the payment from the form version the respondent started on
+  (`actionsResponses` resolves the form at `md.startTime`, and `MAKE_PAYMENT`
+  reads the payment block from that form), which carries the same stale pin. A
+  corrected pin is a new version that only new respondents get. The same holds
+  for any failure whose fix is an edit to the survey's payment block. This is
+  by design: a respondent finishes on the version they started. The recovery
+  is a bail (`documentation/bail-systems.md`) that moves the parked
+  respondents into the corrected form, where they enter on the current
+  version and the payment runs with the new block.
 - **A timeout does not tell you whether the payment executed**, and the backoff
   then retries it. Reloadly dedupes on `custom_identifier`, but the topups
   provider forwards one only when the event supplies it, and the giftcards

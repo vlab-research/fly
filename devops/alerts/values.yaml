@@ -395,14 +395,21 @@ payments:
   transientFor: "30m"
 
   # PaymentUnclassifiedErrorCode — a code missing from recoveryByCode in
-  # dinersclub/classify.go. It defaulted to `permanent`, so the respondent WAS
-  # told the payment failed; if the code is really transient or a precondition,
-  # that was a falsehood and a recoverable payment was thrown away.
+  # dinersclub/classify.go. It was withheld as a `precondition`, so the
+  # respondent is parked and was told nothing; if the code really means their
+  # number cannot be paid, they stay parked until the row is added.
   #
   # Deliberately low. This is not measuring a fault rate, it is asking someone
   # to add a row to a table. If it fires often, that frequency is the finding.
   unclassifiedThreshold: 0
   unclassifiedFor: "15m"
+
+  # PaymentsBlockedByConfiguration — withheld failures that are ours to fix and
+  # have no alert of their own (not the wallet, not pin drift). Above 0 so one
+  # malformed test payment stays quiet; 6h because dean re-drives a parked
+  # respondent every 6h, so a standing fault keeps the count up.
+  preconditionThreshold: 3
+  preconditionFor: "30m"
 
   # PaymentPinDrift — a DingConnect pin that no longer delivers the declared
   # amount. Above 0 so a single drift on a retired form stays quiet, low enough

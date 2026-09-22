@@ -30,16 +30,16 @@ const (
 	RecoveryTransient Recovery = "transient"
 
 	// RecoveryPrecondition: the call cannot succeed until a human changes
-	// something OUTSIDE the respondent's control -- topping up a Reloadly
-	// wallet, restoring credentials. It never self-heals, but it is fully
-	// recoverable inside dean's 14-day runway, and the respondent has no
-	// part to play in that recovery.
+	// something OUTSIDE the respondent's control -- topping up a wallet,
+	// restoring credentials, re-declaring a stale pin, fixing a malformed
+	// payment block. It never self-heals, and the respondent has no part to
+	// play in the recovery.
 	RecoveryPrecondition Recovery = "precondition"
 
-	// RecoveryPermanent: no retry will ever succeed as configured. A number
-	// the operator refuses, an amount that cannot be sent, a malformed
-	// payment block.
-	RecoveryPermanent Recovery = "permanent"
+	// RecoveryRespondent: only the respondent can change the outcome, by
+	// giving a different number. The operator does not know the number, the
+	// line cannot take a top-up, the recipient hit a limit.
+	RecoveryRespondent Recovery = "respondent"
 )
 
 // Silent reports whether dinersclub should withhold the failure Result.
@@ -53,11 +53,16 @@ const (
 // WAIT_EXTERNAL_EVENT, which is the only way dean's Payments query can find
 // them again.
 //
-// Transient and precondition therefore behave identically here. They are kept
-// apart because they differ in what a human should do about them, which is what
-// the metrics in metrics.go and the rules in devops/alerts/ read.
+// So a failure is sent only when being released is useful to the respondent:
+// the form asks for another number and the same payment runs again. Every other
+// failure is ours or the provider's, and telling the respondent about it asks
+// them to fix something they cannot.
+//
+// Transient and precondition behave identically here. They are kept apart
+// because they differ in what a human should do about them, which is what the
+// metrics in metrics.go and the rules in devops/alerts/ read.
 func (r Recovery) Silent() bool {
-	return r != RecoveryPermanent
+	return r != RecoveryRespondent
 }
 
 // recoveryByCode maps a provider error code to how it can recover.
@@ -136,132 +141,109 @@ var recoveryByCode = map[string]Recovery{
 	// researcher re-authorising restores it and the parked payments land.
 	"AUTH_ERROR": RecoveryPrecondition, // 219
 
-	// ---- Permanent -------------------------------------------------------
-	// Will never work as configured. Releasing beats a silent 14-day park on
-	// a payment that can never land, and the surveys already handle this
-	// path -- it is what every failure does today.
-
-	// The respondent holds the fix: a different number, the right operator,
-	// or simply knowing about a recharge window they can wait out.
-	"PHONE_RECENTLY_RECHARGED":       RecoveryPermanent, // 3627
-	"COULD_NOT_AUTO_DETECT_OPERATOR": RecoveryPermanent, // 812
-	"OPERATOR_NOT_FOUND":             RecoveryPermanent, // 361
-	"INVALID_RECIPIENT_PHONE":        RecoveryPermanent, // 275
-	"PHONE_BANNED_BY_OPERATOR":       RecoveryPermanent, // 4
-	"INVALID_PHONE_NUMBER":           RecoveryPermanent, // 1
-	"RECIPIENT_PHONE_INACTIVE":       RecoveryPermanent, // 1
-	"INVALID_ACCOUNT_NUMBER":         RecoveryPermanent, // dingconnect
-
-	"AccountNumberInvalid": RecoveryPermanent, // dingconnect
-
-	// The operator refused outright, or the recipient hit a limit. Permanent
-	// for this number; a retry loop would never clear it.
-	"TRANSACTION_REJECTED_BY_OPERATOR":   RecoveryPermanent, // 33
-	"TRANSACTION_REFUSED_BY_OPERATOR":    RecoveryPermanent, // 2
-	"RECIPIENT_REACHED_MAX_TOPUP_NUMBER": RecoveryPermanent, // 15
-
-	// DingConnect's rate limit. PERMANENT, WHICH CONTRADICTS THE CLIENT
-	// LIBRARY ON PURPOSE.
-	//
-	// (*dingconnect.Error).Retryable() returns true for RateLimited, reading it
-	// as transport throttling. It is right about its own question ("could an
-	// identical request succeed?") and wrong for ours ("should we send it
-	// again?"): DingConnect returns this code both for genuine throttling AND
-	// for a per-account-number fraud rule being breached, and the response does
-	// not say which. Hammering a flagged number is the outcome we must never
-	// risk, so the ambiguity resolves to "stop".
-	//
-	// THIS ROW IS HALF OF A GUARANTEE. The other half is cascadeDecide, which
-	// never advances past RateLimited. Both halves are needed: DC.payout's
-	// backoff.Retry re-invokes Payout wholesale, so classifying this transient
-	// would replay the entire discovery cascade from the first candidate --
-	// undoing the in-cascade stop one layer up. dinersclub never calls
-	// Retryable(); worker retry runs off this table alone. See
+	// DingConnect's rate limit, which it returns both for genuine throttling
+	// and for a per-account-number fraud rule, without saying which. Not
+	// transient ON PURPOSE, against (*dingconnect.Error).Retryable():
+	// DC.payout's backoff.Retry re-invokes Payout wholesale, so a transient
+	// row would replay the whole discovery cascade from the first candidate
+	// and undo cascadeDecide, which never advances past RateLimited. See
 	// planning/dingconnect-amount-resolution.md §8.
-	"RateLimited": RecoveryPermanent,
+	"RateLimited": RecoveryPrecondition,
 
-	// The survey's payment configuration cannot pay this person. The amount
-	// is still impossible on the next attempt.
-	"IMPOSSIBLE_AMOUNT":                  RecoveryPermanent, // 271
-	"INVALID_AMOUNT_FOR_RECIPIENT_PHONE": RecoveryPermanent, // 177
-	"INVALID_AMOUNT":                     RecoveryPermanent, // 59
-	"INVALID_AMOUNT_FOR_OPERATOR":        RecoveryPermanent, // 41
-	"INVALID_INPUT_PROVIDED":             RecoveryPermanent, // 129
-	"INVALID_SKU_CODE":                   RecoveryPermanent, // dingconnect
+	// The survey's payment configuration cannot pay this person, and a
+	// different number would not change that.
+	"IMPOSSIBLE_AMOUNT":                  RecoveryPrecondition, // 271
+	"INVALID_AMOUNT_FOR_RECIPIENT_PHONE": RecoveryPrecondition, // 177
+	"INVALID_AMOUNT":                     RecoveryPrecondition, // 59
+	"INVALID_AMOUNT_FOR_OPERATOR":        RecoveryPrecondition, // 41
+	"INVALID_INPUT_PROVIDED":             RecoveryPrecondition, // 129
+	"INVALID_SKU_CODE":                   RecoveryPrecondition, // dingconnect
 
 	// The DingConnect payment block declared an amount the catalogue can no
-	// longer honour. All three are the researcher's to fix, and all three are
-	// PERMANENT because a retry sends the same stale configuration -- parking
-	// someone for dean's 14 days would hide the very drift these exist to make
-	// loud. See planning/dingconnect-amount-resolution.md.
-	"PIN_DRIFT":                RecoveryPermanent, // pinned sku gone, or out of window
-	"AMOUNT_CURRENCY_MISMATCH": RecoveryPermanent, // product delivers a different currency
-	"NO_PIN_FOR_OPERATOR":      RecoveryPermanent, // operator detected, not pinned
+	// longer honour. The researcher's to fix; PaymentPinDrift is what makes
+	// it loud. See planning/dingconnect-amount-resolution.md.
+	"PIN_DRIFT":                RecoveryPrecondition, // pinned sku gone, or out of window
+	"AMOUNT_CURRENCY_MISMATCH": RecoveryPrecondition, // product delivers a different currency
+	"NO_PIN_FOR_OPERATOR":      RecoveryPrecondition, // operator detected, not pinned
 
-	// Malformed on our side of the wire. A retry sends the same bad bytes.
-	"INVALID_PAYMENT_DETAILS":   RecoveryPermanent, // 20
-	"JSON_SYNTAX_ERROR":         RecoveryPermanent, // 18
-	"INVALID_JSON_FORMAT":       RecoveryPermanent,
-	"INVALID_GIFT_CARD_DETAILS": RecoveryPermanent,
-	"INVALID_PROVIDER":          RecoveryPermanent,
-	"MISSING_SECRET":            RecoveryPermanent,
-	"BAD_HTTP_REQUEST":          RecoveryPermanent,
-	"INVALID_RESPONSE":          RecoveryPermanent, // dingconnect
+	// Malformed on our side of the wire.
+	"INVALID_PAYMENT_DETAILS":   RecoveryPrecondition, // 20
+	"JSON_SYNTAX_ERROR":         RecoveryPrecondition, // 18
+	"INVALID_JSON_FORMAT":       RecoveryPrecondition,
+	"INVALID_GIFT_CARD_DETAILS": RecoveryPrecondition,
+	"INVALID_PROVIDER":          RecoveryPrecondition,
+	"MISSING_SECRET":            RecoveryPrecondition,
+	"BAD_HTTP_REQUEST":          RecoveryPrecondition,
+	"INVALID_RESPONSE":          RecoveryPrecondition, // dingconnect
 
-	"ParameterInvalid": RecoveryPermanent, // dingconnect
-	"400":              RecoveryPermanent, // 47
-	"404":              RecoveryPermanent, // 2
+	"ParameterInvalid": RecoveryPrecondition, // dingconnect
+	"400":              RecoveryPrecondition, // 47
+	"404":              RecoveryPrecondition, // 2
 
-	// The provider could not map its upstream's error either. Its own
-	// catch-all, so we cannot claim to know better than it does -- but we
-	// also cannot claim it is retryable. Permanent keeps today's behaviour
-	// and the code stays visible in metrics; move it if the data says so.
-	"UNMAPPED_PROVIDER_ERROR_CODE": RecoveryPermanent, // 47
-	"PAYMENT_FAILED":               RecoveryPermanent, // dingconnect, no code
+	// The provider could not map its upstream's error either, so nothing
+	// says the respondent's number is at fault.
+	"UNMAPPED_PROVIDER_ERROR_CODE": RecoveryPrecondition, // 47
+	"PAYMENT_FAILED":               RecoveryPrecondition, // dingconnect, no code
+
+	// ---- Respondent ------------------------------------------------------
+	// A different number is the fix, and only the respondent has one.
+
+	// A different number, the right operator, or simply knowing about a
+	// recharge window they can wait out.
+	"PHONE_RECENTLY_RECHARGED":       RecoveryRespondent, // 3627
+	"COULD_NOT_AUTO_DETECT_OPERATOR": RecoveryRespondent, // 812
+	"OPERATOR_NOT_FOUND":             RecoveryRespondent, // 361
+	"INVALID_RECIPIENT_PHONE":        RecoveryRespondent, // 275
+	"PHONE_BANNED_BY_OPERATOR":       RecoveryRespondent, // 4
+	"INVALID_PHONE_NUMBER":           RecoveryRespondent, // 1
+	"RECIPIENT_PHONE_INACTIVE":       RecoveryRespondent, // 1
+	"INVALID_ACCOUNT_NUMBER":         RecoveryRespondent, // dingconnect
+
+	"AccountNumberInvalid": RecoveryRespondent, // dingconnect
+
+	// The operator refused this number outright, or the recipient hit a
+	// limit. Another number can still be paid.
+	"TRANSACTION_REJECTED_BY_OPERATOR":   RecoveryRespondent, // 33
+	"TRANSACTION_REFUSED_BY_OPERATOR":    RecoveryRespondent, // 2
+	"RECIPIENT_REACHED_MAX_TOPUP_NUMBER": RecoveryRespondent, // 15
 
 	// The fake provider's fixture code, used by the payment-failure flow in
 	// facebot/testrunner (forms/gk3gt9ag.json). Pinned rather than left to
 	// the unknown-code default so that integration test depends on an
-	// explicit decision: if the default is ever flipped to transient, this
-	// row is what keeps the test failing loudly on an assertion instead of
-	// hanging until the harness times out.
-	"FAKE": RecoveryPermanent,
+	// explicit decision: the unknown-code default withholds, and without this
+	// row that test would hang until the harness times out instead of failing
+	// on an assertion.
+	"FAKE": RecoveryRespondent,
 
 	// Reloadly's dedup rejecting a duplicate submission. NOT REALLY A
 	// FAILURE: on production, 1483 of the 2393 states carrying this code also
 	// record success=true, so most of these respondents were in fact paid.
-	// It is classified permanent, which preserves today's behaviour exactly
-	// -- the honest fix is a stable, event-derived custom_identifier so the
-	// duplicate is never sent, which is open work (see dinersclub/README.md,
-	// "Payment-safety caveat"). Do not "fix" this by rewriting it to a
-	// success: we cannot confirm the payment from this response.
-	"CUSTOM_IDENTIFIER_ALREADY_USED": RecoveryPermanent, // 2385
-	"DUPLICATE_REFERENCE":            RecoveryPermanent, // dingconnect equivalent
+	// SENT, THOUGH THE RESPONDENT CANNOT FIX IT. Withholding would park people
+	// who were mostly paid, mid-survey, on a re-drive that can only draw the
+	// same duplicate again. The honest fix is a stable, event-derived
+	// custom_identifier so the duplicate is never sent, which is open work
+	// (see dinersclub/README.md, "Payment-safety caveat"). Do not "fix" this
+	// by rewriting it to a success: we cannot confirm the payment from this
+	// response.
+	"CUSTOM_IDENTIFIER_ALREADY_USED": RecoveryRespondent, // 2385
+	"DUPLICATE_REFERENCE":            RecoveryRespondent, // dingconnect equivalent
 
-	"DuplicateTransactionPrevented": RecoveryPermanent, // dingconnect
+	"DuplicateTransactionPrevented": RecoveryRespondent, // dingconnect
 }
 
 // Classify maps a provider error code to how it can recover. ok is false for a
 // code that is not in the table.
 //
-// AN UNKNOWN CODE IS PERMANENT, i.e. it is sent, i.e. it behaves exactly as
-// every failure behaves today. This is deliberate and is the conservative
-// choice in both directions:
-//
-//   - Silence is the new behaviour, and new behaviour should apply only where
-//     we can name the reason. Defaulting to silence would park respondents for
-//     14 days on codes nobody has ever looked at.
-//   - The mistake it can make is visible and cheap to correct: the code is
-//     recorded by dinersclub_unclassified_error_codes_total, and adding a row
-//     above is the fix.
-//
-// Note this reverses the "unrecognised -> transient" line in
-// planning/payment-failure-handling.md §1, which was written before §0 settled
-// on "everything not explicitly silenced behaves as it does today".
+// AN UNKNOWN CODE IS A PRECONDITION, i.e. it is withheld. A code nobody has
+// looked at says nothing about the respondent's number, so asking them for
+// another one is a guess made in their chat. Withheld, the cost of being wrong
+// is a respondent parked until someone reads PaymentUnclassifiedErrorCode and
+// adds the row; sent, it is a respondent told to fix something they may not be
+// able to.
 func Classify(code string) (Recovery, bool) {
 	r, ok := recoveryByCode[code]
 	if !ok {
-		return RecoveryPermanent, false
+		return RecoveryPrecondition, false
 	}
 	return r, true
 }
@@ -271,7 +253,7 @@ func Classify(code string) (Recovery, bool) {
 // check Success before asking.
 func ClassifyResult(res *Result) (Recovery, bool) {
 	if res == nil || res.Error == nil {
-		return RecoveryPermanent, false
+		return RecoveryPrecondition, false
 	}
 	return Classify(res.Error.Code)
 }

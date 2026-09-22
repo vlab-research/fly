@@ -1571,21 +1571,21 @@
       "pluginVersion": "7.4.2",
       "targets": [
         {
-          "expr": "round(sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"permanent\"}[1h]))) or vector(0)",
+          "expr": "round(sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"respondent\"}[1h]))) or vector(0)",
           "instant": true,
           "interval": "",
           "legendFormat": "1h",
           "refId": "A"
         },
         {
-          "expr": "round(sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"permanent\"}[6h]))) or vector(0)",
+          "expr": "round(sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"respondent\"}[6h]))) or vector(0)",
           "instant": true,
           "interval": "",
           "legendFormat": "6h",
           "refId": "B"
         },
         {
-          "expr": "round(sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"permanent\"}[24h]))) or vector(0)",
+          "expr": "round(sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"respondent\"}[24h]))) or vector(0)",
           "instant": true,
           "interval": "",
           "legendFormat": "24h",
@@ -1713,7 +1713,7 @@
     },
     {
       "datasource": "Prometheus",
-      "description": "Every attempt dinersclub finished, split by outcome, recovery class and provider error code. recovery: precondition = needs a human (wallet, credentials), transient = provider down, permanent = respondent told. Counts ATTEMPTS: dean retries a held payment every few hours, so one stuck respondent adds a row per retry. This comes from dinersclub's own counter, whose payment event carries no survey, shortcode or page, so this panel IGNORES the Researcher/Survey/Shortcode/Page filters and always shows every payment in production.",
+      "description": "Every attempt dinersclub finished, split by outcome, recovery class and provider error code. recovery: precondition = needs a human on our side (wallet, credentials, configuration), transient = provider down, respondent = the number cannot be paid, so the respondent was told. Counts ATTEMPTS: dean retries a held payment every few hours, so one stuck respondent adds a row per retry. This comes from dinersclub's own counter, whose payment event carries no survey, shortcode or page, so this panel IGNORES the Researcher/Survey/Shortcode/Page filters and always shows every payment in production.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2031,7 +2031,7 @@
           "refId": "C"
         },
         {
-          "expr": "sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"permanent\"}[1h]))",
+          "expr": "sum(increase(dinersclub_payment_results_total{namespace=\"vprod\", outcome=\"failure\", recovery=\"respondent\"}[1h]))",
           "interval": "",
           "legendFormat": "Failed: told",
           "refId": "D"

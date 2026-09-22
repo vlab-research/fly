@@ -47,7 +47,7 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 
 		// ---- precondition: a human off-stage has to act ----------------
 		// These two are the entire reason the silent path exists. If either
-		// of them is ever reclassified as permanent, 8,700 respondents a
+		// of them is ever reclassified as respondent, 8,700 respondents a
 		// cycle go back to being told their payment failed when it was
 		// simply waiting for a wallet top-up.
 		{"INSUFFICIENT_BALANCE", 8521, RecoveryPrecondition}, // 7687 reloadly + 834 giftcard
@@ -56,55 +56,57 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"InsufficientBalance", 0, RecoveryPrecondition},
 		{"AuthenticationFailed", 0, RecoveryPrecondition},
 
-		// ---- permanent: never going to work as configured --------------
-		{"PHONE_RECENTLY_RECHARGED", 3627, RecoveryPermanent},
-		{"CUSTOM_IDENTIFIER_ALREADY_USED", 2385, RecoveryPermanent},
-		{"COULD_NOT_AUTO_DETECT_OPERATOR", 812, RecoveryPermanent},
-		{"OPERATOR_NOT_FOUND", 361, RecoveryPermanent},
-		{"INVALID_RECIPIENT_PHONE", 275, RecoveryPermanent},
-		{"IMPOSSIBLE_AMOUNT", 271, RecoveryPermanent},
-		{"INVALID_AMOUNT_FOR_RECIPIENT_PHONE", 177, RecoveryPermanent},
-		{"INVALID_INPUT_PROVIDED", 129, RecoveryPermanent},
-		{"INVALID_AMOUNT", 59, RecoveryPermanent},
-		{"400", 47, RecoveryPermanent},
-		{"UNMAPPED_PROVIDER_ERROR_CODE", 47, RecoveryPermanent},
-		{"INVALID_AMOUNT_FOR_OPERATOR", 41, RecoveryPermanent},
-		{"TRANSACTION_REJECTED_BY_OPERATOR", 33, RecoveryPermanent},
-		{"INVALID_PAYMENT_DETAILS", 20, RecoveryPermanent},
-		{"JSON_SYNTAX_ERROR", 18, RecoveryPermanent},
-		{"RECIPIENT_REACHED_MAX_TOPUP_NUMBER", 15, RecoveryPermanent},
-		{"PHONE_BANNED_BY_OPERATOR", 4, RecoveryPermanent},
-		{"TRANSACTION_REFUSED_BY_OPERATOR", 2, RecoveryPermanent},
-		{"404", 2, RecoveryPermanent},
-		{"INVALID_PHONE_NUMBER", 1, RecoveryPermanent},
-		{"RECIPIENT_PHONE_INACTIVE", 1, RecoveryPermanent},
-		{"INVALID_JSON_FORMAT", 0, RecoveryPermanent},
-		{"INVALID_GIFT_CARD_DETAILS", 0, RecoveryPermanent},
-		{"INVALID_PROVIDER", 0, RecoveryPermanent},
-		{"MISSING_SECRET", 0, RecoveryPermanent},
-		{"BAD_HTTP_REQUEST", 0, RecoveryPermanent},
-		{"INVALID_ACCOUNT_NUMBER", 0, RecoveryPermanent},
-		{"INVALID_SKU_CODE", 0, RecoveryPermanent},
-		{"INVALID_RESPONSE", 0, RecoveryPermanent},
-		{"PAYMENT_FAILED", 0, RecoveryPermanent},
-		{"DUPLICATE_REFERENCE", 0, RecoveryPermanent},
+		// ---- everything below was one "permanent" block; each row is now
+		// respondent (a different number fixes it, so it is sent) or
+		// precondition (ours or the provider's to fix, so it is withheld) ----
+		{"PHONE_RECENTLY_RECHARGED", 3627, RecoveryRespondent},
+		{"CUSTOM_IDENTIFIER_ALREADY_USED", 2385, RecoveryRespondent},
+		{"COULD_NOT_AUTO_DETECT_OPERATOR", 812, RecoveryRespondent},
+		{"OPERATOR_NOT_FOUND", 361, RecoveryRespondent},
+		{"INVALID_RECIPIENT_PHONE", 275, RecoveryRespondent},
+		{"IMPOSSIBLE_AMOUNT", 271, RecoveryPrecondition},
+		{"INVALID_AMOUNT_FOR_RECIPIENT_PHONE", 177, RecoveryPrecondition},
+		{"INVALID_INPUT_PROVIDED", 129, RecoveryPrecondition},
+		{"INVALID_AMOUNT", 59, RecoveryPrecondition},
+		{"400", 47, RecoveryPrecondition},
+		{"UNMAPPED_PROVIDER_ERROR_CODE", 47, RecoveryPrecondition},
+		{"INVALID_AMOUNT_FOR_OPERATOR", 41, RecoveryPrecondition},
+		{"TRANSACTION_REJECTED_BY_OPERATOR", 33, RecoveryRespondent},
+		{"INVALID_PAYMENT_DETAILS", 20, RecoveryPrecondition},
+		{"JSON_SYNTAX_ERROR", 18, RecoveryPrecondition},
+		{"RECIPIENT_REACHED_MAX_TOPUP_NUMBER", 15, RecoveryRespondent},
+		{"PHONE_BANNED_BY_OPERATOR", 4, RecoveryRespondent},
+		{"TRANSACTION_REFUSED_BY_OPERATOR", 2, RecoveryRespondent},
+		{"404", 2, RecoveryPrecondition},
+		{"INVALID_PHONE_NUMBER", 1, RecoveryRespondent},
+		{"RECIPIENT_PHONE_INACTIVE", 1, RecoveryRespondent},
+		{"INVALID_JSON_FORMAT", 0, RecoveryPrecondition},
+		{"INVALID_GIFT_CARD_DETAILS", 0, RecoveryPrecondition},
+		{"INVALID_PROVIDER", 0, RecoveryPrecondition},
+		{"MISSING_SECRET", 0, RecoveryPrecondition},
+		{"BAD_HTTP_REQUEST", 0, RecoveryPrecondition},
+		{"INVALID_ACCOUNT_NUMBER", 0, RecoveryRespondent},
+		{"INVALID_SKU_CODE", 0, RecoveryPrecondition},
+		{"INVALID_RESPONSE", 0, RecoveryPrecondition},
+		{"PAYMENT_FAILED", 0, RecoveryPrecondition},
+		{"DUPLICATE_REFERENCE", 0, RecoveryRespondent},
 
-		{"AccountNumberInvalid", 23, RecoveryPermanent},
-		{"ParameterInvalid", 4, RecoveryPermanent},
-		{"DuplicateTransactionPrevented", 0, RecoveryPermanent},
+		{"AccountNumberInvalid", 23, RecoveryRespondent},
+		{"ParameterInvalid", 4, RecoveryPrecondition},
+		{"DuplicateTransactionPrevented", 0, RecoveryRespondent},
 
-		// DingConnect amount resolution (VIR-40). All permanent: a retry sends
-		// the same stale pin, and silence would hide the drift.
-		{"PIN_DRIFT", 0, RecoveryPermanent},
-		{"AMOUNT_CURRENCY_MISMATCH", 0, RecoveryPermanent},
-		{"NO_PIN_FOR_OPERATOR", 0, RecoveryPermanent},
-		{"RateLimited", 0, RecoveryPermanent},
+		// DingConnect amount resolution (VIR-40). Withheld: the pin is the
+		// researcher's to re-declare, and PaymentPinDrift is what makes it loud.
+		{"PIN_DRIFT", 0, RecoveryPrecondition},
+		{"AMOUNT_CURRENCY_MISMATCH", 0, RecoveryPrecondition},
+		{"NO_PIN_FOR_OPERATOR", 0, RecoveryPrecondition},
+		{"RateLimited", 0, RecoveryPrecondition},
 
 		// The fake provider's fixture code (facebot/testrunner,
 		// forms/gk3gt9ag.json). Not production data -- it is here so the
 		// integration test's payment-failure flow rests on a decision rather
 		// than on the unknown-code default.
-		{"FAKE", 0, RecoveryPermanent},
+		{"FAKE", 0, RecoveryRespondent},
 	}
 
 	for _, c := range cases {
@@ -121,18 +123,17 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		"every code in recoveryByCode must be pinned in this test")
 }
 
-// TestClassifyUnknownCodeIsPermanent pins the default, which is the single
+// TestClassifyUnknownCodeIsWithheld pins the default, which is the single
 // decision most likely to be changed by accident.
 //
-// Permanent means "sent", which means an unrecognised code behaves exactly as
-// every failure behaved before classification existed. Flipping this default to
-// transient would silently park respondents for dean's full 14 days on codes
-// nobody has ever read.
-func TestClassifyUnknownCodeIsPermanent(t *testing.T) {
+// A code nobody has read says nothing about the respondent's number, so it must
+// not be sent to a form whose only answer to a failure is "give us another
+// number". PaymentUnclassifiedErrorCode is what gets the row added.
+func TestClassifyUnknownCodeIsWithheld(t *testing.T) {
 	got, known := Classify("SOMETHING_RELOADLY_INVENTED_LAST_WEEK")
 	assert.False(t, known)
-	assert.Equal(t, RecoveryPermanent, got)
-	assert.False(t, got.Silent(), "an unknown code must still reach the respondent")
+	assert.Equal(t, RecoveryPrecondition, got)
+	assert.True(t, got.Silent(), "an unknown code must not reach the respondent")
 }
 
 // TestSilentIsTheOnlyBehaviouralAxis pins the mapping from recovery class to
@@ -142,7 +143,7 @@ func TestClassifyUnknownCodeIsPermanent(t *testing.T) {
 func TestSilentIsTheOnlyBehaviouralAxis(t *testing.T) {
 	assert.True(t, RecoveryTransient.Silent())
 	assert.True(t, RecoveryPrecondition.Silent())
-	assert.False(t, RecoveryPermanent.Silent())
+	assert.False(t, RecoveryRespondent.Silent())
 }
 
 // TestClassifyResultIgnoresSuccessfulResults guards the nil paths. A Result
@@ -181,7 +182,7 @@ func TestRateLimitedIsNeverRetried(t *testing.T) {
 	assert.True(t, known, "RateLimited must be pinned, not left to the unknown-code default")
 	assert.NotEqual(t, RecoveryTransient, got,
 		"RateLimited must never be transient: backoff.Retry would replay the whole cascade")
-	assert.Equal(t, RecoveryPermanent, got)
+	assert.Equal(t, RecoveryPrecondition, got)
 }
 
 // TestInsufficientBalanceIsNeverSent is the regression test for the incident
@@ -201,22 +202,22 @@ func TestInsufficientBalanceIsNeverSent(t *testing.T) {
 
 // TestDingConnectSpellingsAreClassified guards the keying, not the classes:
 // DingConnect's codes reach recoveryByCode verbatim, so a row spelled the
-// vlab way matches nothing and the code silently defaults to permanent.
+// vlab way matches nothing and the code silently takes the unknown-code default.
 func TestDingConnectSpellingsAreClassified(t *testing.T) {
 	for code, expected := range map[string]Recovery{
 		"InsufficientBalance":           RecoveryPrecondition,
 		"AuthenticationFailed":          RecoveryPrecondition,
 		"ProviderError":                 RecoveryTransient,
 		"TransientProviderError":        RecoveryTransient,
-		"AccountNumberInvalid":          RecoveryPermanent,
-		"ParameterInvalid":              RecoveryPermanent,
-		"RateLimited":                   RecoveryPermanent,
-		"DuplicateTransactionPrevented": RecoveryPermanent,
+		"AccountNumberInvalid":          RecoveryRespondent,
+		"ParameterInvalid":              RecoveryPrecondition,
+		"RateLimited":                   RecoveryPrecondition,
+		"DuplicateTransactionPrevented": RecoveryRespondent,
 	} {
 		t.Run(code, func(t *testing.T) {
 			got, known := Classify(code)
 			assert.True(t, known,
-				"%s is a code DingConnect returns verbatim; an unpinned code silently defaults to permanent", code)
+				"%s is a code DingConnect returns verbatim; an unpinned code silently takes the unknown-code default", code)
 			assert.Equal(t, expected, got)
 		})
 	}

@@ -49,7 +49,7 @@ var (
 	//
 	// For a success, recovery and code are empty. For a failure, recovery is
 	// the class from classify.go and code is the provider's error code (or
-	// codeUnclassified). `recovery != "permanent"` is precisely the set of
+	// codeUnclassified). `recovery != "respondent"` is precisely the set of
 	// failures the respondent was NOT told about.
 	paymentResults = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dinersclub_payment_results_total",
@@ -58,8 +58,8 @@ var (
 
 	// unclassifiedErrorCodes records codes missing from recoveryByCode. Every
 	// increment here is a row that should be added to that table: until it
-	// is, the code defaults to permanent and the respondent is told the
-	// payment failed, which may or may not be true.
+	// is, the code is withheld as a precondition and the respondent stays
+	// parked, which may or may not be right.
 	unclassifiedErrorCodes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "dinersclub_unclassified_error_codes_total",
 		Help: "Provider error codes that classify.go does not recognise. Each one is a missing row in recoveryByCode.",
