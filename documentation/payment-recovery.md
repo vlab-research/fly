@@ -289,6 +289,18 @@ to the respondent.
   `DuplicateTransactionPrevented` are classed `respondent` and sent although the
   respondent cannot fix them: withholding would park people who were mostly
   paid, mid-survey, on a re-drive that can only draw the same duplicate again.
+- **The in-process retry converts a transient Reloadly failure into
+  `CUSTOM_IDENTIFIER_ALREADY_USED` when the form supplies the identifier.**
+  Reloadly consumes a `custom_identifier` even when the topup fails, so the
+  second attempt inside `payout`'s backoff — same event, same identifier — is
+  refused as a duplicate. That code is `permanent`, so it ends the retry and is
+  delivered: the respondent is told their number was already used, and surveys
+  that treat the code as evidence of number sharing route them out. dean's
+  `repeat_payment` re-drive has the same shape. Visible in production as
+  identifiers whose *first delivered* Result is `CUSTOM_IDENTIFIER_ALREADY_USED`:
+  under 20 a week before withholding shipped, 84–164 a week during the Safaricom
+  Kenya outage (2026-08-17 to 2026-09-05). Same fix as above — the identifier
+  must be unique per attempt while still deduping a genuinely repeated payment.
 - **A withheld `PIN_DRIFT` is not healed by re-declaring the pin.** dean's
   re-drive rebuilds the payment from the form version the respondent started on
   (`actionsResponses` resolves the form at `md.startTime`, and `MAKE_PAYMENT`
