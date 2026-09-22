@@ -277,7 +277,17 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	return get(conn, getTimeout, query, d, cfg.TimeoutMaxPast, cfg.TimeoutMaxAttempts)
 }
 
-// TODO: test cockroach perf and index
+// Nudge a participant whose question has gone unanswered, measured from
+// last_inbound -- when they last wrote to us -- because that is what the
+// platforms' 24-hour messaging windows count from. `updated` is not: it moves
+// on receipts, machine reports and dean's own sweeps, so a band measured from
+// it lands outside the window and Meta refuses the send. A row with no
+// last_inbound predates the stamp and is never followed up.
+//
+// A participant who has answered nothing is never nudged: a bare ad tap is
+// not an opt-in. `qa` is per form and empties on a stitch, so a respondent
+// stalled on the first question of a second form counts by their form history.
+//
 // states.pageid holds the platform account id, which equals credentials.key
 // for messaging entities (uniqueness enforced by the unique_messaging_account
 // partial index).
@@ -296,8 +306,9 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 					current_state = 'QOUT'  AND
 					previous_is_followup = FALSE AND
 					previous_with_token = FALSE AND
-					(NOW() - updated) > ($1)::INTERVAL AND
-					(NOW() - updated) < ($2)::INTERVAL
+					(NOW() - last_inbound) > ($1)::INTERVAL AND
+					(NOW() - last_inbound) < ($2)::INTERVAL AND
+					(jsonb_array_length(state_json->'qa') > 0 OR jsonb_array_length(state_json->'forms') > 1)
                   )
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY userid, pageid, shortcode ORDER BY created DESC)
                 FROM t

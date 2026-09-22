@@ -62,6 +62,38 @@ and the user is marked `BLOCKED` — which is what finally removes them from the
 `DEAN_RETRY_MAX_ATTEMPTS` (60 in production) is high enough that it is not normally what stops
 the loop. See "The RESPONDING/Echo Trap" in `documentation/states-debugging.md`.
 
+## `FollowUps` and the `follow_up` event
+
+`FollowUps` (`queries.go`) nudges a participant sitting in `QOUT` on a survey
+that configures a follow-up message (`surveys.has_followup`, i.e.
+`label.buttonHint.default`). It selects a row when all of:
+
+- `current_state = 'QOUT'`, `previous_is_followup = FALSE` and
+  `previous_with_token = FALSE`;
+- `states.last_inbound` — when the respondent last wrote to us — is between
+  `DEAN_FOLLOWUP_MIN` and `DEAN_FOLLOWUP_MAX` ago (12 h and 23 h in
+  production);
+- they have answered at least one question: `state_json.qa` is non-empty, or
+  `forms` has more than one entry (`qa` is per form and empties on a stitch).
+
+Two things this rule is built on:
+
+- **It measures from `last_inbound`, not `updated`.** `updated` is the last
+  event of any kind replybot folded — delivery and read receipts, machine
+  reports, dean's own sweeps — while the WhatsApp and Messenger 24-hour
+  windows count from the respondent's last message. Measured from `updated`
+  the band routinely fell outside the window, Meta refused the sends
+  (WhatsApp 131047), and the refused follow-up re-armed the clock without
+  setting `previous_is_followup`, so the same person was nudged again.
+  `MAX` is 23 h so the hourly cron never lands on the window's edge.
+- **A bare ad tap is never nudged.** Tapping the ad opens the conversation and
+  stamps `last_inbound`, but someone who never answered the first question has
+  not opted in.
+
+`last_inbound` is NULL for rows predating the stamp
+(`devops/migrations/33-states-last-inbound.sql`), and NULL is never in band:
+those participants are not followed up until they write again.
+
 ## `Payments` and the `repeat_payment` event
 
 `Payments` (`queries.go:151`) selects respondents parked in a **payment** wait

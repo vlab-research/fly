@@ -39,10 +39,21 @@ func makeMs(mins time.Duration) int64 {
 	return ms
 }
 
-func makeStateJson(startTime time.Time, form, previousOutput string) string {
-	base := `{"state": "QOUT", "md": { "startTime": %v }, "forms": ["%v"], "question": "foo", "previousOutput": %v }`
-
-	return fmt.Sprintf(base, startTime.Unix()*1000, form, previousOutput)
+// A QOUT row as FollowUps sees it. startTime is 30h ago so the survey
+// versions the follow-up test inserts predate it; lastInbound is how long ago
+// the respondent last wrote, 0 for a row predating the stamp.
+func qoutState(forms []string, previousOutput string, lastInbound time.Duration, qa string, platform string) string {
+	f, _ := json.Marshal(forms)
+	md := fmt.Sprintf(`{"startTime": %d}`, makeMs(-30*time.Hour))
+	if platform != "" {
+		md = fmt.Sprintf(`{"startTime": %d, "platform": "%s"}`, makeMs(-30*time.Hour), platform)
+	}
+	li := ""
+	if lastInbound != 0 {
+		li = fmt.Sprintf(`, "lastInbound": %d`, makeMs(-lastInbound))
+	}
+	return fmt.Sprintf(`{"state": "QOUT", "question": "foo", "md": %s, "forms": %s, "qa": %s, "previousOutput": %s%s}`,
+		md, f, qa, previousOutput, li)
 }
 
 func TestGetRespondingsGetsOnlyThoseInGivenInterval(t *testing.T) {
@@ -672,59 +683,67 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 	mustExec(t, pool, surveyInsertSql, "with_followup", time.Now().UTC().Add(-20*time.Hour), `{"label.other": "not a follow up"}`)
 	mustExec(t, pool, surveyInsertSql, "without_followup", time.Now().UTC().Add(-20*time.Hour), `{"label.other": "not a follow up"}`)
 
-	mustExec(t, pool, insertQuery,
-		"foo",
-		"bar",
-		time.Now().UTC().Add(-30*time.Minute),
-		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-30*time.Hour), "with_followup", `{"followUp": null}`))
+	mustExec(t, pool, `INSERT INTO credentials(entity, key, userid, details) VALUES ('whatsapp_business', 'waba', 'e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', '{}')`)
 
-	mustExec(t, pool, insertQuery,
-		"quux",
-		"bar",
-		time.Now().UTC().Add(-30*time.Minute),
-		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-10*time.Hour), "with_followup", `{"followUp": null}`))
+	// Every row's `updated` is in band, to show it is no longer read.
+	updated := time.Now().UTC().Add(-30 * time.Minute)
+	answered := `[["q1", "yes"]]`
+	none := `{"followUp": null}`
 
-	mustExec(t, pool, insertQuery,
-		"baz",
-		"bar",
-		time.Now().UTC().Add(-30*time.Minute),
-		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "without_followup", `{"followUp": null}`))
+	// selected: answered, last wrote 30 minutes ago
+	mustExec(t, pool, insertQuery, "foo", "bar", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, ""))
 
-	mustExec(t, pool, insertQuery,
-		"bar",
-		"qux",
-		time.Now().UTC().Add(-30*time.Minute),
-		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{"followUp": true}`))
+	// selected: a WhatsApp conversation, through the whatsapp_business credential
+	mustExec(t, pool, insertQuery, "wa", "waba", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "whatsapp"))
 
-	mustExec(t, pool, insertQuery,
-		"bar",
-		"quux",
-		time.Now().UTC().Add(-30*time.Minute),
-		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{"token": "token"}`))
+	// selected: stitched into a second form, so qa is empty but they have answered
+	mustExec(t, pool, insertQuery, "stitched", "bar", updated, "QOUT",
+		qoutState([]string{"first_form", "with_followup"}, none, 30*time.Minute, `[]`, ""))
 
-	mustExec(t, pool, insertQuery,
-		"qux",
-		"bar",
-		time.Now().UTC().Add(-90*time.Minute),
-		"QOUT",
-		makeStateJson(time.Now().UTC().Add(-60*time.Hour), "with_followup", `{}`))
+	// not: last wrote too long ago / too recently
+	mustExec(t, pool, insertQuery, "too_old", "bar", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 90*time.Minute, answered, ""))
+	mustExec(t, pool, insertQuery, "too_recent", "bar", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 10*time.Minute, answered, ""))
+
+	// not: a bare ad tap, nothing answered
+	mustExec(t, pool, insertQuery, "bare_tap", "bar", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, `[]`, ""))
+
+	// not: predates the stamp, however recent `updated` is
+	mustExec(t, pool, insertQuery, "no_stamp", "bar", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 0, answered, ""))
+
+	// not: already followed up / sent with a token
+	mustExec(t, pool, insertQuery, "bar", "qux", updated, "QOUT",
+		qoutState([]string{"with_followup"}, `{"followUp": true}`, 30*time.Minute, answered, ""))
+	mustExec(t, pool, insertQuery, "bar", "quux", updated, "QOUT",
+		qoutState([]string{"with_followup"}, `{"token": "token"}`, 30*time.Minute, answered, ""))
+
+	// not: the survey has no follow-up message
+	mustExec(t, pool, insertQuery, "baz", "bar", updated, "QOUT",
+		qoutState([]string{"without_followup"}, none, 30*time.Minute, answered, ""))
 
 	cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes"}
 	ch := FollowUps(cfg, pool)
 	events := getEvents(ch)
 
-	assert.Equal(t, 1, len(events))
-	assert.Equal(t, "foo", events[0].User)
-	assert.Equal(t, "follow_up", events[0].Event.Type)
+	got := map[string]*ExternalEvent{}
+	for _, e := range events {
+		got[e.User] = e
+	}
+	assert.Equal(t, 3, len(events))
+	assert.Contains(t, got, "foo")
+	assert.Contains(t, got, "wa")
+	assert.Contains(t, got, "stitched")
+	assert.Equal(t, "whatsapp", got["wa"].Platform)
+	assert.Equal(t, "waba", got["wa"].AccountID)
+	assert.Equal(t, "messenger", got["foo"].Platform)
 
-	ev, _ := json.Marshal(events[0].Event)
-	assert.Equal(t, string(ev), `{"type":"follow_up","value":"foo"}`)
-
+	ev, _ := json.Marshal(got["foo"].Event)
+	assert.Equal(t, `{"type":"follow_up","value":"foo"}`, string(ev))
 }
 
 func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {

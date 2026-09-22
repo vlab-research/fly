@@ -169,19 +169,25 @@ The `current_state` column is redundant with `state_json->>'state'` but stored s
 
 ### Dean (Follow-Up Service)
 
-**File:** `/home/nandan/Documents/vlab-research/fly/dean/queries.go`, `FollowUps()`, lines 211–238
+**File:** `dean/queries.go`, `FollowUps()`
 
 ```sql
-SELECT question, userid, pageid
+SELECT question, userid, pageid, platform
 FROM states s
 WHERE
   current_state = 'QOUT' AND
   previous_is_followup = FALSE AND
   previous_with_token = FALSE AND
-  (NOW() - updated) > ($1)::INTERVAL AND    -- min elapsed since question was sent
-  (NOW() - updated) < ($2)::INTERVAL        -- max elapsed (don't follow up too late)
-  AND has_followup = TRUE                   -- survey must have followup configured
+  (NOW() - last_inbound) > ($1)::INTERVAL AND   -- respondent's last message, 12h+ ago
+  (NOW() - last_inbound) < ($2)::INTERVAL AND   -- ...and under 23h: inside the messaging window
+  (jsonb_array_length(state_json->'qa') > 0 OR  -- has answered something; a bare ad tap is
+   jsonb_array_length(state_json->'forms') > 1) --   never nudged
+  AND has_followup = TRUE                       -- survey must have followup configured
 ```
+
+`last_inbound` is the respondent's last own message (`state_json.lastInbound`),
+not `updated`, which moves on receipts and dean's own sweeps. See
+`dean/README.md` § "`FollowUps`".
 
 This is the **only** operational query in `dean/queries.go` that filters on `QOUT` directly. Other operational queries filter on `RESPONDING`, `ERROR`, `BLOCKED`, and `WAIT_EXTERNAL_EVENT`.
 

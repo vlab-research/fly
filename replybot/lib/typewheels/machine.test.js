@@ -9,6 +9,7 @@ const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, g
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 const { parseEvent } = require('../event-normalizer')
+const { Machine } = require('./transition')
 
 const _echo = md => ({ ...echo, payload: { ...echo.payload, metadata: md.ref ? md : { ref: md } } })
 
@@ -600,6 +601,73 @@ describe('RESTORE_STATE (recovery event)', () => {
     output.stateUpdate.state.should.equal('QOUT')
     output.stateUpdate.qa.should.eql([['q1', 'yes'], ['q2', 'blue']])
     output.stateUpdate.pointer.should.equal(9999)
+  })
+})
+
+// When the respondent last wrote to us. Dean's follow-up rule reads it (as
+// states.last_inbound), so it must be set by the respondent's acts only and
+// must survive everything that rebuilds the state from scratch.
+describe('lastInbound', () => {
+  const stitchEcho = { ...echo, payload: { ...echo.payload, metadata: { type: 'stitch', stitch: { form: 'BAR' }, ref: 'foo' } } }
+  const resetReferral = { ...referral, payload: { ...referral.payload, referral: { ...referral.payload.referral, ref: 'form.reset' } } }
+  const blockUser = synthetic({ type: 'block_user', value: null })
+
+  it('is unset until the respondent writes', () => {
+    should.not.exist(getState([]).lastInbound)
+    should.not.exist(getState([echo, delivery, read]).lastInbound)
+  })
+
+  it('is stamped by every inbound category, whatever the machine does with it', () => {
+    for (const e of [referral, whatsappReferral, optin, text, sticker, multipleChoice, qr, reaction]) {
+      getState([referral, echo, e]).lastInbound.should.equal(e.timestamp)
+    }
+  })
+
+  it('is not moved by receipts, echoes or synthetic events', () => {
+    const log = [referral, echo, text, echo, delivery, read, syntheticRedo,
+      synthetic({ type: 'follow_up', value: 'foo' }),
+      synthetic({ type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } })]
+    getState(log).lastInbound.should.equal(text.timestamp)
+  })
+
+  it('survives a stitch into another form', () => {
+    const state = getState([referral, text, stitchEcho])
+    state.forms.should.eql(['FOO', 'BAR'])
+    state.qa.should.eql([])
+    state.lastInbound.should.equal(text.timestamp)
+  })
+
+  it('survives a bailout', () => {
+    const state = getState([referral, echo, text, syntheticBail])
+    state.forms.should.eql(['FOO', 'BAR'])
+    state.lastInbound.should.equal(text.timestamp)
+  })
+
+  it('survives a block', () => {
+    const state = getState([referral, echo, text, blockUser])
+    state.state.should.equal('USER_BLOCKED')
+    state.lastInbound.should.equal(text.timestamp)
+  })
+
+  it('treats a reset referral as the latest inbound', () => {
+    const state = getState([referral, echo, text, resetReferral])
+    state.state.should.equal('START')
+    state.lastInbound.should.equal(resetReferral.timestamp)
+  })
+
+  it('survives a restore, and a snapshot carrying its own value wins', () => {
+    const snapshot = { state: 'QOUT', question: 'q2', qa: [['q1', 'yes']], forms: ['FOO'], md: { startTime: 100, seed: 42 } }
+    const restore = s => synthetic({ type: 'restore_state', value: { state: s } }, { timestamp: 9999 })
+    getState([referral, echo, text, blockUser, restore(snapshot)]).lastInbound.should.equal(text.timestamp)
+    getState([referral, echo, text, blockUser, restore({ ...snapshot, lastInbound: 4242 })]).lastInbound.should.equal(4242)
+  })
+
+  it('is rebuilt identically by a replay of the log', () => {
+    const machine = new Machine()
+    const log = [referral, echo, text, delivery, read, echo]
+    const live = log.reduce((s, e) => machine.transition(s, e).newState, _initialState())
+    live.lastInbound.should.equal(text.timestamp)
+    getState(log).should.eql(live)
   })
 })
 
@@ -3627,13 +3695,15 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
     categorizeEvent(event).should.equal('REFERRAL')
   })
 
-  it('leaves the live conversation byte-for-byte untouched', () => {
+  // The tap is still the respondent's act, so lastInbound moves; nothing else does.
+  it('leaves the live conversation untouched but for lastInbound', () => {
+    const tap = parseEvent(getStartedPostback)
     const before = getState(liveLog)
-    const after = getState([...liveLog, parseEvent(getStartedPostback)])
+    const after = getState([...liveLog, tap])
 
     before.state.should.equal('QOUT')
     before.forms.should.eql(['mnchweeklanguage'])
-    after.should.eql(before)
+    after.should.eql({ ...before, lastInbound: tap.timestamp })
   })
 
   it('does not append FALLBACK_FORM and does not wipe the targeting metadata', () => {
@@ -3671,8 +3741,9 @@ describe('a form-less entry event must not re-enter a live conversation', () => 
     const ended = getState([parseEvent(adReferral), tyEcho])
     ended.state.should.equal('END')
 
-    const after = getState([parseEvent(adReferral), tyEcho, parseEvent(getStartedPostback)])
-    after.should.eql(ended)
+    const tap = parseEvent(getStartedPostback)
+    const after = getState([parseEvent(adReferral), tyEcho, tap])
+    after.should.eql({ ...ended, lastInbound: tap.timestamp })
   })
 
   it('refuses a referral whose ref carries no form pair', () => {

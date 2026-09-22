@@ -1,6 +1,15 @@
 # Follow-ups: measure from the respondent's last message
 
-Decided 2026-09-22 (Nandan). Status: plan, not started.
+Decided 2026-09-22 (Nandan). Status: implemented 2026-09-22 on
+`feature/followup-last-inbound`, not deployed. Two departures from the plan as
+first written, both in § "Implementation":
+
+- the answered-anything gate is `qa` non-empty **or** `forms` longer than one,
+  because `qa` is per form and empties on a stitch (a respondent stalled on
+  the payment form's first question has answered plenty);
+- the facebot follow-up test did *not* have the respondent answer anything
+  (`ulrtpfSQ` had one question and the flow sent no reply), so it now answers
+  the first question and stalls on a second.
 
 ## The defect
 
@@ -41,8 +50,10 @@ is the respondent's act and is what opens the conversation.
 - `last_inbound` is between `DEAN_FOLLOWUP_MIN` and `DEAN_FOLLOWUP_MAX` ago,
   with `MAX` set to **23 hours** so the hourly cron can never land on the
   window's edge;
-- `qa` is non-empty: they have answered at least one question, so they opted
-  in. A bare ad tap is never nudged;
+- they have answered at least one question, so they opted in: `qa` is
+  non-empty, or `forms` has more than one entry (`qa` is rebuilt empty by
+  `SWITCH_FORM`, so on a second form the history is the evidence). A bare ad
+  tap is never nudged;
 - `previous_is_followup = FALSE` and `previous_with_token = FALSE`
   (unchanged).
 
@@ -114,8 +125,9 @@ long it took.
 
 - `FollowUps`: `(NOW() - last_inbound) > $1 AND (NOW() - last_inbound) < $2`
   in place of the two `updated` predicates, plus
-  `jsonb_array_length(state_json->'qa') > 0` (check the column's JSON type;
-  `state_json` is `JSON`, so it may need `::JSONB`).
+  `(jsonb_array_length(state_json->'qa') > 0 OR
+  jsonb_array_length(state_json->'forms') > 1)`. `jsonb_array_length` works on
+  the `JSON` column as is (`Spammers` already relies on it).
 - `devops/values/production.yaml:457` and `staging.yaml:251`:
   `DEAN_FOLLOWUP_MAX: "23 hours"`.
 - `dean/queries_test.go`: extend
@@ -125,9 +137,12 @@ long it took.
   `qa` → not; `updated` in band but `last_inbound` absent → not; `last_inbound`
   absent entirely → not; a `whatsapp_business` credential row so the platform
   path is covered.
-- `facebot/testrunner/test.tc.ts:973` ("Sends follow ups when the user does not
-  respond") keeps passing: the respondent there has answered, so `qa` is
-  non-empty; check the fixture's `DEAN_FOLLOWUP_*` values against the new band.
+- `facebot/testrunner/test.tc.ts` ("Sends follow ups when the user does not
+  respond"): the respondent there had answered nothing — `ulrtpfSQ` had a
+  single question and the flow sent no reply — so the fixture gains a
+  `short_text` second question and the test answers the first and stalls on
+  the second. The stack's `DEAN_FOLLOWUP_MIN/MAX` of `0s`/`30s`
+  (`stack.ts`) still bracket the answer.
 - `dean/README.md` and `planning/qout-and-state-machine-findings.md` §"Dean
   (Follow-Up Service)" describe the query; rewrite the follow-up paragraph to
   the new rule. Delete the annotation there that reads

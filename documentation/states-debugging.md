@@ -47,6 +47,7 @@ The state JSON (`state_json` in the database) contains the full conversation con
 | `tokens` | array | One-time notification tokens (used for re-engagement messaging) |
 | `retries` | array | Retry timestamps for exponential backoff on transient failures |
 | `pointer` | string | Message pointer timestamp (tracks position in event log replay) |
+| `lastInbound` | number | Epoch ms of the respondent's last own act (referral, opt-in, text, media, postback, quick reply, reaction) — never a receipt, echo or synthetic event. Stamped by `stampInbound` in `machine.js` outside `exec`/`apply`, survives every rebuild (stitch, reset, restore, bailout), and is what the platforms' 24-hour windows count from. Absent on rows predating the stamp. |
 | `externalEvents` | array | External events received while the participant was waiting |
 
 ## Data Flow
@@ -666,6 +667,7 @@ The table has 15+ computed/stored columns derived from `state_json` for efficien
 | `payment_error_code` | Reloadly payment error code |
 | `previous_is_followup` | Whether the previous output was a follow-up message |
 | `previous_with_token` | Whether the previous output included a one-time notification token |
+| `last_inbound` | `state_json.lastInbound` as a timestamp: when the respondent last wrote. What Dean's `FollowUps` measures its 12–23 h band from; NULL means never followed up (`devops/migrations/33-states-last-inbound.sql`) |
 
 ### Indexes
 

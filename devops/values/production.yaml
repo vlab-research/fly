@@ -471,10 +471,13 @@ dean:
     value: "5"
   - name: DEAN_SEND_DELAY
     value: "3s"
+  # Measured from states.last_inbound, the respondent's last message. MAX is
+  # under the platforms' 24-hour window so the hourly cron never lands on its
+  # edge.
   - name: DEAN_FOLLOWUP_MIN
     value: "12 hours"
   - name: DEAN_FOLLOWUP_MAX
-    value: "24 hours"
+    value: "23 hours"
   - name: DEAN_TIMEOUT_BLACKLIST
     value: "bebborsbaseserb,bebbobg2basebul,nciaim2followup2pay,nciaim2followup1pay,nciaim2baselinepay"
   - name: DEAN_TIMEOUT_MAX_PAST
