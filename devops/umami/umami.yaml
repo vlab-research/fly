@@ -1,0 +1,176 @@
+# Umami — self-hosted, cookieless web analytics (OSS, MIT). Serves every web
+# property we own, not one site: each site is a "website" inside this one
+# instance, so a new project needs a row in Umami and a <script> tag, never a
+# new deployment. See README.md.
+#
+# Namespace `analytics`, separate from vprod: this holds website visitor data,
+# which has nothing to do with research data and should share nothing with it —
+# not a database, not credentials, not a blast radius.
+#
+# Secret `umami` (from the gitignored devops/umami/.env-umami, via
+# devops/secrets.sh) carries POSTGRES_PASSWORD, DATABASE_URL and APP_SECRET.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+---
+# Postgres 17, one instance, for Umami only. Umami v3 supports PostgreSQL and
+# nothing else — CockroachDB speaks the wire protocol but Umami's Prisma
+# migrations are not written for it, so it does not share the Fly cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: umami-postgres
+  namespace: analytics
+  labels: { app.kubernetes.io/name: umami-postgres }
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: umami-postgres }
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: umami-postgres
+  namespace: analytics
+  labels: { app.kubernetes.io/name: umami-postgres }
+spec:
+  serviceName: umami-postgres
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: umami-postgres }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: umami-postgres }
+    spec:
+      securityContext:
+        fsGroup: 70   # postgres uid in the alpine image
+      containers:
+        - name: postgres
+          image: postgres:17.11-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - { name: POSTGRES_USER, value: umami }
+            - { name: POSTGRES_DB, value: umami }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: umami, key: POSTGRES_PASSWORD } }
+            # A subdirectory, because the PD's root holds lost+found and initdb
+            # refuses a non-empty directory.
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "umami", "-d", "umami"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "umami", "-d", "umami"] }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard-rwo
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: umami
+  namespace: analytics
+  labels: { app.kubernetes.io/name: umami }
+spec:
+  # One replica. Umami runs its Prisma migrations at start-up, and two pods
+  # starting together on an upgrade is a race nobody needs for this traffic.
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: umami }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: umami }
+    spec:
+      containers:
+        - name: umami
+          # Pinned. Read the release notes before bumping: a major version
+          # migrates the schema on start-up, and the nightly dump is the way back.
+          image: ghcr.io/umami-software/umami:3.3.1
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: umami, key: DATABASE_URL } }
+            - name: APP_SECRET
+              valueFrom: { secretKeyRef: { name: umami, key: APP_SECRET } }
+            # No phoning home, no in-app update nag.
+            - { name: DISABLE_TELEMETRY, value: "1" }
+            - { name: DISABLE_UPDATES, value: "1" }
+            # The visitor's IP. Sites that proxy the tracker through Netlify
+            # (vlab.digital does, so ad blockers see a first-party request)
+            # reach us from Netlify's edge, so X-Forwarded-For names Netlify,
+            # not the visitor. Netlify puts the visitor's address in this
+            # header. Without it every visitor collapses into a handful of
+            # "sessions" located wherever Netlify's edge is. Umami uses the IP
+            # for country lookup and a salted session hash, and stores neither.
+            - { name: CLIENT_IP_HEADER, value: x-nf-client-connection-ip }
+          readinessProbe:
+            httpGet: { path: /api/heartbeat, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/heartbeat, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { memory: 768Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: umami
+  namespace: analytics
+  labels: { app.kubernetes.io/name: umami }
+spec:
+  selector: { app.kubernetes.io/name: umami }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: umami
+  namespace: analytics
+  labels: { app.kubernetes.io/name: umami }
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: analytics.vlab.digital
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: umami
+                port: { number: 80 }
+  tls:
+    - hosts: [analytics.vlab.digital]
+      secretName: umami-tls

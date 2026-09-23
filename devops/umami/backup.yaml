@@ -1,0 +1,89 @@
+# Nightly: purge visitor data older than 24 months, then pg_dump the Umami
+# database onto its own PVC, 14 days of dumps retained.
+#
+# THE PURGE IS A PUBLISHED PROMISE. vlab.digital/privacy/ §7 states that website
+# analytics are kept for 24 months; this job is the only thing that makes that
+# true — Umami itself keeps everything forever. Change the interval here and the
+# policy in the same change, or neither. Umami's schema has no foreign keys, so
+# each visitor-data table is trimmed on its own created_at.
+#
+# What this covers: a bad Umami upgrade (schema migrations run on start-up), a
+# mistaken delete in the UI, a corrupted database. What it does NOT cover: loss
+# of the cluster's disks — the dumps live in the same zone as the data. That is
+# a deliberate trade: this is website traffic, which is lost for the days it is
+# down and then accumulates again, not research data that cannot be re-derived.
+# If that changes, copy the media-mirror pattern (devops/backup/) to GCS.
+#
+# Restore:
+#   kubectl -n analytics exec -i umami-postgres-0 -- \
+#     pg_restore -U umami -d umami --clean --if-exists < umami-YYYYMMDD.dump
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: umami-backups
+  namespace: analytics
+  labels: { app.kubernetes.io/name: umami-backup }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: umami-backup
+  namespace: analytics
+  labels: { app.kubernetes.io/name: umami-backup }
+spec:
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: umami-backup }
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            fsGroup: 70
+            runAsUser: 70
+          containers:
+            - name: pg-dump
+              image: postgres:17.11-alpine
+              env:
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: umami, key: POSTGRES_PASSWORD } }
+              command:
+                - sh
+                - -euc
+                - |
+                  psql -h umami-postgres -U umami -d umami -v ON_ERROR_STOP=1 <<'SQL'
+                  BEGIN;
+                  DELETE FROM website_event  WHERE created_at < now() - interval '24 months';
+                  DELETE FROM event_data     WHERE created_at < now() - interval '24 months';
+                  DELETE FROM session_data   WHERE created_at < now() - interval '24 months';
+                  DELETE FROM revenue        WHERE created_at < now() - interval '24 months';
+                  DELETE FROM heatmap_event  WHERE created_at < now() - interval '24 months';
+                  DELETE FROM session_replay WHERE created_at < now() - interval '24 months';
+                  DELETE FROM session        WHERE created_at < now() - interval '24 months';
+                  COMMIT;
+                  SQL
+                  f=/backups/umami-$(date -u +%Y%m%d).dump
+                  pg_dump -h umami-postgres -U umami -d umami -Fc -f "$f.tmp"
+                  mv "$f.tmp" "$f"
+                  find /backups -name 'umami-*.dump' -mtime +14 -delete
+                  ls -la /backups
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { memory: 256Mi }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: umami-backups }
