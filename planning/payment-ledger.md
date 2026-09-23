@@ -10,10 +10,12 @@
 > the step that can disprove the design; do not commit to a schema before it
 > passes.
 >
-> **Related:** `documentation/payment-recovery.md` (the system as it is today —
-> read it first), `dinersclub/README.md`, `documentation/bail-systems.md`,
-> `planning/payment-failure-handling.md` (the 2026-08-20 decision this builds
-> on), `planning/payment-provider-landscape.md`.
+> **Related:** `planning/sub-bots.md` (the delegation primitive — the payment
+> sub-bot is its first consumer), `documentation/payment-recovery.md` (the
+> system as it is today — read it first), `dinersclub/README.md`,
+> `documentation/bail-systems.md`, `planning/payment-failure-handling.md` (the
+> 2026-08-20 decision this builds on),
+> `planning/payment-provider-landscape.md`.
 
 ---
 
@@ -26,9 +28,10 @@ Three parts, in the order they matter:
 
 1. **A claim** — a durable row saying *this respondent is owed X*, created when
    they cross the payment point. The desired state.
-2. **A control frame** — while a claim is open, the payment subsystem owns the
+2. **A sub-bot** — while a claim is open, a payment sub-bot owns the
    conversation. It decides what to say and how to read replies. When the claim
-   completes, control returns to the survey machine at the next field.
+   completes, control returns to the survey machine at the next field. It is the
+   first consumer of the delegation primitive in `planning/sub-bots.md`.
 3. **A reconciliation loop** — a background process that converges reality onto
    the claims, and whose only oracle is the payment provider.
 
@@ -64,8 +67,10 @@ Recorded because each was considered and each would have cost real complexity:
 | The payment subsystem re-taking control later (interrupts) | Too complex. Requires safe-point queueing, concurrent-frame rules, and out-of-window templates for every re-contact. If the respondent has gone quiet we do not chase them; the claim stays open for a human. |
 | Separating "release" (done talking) from "resolve" (done paying) | Two transitions where one will do. Control returns on completion, full stop. |
 | Deriving the contract purely from survey design | Not possible — see §3.2. The amount is interpolated per respondent. |
-| A payment as a system-owned *form* stitched into the conversation | Reuses the stitch machinery, but a form cannot express "back off six hours and retry", so it collapses back into the control frame. |
+| A payment as a system-owned *form* stitched into the conversation | Reuses the stitch machinery, but a form cannot express "back off six hours and retry", so it collapses back into the sub-bot. |
 | Fabricating success Results to mark someone paid | An operator act must be structurally distinguishable from a real disbursement, not distinguishable by convention. It becomes a claim state with an actor. |
+| A human queue behind the sub-bot's chat | "Someone will get back to you" is a commitment to an SLA that does not exist. The sub-bot deflects honestly instead; escalation is a list on a dashboard, not a queue with a respondent waiting on it. |
+| The payment handler living inside the machine | It needs wall-clock, timers, retries and IO, none of which may happen inside a pure fold. See `planning/sub-bots.md` §2.6. |
 
 ---
 
@@ -157,7 +162,7 @@ Useful facts about how payments move today, verified while designing this:
 - A `PaymentEvent` on `vlab-payment` is plain JSON and dinersclub does not care
   who produced it. `details` *is* the provider settings.
 - replybot owns the only producer (`publishPayment`, `lib/index.js:67`).
-- Out-of-window sends require a pre-approved template — see §6.3.
+- Out-of-window sends require a pre-approved template — see §6.11.
 
 ---
 
@@ -231,7 +236,7 @@ owed ──► claiming ──► disbursed                      (provider accep
 terminal by human act:  disbursed_offline | waived
 ```
 
-- **`needs_respondent` is handled inside the control frame**, while we still
+- **`needs_respondent` is handled by the sub-bot**, while we still
   have them. If they have gone quiet, the claim sits and a human deals with it.
   We do not chase.
 - **The attempt cap escalates.** That is the fix for the 1,424-retry case: the
@@ -301,59 +306,172 @@ lock on the claim, and a provider-side dedupe on the derived identifier.
 
 ---
 
-## 6. The control frame
+## 6. The payment sub-bot
 
-### 6.1 Where it lives
+The first consumer of `planning/sub-bots.md`. A separate service whose only goal
+is to pay one participant.
 
-In the state, not in a separate service: `state.control = {owner: 'payment',
-claim_id, sub_state}`, with `exec()` dispatching to the payment handler while it
-is set.
+**The way to think about it: a control loop with a mouth, and the loop has to
+work with the mouth turned off.** Design the chat first and you rebuild today's
+system, where the participant's presence is load-bearing and everything degrades
+the moment they stop replying. The test for any feature: *does the loop still
+terminate correctly if this message is never delivered and never answered?* If
+not, it belongs in the loop, not the chat.
 
-This keeps the machine a pure fold, so it replays correctly and `restore_state`
-still works, and nothing gains the ability to message a respondent behind the
-machine's back. The handler's logic is a pure function of `(claim, event) →
-(messages, transition)` — the functional-core shape `CLAUDE.md` already asks for.
+### 6.1 The claim row is the sub-bot's state
 
-`WAIT_EXTERNAL_EVENT` is already an inversion of control; it simply has no logic
-inside it. This generalises the frame rather than introducing a new concept.
+No session memory, nothing in RAM that matters. Every decision it makes is
+recoverable by reading the claim and its attempts, so a restart mid-flight
+resumes correctly. That is what "self-healing" cashes out to operationally.
 
-### 6.2 What it owns
+It is a service, not a handler inside the machine, because it needs wall-clock,
+timers, retries and IO — none of which may happen inside the pure fold
+(`sub-bots.md` §2.6).
 
-Everything the respondent sees about a payment: the acknowledgement, "it's on its
-way", the request for a different number, the apology. **Forms stop branching on
-`e_payment_*`.** A researcher cannot get payment UX wrong, and a fix ships once
-for everyone instead of per-form by hand.
+### 6.2 Its decision space is already enumerated
+
+`dinersclub/classify.go` partitions every provider error into a recovery class,
+and that partition is exactly the sub-bot's world. It needs no new taxonomy:
+
+| class | the loop | the mouth |
+|---|---|---|
+| `transient` | retry with backoff | silence |
+| `precondition`, or an `unknown` that persists | wait; a human acts off-stage | **"this is taking longer than expected"** |
+| `respondent` | pause | **ask for another number** — the only question it ever has |
+| cap reached | stop, mark `needs_attention` | silence |
+
+`payment-recovery.md` §3 already defines `precondition` as *"a human off-stage
+must act first, **and the respondent has no part in it**"*. That is the
+definition of "sorry, this is taking longer than expected." The class was always
+the right abstraction; we simply never used it to say anything.
+
+The same fact drives both ends: the condition that sends that message is the
+condition that fires the `PaymentWalletEmpty` alert. The respondent is told at
+the moment the researcher is paged, and no new detection is needed.
+
+### 6.3 What it says — four messages and a timing rule
+
+1. acknowledgement / "sending your X"
+2. "sent — it should arrive shortly"
+3. "that number didn't work — what's another number we can send it to?"
+4. "this is taking longer than expected; we'll keep trying"
+
+**Announce outcomes, not attempts.** Most payments resolve in seconds, and
+"sending now…" followed two seconds later by "sent!" is noise. The first message
+is timer-gated: emitted only if the claim has not resolved within N seconds. A
+service can do that; the machine could not.
+
+**Message 4 is sent at most once per claim**, gated on elapsed time rather than
+on the first `precondition` failure. Repeating "still taking longer" every few
+hours is how a good message becomes a complaint. After it, the next thing they
+hear is "sent".
+
+Emission is keyed on `(claim_id, kind, attempt_no)` so a restart does not
+re-send.
+
+### 6.4 What it says to everything else — deflection, not escalation
+
+There is **no human queue**. Anything that is not an answer to its one question
+is deflected, in two distinct ways:
+
+- *They answered, badly* — "that doesn't look like a number we can send to."
+- *They asked something else* — "sorry, I can't answer questions."
+
+Collapsing those two tells someone who fat-fingered a digit that we are refusing
+to talk to them.
+
+**When it is not asking anything, the deflection is a status reply.** A
+participant who writes in during a wait gets "I can't answer questions — your
+payment is still on its way", which is simultaneously a brush-off and the one
+thing they wanted to know.
+
+Cap the deflections: after a few, go quiet and stay delegated. Silence is a
+legitimate response. Escalation to a person is not — that would be an SLA we
+cannot honour. `needs_attention` is a list on a dashboard, not a queue with a
+respondent waiting on the other end.
+
+### 6.5 The chat box is a delivery sensor we said we would never have
+
+§1.1 fixes completion as *the provider said so*, because delivery is
+unobservable. But a participant replying "I didn't get it" is the only delivery
+signal anywhere in the system.
+
+It must **not** drive payment — "I didn't get it" → pay again is an obvious
+exploit. It should be recorded against the claim and **counted**. A cluster of
+non-receipt reports against one operator or country, while the provider reports
+success, is precisely the evidence that a provider's reports are lying — and
+because it is aggregate, no individual claim has to be believed.
+
+Detection, not disbursement.
+
+### 6.6 What it can own that no form ever could
+
+**Provider fallback.** Today the provider is baked into the form's payment block,
+so "Reloadly refused this operator — try DingConnect" has nowhere to live. Two
+open tickets are that homeless feature: VIR-62 (11 Bolivians unpayable via
+DingConnect, "investigate, try Reloadly") and VIR-54 (the discovery cascade stops
+early). A system whose only goal is to pay someone is the right owner for "try a
+different rail".
+
+**Trap:** the sub-bot must parse and normalise phone numbers with the *same*
+parser the form uses (`replybot/lib/phone.js`). `documentation/phone-numbers.md`
+states the symmetry contract — anything the question accepts must normalise at
+the payment. A second parser in a second service accepts numbers it then cannot
+pay.
+
+### 6.7 What it must never do
+
+Decide eligibility or amount (that is the survey's contract), branch on survey
+logic, hold the participant when it has nothing to ask, or pay without a claim.
+
+### 6.8 Forms stop branching on `e_payment_*`
+
+The sub-bot owns everything the participant sees about a payment. A researcher
+cannot get payment UX wrong, and a fix ships once for everyone instead of
+per-form by hand — which is the actual lesson of Girl Effect, where
+`girleffectincentive` still carried the old branch logic a day after two sibling
+forms were corrected.
 
 Existing forms keep today's semantics behind an explicit `await: true` on the
-payment block until migrated — their `e_payment_*` branches would otherwise
+payment block until migrated; their `e_payment_*` branches would otherwise
 become dead or, worse, wrong.
 
-### 6.3 The wrinkle: resuming after a slow completion
+### 6.9 The copy is four strings, not a UX
+
+Researchers need their own voice and their own language — Girl Effect in Kenyan
+English, Bauchi in Hausa. That is **four strings per survey per language, plus
+the approved templates for out-of-window sends**, with a platform default they
+can leave alone.
+
+Worth stating plainly because the alternative framing ("researchers configure
+payment messaging") sounds like a product surface and is not one. The line is:
+researchers own the words, the platform owns the logic.
+
+### 6.10 How it ends
+
+Terminal states are `disbursed`, `disbursed_offline`, `waived`.
+
+Escalation is **not** terminal and does not return control: the participant is
+owed money and has not been paid, so the delegation holds, and a human resolving
+the claim is what releases it.
+
+That makes `waived` a necessary escape hatch, to be designed deliberately rather
+than discovered. VIR-62's Bolivians may be genuinely unpayable by any rail we
+have; somebody must be able to say "we cannot pay this person, let them
+continue" and have it recorded as a decision with a name on it, rather than as a
+bail.
+
+### 6.11 Resuming after a slow completion
 
 Control returns on completion, and completion can land days later — a wallet
-topped up on Thursday for a payment that stalled on Monday. Control returns, the
-survey sends the next question, and that send is **outside the 24-hour window**.
+topped up on Thursday for a payment that stalled on Monday. The parent's next
+question is then an **out-of-window send**.
 
-This is not new: it is the same problem dean has, and it is exactly what the
-template systems were built for — `documentation/whatsapp-templates.md` names
-"dean timeouts and follow-ups, payment retries, any re-contact". So it is covered
-by existing machinery. But a survey with questions after its payment point needs
-its resume path to go through an approved template, and that must be designed in
-rather than discovered in production.
-
-Rejecting interrupts (§1.2) means we need no *new* payment-specific templates
-for re-contact. It does not exempt the resume.
-
-### 6.4 The cost
-
-Researchers will want the wording — their voice, their language, their branding,
-different amounts and rules per study. The moment the subsystem owns the
-messages it needs a per-survey configuration layer, and with templates that layer
-carries an approval lead time.
-
-**This is the largest hidden cost in the design and it is product work, not
-plumbing.** Size it before committing. "The platform owns payment UX" is only a
-win if researchers accept the constraint.
+Not new: it is the same problem dean has, and what the template systems were
+built for (`documentation/whatsapp-templates.md` names "dean timeouts and
+follow-ups, payment retries, any re-contact"). But a survey with questions after
+its payment point needs its resume path to go through an approved template, and
+that must be designed in rather than discovered in production.
 
 ---
 
@@ -409,7 +527,7 @@ Ordered so that the cheapest step is the one that can disprove the design.
 | **1** | **The auditor** (§5.1) as a read-only report over history | no | yes — it is the outstanding-payments report |
 | **2** | **The provider reconciler** (§5.2), read-only | no | yes — resolves the burned-identifier question |
 | **3** | Claim table + replybot writes claims at crossing | no | records obligations going forward |
-| **4** | The control frame (§6), new forms only, `await: true` compatibility | no | payment UX stops being form-authored |
+| **4** | The payment sub-bot (§6), new forms only, `await: true` compatibility | no | payment UX stops being form-authored |
 | **5** | The settler (§5.3) with caps and kill switch | **yes** | closes the loop |
 | **6** | Retire: dean's `Payments` re-drive, the withheld/delivered distinction, `states.payment_error_code`, bail-as-payment-recovery | no | removes five layers |
 
@@ -440,7 +558,8 @@ Do not commit to the schema in §4 before this passes.
    harmful than today's silent parking — they have been told, the loop keeps
    trying, an operator can resolve the claim — but it is a product decision that
    should be made explicitly, not inherited.
-2. **Per-survey message configuration** (§6.4) — scope and approval workflow.
+2. **Per-survey message copy** (§6.9) — four strings per survey per language,
+   plus template approval. Small, but it needs an owner and a default.
 3. **`destination` storage** (§7.2).
 4. **Does the auditor fold cost what we think?** Re-folding every respondent's
    event log is the same shape as the Phase 1.5 backfill
