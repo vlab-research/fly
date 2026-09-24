@@ -22,8 +22,9 @@ The request carries `X-Vlab-Poster: dean` so hermes can name dean in a rejection
 deprecated alias for posters that have not migrated. The value is unchanged — it is
 `states.pageid`, which holds the platform account id.
 
-Every query (`Respondings`, `Errored`, `Blocked`, `Payments`, `Timeouts`, `FollowUps`, `Spammers`)
-selects `COALESCE(states.platform, 'messenger')` and threads it into the emitted event.
+Every query except `FollowUps` (`Respondings`, `Errored`, `Blocked`, `Payments`, `Timeouts`, `Spammers`)
+selects `COALESCE(states.platform, 'messenger')` and threads it into the emitted event;
+`FollowUps` reads `credentials.entity` instead (see "`DEAN_FOLLOWUP_PLATFORMS`" below).
 `states.platform` is a stored computed column over `state_json->'md'->>'platform'`; legacy rows
 without `md.platform` are NULL and report `messenger` — exact for every conversation predating
 WhatsApp support, and the reason `platform` is never empty on a dean event. Replybot receives
@@ -75,8 +76,7 @@ that configures a follow-up message (`surveys.has_followup`, i.e.
   production);
 - they have answered at least one question: `state_json.qa` is non-empty, or
   `forms` has more than one entry (`qa` is per form and empties on a stitch).
-- their platform, `COALESCE(states.platform, 'messenger')`, is listed in
-  `DEAN_FOLLOWUP_PLATFORMS` (see below).
+- their platform is listed in `DEAN_FOLLOWUP_PLATFORMS` (see below).
 
 Two things this rule is built on:
 
@@ -100,9 +100,18 @@ those participants are not followed up until they write again.
 
 A comma-separated **allowlist** of platforms that receive follow-ups, e.g.
 `messenger` or `messenger,whatsapp`. A platform not listed is never nudged, so
-a platform added to the system later stays off until someone lists it. Legacy
-rows with no `md.platform` count as `messenger`, as everywhere else in dean.
-The per-form opt-in (`has_followup`) still applies on top.
+a platform added to the system later stays off until someone lists it. The
+per-form opt-in (`has_followup`) still applies on top.
+
+Unlike dean's other queries, `FollowUps` does not read `states.platform`. It
+already joins the account's credential, so it takes the platform from
+`credentials.entity` (`whatsapp_business` → `whatsapp`, `facebook_page` →
+`messenger`). `states.platform` is NULL whenever `md` is missing, including
+when a blocked conversation's `md` has been erased
+(`planning/platform-guess-expiry.md`). Defaulting that NULL to `messenger`
+would let a WhatsApp conversation through a `messenger`-only list, and then
+send it as Messenger. The same value is used for the filter and for the
+platform on the emitted event.
 
 | env | value | why |
 |---|---|---|

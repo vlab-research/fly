@@ -293,11 +293,13 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 //
 // states.pageid holds the platform account id, which equals credentials.key
 // for messaging entities (uniqueness enforced by the unique_messaging_account
-// partial index).
+// partial index). The platform is read from that credential's entity rather
+// than states.platform, which is NULL when md is missing and would have to be
+// guessed.
 func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `WITH x AS
                 (WITH t AS
-                  (SELECT state_json->>'question' as question, states.userid, states.pageid, COALESCE(states.platform, 'messenger') AS platform, surveys.shortcode, has_followup, surveys.created
+                  (SELECT state_json->>'question' as question, states.userid, states.pageid, CASE c.entity WHEN 'whatsapp_business' THEN 'whatsapp' ELSE 'messenger' END AS platform, surveys.shortcode, has_followup, surveys.created
 				  FROM states
                                   INNER JOIN credentials c
                                     ON pageid = c.key AND c.entity IN ('facebook_page', 'whatsapp_business')
@@ -311,7 +313,7 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 					previous_with_token = FALSE AND
 					(NOW() - last_inbound) > ($1)::INTERVAL AND
 					(NOW() - last_inbound) < ($2)::INTERVAL AND
-					COALESCE(states.platform, 'messenger') = ANY($3) AND
+					(CASE c.entity WHEN 'whatsapp_business' THEN 'whatsapp' ELSE 'messenger' END) = ANY($3) AND
 					(jsonb_array_length(state_json->'qa') > 0 OR jsonb_array_length(state_json->'forms') > 1)
                   )
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY userid, pageid, shortcode ORDER BY created DESC)

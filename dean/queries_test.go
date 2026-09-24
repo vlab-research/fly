@@ -764,22 +764,24 @@ func TestFollowUpsOnlySelectsListedPlatforms(t *testing.T) {
 		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "whatsapp"))
 	mustExec(t, pool, insertQuery, "fb", "bar", updated, "QOUT",
 		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "messenger"))
-	// no md.platform: a legacy row, which counts as messenger
+	// no md.platform: the platform comes from the account's credential
 	mustExec(t, pool, insertQuery, "legacy", "bar", updated, "QOUT",
 		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, ""))
+	mustExec(t, pool, insertQuery, "wa_no_md", "waba", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, ""))
 
-	users := func(platforms ...string) []string {
-		cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes", FollowUpPlatforms: platforms}
-		res := []string{}
+	platforms := func(listed ...string) map[string]string {
+		cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes", FollowUpPlatforms: listed}
+		res := map[string]string{}
 		for _, e := range getEvents(FollowUps(cfg, pool)) {
-			res = append(res, e.User)
+			res[e.User] = e.Platform
 		}
 		return res
 	}
 
-	assert.ElementsMatch(t, []string{"fb", "legacy"}, users("messenger"))
-	assert.ElementsMatch(t, []string{"wa"}, users("whatsapp"))
-	assert.ElementsMatch(t, []string{"fb", "legacy", "wa"}, users("messenger", "whatsapp"))
+	assert.Equal(t, map[string]string{"fb": "messenger", "legacy": "messenger"}, platforms("messenger"))
+	assert.Equal(t, map[string]string{"wa": "whatsapp", "wa_no_md": "whatsapp"}, platforms("whatsapp"))
+	assert.Equal(t, 4, len(platforms("messenger", "whatsapp")))
 }
 
 func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {
