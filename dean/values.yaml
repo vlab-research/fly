@@ -30,6 +30,8 @@ env:
   value: "1 minute"
 - name: DEAN_FOLLOWUP_MAX
   value: "1 hour"
+- name: DEAN_FOLLOWUP_PLATFORMS
+  value: "messenger,whatsapp"
 
 queries:
   - name: redos

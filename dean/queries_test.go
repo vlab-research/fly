@@ -726,7 +726,7 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 	mustExec(t, pool, insertQuery, "baz", "bar", updated, "QOUT",
 		qoutState([]string{"without_followup"}, none, 30*time.Minute, answered, ""))
 
-	cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes"}
+	cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes", FollowUpPlatforms: []string{"messenger", "whatsapp"}}
 	ch := FollowUps(cfg, pool)
 	events := getEvents(ch)
 
@@ -744,6 +744,42 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 
 	ev, _ := json.Marshal(got["foo"].Event)
 	assert.Equal(t, `{"type":"follow_up","value":"foo"}`, string(ev))
+}
+
+func TestFollowUpsOnlySelectsListedPlatforms(t *testing.T) {
+	pool := testPool()
+	defer pool.Close()
+	before(pool)
+
+	mustExec(t, pool, insertUserSql)
+	mustExec(t, pool, pageInsertSql, `{"id": "bar"}`)
+	mustExec(t, pool, `INSERT INTO credentials(entity, key, userid, details) VALUES ('whatsapp_business', 'waba', 'e49cbb6b-45e1-4b9d-9516-094c63cc6ca2', '{}')`)
+	mustExec(t, pool, surveyInsertSql, "with_followup", time.Now().UTC().Add(-40*time.Hour), `{"label.buttonHint.default": "this is follow up"}`)
+
+	updated := time.Now().UTC().Add(-30 * time.Minute)
+	answered := `[["q1", "yes"]]`
+	none := `{"followUp": null}`
+
+	mustExec(t, pool, insertQuery, "wa", "waba", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "whatsapp"))
+	mustExec(t, pool, insertQuery, "fb", "bar", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "messenger"))
+	// no md.platform: a legacy row, which counts as messenger
+	mustExec(t, pool, insertQuery, "legacy", "bar", updated, "QOUT",
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, ""))
+
+	users := func(platforms ...string) []string {
+		cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes", FollowUpPlatforms: platforms}
+		res := []string{}
+		for _, e := range getEvents(FollowUps(cfg, pool)) {
+			res = append(res, e.User)
+		}
+		return res
+	}
+
+	assert.ElementsMatch(t, []string{"fb", "legacy"}, users("messenger"))
+	assert.ElementsMatch(t, []string{"wa"}, users("whatsapp"))
+	assert.ElementsMatch(t, []string{"fb", "legacy", "wa"}, users("messenger", "whatsapp"))
 }
 
 func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {

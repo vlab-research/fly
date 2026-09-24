@@ -75,6 +75,8 @@ that configures a follow-up message (`surveys.has_followup`, i.e.
   production);
 - they have answered at least one question: `state_json.qa` is non-empty, or
   `forms` has more than one entry (`qa` is per form and empties on a stitch).
+- their platform, `COALESCE(states.platform, 'messenger')`, is listed in
+  `DEAN_FOLLOWUP_PLATFORMS` (see below).
 
 Two things this rule is built on:
 
@@ -93,6 +95,33 @@ Two things this rule is built on:
 `last_inbound` is NULL for rows predating the stamp
 (`devops/migrations/33-states-last-inbound.sql`), and NULL is never in band:
 those participants are not followed up until they write again.
+
+### `DEAN_FOLLOWUP_PLATFORMS`: which platforms are nudged
+
+A comma-separated **allowlist** of platforms that receive follow-ups, e.g.
+`messenger` or `messenger,whatsapp`. A platform not listed is never nudged, so
+a platform added to the system later stays off until someone lists it. Legacy
+rows with no `md.platform` count as `messenger`, as everywhere else in dean.
+The per-form opt-in (`has_followup`) still applies on top.
+
+| env | value | why |
+|---|---|---|
+| production, staging | `messenger` | On WhatsApp a second message from an unknown business number is one tap from "report / block", and follow-up waves preceded Meta's spam warnings on the LAC number (`planning/whatsapp-spam-flag-2026-09-11.md`). On Messenger nudges are routine. |
+| integrations, kube-dev, chart defaults | `messenger,whatsapp` | Keeps both paths exercised in tests. |
+
+Dean validates the list at startup, before running any query, and exits with an
+error naming the bad value if:
+
+- an entry is anything other than `messenger` or `whatsapp` — a typo must not
+  silently turn follow-ups off everywhere;
+- the list is empty. An empty value is refused rather than read as "no
+  follow-ups", because it looks exactly like a mis-set variable. To stop
+  follow-ups on every platform, remove `followups` from the CronJob's
+  `queries` instead.
+
+Because every dean CronJob shares one env block, a bad value stops all of them,
+not just `followups`. Only follow-ups read this list: `timeout`, `redo`,
+`repeat_payment` and the rest run on every platform.
 
 ## `Payments` and the `repeat_payment` event
 
@@ -213,6 +242,7 @@ Dean uses environment variables for configuration. Key variables include:
 
 - `DEAN_TIMEOUT_MAX_PAST`: Maximum duration in the past to trigger timeouts (e.g., "24h", "20d"). Timeouts older than this will be ignored.
 - `DEAN_TIMEOUT_BLACKLIST`: Comma-separated list of form shortcodes to exclude from timeout processing
+- `DEAN_FOLLOWUP_PLATFORMS`: Comma-separated allowlist of platforms (`messenger`, `whatsapp`) that receive follow-ups; unknown or empty is a startup error. See "`DEAN_FOLLOWUP_PLATFORMS`" above.
 - `DEAN_ERROR_INTERVAL`: Retry interval for error states
 - `DEAN_BLOCKED_INTERVAL`: Retry interval for blocked states
 - `DEAN_RESPONDING_INTERVAL`: Maximum time to wait for responses

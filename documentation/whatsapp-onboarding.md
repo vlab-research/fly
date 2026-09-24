@@ -279,6 +279,7 @@ rejects it unless it is an approved template. Text the number first, then inject
 - **The WABA must be subscribed to the `messages` webhook field.** Unlike Messenger pages — which the dashboard subscribes on connect — nothing in this repo subscribes a WABA. Verifying the callback URL alone delivers no events.
 - **Entry is by referral *or* bare `form.<shortcode>` text** — there is no "Get Started" button equivalent, but the bare-text path means no ad is needed to start a survey.
 - **Free-form sends are limited to the 24-hour customer-service window.** Anything outside it — dean timeouts and follow-ups, payment retries — must be an approved template (`documentation/whatsapp-templates.md`). Messenger has no such constraint.
+- **Dean sends no follow-up nudges on WhatsApp in staging or production.** `DEAN_FOLLOWUP_PLATFORMS` is `messenger` there, because unsolicited nudges draw spam reports against the number. See `dean/README.md`.
 - **No handoff.** WhatsApp has no `pass_thread_control` equivalent; handoff fields are unimplemented on this platform.
 - **No quick_reply / postback bug** (WhatsApp interactive buttons don't have the Messenger quick_reply payload parsing issue; see platform-abstraction-hardening.md §7).
 - **Question option limits are hard errors.** ≤3 options → interactive buttons, 4–10 → a list, >10 → `ErrTooManyOptions`. A survey that works on Messenger can fail to send on WhatsApp for this reason alone.

@@ -288,6 +288,9 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 // not an opt-in. `qa` is per form and empties on a stitch, so a respondent
 // stalled on the first question of a second form counts by their form history.
 //
+// Only platforms in DEAN_FOLLOWUP_PLATFORMS are nudged: on WhatsApp a second
+// message from an unknown business number invites a spam report.
+//
 // states.pageid holds the platform account id, which equals credentials.key
 // for messaging entities (uniqueness enforced by the unique_messaging_account
 // partial index).
@@ -308,6 +311,7 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 					previous_with_token = FALSE AND
 					(NOW() - last_inbound) > ($1)::INTERVAL AND
 					(NOW() - last_inbound) < ($2)::INTERVAL AND
+					COALESCE(states.platform, 'messenger') = ANY($3) AND
 					(jsonb_array_length(state_json->'qa') > 0 OR jsonb_array_length(state_json->'forms') > 1)
                   )
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY userid, pageid, shortcode ORDER BY created DESC)
@@ -319,7 +323,7 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
                 row_number = 1 AND
                 has_followup = TRUE`
 
-	return get(conn, getFollowUp, query, cfg.FollowUpMin, cfg.FollowUpMax)
+	return get(conn, getFollowUp, query, cfg.FollowUpMin, cfg.FollowUpMax, cfg.FollowUpPlatforms)
 }
 
 // Spamming users and send BLOCK_USER event
