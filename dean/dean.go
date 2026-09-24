@@ -60,12 +60,38 @@ type Config struct {
 	SendDelay          time.Duration `env:"DEAN_SEND_DELAY,required"`
 	FollowUpMin        string        `env:"DEAN_FOLLOWUP_MIN,required"`
 	FollowUpMax        string        `env:"DEAN_FOLLOWUP_MAX,required"`
+	FollowUpPlatforms  []string      `env:"DEAN_FOLLOWUP_PLATFORMS,required" envSeparator:","`
 	PaymentGrace             string        `env:"DEAN_PAYMENT_GRACE,required"`
 	PaymentInterval          string        `env:"DEAN_PAYMENT_INTERVAL,required"`
 	PaymentMaxAttempts       int           `env:"DEAN_PAYMENT_MAX_ATTEMPTS,required"`
 	TimeoutMaxPast           string        `env:"DEAN_TIMEOUT_MAX_PAST,required"`
 	TimeoutMaxAttempts       int           `env:"DEAN_TIMEOUT_MAX_ATTEMPTS,required"`
 	SpammerExternalEventsMax int           `env:"DEAN_SPAMMER_EXTERNAL_EVENTS_MAX,required"`
+}
+
+// Platforms dean knows how to address. Anything else in a platform list is a
+// typo, and must stop dean rather than silently match nothing.
+var knownPlatforms = map[string]bool{"messenger": true, "whatsapp": true}
+
+// An allowlist of platforms that receive follow-ups. An empty list is refused
+// rather than read as "none": it is indistinguishable from a mis-set variable.
+// To stop follow-ups everywhere, drop `followups` from the CronJob's queries.
+func parseFollowUpPlatforms(raw []string) ([]string, error) {
+	platforms := []string{}
+	for _, p := range raw {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !knownPlatforms[p] {
+			return nil, fmt.Errorf("DEAN_FOLLOWUP_PLATFORMS: unknown platform %q (known: messenger, whatsapp)", p)
+		}
+		platforms = append(platforms, p)
+	}
+	if len(platforms) == 0 {
+		return nil, fmt.Errorf("DEAN_FOLLOWUP_PLATFORMS is empty: list at least one of messenger, whatsapp, or remove `followups` from DEAN_QUERIES")
+	}
+	return platforms, nil
 }
 
 func send(cfg *Config, client *http.Client, e *ExternalEvent) error {
@@ -149,6 +175,9 @@ func getQueries(cfg *Config, pool *pgxpool.Pool) []<-chan *ExternalEvent {
 func main() {
 	cfg := &Config{}
 	err := env.Parse(cfg)
+	handle(err)
+
+	cfg.FollowUpPlatforms, err = parseFollowUpPlatforms(cfg.FollowUpPlatforms)
 	handle(err)
 
 	pool := getConn(cfg)

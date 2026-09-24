@@ -263,6 +263,10 @@ dean:
     value: "12 hours"
   - name: DEAN_FOLLOWUP_MAX
     value: "23 hours"
+  # Allowlist of platforms that get follow-up nudges. Off on WhatsApp, where a
+  # second message from an unknown business number invites a spam report.
+  - name: DEAN_FOLLOWUP_PLATFORMS
+    value: "messenger"
   - name: DEAN_TIMEOUT_BLACKLIST
     value: "bebborsbaseserb,bebbobg2basebul,nciaim2followup2pay,nciaim2followup1pay,nciaim2baselinepay"
   - name: DEAN_TIMEOUT_MAX_PAST
