@@ -73,11 +73,11 @@ Roles:
 
 ```
 replybot (DELEGATED)
-  → vlab-prod-responder-invocations   (command; `service` in envelope; keyed by userid)
+  → vlab-prod-delegations             (`open` / `event`; `service` in envelope; keyed by userid)
       → responder service N  (own consumer group, filters on `service`)
           → external API (LLM or anything)
-      → vlab-prod-chat-events         (event: what the model decided)
-  → replybot adjudicates, stays delegated or exits
+      → hermes /synthetic → vlab-prod-chat-events   (`say` / `release`: what the model decided)
+  → replybot fences on the delegation id, stays delegated or exits
 ```
 
 **Replybot → responder is a command. Responder → replybot is an event.** The responder does
@@ -86,9 +86,9 @@ against the capability grant and the validator. Propose-and-validate therefore f
 the bus semantics rather than being bolted on: a responder that could publish commands could
 bypass the trust boundary; one that publishes events structurally cannot.
 
-**Topics name kinds of work, not identities of services.** `responder-invocations` names
-"delegated-turn work", exactly as `vlab-prod-commands` names "outbound messaging work" rather
-than "message-worker". Any number of responder services subscribe and filter on `service`,
+**Topics name kinds of work, not identities of services.** `delegations` names "delegated
+conversations", exactly as `vlab-prod-commands` names "outbound messaging work" rather than
+"message-worker". Any number of responder services subscribe and filter on `service`,
 the same way message-worker already dispatches internally on `type` (`send_message` vs
 `handoff`).
 
@@ -98,11 +98,12 @@ learn that responders exist.
 
 **Coupling test:** adding responder #2 must require changing no producer. This shape passes.
 
-*Why a separate topic rather than reusing `vlab-prod-commands`* — not architectural, but
-operational: the commands topic carries every outbound message, so responders would read the
-whole send firehose to find their traffic; and consumer-lag alerting is per-topic
-(`documentation/kafka-consumer-lag-alerting.md`), so a responder's lag would be invisible
-against send volume.
+*Why a separate topic rather than having responders read `chat-events`* — the projection.
+Message bodies on `chat-events` are platform-shaped and the parser lives in replybot, and
+"is this user delegated to me" is state only replybot holds; forwarding is the projection of
+exactly those two things. Full reasoning and the rejected alternatives: `sub-bots.md` §2.7.
+(Consumer-lag alerting is per consumer group, so observability is *not* the reason —
+a responder's lag would be visible either way.)
 
 **Always async.** Replybot is a Kafka consumer; a blocking call in the consume loop stalls
 a partition and shows up as consumer lag. A responder may block internally; the machine never does.
@@ -177,10 +178,10 @@ Two-level fencing hierarchy, for free:
 
 ### Close is best-effort, not required
 
-Emit close from the paths that naturally know — responder `release`, max_turns exhausted,
-Dean expiry — and do **not** thread it through `RESTORE_STATE` or `BLOCK_USER`. The ID covers
-those. Close lets the responder abort an in-flight LLM call and stop burning tokens it will
-never use. That is cost, not correctness.
+Emit the `closed` event from the paths that naturally know — responder `release`,
+max_turns exhausted, Dean expiry — and do **not** thread it through `RESTORE_STATE` or
+`BLOCK_USER`. The ID covers those. `closed` lets the responder abort an in-flight LLM call
+and stop burning tokens it will never use. That is cost, not correctness.
 
 Responder-side cleanup is then a TTL on the in-flight map; it does not need to be precise
 because nothing depends on it being precise. **Count dropped orphan commands as a metric** — a
@@ -194,48 +195,49 @@ Dean already reads `state_json` (every computed column and predicate works that 
 can read `delegation.id` and include it; replybot checks it matches before acting. Same
 staleness class as the `Respondings`/redo behaviour in `dean/README.md`.
 
-## The delegation topic: five message classes (decided)
+## The delegation topic: four messages (decided — owned by `sub-bots.md` §2.7)
 
-The `vlab-prod-responder-invocations` topic carries five kinds of messages, all keyed by
-userid (ordering guaranteed on one partition). Replybot → responder: `open`, `turn`, `echo`,
-`verdict`, `close`. Responder → replybot: `say`, `resolve`, `release`, `fail` (as synthetic
-events on `vlab-prod-chat-events`, adjudicated by replybot).
+The delegation topic carries two messages from replybot, keyed by userid (ordering
+guaranteed on one partition); the responder answers with two, POSTed to hermes `/synthetic`
+and adjudicated by replybot off `vlab-prod-chat-events`. The vocabulary is the sub-bot
+primitive's, not this feature's; what follows is how the LLM responder uses it.
 
-**Replybot → responder (commands onto the delegation topic):**
+**Replybot → responder:**
 
 | Message | When | Payload |
 |---|---|---|
-| `open` | survey reaches a responder field | `delegation_id`, user, platform, capability grant, config (prompt, model alias, `max_turns`, `deadline`), target field (ref, question text, choices, validation rules); optional triggering user message (present for coercion, absent for `type: delegate` takeover); optional prior `qa` if `context: conversation` granted |
-| `turn` | user sends a message while delegated | the user's text/attachment, `source_timestamp`, `source_event_id` |
-| `echo` | message-worker confirms delivery of an outbound message | delivery confirmation of a `say`; opt-in per service via `receive: [delivery_echoes]` |
-| `verdict` | replybot adjudicates a `resolve` | `accepted` or `rejected` with reason (`validator_failed` + the validator's message, `capability_denied`, `unknown_ref`) |
-| `close` | delegation ends (best-effort; see § fencing) | `reason` — `released`, `max_turns`, `expired`, `blocked`, `restored` |
+| `open` | survey reaches a responder field | `delegation_id`, the full `(platform, account_id, user_id)`, capability grant, config (prompt, model alias, `max_turns`, `deadline`), target field (ref, question text, choices, validation rules); optional triggering user message (present for coercion, absent for `type: delegate` takeover); optional prior `qa` if `context: conversation` granted |
+| `event` | anything arrives for the delegated conversation | the normalized event: a participant message (with `source_timestamp`, `source_event_id`), a delivery echo of a `say`, a refused `release` (the validator's message), or `closed` with a reason (`released`, `max_turns`, `expired`, `blocked`, `restored`). `receive:` filters which kinds this service is sent |
 
-**Responder → replybot (events onto `vlab-prod-chat-events`, adjudicated by replybot):**
+**Responder → replybot:**
 
-| Command | Machine does |
+| Message | Machine does |
 |---|---|
-| `say(text)` | sends it; state unchanged, still delegated |
-| `resolve(ref, value)` | runs the field's **existing validator**; pass → recorded like any answer, fail → `verdict: rejected` back to the responder |
-| `release()` | delegation ends, survey resumes at the next field |
-| `fail(reason)` | delegation ends via the declared fallback |
+| `say(content)` | sends it; state unchanged, still delegated. `(delegation_id, seq)` makes a redelivered POST idempotent |
+| `release(outcome)` | runs the field's **existing validator** on the outcome; pass → recorded like any answer and the survey resumes at the next field; fail → stays delegated and forwards the rejection as an `event`. An outcome of `unresolvable` is a release too — the form maps it to the declared fallback |
 
-### The verdict loop (decided)
+There is no `turn`/`echo`/`verdict`/`close` (all are `event`), no `resolve` (it is the
+outcome of `release`) and no `fail` (a `release` with a bad outcome). The earlier
+nine-message vocabulary was cut to these four once the payment sub-bot was designed against
+the same interface: every dropped message existed for one consumer's one case.
 
-The responder emits `resolve(ref, value)`. Replybot runs the validator and the capability
-check. **That verdict must come back, or the loop deadlocks** — the responder believes it's
-done and stops, while replybot is still delegated waiting for a valid answer.
+### The rejection loop (decided)
+
+The responder `release`s a candidate. Replybot runs the validator and the capability
+check. **A refused release must come back as an `event`, or the loop deadlocks** — the
+responder believes it's done and stops, while replybot is still delegated waiting for a
+valid answer.
 
 A validator rejection is a normal, expected part of the coercion loop: the model proposes
 "MTN", the field's labels are "MTN Nigeria", it gets told no (with the validator's message —
-already written, translated, and survey-authored) and tries again. That is the mechanism
-working as designed.
+already written, translated, and survey-authored) and tries again, up to `max_turns`. That
+is the mechanism working as designed.
 
 ### Propose-and-validate (decided)
 
 **The responder never decides validity. It proposes a candidate; the field's existing
-validator is the judge.** `resolve` runs `validator(field, messages)` — the same function
-that judges a button tap.
+validator is the judge.** The `release` outcome runs through `validator(field, messages)` —
+the same function that judges a button tap.
 
 Consequences: the trust boundary stays in the deterministic core; the model cannot invent
 values; and **every field type with a validator gets coercion for free** — `number` ("about
@@ -248,30 +250,30 @@ byte-identical to a human tapping the button. Downstream analysis need not know 
 ### Capability scoping (decided)
 
 The survey author declares what the service may do; the machine enforces it in the pure core.
-A responder that tries to `resolve` an ungranted ref gets a deterministic, logged rejection.
+A responder whose `release` outcome tries to answer a field it was not granted gets a
+deterministic, logged rejection.
 
 ```yaml
-# coercion
+# coercion — the release outcome is this field's answer
 type: multiple_choice
 responder:
   service: llm
-  can: [say, resolve]
-  resolve_refs: [self]
+  answers: self               # none | self
   max_turns: 2
   deadline: 5m
-  on_timeout: fallback_buttons
+  on_unresolvable: fallback_buttons
   context: question           # none | question | conversation
-  receive: [user_messages, delivery_echoes, verdicts]
+  receive: [user_messages, delivery_echoes]
 ```
 
 ```yaml
-# takeover
+# takeover — the release outcome is only branched on
 type: delegate
 responder:
   service: llm-tutor
-  can: [say, release]
+  answers: none
   deadline: 30m
-  on_timeout: release
+  on_unresolvable: release
   context: conversation
   receive: [user_messages, delivery_echoes]
 ```
@@ -284,9 +286,9 @@ list makes it expressible later without redesign.
 answers to a third-party model — a different consent posture than sending one isolated
 utterance, and the kind of thing that shows up in an ethics review. Default to `question`.
 
-**`receive` controls what the responder subscribes to** on the delegation topic. `verdicts`
-is always on for any service with `can: [resolve]` (the loop deadlocks without it); listed
-explicitly for legibility.
+**`receive` controls which `event` kinds the responder is sent** on the delegation topic.
+Refused releases and `closed` are always sent (the loop deadlocks without the former); the
+list governs only participant messages and delivery echoes.
 
 Authoring rides on `addCustomType` (`form.js:351`), which already merges arbitrary YAML from
 the Typeform description into `field.md`. **Side benefit:** the prompt is form content, so it
@@ -299,7 +301,7 @@ providers can be swapped without editing research instruments.
 ## Deadlines: two-tier (decided)
 
 - **Short deadlines** (coercion, seconds) — enforced by the responder itself. It knows its own
-  call timed out; it emits `fail`.
+  call timed out; it `release`s with `unresolvable`.
 - **Dead responder** — Dean is the backstop. A `Delegations` query following the existing
   `Respondings` pattern, emitting `delegation_expired`.
 
@@ -342,7 +344,8 @@ Implications for the responder (Go, using `burrow`):
   offsets, and completion is `processFunc` returning — so emitting first gives at-least-once
   for free. A crash mid-turn re-consumes on restart.
 - **Never return `error` for an upstream API failure.** Burrow's default `FatalOnError` calls
-  `os.Exit(1)`; an LLM outage would crash-loop the pod. Emit `fail` and return `nil`.
+  `os.Exit(1)`; an LLM outage would crash-loop the pod. `release` as `unresolvable` and
+  return `nil`.
 - **Cancelled LLM calls still bill for generated tokens.** Argues for a short debounce inside
   the responder before starting the call.
 
@@ -421,6 +424,10 @@ Read `CLAUDE.md` first — especially the documentation-first protocol and the I
 Read `replybot/README.md` and `documentation/questions.md` before touching machine code.
 Work in a git worktree for anything that runs.
 
+**Phases 1–3 below are the sub-bot framework, not the LLM feature.** The order of work
+and the consumer list are owned by `planning/sub-bots.md` §8; the payment sub-bot goes
+before the LLM responder. Phase 0 and Phases 4–6 are this feature's own.
+
 ### Phase 0: Eval (prerequisite, no code changes)
 
 Follow `planning/llm-enumerator-eval.md`. Mine the prod DB read-only, build the frozen JSONL,
@@ -435,25 +442,26 @@ forced-fit rate). This validates the feature before building it and gives a numb
    table in `replybot/README.md`.
 3. Guard TEXT/QUICK_REPLY/POSTBACK/MEDIA in `exec()` — when `state.state === 'DELEGATED'`,
    forward instead of `RESPOND`. One condition, same position as `_isHandoffWait`.
-4. Add the fencing check: any responder command with a non-matching `delegation_id` is
+4. Add the fencing check: any `say`/`release` with a non-matching `delegation_id` is
    `_noop()`.
 5. Add `addCustomType` parsing for the `responder:` YAML block (already merges arbitrary YAML
    into `field.md` — just needs the field type to be recognized).
-6. Add the `verdict` path — `resolve` runs `validator(field, messages)`; pass → record as a
-   normal answer (`response` = `choice.label`); fail → emit `verdict: rejected` with the
-   validator's message.
+6. Add the `release` path — the outcome runs `validator(field, messages)`; pass → record as
+   a normal answer (`response` = `choice.label`) and exit `DELEGATED`; fail → stay delegated
+   and forward the validator's message as an `event`.
 7. Add `metadata.responder: '<service>'` to outbound messages from delegated turns.
 8. Tests: `replybot/lib/typewheels/machine.test.js` — new state, forwarding, fencing,
    propose-and-validate, capability rejection. Fixtures in `events.test.js`.
 
 ### Phase 2: Delegation topic + replybot producer (replybot, IO edge)
 
-1. Add `vlab-prod-responder-invocations` topic to `devops/values/{production,staging}.yaml`.
-2. Replybot publishes `open`/`turn`/`echo`/`verdict`/`close` commands, keyed by userid.
-3. Replybot consumes responder events (`say`/`resolve`/`release`/`fail`) from
-   `vlab-prod-chat-events`, adjudicates, applies.
-4. `close` emitted from natural exit paths only (release, max_turns, fail). Do not thread
-   through `RESTORE_STATE`/`BLOCK_USER` — fencing handles those.
+1. Add the `vlab-<env>-delegations` topic to `devops/values/{production,staging}.yaml`.
+2. Replybot publishes `open` and `event`, keyed by userid — `event` is whatever arrives
+   for a delegated user, normalized, unclassified.
+3. Replybot consumes `say`/`release` from `vlab-prod-chat-events`, fences, validates
+   `release`, applies.
+4. `closed` emitted from natural exit paths only (release, max_turns, expiry). Do not
+   thread through `RESTORE_STATE`/`BLOCK_USER` — fencing handles those.
 
 ### Phase 3: Dean `Delegations` query (dean)
 
@@ -465,13 +473,14 @@ forced-fit rate). This validates the feature before building it and gives a numb
 
 ### Phase 4: Responder service (Go, using burrow)
 
-1. New consumer group on `vlab-prod-responder-invocations`, filtering on `service`.
-2. `burrow` with `KeyAffinity: false`, `FatalOnError` → emit `fail`, return `nil` for upstream
-   errors.
+1. New consumer group on `vlab-<env>-delegations`, filtering on `service`.
+2. `burrow` with `KeyAffinity: false`, `FatalOnError` → `release` as `unresolvable`, return
+   `nil` for upstream errors.
 3. Per-user in-flight map with cancellation tokens. Serialize state mutation with per-user
    mutex; do not serialize arrival.
 4. LLM provider with model alias → provider config mapping. Start with the cheap tier.
-5. Emit commands to `vlab-prod-chat-events` as synthetic events.
+5. POST `say`/`release` to hermes `/synthetic`, addressed with the identity from `open`,
+   with a retry budget on the pattern of `DINERSCLUB_RETRY_BOTSERVER`.
 6. Decide: inside `external-worker` (reuse its machinery) or standalone. Leaning
    `external-worker`.
 7. Short deadline enforcement inside the responder (context timeout on the LLM call).

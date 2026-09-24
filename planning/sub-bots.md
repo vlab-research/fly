@@ -112,6 +112,60 @@ because it is not in the fold.
 This is why a sub-bot is a service rather than a handler inside the machine,
 even when its logic happens to be deterministic.
 
+### 2.7 The interface is four messages
+
+Replybot forwards to a dedicated topic, `vlab-<env>-delegations` (normalized,
+keyed by userid; sub-bots run their own consumer group and filter on
+`service`). The name follows the existing convention — topics name kinds of
+work (`commands`, `chat-events`, `payment`), not the services that read them.
+Sub-bots answer by POSTing to hermes `/synthetic`, stamped with the delegation
+id, and replybot adjudicates them off `chat-events` like any other event. A
+sub-bot is a consumer plus an HTTP client; it needs no Kafka producer.
+
+| direction | message | carries |
+|---|---|---|
+| parent → sub-bot | `open` | delegation id, the full `(platform, account_id, user_id)`, and the payload the machine computed at that moment (amount, config, target field) |
+| parent → sub-bot | `event` | any normalized event that arrived for the delegated conversation: participant message, delivery echo, external result, a refused `release`, `closed` |
+| sub-bot → parent | `say` | structured `MessageContent` (not a string — a fly machine as sub-bot sends questions with options), with `(delegation_id, seq)` so a redelivered POST does not double-send |
+| sub-bot → parent | `release` | the outcome: the small value the parent branches on and, for a field-scoped delegation, records as the field's answer |
+
+One envelope shape both ways: `{delegation_id, conversation, kind, payload}`.
+
+**`open` is the only command.** Everything else the parent sends is narration
+of what happened to the conversation; replybot does not classify it, it
+forwards whatever arrives for a delegated user and the sub-bot decides what it
+cares about. A sub-bot's cold start is "replay the stream from `open`".
+
+**`release` is validated by the parent.** For a field-scoped delegation the
+outcome goes through the field's existing validator — the same function that
+judges a button tap — so the recorded answer is byte-identical to a human's
+and downstream analysis need not know a sub-bot existed. A failing outcome is
+refused: the parent stays delegated and forwards the validator's message
+(already written, translated, survey-authored) as an `event`, and the sub-bot
+tries again. That is the whole of propose-and-validate, without a separate
+`resolve` command or a `verdict` message. A sub-bot giving up is also a
+`release`, with an outcome the form maps to a fallback; there is no `fail`.
+The payment sub-bot never gives up — it escalates and stays delegated — so a
+distinct `fail` would exist for one consumer's one case.
+
+Two alternatives were considered and rejected:
+
+- **Sub-bots read `chat-events` directly.** Fewer moving parts, but the
+  envelope normalizes identity only — message bodies are platform-shaped, and
+  the parser lives in replybot — so every sub-bot duplicates it. And each
+  sub-bot must answer "is this user delegated to me" for every message in the
+  cluster, against its own store, on every event. Replybot already has both
+  the normalized content and the delegation state in hand inside the fold; the
+  forwarding is the projection of exactly those two things.
+- **Sub-bots write to `vlab-prod-commands` directly.** Bypasses the fencing
+  check (§2.5): a stale sub-bot could message a participant after a bail or a
+  block. Routed through `/synthetic` it structurally cannot, and hermes
+  enforces the envelope at ingest — which is why `open` must carry the full
+  `(platform, account_id, user_id)`.
+
+Lag alerting is per consumer group, so a sub-bot's lag is visible either way;
+the topic is about who owns the projection, not observability.
+
 ## 3. What the parent keeps
 
 The main bot is a router plus a stack, with exactly two powers it cannot
@@ -206,3 +260,27 @@ by going second — it already has a design and an eval plan.
   sub-bots or per-sub-bot.
 - Everything under `external-responder-design.md` § OPEN still applies to
   consumer 2.
+
+## 8. Order of work
+
+The framework first, then its consumers. Each step ships alone. The
+step-by-step for 1–3 is `external-responder-design.md` § "Implementation
+roadmap", Phases 1–3 — that is the framework, not the LLM feature, and this
+document owns its order.
+
+1. **`DELEGATED` in the machine** (replybot, pure core). New state in
+   `exec`/`apply`; a `delegation` transient field `{id, service, deadline,
+   resume}`; participant events forwarded, not recorded; the fencing check;
+   provenance tag on outbound. Tests in `machine.test.js`. No IO, no topic —
+   provable with fixtures alone.
+2. **The `vlab-<env>-delegations` topic** (replybot, IO edge). Replybot
+   publishes `open` and `event`; consumes `say` and `release` off chat-events,
+   fences on the id, validates `release`. Dashboard learns the new state.
+3. **Dean backstop.** `Delegations` query, `delegation_expired` carrying the
+   id, a handler that actually exits the state.
+4. **First consumer: payments** — `planning/payment-ledger.md` §10. dinersclub
+   is the sub-bot: it gains the `delegations` entry point, state, and a mouth.
+5. **Second consumer: LLM** — `external-responder-design.md` Phase 0 and 4–6.
+
+Consumer-lag alerting for the new topic lands with step 2
+(`documentation/kafka-consumer-lag-alerting.md`).
