@@ -692,7 +692,7 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 
 	// selected: answered, last wrote 30 minutes ago
 	mustExec(t, pool, insertQuery, "foo", "bar", updated, "QOUT",
-		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, ""))
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "messenger"))
 
 	// selected: a WhatsApp conversation, through the whatsapp_business credential
 	mustExec(t, pool, insertQuery, "wa", "waba", updated, "QOUT",
@@ -700,31 +700,31 @@ func TestFollowUpsGetsOnlyThoseBetweenMinAndMaxAndIgnoresAllSortsOfThings(t *tes
 
 	// selected: stitched into a second form, so qa is empty but they have answered
 	mustExec(t, pool, insertQuery, "stitched", "bar", updated, "QOUT",
-		qoutState([]string{"first_form", "with_followup"}, none, 30*time.Minute, `[]`, ""))
+		qoutState([]string{"first_form", "with_followup"}, none, 30*time.Minute, `[]`, "messenger"))
 
 	// not: last wrote too long ago / too recently
 	mustExec(t, pool, insertQuery, "too_old", "bar", updated, "QOUT",
-		qoutState([]string{"with_followup"}, none, 90*time.Minute, answered, ""))
+		qoutState([]string{"with_followup"}, none, 90*time.Minute, answered, "messenger"))
 	mustExec(t, pool, insertQuery, "too_recent", "bar", updated, "QOUT",
-		qoutState([]string{"with_followup"}, none, 10*time.Minute, answered, ""))
+		qoutState([]string{"with_followup"}, none, 10*time.Minute, answered, "messenger"))
 
 	// not: a bare ad tap, nothing answered
 	mustExec(t, pool, insertQuery, "bare_tap", "bar", updated, "QOUT",
-		qoutState([]string{"with_followup"}, none, 30*time.Minute, `[]`, ""))
+		qoutState([]string{"with_followup"}, none, 30*time.Minute, `[]`, "messenger"))
 
 	// not: predates the stamp, however recent `updated` is
 	mustExec(t, pool, insertQuery, "no_stamp", "bar", updated, "QOUT",
-		qoutState([]string{"with_followup"}, none, 0, answered, ""))
+		qoutState([]string{"with_followup"}, none, 0, answered, "messenger"))
 
 	// not: already followed up / sent with a token
 	mustExec(t, pool, insertQuery, "bar", "qux", updated, "QOUT",
-		qoutState([]string{"with_followup"}, `{"followUp": true}`, 30*time.Minute, answered, ""))
+		qoutState([]string{"with_followup"}, `{"followUp": true}`, 30*time.Minute, answered, "messenger"))
 	mustExec(t, pool, insertQuery, "bar", "quux", updated, "QOUT",
-		qoutState([]string{"with_followup"}, `{"token": "token"}`, 30*time.Minute, answered, ""))
+		qoutState([]string{"with_followup"}, `{"token": "token"}`, 30*time.Minute, answered, "messenger"))
 
 	// not: the survey has no follow-up message
 	mustExec(t, pool, insertQuery, "baz", "bar", updated, "QOUT",
-		qoutState([]string{"without_followup"}, none, 30*time.Minute, answered, ""))
+		qoutState([]string{"without_followup"}, none, 30*time.Minute, answered, "messenger"))
 
 	cfg := &Config{FollowUpMin: "20 minutes", FollowUpMax: "60 minutes", FollowUpPlatforms: []string{"messenger", "whatsapp"}}
 	ch := FollowUps(cfg, pool)
@@ -764,7 +764,7 @@ func TestFollowUpsOnlySelectsListedPlatforms(t *testing.T) {
 		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "whatsapp"))
 	mustExec(t, pool, insertQuery, "fb", "bar", updated, "QOUT",
 		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, "messenger"))
-	// no md.platform: the platform comes from the account's credential
+	// no md.platform: never nudged, on either kind of account
 	mustExec(t, pool, insertQuery, "legacy", "bar", updated, "QOUT",
 		qoutState([]string{"with_followup"}, none, 30*time.Minute, answered, ""))
 	mustExec(t, pool, insertQuery, "wa_no_md", "waba", updated, "QOUT",
@@ -779,9 +779,9 @@ func TestFollowUpsOnlySelectsListedPlatforms(t *testing.T) {
 		return res
 	}
 
-	assert.Equal(t, map[string]string{"fb": "messenger", "legacy": "messenger"}, platforms("messenger"))
-	assert.Equal(t, map[string]string{"wa": "whatsapp", "wa_no_md": "whatsapp"}, platforms("whatsapp"))
-	assert.Equal(t, 4, len(platforms("messenger", "whatsapp")))
+	assert.Equal(t, map[string]string{"fb": "messenger"}, platforms("messenger"))
+	assert.Equal(t, map[string]string{"wa": "whatsapp"}, platforms("whatsapp"))
+	assert.Equal(t, map[string]string{"fb": "messenger", "wa": "whatsapp"}, platforms("messenger", "whatsapp"))
 }
 
 func TestGetPaymentsGetsOnlyThoseWhovePassedGraceButNotInterval(t *testing.T) {

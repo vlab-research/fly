@@ -24,7 +24,7 @@ deprecated alias for posters that have not migrated. The value is unchanged — 
 
 Every query except `FollowUps` (`Respondings`, `Errored`, `Blocked`, `Payments`, `Timeouts`, `Spammers`)
 selects `COALESCE(states.platform, 'messenger')` and threads it into the emitted event;
-`FollowUps` reads `credentials.entity` instead (see "`DEAN_FOLLOWUP_PLATFORMS`" below).
+`FollowUps` reads `states.platform` as is and skips NULL rows (see "`DEAN_FOLLOWUP_PLATFORMS`" below).
 `states.platform` is a stored computed column over `state_json->'md'->>'platform'`; legacy rows
 without `md.platform` are NULL and report `messenger` — exact for every conversation predating
 WhatsApp support, and the reason `platform` is never empty on a dean event. Replybot receives
@@ -76,7 +76,7 @@ that configures a follow-up message (`surveys.has_followup`, i.e.
   production);
 - they have answered at least one question: `state_json.qa` is non-empty, or
   `forms` has more than one entry (`qa` is per form and empties on a stitch).
-- their platform is listed in `DEAN_FOLLOWUP_PLATFORMS` (see below).
+- `states.platform` is set and listed in `DEAN_FOLLOWUP_PLATFORMS` (see below).
 
 Two things this rule is built on:
 
@@ -103,15 +103,15 @@ A comma-separated **allowlist** of platforms that receive follow-ups, e.g.
 a platform added to the system later stays off until someone lists it. The
 per-form opt-in (`has_followup`) still applies on top.
 
-Unlike dean's other queries, `FollowUps` does not read `states.platform`. It
-already joins the account's credential, so it takes the platform from
-`credentials.entity` (`whatsapp_business` → `whatsapp`, `facebook_page` →
-`messenger`). `states.platform` is NULL whenever `md` is missing, including
-when a blocked conversation's `md` has been erased
-(`planning/platform-guess-expiry.md`). Defaulting that NULL to `messenger`
-would let a WhatsApp conversation through a `messenger`-only list, and then
-send it as Messenger. The same value is used for the filter and for the
-platform on the emitted event.
+Unlike dean's other queries, `FollowUps` does not default a NULL
+`states.platform` to `messenger`: a row with no platform is never followed up,
+whatever the list says. `states.platform` is NULL whenever `md` is missing,
+including when a blocked conversation's `md` has been erased
+(`planning/platform-guess-expiry.md`), and such a row may well be a WhatsApp
+conversation. Defaulting it would let it through a `messenger`-only list and
+send it as Messenger. It is rare in practice: on vprod, 23 of the 3,875
+conversations active in the 30 days to 2026-09-24 had a NULL platform, and 14 of
+those were on the WhatsApp account.
 
 | env | value | why |
 |---|---|---|

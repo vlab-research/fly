@@ -289,17 +289,16 @@ func Timeouts(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 // stalled on the first question of a second form counts by their form history.
 //
 // Only platforms in DEAN_FOLLOWUP_PLATFORMS are nudged: on WhatsApp a second
-// message from an unknown business number invites a spam report.
+// message from an unknown business number invites a spam report. A row with
+// no states.platform is never nudged; its platform would have to be guessed.
 //
 // states.pageid holds the platform account id, which equals credentials.key
 // for messaging entities (uniqueness enforced by the unique_messaging_account
-// partial index). The platform is read from that credential's entity rather
-// than states.platform, which is NULL when md is missing and would have to be
-// guessed.
+// partial index).
 func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 	query := `WITH x AS
                 (WITH t AS
-                  (SELECT state_json->>'question' as question, states.userid, states.pageid, CASE c.entity WHEN 'whatsapp_business' THEN 'whatsapp' ELSE 'messenger' END AS platform, surveys.shortcode, has_followup, surveys.created
+                  (SELECT state_json->>'question' as question, states.userid, states.pageid, states.platform, surveys.shortcode, has_followup, surveys.created
 				  FROM states
                                   INNER JOIN credentials c
                                     ON pageid = c.key AND c.entity IN ('facebook_page', 'whatsapp_business')
@@ -313,7 +312,7 @@ func FollowUps(cfg *Config, conn *pgxpool.Pool) <-chan *ExternalEvent {
 					previous_with_token = FALSE AND
 					(NOW() - last_inbound) > ($1)::INTERVAL AND
 					(NOW() - last_inbound) < ($2)::INTERVAL AND
-					(CASE c.entity WHEN 'whatsapp_business' THEN 'whatsapp' ELSE 'messenger' END) = ANY($3) AND
+					states.platform = ANY($3) AND
 					(jsonb_array_length(state_json->'qa') > 0 OR jsonb_array_length(state_json->'forms') > 1)
                   )
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY userid, pageid, shortcode ORDER BY created DESC)
