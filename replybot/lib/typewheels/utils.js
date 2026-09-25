@@ -345,6 +345,53 @@ function decodeRecruitmentRef(encoded) {
   return { form, token }
 }
 
+// The dotted key/value pairs a ref carries, or {} for a referral without one.
+// The single place the dotted grammar is parsed: getMetadata resolves the form
+// from it, refNamesForm asks whether there is one to resolve, and sharing this
+// is what stops the two disagreeing about the same string (VIR-35).
+//
+// Deliberately NOT total -- it throws on a ref that is not a string. Each caller
+// decides what that costs: getMetadata swallows it and falls through to
+// FALLBACK_FORM, refNamesForm answers "names no form".
+function _refPairs(referral) {
+  if (!referral || !referral.ref) return {}
+
+  return _group(referral.ref.split('.').map(_decodeToken))
+}
+
+// Pure, total. Did this entry event NAME a form, or is its form about to come
+// from FALLBACK_FORM?
+//
+// This is a question about the REF, deliberately not about the resolved form.
+// `getForm(event) === process.env.FALLBACK_FORM` reads as the obvious equivalent
+// and is wrong: a ref may name the fallback shortcode EXPLICITLY, and production
+// has such refs -- `?ref=form.305.country.iraq` on the Iraq vaccination page.
+// Those are real referrals and must keep switching a live participant's form.
+//
+// BOTH ref grammars name a form, and the second one is why this lives here.
+// A dotted ref names it through `md.form`. An encoded ref carries the shortcode
+// INSIDE `md.r`, so `md.form` is undefined for every one of them -- testing
+// `md.form` alone reported "names no form" for a ref whose form getMetadata
+// resolved perfectly well, and the REFERRAL guard silently dropped the referral
+// for anyone with a non-empty form stack (VIR-35).
+//
+// The presence of `r` settles it without decoding: getMetadata either resolves
+// the encoded ref or throws RefDecodeError (see the comment there), so an
+// encoded ref never falls through to FALLBACK_FORM, which is the only thing
+// this predicate is used to detect. Decoding a second time on the hot path
+// would buy nothing and add a way for the two to disagree again.
+function refNamesForm(event) {
+  try {
+    if (event.event_type !== 'conversation_started') return false
+
+    const md = _refPairs(event.payload && event.payload.referral)
+
+    return md.form !== undefined || md.r !== undefined
+  } catch (e) {
+    return false
+  }
+}
+
 function getMetadata(event) {
   let md = {}
   let referral = null
@@ -354,10 +401,7 @@ function getMetadata(event) {
       referral = event.payload.referral
     }
 
-    if (referral && referral.ref) {
-      const pairs = referral.ref.split('.')
-      md = _group(pairs.map(_decodeToken))
-    }
+    md = _refPairs(referral)
   } catch (e) {
     md = {}
     referral = null
@@ -427,6 +471,7 @@ module.exports = {
   hash,
   _group,
   getMetadata,
+  refNamesForm,
   eventPlatform,
   conversationFromRawEvent,
   identityComponent,
