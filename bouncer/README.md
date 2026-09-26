@@ -9,20 +9,51 @@ Researchers use it through replybot's `id_verification` field type
 (`documentation/questions.md` § "Verification (captcha)"). Design and rationale:
 `planning/human-verification-captcha.md`.
 
-## Methods
+## Structure: one interface, methods own their providers
 
-| `type` | Parameters | `default` resolves to | Proof the page submits |
+```
+bouncer/
+  verify/            the contract (the server knows only this)
+    Method           Plan(params) -> Step       validates its own parameters
+    Step             Ran() / Client() / Check(ctx, proof)
+    Registry         name -> Method; Plan([]entries) -> []Step
+  methods/
+    captcha/         Method + Provider interface; owns which provider is default
+      turnstile.go   a Provider (siteverify client, binding checks)
+      turnstile.js   its browser runner
+    auto/            test-only Method; no parameters, no providers
+  main.go            the one place that builds the Registry from env
+  server.go          links, signatures, page, submit, event -- no method names
+```
+
+- **Server** (`server.go`) checks the link and signature, asks the registry to plan
+  the steps, renders each step's `Client` (a runner name, public config, and the runner
+  JS), and hands each step back its opaque proof. It contains no method or provider
+  names.
+- **Method** (`verify.Method`) receives its parameters with `type` removed and
+  decodes them strictly (`verify.DecodeParams`), so an unknown parameter is an error.
+  Whether a method has providers at all, and which is the default, is its own business.
+- **captcha** has a `Provider` interface (`Name`, `Client`, `Check(token)`). `captcha.New(defaultProvider, others...)`
+  sets the default, so switching every `default` survey to another provider is a
+  one-line change in `main.go` with no survey edits. `{"type":"captcha"}` and
+  `{"type":"captcha","provider":"default"}` both mean the default.
+- **Errors:** a step's `Check` returns an error wrapping `verify.ErrUnavailable` when
+  the failure is ours (provider unreachable → the page says "try again"). Any other
+  error means the participant didn't pass.
+
+| method | parameters | providers | proof |
 |---|---|---|---|
-| `captcha` | `provider`: `default` \| `turnstile` | `turnstile` | `{token}` from the Turnstile widget |
-| `auto` | `provider`: `default` | `none` | `{}`. It passes with no participant action. **Test-only**: refused (400, `[BOUNCER_AUTO_DISABLED]`) unless `BOUNCER_ALLOW_AUTO=true` |
+| `captcha` | `provider` (optional) | `turnstile` (default) | `{token}` from the widget |
+| `auto` | none | none | `{}`. **Test-only**: registered only when `BOUNCER_ALLOW_AUTO=true` |
 
-`default` is resolved **here** (`defaultProvider` in `methods.go`), so switching
-providers is a bouncer deploy and needs no survey edits. `allowedProviders` must match
-replybot's `VERIFICATION_METHODS`. Each type may appear at most once in a list.
+**Adding a method:**
+1. Create a package under `methods/` that implements `verify.Method`, plus a JS runner
+   that registers `window.bouncerRunners['<runner>']`.
+2. Register it in `main.go`.
 
-Adding a method means adding it to `allowedProviders`/`defaultProvider`, a case in
-`Server.checkStep`, and a runner in `page.html`'s `runners`, plus replybot's
-`VERIFICATION_METHODS`. Deploy bouncer first: it refuses methods it does not know.
+Nothing else changes: not the server, not the page template, and not replybot, which
+passes `methods` through without reading them. **Adding a provider** to an existing
+method is a new `Provider` in that method's package, registered in `main.go`.
 
 ### `auto` and the end-to-end test
 
@@ -36,23 +67,27 @@ call is real:
 - tampered links (another user, swapped methods) must get a 400 while the survey keeps
   waiting.
 
-It is safe to leave `auto` in the method list, because participants cannot add it to a
-link (the method list is signed). The environment gate stops a researcher from using it
-in a real survey. Staging and production set `BOUNCER_ALLOW_AUTO: "false"` explicitly.
+Without the flag `auto` is simply not registered, so a link asking for it is refused
+like any unknown method (400, `[BOUNCER_BAD_METHODS]`). Participants cannot add it to a
+link, because the method list is signed. Staging and production set
+`BOUNCER_ALLOW_AUTO: "false"` explicitly.
 
 ## Flow
 
 1. replybot sends a button to `BOUNCER_URL?vlab_user&vlab_account&vlab_platform&vlab_methods&vlab_sig`.
-   `vlab_methods` is base64url JSON of the normalized list, e.g.
-   `[{"type":"captcha","provider":"default"}]`.
-2. `GET /verify` checks that the link is complete, that the signature matches and that every
-   method is known. It then resolves `default` and renders one step per method.
+   `vlab_methods` is base64url JSON of the survey's `methods`, passed through by replybot
+   verbatim, e.g. `[{"type":"captcha"}]`.
+2. `GET /verify` checks that the link is complete and that the signature matches. It then
+   has the registry plan each method (the method validates its own parameters) and
+   renders one step per method.
 3. The page runs the steps in order, collecting each step's proof, and then POSTs them
    all together to `/verify/submit`. There is no server-side session: each submit carries the
    whole signed link again.
-4. bouncer checks each proof in order. For Turnstile, it calls `siteverify` and requires
-   `success`, `hostname == BOUNCER_HOSTNAME` and `cdata == vlab_sig` (the widget is
-   rendered with that cData, so a token solved for one conversation cannot be spent on another).
+4. bouncer hands each proof to its step's `Check`, in order. For captcha/Turnstile, that
+   calls `siteverify` and requires `success`, `hostname == BOUNCER_HOSTNAME` and
+   `cdata == vlab_sig`. Every step's page config carries the link's `binding` (its
+   signature), and Turnstile renders the widget with it as cData, so a token solved for
+   one conversation cannot be spent on another.
 5. Only when every step has passed does it POST to hermes `/synthetic`:
 
 ```jsonc
@@ -131,14 +166,14 @@ secret lets everyone through anyway.
 | Tag | Meaning |
 |---|---|
 | `[BOUNCER_VERIFIED]` | Every step passed and the event was delivered (logged with `methods=`) |
-| `[BOUNCER_VERIFY_FAILED]` | A step did not pass (logged with `method=type:provider`), or the number of results did not match the methods |
+| `[BOUNCER_VERIFY_FAILED]` | A step did not pass (logged with the step's `Ran()`), or the number of results did not match the methods |
 | `[BOUNCER_BAD_SIGNATURE]` | The link or POST was tampered with, or the replybot and bouncer keys differ. If **every** request logs this, check the keys first |
-| `[BOUNCER_BAD_LINK]` | A missing component, an unknown platform, or `vlab_methods` that does not decode to a known, valid list |
+| `[BOUNCER_BAD_LINK]` | A missing component or an unknown platform |
+| `[BOUNCER_BAD_METHODS]` | `vlab_methods` is not a list, or it names a method not offered here (including `auto` without the flag), lists a method twice, or has parameters its method rejects |
 | `[BOUNCER_PROVIDER_ERROR]` | The provider (e.g. Cloudflare) was unreachable or returned non-200. The participant is told to retry |
 | `[BOUNCER_EVENT_FAILED]` | hermes did not accept the event. The participant is told to retry |
 | `[BOUNCER_TEST_KEYS]` | Running with a dummy Turnstile secret |
-| `[BOUNCER_AUTO_ENABLED]` | Startup: the `auto` method is allowed. It should appear only in test environments |
-| `[BOUNCER_AUTO_DISABLED]` | A link asked for `auto` in an environment that refuses it |
+| `[BOUNCER_AUTO_ENABLED]` | Startup: the `auto` method is registered. It should appear only in test environments |
 
 ## Local run
 
@@ -151,7 +186,7 @@ BOUNCER_HOSTNAME=localhost \
 BOTSERVER_URL=http://localhost:18099/synthetic \
 go run .
 # signed link for the test vector:
-open "http://localhost:1323/verify?vlab_user=1234567890&vlab_account=acct-1&vlab_platform=whatsapp&vlab_methods=W3sidHlwZSI6ImNhcHRjaGEiLCJwcm92aWRlciI6ImRlZmF1bHQifV0&vlab_sig=c0a8ef438ad169bcc0eda1faf601c89b76ce5482ae042c06db452d8361cef1fd"
+open "http://localhost:1323/verify?vlab_user=1234567890&vlab_account=acct-1&vlab_platform=whatsapp&vlab_methods=W3sidHlwZSI6ImNhcHRjaGEifV0&vlab_sig=ac7e674d994adeab7c7587782a52a09fd6297404d363115a76848e9ffe2be9eb"
 ```
 
 ## Testing
@@ -160,8 +195,10 @@ open "http://localhost:1323/verify?vlab_user=1234567890&vlab_account=acct-1&vlab
 go test ./...
 ```
 
-Handlers are tested with fake `Verifier` and `Sender`. The pure pieces (`parseLink`,
-`sign`/`verifySig`, `decodeMethods`/`resolveMethods`, `judgeSiteverify`, `buildEvent`) are tested directly.
+Each package tests itself. The server is tested against a fake `verify.Method`, so its
+tests say nothing about captcha. `verify` tests `Registry.Plan`, `captcha` tests provider
+selection and Turnstile (with a fake siteverify), and `auto` tests itself. The shared
+signing vector is in `identity_test.go`.
 
 ## Deploy
 

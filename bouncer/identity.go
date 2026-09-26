@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -93,4 +95,21 @@ func sign(key []byte, l Link) string {
 
 func verifySig(key []byte, l Link) bool {
 	return hmac.Equal([]byte(sign(key, l)), []byte(strings.ToLower(l.Sig)))
+}
+
+// decodeMethods reads the `vlab_methods` param: base64url (unpadded) JSON of
+// the survey's method list, passed through replybot verbatim. The signature
+// covers the raw param, not this decoding, so nothing here has to reproduce
+// replybot's serialization byte for byte. What each entry means is the
+// registry's business (verify.Registry.Plan).
+func decodeMethods(raw string) ([]json.RawMessage, error) {
+	b, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("methods are not base64url: %v", err)
+	}
+	var list []json.RawMessage
+	if err := json.Unmarshal(b, &list); err != nil {
+		return nil, fmt.Errorf("methods are not a list: %v", err)
+	}
+	return list, nil
 }

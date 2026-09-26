@@ -1,9 +1,11 @@
 package main
 
 import (
-	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,17 +15,37 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/vlab-research/bouncer/verify"
 )
 
-type fakeVerifier struct {
-	answer SiteverifyResponse
-	err    error
-	calls  int
+func enc(json string) string { return base64.RawURLEncoding.EncodeToString([]byte(json)) }
+
+// The server is tested against a fake method, so these tests say nothing
+// about captcha and would not change if every real method did.
+type fakeMethod struct {
+	checkErr error
+	checked  []json.RawMessage
+	binding  string
 }
 
-func (f *fakeVerifier) Verify(token, ip string) (SiteverifyResponse, error) {
-	f.calls++
-	return f.answer, f.err
+func (f *fakeMethod) Plan(params json.RawMessage) (verify.Step, error) {
+	var p struct{}
+	if err := verify.DecodeParams(params, &p); err != nil {
+		return nil, err
+	}
+	return fakeStep{f}, nil
+}
+
+type fakeStep struct{ m *fakeMethod }
+
+func (s fakeStep) Ran() map[string]string { return map[string]string{"type": "captcha"} }
+func (s fakeStep) Client() verify.Client {
+	return verify.Client{Runner: "fake", Config: map[string]string{"key": "public"}, JS: template.JS(`/*fake-runner*/`)}
+}
+func (s fakeStep) Check(ctx verify.Context, proof json.RawMessage) error {
+	s.m.checked = append(s.m.checked, proof)
+	s.m.binding = ctx.Binding
+	return s.m.checkErr
 }
 
 type fakeSender struct {
@@ -36,23 +58,12 @@ func (f *fakeSender) Send(ev ExternalEvent) error {
 	return f.err
 }
 
-const testHost = "id.vlab.digital"
-
-func newServer(v *fakeVerifier, s *fakeSender) *Server {
+func newServer(m *fakeMethod, s *fakeSender) *Server {
 	return &Server{
 		HMACKey: []byte(vectorKey),
-		Turnstile: TurnstileConfig{
-			SiteKey:      "site-key",
-			ExpectedHost: testHost,
-			CheckBinding: true,
-			Verifier:     v,
-		},
-		Sender: s,
+		Methods: verify.Registry{"captcha": m},
+		Sender:  s,
 	}
-}
-
-func passing() *fakeVerifier {
-	return &fakeVerifier{answer: SiteverifyResponse{Success: true, Hostname: testHost, CData: vectorSig}}
 }
 
 func linkQuery(l Link) string {
@@ -82,8 +93,12 @@ func postSubmit(s *Server, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
-func submitBody(l Link, results ...StepResult) string {
-	b, _ := json.Marshal(submitRequest{l.User, l.Account, l.Platform, l.Methods, l.Sig, results})
+func submitBody(l Link, results ...string) string {
+	raw := make([]json.RawMessage, len(results))
+	for i, r := range results {
+		raw[i] = json.RawMessage(r)
+	}
+	b, _ := json.Marshal(submitRequest{l.User, l.Account, l.Platform, l.Methods, l.Sig, raw})
 	return string(b)
 }
 
@@ -94,14 +109,15 @@ func signed(methodsJSON string) Link {
 	return l
 }
 
-func TestPageRendersResolvedStepsForSignedLink(t *testing.T) {
-	rec := getPage(newServer(passing(), &fakeSender{}), linkQuery(vectorLink()))
+func TestPageRendersStepsFromTheirClients(t *testing.T) {
+	rec := getPage(newServer(&fakeMethod{}, &fakeSender{}), linkQuery(vectorLink()))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
-	assert.Contains(t, body, `data-provider="turnstile"`, "default resolves before rendering")
-	assert.Contains(t, body, `"TurnstileSiteKey":"site-key"`)
-	assert.Contains(t, body, "challenges.cloudflare.com/turnstile")
+	assert.Contains(t, body, `"runner":"fake"`)
+	assert.Contains(t, body, `"key":"public"`)
+	assert.Contains(t, body, `"binding":"`+vectorSig+`"`, "every step gets the link binding")
+	assert.Contains(t, body, `/*fake-runner*/`)
 	assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
 	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 }
@@ -110,19 +126,18 @@ func TestPageRefusesBadLinks(t *testing.T) {
 	stripped := vectorLink()
 	stripped.Methods = enc(`[]`)
 
-	badMethods := signed(`[{"type":"otp","provider":"default"}]`)
-
 	badSig := vectorLink()
 	badSig.Sig = strings.Repeat("0", 64)
 
 	for name, q := range map[string]string{
-		"bad signature":    linkQuery(badSig),
-		"methods stripped": linkQuery(stripped),
-		"unknown method":   linkQuery(badMethods),
-		"incomplete":       "vlab_user=1234567890",
+		"bad signature":      linkQuery(badSig),
+		"methods stripped":   linkQuery(stripped),
+		"method not offered": linkQuery(signed(`[{"type":"otp"}]`)),
+		"bad parameter":      linkQuery(signed(`[{"type":"captcha","provder":"x"}]`)),
+		"incomplete":         "vlab_user=1234567890",
 	} {
 		t.Run(name, func(t *testing.T) {
-			rec := getPage(newServer(passing(), &fakeSender{}), q)
+			rec := getPage(newServer(&fakeMethod{}, &fakeSender{}), q)
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
 			assert.Contains(t, rec.Body.String(), "This link isn't working")
 			assert.NotContains(t, rec.Body.String(), `class="widget"`)
@@ -134,87 +149,62 @@ func TestPageEscapesIdentity(t *testing.T) {
 	l := Link{Identity: Identity{"</script><script>alert(1)</script>", "a", "messenger"}, Methods: vectorMethods}
 	l.Sig = sign([]byte(vectorKey), l)
 
-	rec := getPage(newServer(passing(), &fakeSender{}), linkQuery(l))
+	rec := getPage(newServer(&fakeMethod{}, &fakeSender{}), linkQuery(l))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.NotContains(t, rec.Body.String(), "<script>alert(1)")
 }
 
-func TestSubmitPostsEventOnPass(t *testing.T) {
-	sender := &fakeSender{}
-	rec := postSubmit(newServer(passing(), sender), submitBody(vectorLink(), StepResult{"tok"}))
+func TestSubmitChecksEachProofAndPostsEvent(t *testing.T) {
+	m, sender := &fakeMethod{}, &fakeSender{}
+	rec := postSubmit(newServer(m, sender), submitBody(vectorLink(), `{"token":"tok"}`))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `{"status":"verified"}`, rec.Body.String())
-	assert.Equal(t, []ExternalEvent{buildEvent(vectorIdentity, []Method{{methodCaptcha, providerTurn}})}, sender.sent)
+	assert.Equal(t, []json.RawMessage{json.RawMessage(`{"token":"tok"}`)}, m.checked, "the step gets its proof verbatim")
+	assert.Equal(t, vectorSig, m.binding)
+	assert.Equal(t, []ExternalEvent{buildEvent(vectorIdentity, []map[string]string{{"type": "captcha"}})}, sender.sent)
 }
 
-func TestSubmitRejectsBadSignatureWithoutCallingProvider(t *testing.T) {
-	v, sender := passing(), &fakeSender{}
+func TestSubmitRejectsBadSignatureWithoutChecking(t *testing.T) {
+	m, sender := &fakeMethod{}, &fakeSender{}
 	l := vectorLink()
 	l.Sig = strings.Repeat("0", 64)
-	rec := postSubmit(newServer(v, sender), submitBody(l, StepResult{"tok"}))
+	rec := postSubmit(newServer(m, sender), submitBody(l, `{}`))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Equal(t, 0, v.calls)
+	assert.Empty(t, m.checked)
 	assert.Empty(t, sender.sent)
 }
 
 func TestSubmitRequiresOneResultPerMethod(t *testing.T) {
-	for name, results := range map[string][]StepResult{
+	for name, results := range map[string][]string{
 		"none":     {},
-		"too many": {{"a"}, {"b"}},
+		"too many": {`{}`, `{}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			v, sender := passing(), &fakeSender{}
-			rec := postSubmit(newServer(v, sender), submitBody(vectorLink(), results...))
+			m, sender := &fakeMethod{}, &fakeSender{}
+			rec := postSubmit(newServer(m, sender), submitBody(vectorLink(), results...))
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
-			assert.Equal(t, 0, v.calls)
+			assert.Empty(t, m.checked)
 			assert.Empty(t, sender.sent)
 		})
 	}
 }
 
-func TestSubmitRejectsMissingOrOversizedToken(t *testing.T) {
-	for name, tok := range map[string]string{"empty": "", "oversized": strings.Repeat("x", maxTokenLength+1)} {
-		t.Run(name, func(t *testing.T) {
-			v, sender := passing(), &fakeSender{}
-			rec := postSubmit(newServer(v, sender), submitBody(vectorLink(), StepResult{tok}))
-			assert.Equal(t, http.StatusForbidden, rec.Code)
-			assert.Equal(t, 0, v.calls)
-			assert.Empty(t, sender.sent)
-		})
-	}
-}
-
-func TestSubmitNoEventWhenChallengeFails(t *testing.T) {
-	cases := map[string]SiteverifyResponse{
-		"not passed":         {Success: false, ErrorCodes: []string{"invalid-input-response"}},
-		"wrong host":         {Success: true, Hostname: "evil.example", CData: vectorSig},
-		"other conversation": {Success: true, Hostname: testHost, CData: "someone-else"},
-	}
-	for name, answer := range cases {
-		t.Run(name, func(t *testing.T) {
-			sender := &fakeSender{}
-			rec := postSubmit(newServer(&fakeVerifier{answer: answer}, sender), submitBody(vectorLink(), StepResult{"tok"}))
-			assert.Equal(t, http.StatusForbidden, rec.Code)
-			assert.JSONEq(t, `{"status":"failed"}`, rec.Body.String())
-			assert.Empty(t, sender.sent)
-		})
-	}
-}
-
-func TestSubmitDummySecretSkipsBinding(t *testing.T) {
-	s := newServer(&fakeVerifier{answer: SiteverifyResponse{Success: true, Hostname: "localhost", CData: "test-data"}}, &fakeSender{})
-	s.Turnstile.CheckBinding = false
-
-	rec := postSubmit(s, submitBody(vectorLink(), StepResult{"tok"}))
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestSubmitProviderErrorAsksForRetry(t *testing.T) {
+func TestSubmitFailedCheckSendsNothing(t *testing.T) {
 	sender := &fakeSender{}
-	rec := postSubmit(newServer(&fakeVerifier{err: errors.New("down")}, sender), submitBody(vectorLink(), StepResult{"tok"}))
+	rec := postSubmit(newServer(&fakeMethod{checkErr: errors.New("nope")}, sender), submitBody(vectorLink(), `{}`))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.JSONEq(t, `{"status":"failed"}`, rec.Body.String())
+	assert.Empty(t, sender.sent)
+}
+
+func TestSubmitUnavailableProviderAsksForRetry(t *testing.T) {
+	sender := &fakeSender{}
+	err := fmt.Errorf("%w: down", verify.ErrUnavailable)
+	rec := postSubmit(newServer(&fakeMethod{checkErr: err}, sender), submitBody(vectorLink(), `{}`))
 
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.JSONEq(t, `{"status":"retry"}`, rec.Body.String())
@@ -223,23 +213,14 @@ func TestSubmitProviderErrorAsksForRetry(t *testing.T) {
 
 // The event is the product: a failed POST to hermes must never show "verified".
 func TestSubmitEventFailureIsNotVerified(t *testing.T) {
-	rec := postSubmit(newServer(passing(), &fakeSender{err: errors.New("hermes down")}), submitBody(vectorLink(), StepResult{"tok"}))
+	rec := postSubmit(newServer(&fakeMethod{}, &fakeSender{err: errors.New("hermes down")}), submitBody(vectorLink(), `{}`))
 
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.JSONEq(t, `{"status":"retry"}`, rec.Body.String())
 }
 
-func TestSubmitExplicitProvider(t *testing.T) {
-	sender := &fakeSender{}
-	l := signed(`[{"type":"captcha","provider":"turnstile"}]`)
-	rec := postSubmit(newServer(&fakeVerifier{answer: SiteverifyResponse{Success: true, Hostname: testHost, CData: l.Sig}}, sender), submitBody(l, StepResult{"tok"}))
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Len(t, sender.sent, 1)
-}
-
 func TestEventerPostsExactBody(t *testing.T) {
-	expected := `{"user":"1234567890","account_id":"acct-1","page":"acct-1","platform":"whatsapp","event":{"type":"external","value":{"type":"bouncer:verified","methods":[{"type":"captcha","provider":"turnstile"}]}}}`
+	expected := `{"user":"1234567890","account_id":"acct-1","page":"acct-1","platform":"whatsapp","event":{"type":"external","value":{"type":"bouncer:verified","methods":[{"provider":"turnstile","type":"captcha"}]}}}`
 
 	var got []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +229,8 @@ func TestEventerPostsExactBody(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	assert.Nil(t, NewEventer(ts.URL).Send(buildEvent(vectorIdentity, []Method{{methodCaptcha, providerTurn}})))
+	ran := []map[string]string{{"type": "captcha", "provider": "turnstile"}}
+	assert.Nil(t, NewEventer(ts.URL).Send(buildEvent(vectorIdentity, ran)))
 	assert.Equal(t, expected, string(got))
 }
 
@@ -259,67 +241,4 @@ func TestEventerNon200IsError(t *testing.T) {
 	defer ts.Close()
 
 	assert.Error(t, NewEventer(ts.URL).Send(buildEvent(vectorIdentity, nil)))
-}
-
-func TestTurnstileClientSendsSecretAndToken(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Nil(t, r.ParseForm())
-		assert.Equal(t, "secret", r.PostForm.Get("secret"))
-		assert.Equal(t, "tok", r.PostForm.Get("response"))
-		assert.Equal(t, "1.2.3.4", r.PostForm.Get("remoteip"))
-		_, _ = io.Copy(w, bytes.NewBufferString(`{"success":true,"hostname":"id.vlab.digital","cdata":"c","error-codes":[]}`))
-	}))
-	defer ts.Close()
-
-	tt := NewTurnstile("secret")
-	tt.url = ts.URL
-	r, err := tt.Verify("tok", "1.2.3.4")
-
-	assert.Nil(t, err)
-	assert.Equal(t, SiteverifyResponse{Success: true, Hostname: "id.vlab.digital", CData: "c", ErrorCodes: []string{}}, r)
-}
-
-func TestIsDummySecret(t *testing.T) {
-	assert.True(t, isDummySecret("1x0000000000000000000000000000000AA"))
-	assert.False(t, isDummySecret("0x4AAAAAAA-real-secret"))
-}
-
-func TestAutoIsRefusedUnlessAllowed(t *testing.T) {
-	l := signed(`[{"type":"auto","provider":"default"}]`)
-
-	rec := getPage(newServer(passing(), &fakeSender{}), linkQuery(l))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-
-	sender := &fakeSender{}
-	rec = postSubmit(newServer(passing(), sender), submitBody(l, StepResult{}))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Empty(t, sender.sent)
-}
-
-func TestAutoVerifiesWhenAllowed(t *testing.T) {
-	l := signed(`[{"type":"auto","provider":"default"}]`)
-	v, sender := passing(), &fakeSender{}
-	s := newServer(v, sender)
-	s.AllowAuto = true
-
-	page := getPage(s, linkQuery(l))
-	assert.Equal(t, http.StatusOK, page.Code)
-	assert.NotContains(t, page.Body.String(), "challenges.cloudflare.com", "auto alone loads no provider script")
-
-	rec := postSubmit(s, submitBody(l, StepResult{}))
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, 0, v.calls)
-	assert.Equal(t, []ExternalEvent{buildEvent(vectorIdentity, []Method{{methodAuto, providerNone}})}, sender.sent)
-}
-
-// auto alongside a real method still requires the real method to pass.
-func TestAutoDoesNotExcuseOtherMethods(t *testing.T) {
-	l := signed(`[{"type":"auto","provider":"default"},{"type":"captcha","provider":"default"}]`)
-	sender := &fakeSender{}
-	s := newServer(&fakeVerifier{answer: SiteverifyResponse{Success: false}}, sender)
-	s.AllowAuto = true
-
-	rec := postSubmit(s, submitBody(l, StepResult{}, StepResult{"tok"}))
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Empty(t, sender.sent)
 }

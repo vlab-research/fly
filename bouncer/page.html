@@ -27,14 +27,11 @@
     <p>Please go back to the chat and tap the button again.</p>
   </section>
 {{else}}
-  {{range $i, $m := .Steps}}
+  {{range $i, $st := .Steps}}
   <section class="step" data-step="{{$i}}" hidden>
-    {{if eq $m.Type "captcha"}}
     <h1>Quick check</h1>
     <p>Please confirm you're a person. This takes a few seconds.</p>
-    <div class="widget" data-type="{{$m.Type}}" data-provider="{{$m.Provider}}"></div>
-    {{end}}
-    {{if eq $m.Type "auto"}}<h1>Checking…</h1>{{end}}
+    <div class="widget"></div>
   </section>
   {{end}}
   <section id="working" hidden><h1>Checking…</h1></section>
@@ -50,6 +47,13 @@
 
   <script id="config" type="application/json">{{.}}</script>
   <script>
+    // Each method's JS registers a runner here: fn(el, config, done, fail).
+    // `done(proof)` hands back what that method's server-side Check reads.
+    window.bouncerRunners = {};
+  </script>
+  {{range .RunnerJS}}<script>{{.}}</script>
+  {{end}}
+  <script>
     var config = JSON.parse(document.getElementById('config').textContent);
     var results = [];
     var current = -1;
@@ -58,35 +62,19 @@
       document.querySelectorAll('main > section').forEach(function (s) { s.hidden = s !== el; });
     }
 
-    function stepEl(i) { return document.querySelector('.step[data-step="' + i + '"]'); }
-
-    // Each method's runner renders its step and calls done(result) once, with
-    // the proof bouncer checks for that method.
-    var runners = {
-      'auto:none': function (el, done) { done({}); },
-      'captcha:turnstile': function (el, done) {
-        var w = el.querySelector('.widget');
-        if (w.dataset.widgetId) { window.turnstile.reset(w.dataset.widgetId); return; }
-        w.dataset.widgetId = window.turnstile.render(w, {
-          sitekey: config.TurnstileSiteKey,
-          cData: config.Sig,
-          callback: function (token) { done({ token: token }); },
-          'error-callback': function () { show(document.getElementById('failed')); }
-        });
-      }
-    };
+    function fail() { show(document.getElementById('failed')); }
 
     function run(i) {
       current = i;
       if (i === config.Steps.length) return submit();
-      var m = config.Steps[i];
-      var el = stepEl(i);
+      var step = config.Steps[i];
+      var el = document.querySelector('.step[data-step="' + i + '"]');
       show(el);
-      runners[m.type + ':' + m.provider](el, function (result) {
+      window.bouncerRunners[step.runner](el.querySelector('.widget'), step.config, function (proof) {
         if (current !== i) return;
-        results[i] = result;
+        results[i] = proof;
         run(i + 1);
-      });
+      }, fail);
     }
 
     function start() { results = []; run(0); }
@@ -109,15 +97,11 @@
         .then(function (body) {
           show(document.getElementById(body.status === 'verified' ? 'verified' : 'failed'));
         })
-        .catch(function () { show(document.getElementById('failed')); });
+        .catch(fail);
     }
 
-    window.onTurnstileLoad = start;
-    if (!config.NeedsTurnstile) start();
+    start();
   </script>
-  {{if .NeedsTurnstile}}
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
-  {{end}}
 {{end}}
 </main>
 </body>

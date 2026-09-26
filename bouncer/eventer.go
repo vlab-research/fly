@@ -14,10 +14,10 @@ import (
 // whatever else it carried -- would release a wait on `{type: bouncer:verified}`.
 const verifiedEventType = "bouncer:verified"
 
-// Methods records what actually ran, with `default` resolved to its provider.
+// Methods records what actually ran, one entry per step (see verify.Step.Ran).
 type EventValue struct {
-	Type    string   `json:"type"`
-	Methods []Method `json:"methods"`
+	Type    string              `json:"type"`
+	Methods []map[string]string `json:"methods"`
 }
 
 type SyntheticEvent struct {
@@ -35,7 +35,7 @@ type ExternalEvent struct {
 
 // buildEvent is the /synthetic body for one passed verification. `page`
 // mirrors `account_id`, as every synthetic producer still sends it.
-func buildEvent(id Identity, ran []Method) ExternalEvent {
+func buildEvent(id Identity, ran []map[string]string) ExternalEvent {
 	return ExternalEvent{
 		User:      id.User,
 		AccountID: id.Account,

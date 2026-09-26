@@ -8,12 +8,11 @@ import (
 
 // The shared test vector. replybot/lib/generic-translator.test.js asserts the
 // same key, link and signature; if either side's signing changes, one of the
-// two tests breaks. vectorMethods is base64url of
-// [{"type":"captcha","provider":"default"}].
+// two tests breaks. vectorMethods is base64url of [{"type":"captcha"}].
 const (
 	vectorKey     = "bouncer-test-vector-key"
-	vectorMethods = "W3sidHlwZSI6ImNhcHRjaGEiLCJwcm92aWRlciI6ImRlZmF1bHQifV0"
-	vectorSig     = "c0a8ef438ad169bcc0eda1faf601c89b76ce5482ae042c06db452d8361cef1fd"
+	vectorMethods = "W3sidHlwZSI6ImNhcHRjaGEifV0"
+	vectorSig     = "ac7e674d994adeab7c7587782a52a09fd6297404d363115a76848e9ffe2be9eb"
 )
 
 var vectorIdentity = Identity{"1234567890", "acct-1", "whatsapp"}
@@ -89,4 +88,16 @@ func TestParseLink(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeMethods(t *testing.T) {
+	list, err := decodeMethods(vectorMethods)
+	assert.Nil(t, err)
+	assert.Len(t, list, 1)
+	assert.JSONEq(t, `{"type":"captcha"}`, string(list[0]))
+
+	_, err = decodeMethods("%%%")
+	assert.Error(t, err)
+	_, err = decodeMethods(enc(`{"type":"captcha"}`))
+	assert.Error(t, err, "an object, not a list")
 }
