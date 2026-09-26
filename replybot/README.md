@@ -151,6 +151,37 @@ is a measured, deliberate contributor to the outbound command latency floor; see
 two-sided measurement of `message-worker`'s command-processing latency, alongside
 `documentation/message-worker-deployment.md` and `planning/message-worker-command-lag.md`).
 
+### Where a payment comes from (`act()` in `machine.js`)
+
+`report.payment` — what `publishPayment` sends to `VLAB_PAYMENT_TOPIC` — is set by
+`act()`, in exactly two ways:
+
+| `act()` branch | produced by | payment |
+|---|---|---|
+| `RESPOND`, `SWITCH_FORM`, `RESPOND_AGAIN`, `RESPOND_AND_RESET` | a user answer; a stitch echo or blank start; a dean `redo`; (no producer — dead) | extracted from `metadata.payment` of any rendered message, via `withPayment()` |
+| `MAKE_PAYMENT` | dean `repeat_payment` | rebuilt from the payment field with `getPayment()`, no message sent |
+
+**Invariant: a rendered message that carries `metadata.payment` always has its payment
+published in the same report.** Every message-rendering branch returns through
+`withPayment()` so that no branch can skip it. The send echo, not the payment, is what
+opens the `payment:*` wait, so a dropped payment looks like a perfectly healthy
+`WAIT_EXTERNAL_EVENT` state and is recovered only by dean's `Payments` sweep (2h grace,
+then six-hourly). Before VIR-46, `SWITCH_FORM` and `RESPOND_AGAIN` skipped extraction:
+a stitch into a form whose first field is a payment never requested it.
+
+Consequences worth knowing:
+
+- **A `redo` re-publishes the payment** when the message it re-sends is a payment
+  message. The original `RESPOND` normally already published it (payments are produced
+  before commands in `processor()`), so this is a second attempt — consistent with the
+  at-least-once policy in `documentation/payment-recovery.md` §2, and the same
+  duplication dean's `repeat_payment` already causes. It is also the only prompt
+  payment when the original report failed before `publishPayment` (e.g. `getForm`
+  raising `INTERNAL`).
+- **The "acknowledged statement first" form shape** (`pay_N_ready`, then the send) is
+  no longer required for a stitched-into payment form to pay. It remains the house
+  pattern because the payment retry loop needs a question to wait on.
+
 Notes on specific shapes:
 
 - **Payload parsing** — Messenger delivers `quick_reply`, `postback`, and
