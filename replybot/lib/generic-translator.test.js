@@ -8,6 +8,11 @@ const {
   splitDestination,
   buildLinkTrackingUrl,
   buildMoviehouseUrl,
+  normalizeVerificationMethods,
+  encodeVerificationMethods,
+  verificationSignature,
+  buildIdVerificationUrl,
+  ID_VERIFICATION_WAIT,
   IDENTITY_PARAMS,
   VIDEO_PARAM
 } = require('./generic-translator')
@@ -691,6 +696,156 @@ describe('translateTypeformField', () => {
           CTX
         )
         result.type.should.equal('text')
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // `id_verification` -- bouncer.
+  // -------------------------------------------------------------------------
+
+  describe('normalizeVerificationMethods', () => {
+    const throwsInvalid = (methods, fragment) => {
+      let err
+      try { normalizeVerificationMethods(methods, 'ref_1') } catch (e) { err = e }
+      should.exist(err)
+      err.message.should.contain('[INVALID_FIELD_CONTENT]')
+      if (fragment) err.message.should.contain(fragment)
+    }
+
+    it('fills in the default provider', () => {
+      normalizeVerificationMethods([{ type: 'captcha' }], 'r')
+        .should.deep.equal([{ type: 'captcha', provider: 'default' }])
+    })
+
+    it('keeps an explicit provider', () => {
+      normalizeVerificationMethods([{ type: 'captcha', provider: 'turnstile' }], 'r')
+        .should.deep.equal([{ type: 'captcha', provider: 'turnstile' }])
+    })
+
+    it('refuses a missing or empty list', () => {
+      throwsInvalid(undefined, 'methods')
+      throwsInvalid([], 'methods')
+      throwsInvalid({ type: 'captcha' }, 'methods')
+    })
+
+    it('accepts auto, which bouncer gates per environment', () => {
+      normalizeVerificationMethods([{ type: 'auto' }], 'r')
+        .should.deep.equal([{ type: 'auto', provider: 'default' }])
+    })
+
+    it('refuses an unknown method', () => throwsInvalid([{ type: 'otp' }], "unknown method 'otp'"))
+    it('refuses an unknown provider', () => throwsInvalid([{ type: 'captcha', provider: 'recaptcha' }], "provider 'recaptcha'"))
+    it('refuses an unknown parameter', () => throwsInvalid([{ type: 'captcha', provder: 'turnstile' }], "parameter 'provder'"))
+    it('refuses a method twice', () => throwsInvalid([{ type: 'captcha' }, { type: 'captcha' }], 'twice'))
+    it('refuses a bare string', () => throwsInvalid(['captcha'], 'not an object'))
+  })
+
+  describe('verificationSignature', () => {
+    // The shared test vector. bouncer/identity_test.go asserts the same key,
+    // link and signature; if either side's signing changes, one breaks.
+    it('matches the vector bouncer verifies against', () => {
+      const ctx = { user: { id: '1234567890' }, page: { id: 'acct-1' }, platform: 'whatsapp' }
+      const methods = encodeVerificationMethods(normalizeVerificationMethods([{ type: 'captcha' }], 'r'))
+
+      methods.should.equal('W3sidHlwZSI6ImNhcHRjaGEiLCJwcm92aWRlciI6ImRlZmF1bHQifV0')
+      verificationSignature('bouncer-test-vector-key', ctx, methods)
+        .should.equal('c0a8ef438ad169bcc0eda1faf601c89b76ce5482ae042c06db452d8361cef1fd')
+    })
+
+    it('differs for a different conversation or different methods', () => {
+      const other = { ...CTX, user: { id: 'user-124' } }
+      verificationSignature('k', CTX, 'm').should.not.equal(verificationSignature('k', other, 'm'))
+      verificationSignature('k', CTX, 'm').should.not.equal(verificationSignature('k', CTX, 'n'))
+    })
+  })
+
+  describe('buildIdVerificationUrl', () => {
+    it('carries the identity, the methods and their signature', () => {
+      const methods = [{ type: 'captcha', provider: 'default' }]
+      const { url, missing } = buildIdVerificationUrl('https://id.vlab.digital/verify', 'k', CTX, methods)
+      const u = new URL(url)
+      const m = u.searchParams.get('vlab_methods')
+
+      u.origin.should.equal('https://id.vlab.digital')
+      u.pathname.should.equal('/verify')
+      u.searchParams.get('vlab_user').should.equal('user-123')
+      u.searchParams.get('vlab_account').should.equal('page-456')
+      u.searchParams.get('vlab_platform').should.equal('whatsapp')
+      JSON.parse(Buffer.from(m, 'base64url').toString()).should.deep.equal(methods)
+      u.searchParams.get('vlab_sig').should.equal(verificationSignature('k', CTX, m))
+      missing.should.deep.equal([])
+    })
+  })
+
+  describe('translateTypeformField - id_verification', () => {
+    const ENV = { BOUNCER_URL: 'https://id.vlab.digital/verify', BOUNCER_HMAC_KEY: 'k' }
+    const field = (md = {}) => ({
+      type: 'id_verification',
+      ref: 'verify_1',
+      title: 'Before we pay you, one quick check.',
+      md: { type: 'id_verification', methods: [{ type: 'captcha' }], ...md },
+      properties: {}
+    })
+    const translate = f => translateTypeformField(f, CTX)
+    const thrown = fn => { try { fn() } catch (e) { return e } }
+
+    it('renders as a webview with a signed bouncer url', () => {
+      withEnv(ENV, () => {
+        const result = translate(field({ buttonText: 'Verify' }))
+        const u = new URL(result.metadata.url)
+
+        result.metadata.type.should.equal('webview')
+        result.metadata.buttonText.should.equal('Verify')
+        result.metadata.extensions.should.equal(false)
+        u.searchParams.get('vlab_sig')
+          .should.equal(verificationSignature('k', CTX, u.searchParams.get('vlab_methods')))
+      })
+    })
+
+    it('defaults the button text', () => {
+      withEnv(ENV, () => {
+        translate(field()).metadata.buttonText.should.equal("Verify you're human")
+      })
+    })
+
+    it('waits for bouncer when the author wrote no wait', () => {
+      withEnv(ENV, () => {
+        translate(field()).metadata.wait.should.deep.equal(ID_VERIFICATION_WAIT)
+      })
+    })
+
+    it("keeps the author's own wait", () => {
+      const wait = { op: 'or', vars: [ID_VERIFICATION_WAIT, { type: 'timeout', value: '1 day' }] }
+      withEnv(ENV, () => {
+        translate(field({ wait })).metadata.wait.should.deep.equal(wait)
+      })
+    })
+
+    it('refuses invalid methods', () => {
+      withEnv(ENV, () => {
+        thrown(() => translate(field({ methods: [{ type: 'otp' }] }))).message.should.contain('[INVALID_FIELD_CONTENT]')
+        thrown(() => translate(field({ methods: undefined }))).message.should.contain('[INVALID_FIELD_CONTENT]')
+      })
+    })
+
+    it('refuses keepMoving, which would skip the wait', () => {
+      withEnv(ENV, () => {
+        thrown(() => translate(field({ keepMoving: true }))).message.should.contain('[INVALID_FIELD_CONTENT]')
+      })
+    })
+
+    it('throws a greppable error when BOUNCER_URL is unset', () => {
+      withEnv({ ...ENV, BOUNCER_URL: null }, () => {
+        const err = thrown(() => translate(field()))
+        err.message.should.contain('[MISSING_SERVICE_URL]')
+        err.message.should.contain('BOUNCER_URL')
+      })
+    })
+
+    it('throws a greppable error when BOUNCER_HMAC_KEY is unset', () => {
+      withEnv({ ...ENV, BOUNCER_HMAC_KEY: null }, () => {
+        thrown(() => translate(field())).message.should.contain('[MISSING_SERVICE_SECRET]')
       })
     })
   })
