@@ -1,0 +1,51 @@
+{
+  "id": "idVrfy",
+  "title": "id verification (auto) test",
+  "settings": {
+    "language": "en"
+  },
+  "welcome_screens": [],
+  "thankyou_screens": [
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "idVrfyField0",
+      "title": "Quick check before we continue.",
+      "ref": "id-verification-auto",
+      "properties": {
+        "description": "type: id_verification\nbuttonText: Verify\nmethods:\n  - type: auto"
+      },
+      "validations": {
+        "required": false
+      },
+      "type": "statement"
+    },
+    {
+      "id": "idVrfyField1",
+      "title": "Did that work?",
+      "ref": "after-verification",
+      "validations": {
+        "required": false
+      },
+      "type": "yes_no"
+    },
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      },
+      "type": "thankyou_screen"
+    }
+  ],
+  "custom_messages": {}
+}

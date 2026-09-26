@@ -43,6 +43,8 @@ export interface Stack {
   scribbleChatlLog: StartedTestContainer;
   formcentral: StartedTestContainer;
   dinersclub: StartedTestContainer;
+  bouncer: StartedTestContainer;
+  bouncerUrl: string;
   botserver: StartedTestContainer;
   replybot: StartedTestContainer;
   messageWorker: StartedTestContainer;
@@ -118,6 +120,7 @@ export async function startStack(): Promise<Stack> {
   const formcentralImageName = 'formcentral:test';
   const dinersclubImageName = 'dinersclub:test';
   const messageWorkerImageName = 'message-worker:test';
+  const bouncerImageName = 'bouncer:test';
 
   await Promise.all([
     GenericContainer.fromDockerfile(path.join(repoRoot, 'hermes')).build(hermesImageName),
@@ -128,6 +131,7 @@ export async function startStack(): Promise<Stack> {
     GenericContainer.fromDockerfile(path.join(repoRoot, 'formcentral')).build(formcentralImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'dinersclub')).build(dinersclubImageName),
     GenericContainer.fromDockerfile(path.join(repoRoot, 'message-worker')).build(messageWorkerImageName),
+    GenericContainer.fromDockerfile(path.join(repoRoot, 'bouncer')).build(bouncerImageName),
   ]);
   console.timeEnd('[setup] image builds');
 
@@ -377,6 +381,29 @@ export async function startStack(): Promise<Stack> {
     .withEnvironment(dinersclubEnv)
     .start();
 
+  // Start bouncer (verification pages; posts `bouncer:verified` to hermes).
+  // The harness cannot solve a real captcha, so it enables the `auto` method,
+  // which passes with no participant action and exercises everything else:
+  // replybot signing with BOUNCER_HMAC_KEY, bouncer checking the signature and
+  // methods, and the event reaching the survey. Turnstile gets Cloudflare's
+  // published dummy keys only because bouncer requires them to start.
+  const BOUNCER_HMAC_KEY = 'testcontainers-bouncer-key';
+  const bouncer = await new GenericContainer(bouncerImageName)
+    .withNetwork(network)
+    .withNetworkAliases('bouncer')
+    .withExposedPorts(1323)
+    .withEnvironment({
+      BOTSERVER_URL: 'http://botserver/synthetic',
+      BOUNCER_HOSTNAME: 'bouncer',
+      BOUNCER_HMAC_KEY,
+      BOUNCER_ALLOW_AUTO: 'true',
+      TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+      TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
+    })
+    .withWaitStrategy(Wait.forHttp('/health', 1323))
+    .start();
+  const bouncerUrl = `http://localhost:${bouncer.getMappedPort(1323)}`;
+
   // Load replybot env from YAML and apply overrides
   console.time('[setup] replybot + botserver + facebot');
   const replybotEnv = loadKubeEnv(
@@ -391,6 +418,10 @@ export async function startStack(): Promise<Stack> {
   replybotEnv.REDIS_HOST = 'redis';
   replybotEnv.REDIS_PORT = '6379';
   replybotEnv.AUTH0_DASHBOARD_SECRET = testEnv.AUTH0_DASHBOARD_SECRET || 'test';
+  // The participant-facing bouncer address. Tests swap its origin for
+  // `stack.bouncerUrl`, since `bouncer` only resolves inside the network.
+  replybotEnv.BOUNCER_URL = 'http://bouncer:1323/verify';
+  replybotEnv.BOUNCER_HMAC_KEY = BOUNCER_HMAC_KEY;
 
   // Ensure NUM_SPINES is set
   if (!replybotEnv.NUM_SPINES) {
@@ -553,6 +584,8 @@ export async function startStack(): Promise<Stack> {
     scribbleChatlLog,
     formcentral,
     dinersclub,
+    bouncer,
+    bouncerUrl,
     botserver,
     replybot,
     messageWorker,
@@ -576,6 +609,7 @@ export async function stopStack(stack: Stack): Promise<void> {
     stack.botserver.stop(),
     stack.formcentral.stop(),
     stack.dinersclub.stop(),
+    stack.bouncer.stop(),
     stack.messageWorker.stop(),
     stack.replybot.stop(),
     stack.scribbleStates.stop(),
