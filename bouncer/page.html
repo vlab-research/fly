@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Quick check</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #5f6368; --bg: #fafafa; --ok: #1e7d3a; --err: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #ececec; --muted: #a0a4a8; --bg: #141414; --ok: #6fcf8a; --err: #f2968f; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 420px; margin: 0 auto; padding: 48px 16px; text-align: center; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { color: var(--muted); margin: 0 0 24px; }
+  .widget { display: flex; justify-content: center; min-height: 65px; }
+  [hidden] { display: none !important; }
+  .ok h1 { color: var(--ok); }
+  .err h1 { color: var(--err); }
+  button { font: inherit; padding: 10px 20px; border-radius: 8px; border: 1px solid var(--muted); background: transparent; color: var(--fg); }
+</style>
+</head>
+<body>
+<main>
+{{if .Broken}}
+  <section class="err">
+    <h1>This link isn't working</h1>
+    <p>Please go back to the chat and tap the button again.</p>
+  </section>
+{{else}}
+  {{range $i, $m := .Steps}}
+  <section class="step" data-step="{{$i}}" hidden>
+    {{if eq $m.Type "captcha"}}
+    <h1>Quick check</h1>
+    <p>Please confirm you're a person. This takes a few seconds.</p>
+    <div class="widget" data-type="{{$m.Type}}" data-provider="{{$m.Provider}}"></div>
+    {{end}}
+    {{if eq $m.Type "auto"}}<h1>Checking…</h1>{{end}}
+  </section>
+  {{end}}
+  <section id="working" hidden><h1>Checking…</h1></section>
+  <section id="verified" class="ok" hidden>
+    <h1>Thank you, you're verified</h1>
+    <p>You can close this page and go back to the chat.</p>
+  </section>
+  <section id="failed" class="err" hidden>
+    <h1>That didn't work</h1>
+    <p>Please try once more.</p>
+    <button type="button" onclick="start()">Try again</button>
+  </section>
+
+  <script id="config" type="application/json">{{.}}</script>
+  <script>
+    var config = JSON.parse(document.getElementById('config').textContent);
+    var results = [];
+    var current = -1;
+
+    function show(el) {
+      document.querySelectorAll('main > section').forEach(function (s) { s.hidden = s !== el; });
+    }
+
+    function stepEl(i) { return document.querySelector('.step[data-step="' + i + '"]'); }
+
+    // Each method's runner renders its step and calls done(result) once, with
+    // the proof bouncer checks for that method.
+    var runners = {
+      'auto:none': function (el, done) { done({}); },
+      'captcha:turnstile': function (el, done) {
+        var w = el.querySelector('.widget');
+        if (w.dataset.widgetId) { window.turnstile.reset(w.dataset.widgetId); return; }
+        w.dataset.widgetId = window.turnstile.render(w, {
+          sitekey: config.TurnstileSiteKey,
+          cData: config.Sig,
+          callback: function (token) { done({ token: token }); },
+          'error-callback': function () { show(document.getElementById('failed')); }
+        });
+      }
+    };
+
+    function run(i) {
+      current = i;
+      if (i === config.Steps.length) return submit();
+      var m = config.Steps[i];
+      var el = stepEl(i);
+      show(el);
+      runners[m.type + ':' + m.provider](el, function (result) {
+        if (current !== i) return;
+        results[i] = result;
+        run(i + 1);
+      });
+    }
+
+    function start() { results = []; run(0); }
+
+    function submit() {
+      show(document.getElementById('working'));
+      fetch('/verify/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vlab_user: config.User,
+          vlab_account: config.Account,
+          vlab_platform: config.Platform,
+          vlab_methods: config.Methods,
+          vlab_sig: config.Sig,
+          results: results
+        })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (body) {
+          show(document.getElementById(body.status === 'verified' ? 'verified' : 'failed'));
+        })
+        .catch(function () { show(document.getElementById('failed')); });
+    }
+
+    window.onTurnstileLoad = start;
+    if (!config.NeedsTurnstile) start();
+  </script>
+  {{if .NeedsTurnstile}}
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
+  {{end}}
+{{end}}
+</main>
+</body>
+</html>
