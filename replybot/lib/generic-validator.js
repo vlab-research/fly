@@ -260,6 +260,7 @@ const lookup = {
   // before the field is ever translated.
   link_tracking: validateStatement,
   moviehouse: validateStatement,
+  id_verification: validateStatement,
   wait: validateStatement,
   stitch: validateStatement,
   notify: validateNotify,

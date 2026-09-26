@@ -237,7 +237,7 @@ const TYPEFORM_FIELD_SCHEMA = {
         'Question type. Typeform names — "multiple_choice", "short_text", "statement", ' +
         '"phone_number", "number" — or the short aliases "mc", "text", "statement", ' +
         '"phone", "number". NOTE: for any rich Fly type (webview, link_tracking, ' +
-        'moviehouse, stitch, wait, notify, attachment, payment) the Typeform type barely ' +
+        'moviehouse, id_verification, stitch, wait, notify, attachment, payment) the Typeform type barely ' +
         'matters — use "statement" and put the real type in `description`.',
     },
     ref: {
@@ -266,6 +266,8 @@ const TYPEFORM_FIELD_SCHEMA = {
         '  webview        — "type: webview" plus `url`, `buttonText`, `keepMoving`\n' +
         '  link_tracking  — a tracked link/tel/mailto button; Fly builds the whole URL\n' +
         '  moviehouse     — a Vimeo video with play/pause/finish events; give `videoId`\n' +
+        '  id_verification — human checks before continuing (put it before payment);\n' +
+        '                   `methods: [{type: captcha}]` plus a `wait` on external `bouncer:verified`\n' +
         '  attachment     — an image or video; `attachment: {type, url}`\n' +
         '  stitch         — jump to another form: `stitch: {form: SHORTCODE}`\n' +
         '  wait / notify  — hold the conversation on a timeout or external event\n' +

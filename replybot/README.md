@@ -943,6 +943,25 @@ To get tracking on a link to our own host, the researcher changes the field's `t
 - `gbvlinks.nandan.cloud` → dead. TLS fails (no Ingress claims the hostname, nginx serves the ingress controller's self-signed certificate); carries 193 stored fields.
 - `virtuallab-videos.netlify.com` → dead. 404 (`.netlify.com` alias, retired); carries 490 stored fields.
 
+### `id_verification`: a signed pass-through
+
+The third first-party type points at **bouncer** (`bouncer/README.md`). Replybot knows nothing about verification methods. It builds a signed link and the survey does the rest:
+
+```yaml
+type: id_verification
+methods:
+  - type: captcha
+wait:
+  type: external
+  value: { type: bouncer:verified }
+```
+
+- **`methods` pass through verbatim.** `encodeVerificationMethods` writes the authored list as `vlab_methods` (base64url JSON). Which methods exist, their parameters and providers are all bouncer's (`bouncer/verify`), and bouncer validates them when the link is opened. Adding a method never touches replybot. The only check here is that `methods` is a list (`[MISSING_FIELD_CONTENT]` otherwise).
+- **The link is signed.** `vlab_sig = hex(HMAC-SHA256(BOUNCER_HMAC_KEY, "v2|user|account|platform|<vlab_methods>"))` (`verificationSignature`). Signing the raw param string means neither side has to reproduce the other's JSON serialization. The signature stops a participant verifying another conversation or changing the methods. Both test suites assert the same test vector.
+- **Waiting is survey logic.** The author writes the `wait` on `bouncer:verified` like any other external wait (moviehouse, linksniffer), and replybot carries it through untouched.
+
+Config: `BOUNCER_URL` (public, from `devops/values/<env>.yaml`, e.g. `https://id.vlab.digital/verify`) and `BOUNCER_HMAC_KEY` (secret, `gbv-bot-envs` from `replybot/.env-<env>`; it must equal bouncer's). Each throws at the point of use (`[MISSING_SERVICE_URL]`, `[MISSING_SERVICE_SECRET]`), following the same reasoning as `serviceBase`.
+
 ## WhatsApp Entry Points
 
 WhatsApp conversations are initiated via three distinct paths, all reaching the same referral-based survey start logic in `machine.js`:

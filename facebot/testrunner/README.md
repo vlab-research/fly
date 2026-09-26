@@ -28,6 +28,7 @@ The primary test mode (`test.tc.ts`) spins up a isolated Docker network with the
 - **Scribble (chat-log sink)** — consumes `vlab-chat-log` into `chatroach.chat_log`. Replybot has always produced to this topic in the harness; until this sink existed nothing consumed it.
 - **Formcentral** — resolves `(account_id, shortcode)` → survey; replybot calls it for every form lookup
 - **Dinersclub** — payment processor; consumes `vlab-payment`, posts results back through hermes `/synthetic`
+- **Bouncer** — the verification page behind `id_verification` fields. It runs with `BOUNCER_ALLOW_AUTO=true`, so the `auto` method verifies with no participant action. Replybot's `BOUNCER_HMAC_KEY` is set to the same key, so the signed path is real. Its mapped port is `stack.bouncerUrl`. Tests re-point replybot's link (`http://bouncer:1323/verify?...`) at that port. See `bouncer/README.md` § "`auto` and the end-to-end test"
 - **Message-worker** — consumes `commands`, translates per platform, and sends to the facebot mock. Pinned to `NUM_WORKERS: 1` (see the un-acked-send warning below).
 - **Facebot receiver** — mocks the Facebook Graph API *and* the WhatsApp Cloud API; captures outbound sends and lets tests poll and reply
 - **Dean** — triggered on-demand per test; processes overdue followups, updates CockroachDB, publishes new questions

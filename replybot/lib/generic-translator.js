@@ -1,3 +1,5 @@
+const crypto = require('crypto')
+
 // ---------------------------------------------------------------------------
 // First-party service URLs
 //
@@ -55,6 +57,11 @@ const VIDEO_PARAM = 'vlab_video'
 // protocol stripped, `p` is that protocol (`https`, `tel`, `mailto`, `sms`).
 const DESTINATION_PARAM = 'url'
 const PROTOCOL_PARAM = 'p'
+
+// bouncer content: the requested verifications, and replybot's signature over
+// them and the conversation triple.
+const METHODS_PARAM = 'vlab_methods'
+const SIGNATURE_PARAM = 'vlab_sig'
 
 // Pure. The conversation triple as query params, plus the components we could
 // not resolve. A component is stamped only when it is a non-empty string --
@@ -126,6 +133,45 @@ function buildMoviehouseUrl(base, videoId, ctx) {
   const url = buildServiceUrl(base, {
     [VIDEO_PARAM]: String(videoId),
     ...params
+  })
+
+  return { url, missing }
+}
+
+// Pure. The `vlab_methods` param: base64url JSON of the survey's `methods`,
+// exactly as authored. replybot does not interpret them -- which methods
+// exist, their parameters and providers are bouncer's (bouncer/verify). The
+// signature covers this exact string, so bouncer never has to reproduce
+// replybot's JSON serialization.
+function encodeVerificationMethods(methods) {
+  return Buffer.from(JSON.stringify(methods)).toString('base64url')
+}
+
+// Pure. HMAC-SHA256 over the triple and the methods param, hex. Must stay
+// byte-identical to bouncer's `sign` (`bouncer/identity.go`); the shared test
+// vector in both test suites enforces it. Signing is what stops a participant
+// editing `vlab_user` to verify someone else, or stripping a method out.
+function verificationSignature(key, ctx, methodsParam) {
+  const { params } = identityParams(ctx)
+  const input = [
+    'v2',
+    params[IDENTITY_PARAMS.user] || '',
+    params[IDENTITY_PARAMS.account] || '',
+    params[IDENTITY_PARAMS.platform] || '',
+    methodsParam
+  ].join('|')
+  return crypto.createHmac('sha256', String(key)).update(input).digest('hex')
+}
+
+// Pure. The full bouncer URL for an `id_verification` field.
+function buildIdVerificationUrl(base, key, ctx, methods) {
+  const { params, missing } = identityParams(ctx)
+  const methodsParam = encodeVerificationMethods(methods)
+
+  const url = buildServiceUrl(base, {
+    ...params,
+    [METHODS_PARAM]: methodsParam,
+    [SIGNATURE_PARAM]: verificationSignature(key, ctx, methodsParam)
   })
 
   return { url, missing }
@@ -482,6 +528,43 @@ function translateMoviehouse(field, ctx) {
   return webviewMessage(field, withExtensionsDefault(md), url, md.buttonText)
 }
 
+// `id_verification` -- the participant passes the checks the survey lists on
+// bouncer's page, and bouncer emits `bouncer:verified`, which the survey waits
+// on like any other external event:
+//
+//   type: id_verification
+//   buttonText: Verify you're human
+//   methods:
+//     - type: captcha
+//   wait:
+//     type: external
+//     value: { type: bouncer:verified }
+//
+// replybot's only job is the link: base from BOUNCER_URL, identity from the
+// conversation, `methods` passed through verbatim, all signed with
+// BOUNCER_HMAC_KEY. bouncer validates the methods when the link is opened.
+function translateIdVerification(field, ctx) {
+  const md = field.md || {}
+  const base = serviceBase('BOUNCER_URL', 'id_verification', field.ref)
+  const key = process.env.BOUNCER_HMAC_KEY
+
+  if (!key || !String(key).trim()) {
+    throw new Error(
+      `[MISSING_SERVICE_SECRET] BOUNCER_HMAC_KEY is not set, so the 'id_verification' field ` +
+      `'${field.ref}' cannot sign its link. Set it in the replybot env file for this environment.`
+    )
+  }
+
+  if (!Array.isArray(md.methods)) {
+    throw new Error(`[MISSING_FIELD_CONTENT] the 'id_verification' field '${field.ref}' has no 'methods' list to send to bouncer.`)
+  }
+
+  const { url, missing } = buildIdVerificationUrl(base, String(key).trim(), ctx, md.methods)
+  warnIncomplete('id_verification', field.ref, missing)
+
+  return webviewMessage(field, withExtensionsDefault(md), url, md.buttonText || "Verify you're human")
+}
+
 // Messenger renders a webview button with `messenger_extensions: true` unless
 // told otherwise (`message-worker/translator.go`), and that requires the domain
 // to be whitelisted in the Facebook app or the button fails to open. Neither
@@ -633,6 +716,9 @@ function _translateTypeformField(field, ctx) {
     case 'moviehouse':
       return translateMoviehouse(field, ctx)
 
+    case 'id_verification':
+      return translateIdVerification(field, ctx)
+
     case 'attachment':
       return translateAttachment(field)
 
@@ -652,6 +738,9 @@ module.exports = {
   buildServiceUrl,
   buildLinkTrackingUrl,
   buildMoviehouseUrl,
+  encodeVerificationMethods,
+  verificationSignature,
+  buildIdVerificationUrl,
   IDENTITY_PARAMS,
   VIDEO_PARAM,
   DESTINATION_PARAM,

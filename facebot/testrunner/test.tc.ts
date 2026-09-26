@@ -21,6 +21,7 @@ import {
 } from './seed-db';
 import { flowMaster, flowMasterWhatsApp, TestFlow, ErrorResponse, SuccessResponse, receiveSent, receiveSentEnvelope, registerAccounts } from './socket';
 import { snooze, waitFor } from './utils';
+import r2 from 'r2';
 import { getResponses, getState, getAllStates, getChatLog, getMessages, countMessages, messagesHasAccountColumn } from './responses';
 import { onPageA, onPageB, onWaA, onWaB, stateKey, stateKeyGlob, legacyStateKey } from './conversation';
 import { makeReferralFor, makeTextResponseFor, makeQRFor, makeEchoFor, makeSyntheticRaw } from './mox';
@@ -883,6 +884,118 @@ describe('Test Bot flow Survey Integration Testing', () => {
 
       await sendMessage(makeReferral(userId, 'UGqDwc'));
       await flowMaster(userId, testFlow);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Verification (bouncer). A real captcha cannot be solved here, so the form
+  // asks for the `auto` method, which the harness's bouncer allows
+  // (BOUNCER_ALLOW_AUTO). Everything but the provider call is real: replybot
+  // signs the link with BOUNCER_HMAC_KEY from its env, bouncer checks that
+  // signature and the method list with its own copy of the key, and its
+  // `bouncer:verified` event must reach hermes and advance the survey.
+  // ---------------------------------------------------------------------------
+  describe('Verification (bouncer)', function () {
+    this.timeout(60000);
+
+    const form = JSON.parse(fs.readFileSync('forms/idVrfy.json', 'utf-8'));
+    // The harness's translate-typeform package predates `id_verification`, so
+    // only the fields after it go through fieldsFromForm.
+    const after = fieldsFromForm({ ...form, fields: form.fields.slice(1) });
+
+    // Referral -> the verification button. Returns the link replybot built,
+    // re-pointed at bouncer's host-mapped port (`bouncer` only resolves inside
+    // the docker network), once the conversation is waiting on it.
+    async function reachVerification(userId: string): Promise<URL> {
+      await sendMessage(makeReferral(userId, 'idVrfy'));
+      const sent = await receiveSent(userId);
+      const found = JSON.stringify(sent.message).match(/http:\/\/bouncer:1323\/verify\?[^"]+/);
+      if (!found) throw new Error(`no bouncer link in the verification message: ${JSON.stringify(sent.message)}`);
+
+      await sendMessage(makeEcho(sent.message, userId));
+      await waitFor(async () => {
+        const st = await getState(chatbase, userId);
+        return st?.current_state === 'WAIT_EXTERNAL_EVENT' ? st : null;
+      }, 30000);
+
+      const link = new URL(found[0]);
+      return new URL(`${stack.bouncerUrl}${link.pathname}${link.search}`);
+    }
+
+    function submitBody(link: URL): any {
+      const q = link.searchParams;
+      return {
+        vlab_user: q.get('vlab_user'),
+        vlab_account: q.get('vlab_account'),
+        vlab_platform: q.get('vlab_platform'),
+        vlab_methods: q.get('vlab_methods'),
+        vlab_sig: q.get('vlab_sig'),
+        results: [{}],
+      };
+    }
+
+    async function submit(link: URL): Promise<{ status: number, body: any }> {
+      const res = await r2.post(`${stack.bouncerUrl}/verify/submit`, { json: submitBody(link) }).response;
+      return { status: res.status, body: await res.json() };
+    }
+
+    function tampered(link: URL, param: string, value: string): URL {
+      const t = new URL(link.href);
+      t.searchParams.set(param, value);
+      return t;
+    }
+
+    it('a signed link verifies the participant and advances the survey', async () => {
+      const userId = uuid();
+      const link = await reachVerification(userId);
+
+      const q = link.searchParams;
+      q.get('vlab_user')!.should.equal(userId);
+      q.get('vlab_account')!.should.equal(PAGE_A);
+      q.get('vlab_platform')!.should.equal('messenger');
+      JSON.parse(Buffer.from(q.get('vlab_methods')!, 'base64url').toString())
+        .should.eql([{ type: 'auto' }]);
+
+      const page = await r2.get(link.href).response;
+      page.status.should.equal(200);
+
+      const { status, body } = await submit(link);
+      status.should.equal(200);
+      body.status.should.equal('verified');
+
+      await flowMaster(userId, [
+        [ok, after[0], [makePostback(after[0], userId, 0)]],
+        [ok, after[1], []],
+      ]);
+    });
+
+    it('a tampered link is refused and the survey keeps waiting', async () => {
+      const userId = uuid();
+      const link = await reachVerification(userId);
+
+      // Another participant, or a method list with the requested check swapped
+      // out, must fail the signature -- on the page and on submit alike.
+      const otherUser = tampered(link, 'vlab_user', uuid());
+      const otherMethods = tampered(link, 'vlab_methods',
+        Buffer.from(JSON.stringify([{ type: 'captcha' }])).toString('base64url'));
+
+      for (const bad of [otherUser, otherMethods]) {
+        (await r2.get(bad.href).response).status.should.equal(400);
+        const { status, body } = await submit(bad);
+        status.should.equal(400);
+        body.status.should.equal('broken');
+      }
+
+      await snooze(3000);
+      const st = await getState(chatbase, userId);
+      st!.current_state.should.equal('WAIT_EXTERNAL_EVENT');
+
+      // The genuine link still works afterwards.
+      (await submit(link)).body.status.should.equal('verified');
+      await flowMaster(userId, [
+        [ok, after[0], [makePostback(after[0], userId, 0)]],
+        [ok, after[1], []],
+      ]);
     });
   });
 

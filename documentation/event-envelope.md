@@ -243,6 +243,7 @@ moviehouse below.
 | `message-worker` | `machine_report` (on every send failure) | yes |
 | `replybot` | `machine_report` (on every report) | yes |
 | `linksniffer` | `external` (`linksniffer:click`) | yes — but `platform` is *assumed* when absent, see below |
+| `bouncer` | `external` (`bouncer:verified`, success only, once every requested method passed) | yes — all three are **required**, and the link is HMAC-signed by replybot |
 | `exodus` | `bailout` | yes — but conditions-based bails send an *assumed* platform, see below |
 | **`moviehouse`** | `external` (`moviehouse:play`, `:pause`, `:ended`, `:seeked`, `:volumechange`, `:playbackratechange`, `:error`, **`:heartbeat` every 30s**) | yes — and `platform` is **omitted rather than assumed** when absent, see below |
 
