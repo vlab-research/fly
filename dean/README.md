@@ -94,6 +94,25 @@ Two things this rule is built on:
 (`devops/migrations/33-states-last-inbound.sql`), and NULL is never in band:
 those participants are not followed up until they write again.
 
+## `Timeouts` and the `timeout` event
+
+`Timeouts` (`queries.go`) selects respondents in `WAIT_EXTERNAL_EVENT` whose
+timeout has matured and emits `{"type": "timeout", "value": <waitStart>}`.
+Replybot treats that as satisfying the wait's timeout leaf. It is the only
+source of `timeout` events.
+
+The date comes from the `states.timeout_date` stored computed column
+(`devops/migrations/34-states-timeout-date-compound-wait.sql`), or, when that is
+NULL, from a named survey setting (`wait.value.variable` joined to
+`survey_settings.timeouts`). `timeout_date` covers top-level timeouts and the
+timeout arms of a one-level `op: or` (earliest arm) or `op: and` (latest arm).
+The settings join reads only the top level. The rules, the interval syntax
+and the limits are in `documentation/waits-and-timeouts.md`.
+
+With `DEAN_TIMEOUT_BLACKLIST` empty the query takes an `ORDER BY ... LIMIT 1`
+branch and fires **one** timeout per run. Production sets a blacklist. Tests
+that expect several rows set a dummy one.
+
 ## `Payments` and the `repeat_payment` event
 
 `Payments` (`queries.go:151`) selects respondents parked in a **payment** wait
@@ -175,6 +194,13 @@ cd devops
 make test-db PORT=5433
 ```
 
+`DEAN_TEST_DATABASE_URL` overrides the default
+`postgres://root@localhost:5433/chatroach`, for when port 5433 is taken:
+
+```bash
+DEAN_TEST_DATABASE_URL=postgres://root@localhost:26299/chatroach go test -p 1 ./...
+```
+
 Once the database is running, you can run the tests:
 
 ```bash
@@ -212,7 +238,7 @@ docker rm vlab-cockroach
 Dean uses environment variables for configuration. Key variables include:
 
 - `DEAN_TIMEOUT_MAX_PAST`: Maximum duration in the past to trigger timeouts (e.g., "24h", "20d"). Timeouts older than this will be ignored.
-- `DEAN_TIMEOUT_BLACKLIST`: Comma-separated list of form shortcodes to exclude from timeout processing
+- `DEAN_TIMEOUT_BLACKLIST`: Comma-separated list of form shortcodes to exclude from timeout processing. Leaving it empty limits `Timeouts` to one event per run (see above)
 - `DEAN_ERROR_INTERVAL`: Retry interval for error states
 - `DEAN_BLOCKED_INTERVAL`: Retry interval for blocked states
 - `DEAN_RESPONDING_INTERVAL`: Maximum time to wait for responses

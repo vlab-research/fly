@@ -839,6 +839,10 @@ wait:
       value: 1 day
 ```
 
+The timeout arm is scheduled by dean from `states.timeout_date`, and
+`lib/typewheels/waiting.js` accepts it. Which arm shapes are scheduled is in
+`documentation/waits-and-timeouts.md`.
+
 **`moviehouse`:** Play a Vimeo video with events for play, pause, seek, finish, and a 30-second heartbeat.
 
 ```yaml

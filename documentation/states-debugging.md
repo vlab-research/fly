@@ -782,7 +782,7 @@ Non-destructive: state is derived, the event log is durable, a miss recomputes, 
 is sent to anyone. See the Redis cache-key section above for how to find the keys by hand.
 
 ### Participant waiting too long
-Filter by `current_state = 'WAIT_EXTERNAL_EVENT'` and check `timeout_date`. Dean normally handles timeouts automatically, but if Dean is down or misconfigured, participants can get stuck waiting. The `state_json.wait` field describes what event is expected.
+Filter by `current_state = 'WAIT_EXTERNAL_EVENT'` and check `timeout_date`. Dean normally handles timeouts automatically, but if Dean is down or misconfigured, participants can get stuck waiting. The `state_json.wait` field describes what event is expected. A NULL `timeout_date` on a waiting row means dean has no date to fire at: the wait has no timeout arm, names a survey setting, or uses a shape or interval `timeout_date` does not read. See `documentation/waits-and-timeouts.md`.
 
 ### Survey health overview
 Aggregate `current_state` counts grouped by `current_form` for all shortcodes in a survey:

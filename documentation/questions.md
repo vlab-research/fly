@@ -232,6 +232,9 @@ wait:
 >     - type: timeout
 >       value: 1 day
 > ```
+>
+> The conversation moves on at whichever comes first. See "Wait - Timeout" below
+> for how compound waits are scheduled.
 
 ## Videos (Moviehouse)
 
@@ -392,7 +395,10 @@ JSON:
 }
 ```
 
-`value` written as "1 minute" or "2 hours" or "2 days".
+`value` written as "1 minute" or "2 hours" or "2 days". Up to three parts,
+decimals and abbreviations also work ("90 mins", "1.5 hours", "1 day 2 hours").
+A value in any other form never times out. The full syntax is in
+`documentation/waits-and-timeouts.md` §3.
 
 
 ### Absolute timeout:
@@ -414,6 +420,26 @@ JSON:
 }
 ```
 
+
+### Timeout or event, whichever comes first:
+
+```yaml
+wait:
+  op: or
+  vars:
+    - type: external
+      value:
+        type: moviehouse:play
+    - type: timeout
+      value: 1 hour
+```
+
+`op: or` ends at the first arm satisfied, so it ends at the earliest timeout
+arm. `op: and` needs every arm, so it ends at the latest timeout arm, and
+only once the other arms have arrived too. Only relative timeouts
+are scheduled inside `op`, in the first four arms, one level deep. An absolute or
+named (`variable`) timeout inside `op` never fires. See
+`documentation/waits-and-timeouts.md` §2.
 
 ## Notify
 
