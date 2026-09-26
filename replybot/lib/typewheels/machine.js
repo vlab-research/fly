@@ -870,31 +870,17 @@ function act(ctx, state, output) {
     case 'RESPOND': {
       const ctxWithMd = { ...ctx, md: { ...state.md, ...output.md } }
       const qa = apply(state, output).qa
-      const messages = respond(ctxWithMd, qa, output)
-      const payment = messages.map(m => getPaymentFromMessage(ctx, m)).find(p => p)
-
-      return { messages, payment }
+      return withPayment(ctx, respond(ctxWithMd, qa, output))
     }
 
-    case 'RESPOND_AND_RESET': {
-      const qa = state.qa
-      const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
-
-      return { messages }
-    }
-
+    case 'RESPOND_AND_RESET':
     case 'RESPOND_AGAIN': {
       const qa = state.qa
-      const messages = respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output)
-
-      return { messages }
+      return withPayment(ctx, respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output))
     }
 
     case 'SWITCH_FORM': {
-
-      return {
-        messages: respond({ ...ctx, md: output.md }, [], output)
-      }
+      return withPayment(ctx, respond({ ...ctx, md: output.md }, [], output))
     }
 
     case 'MAKE_PAYMENT': {
@@ -944,6 +930,14 @@ function _wrapPayment(ctx, payment) {
     ..._wrapSideEffect(ctx, payment),
     platform: ctx.platform || 'messenger'
   }
+}
+
+// Every branch that renders messages must go through here: a message carrying
+// metadata.payment that is sent without its payment being published leaves the
+// respondent waiting on a payment nobody requested.
+function withPayment(ctx, messages) {
+  const payment = messages.map(m => getPaymentFromMessage(ctx, m)).find(p => p)
+  return { messages, payment }
 }
 
 function getPaymentFromMessage(ctx, message) {
