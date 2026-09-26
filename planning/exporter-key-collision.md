@@ -1,6 +1,6 @@
 # Exporter Object-Key Collision — Cross-Tenant Data Disclosure
 
-**Status:** Backlog — [VIR-23](https://linear.app/vlab-research/issue/VIR-23/exporter-object-keys-collide-across-researchers-disclosing-respondent). Pre-existing bug, live in production, unrelated to the media
+**Status:** Fix in review on branch `fix/vir-23-exporter-key-collision` (see §8) — [VIR-23](https://linear.app/vlab-research/issue/VIR-23/exporter-object-keys-collide-across-researchers-disclosing-respondent). Pre-existing bug, live in production, unrelated to the media
 abstraction work that surfaced it.
 
 **Found:** 2026-08-10, while designing inbound respondent-media storage
@@ -116,3 +116,48 @@ media. **That work must not adopt the current key scheme.** The same collision t
 disclose a ZIP of respondent photographs rather than a CSV — same mechanism, materially
 worse payload. Either fix this first, or key the new source correctly from the start and
 leave the existing three to this ticket.
+
+## 8. Implementation (branch `fix/vir-23-exporter-key-collision`)
+
+**Decisions taken:**
+
+- **Option A only.** The key is `exports/{sha256(email)[:16]}/{survey}{artifact}.csv`,
+  built by pure functions in `exporter/exporter/keys.py` and used by all three
+  export types. Option D (`export_id` in the key) was not adopted. It is a product
+  question, and a stable per-owner key keeps today's "latest export" behaviour.
+- **Remediation goes beyond §5.** §5 relies on the lifecycle rule plus an optional
+  delete. That leaves the old links in `export_status.export_link`, still served
+  by the dashboard until they expire, and the object behind each may already be
+  another owner's. So the dashboard-server now guards the read side too:
+  `listExports` (REST and MCP) serves a link only if its object key is under the
+  caller's own owner prefix (`dashboard-server/api/exports/exports.keys.js`).
+  Every pre-fix link is replaced by the `Not Found` placeholder the moment
+  dashboard-server deploys, without deleting anything from storage. This does
+  not revoke a presigned URL already copied out of the UI; those die on their
+  own within 7 hours of issue. Deleting the old `exports/<survey>*.csv` objects
+  is the only way to kill them sooner, and it stays an optional manual step.
+- **No other reader.** Only these two places use the key: the exporter writes it,
+  and the dashboard-server relays the presigned URL out of `export_status`. The
+  dashboard-client only renders `export_link`, and nothing else reads the
+  exports bucket.
+
+**Rollout:** two services change, and either order is safe. The dashboard guard
+works on its own, since before the exporter ships it hides every link, new ones
+included. The recommended order is exporter first, then dashboard-server
+straight after, so the gap during which downloads are hidden is short.
+Deploying dashboard-server first closes the old-link exposure a few minutes
+sooner, at the cost of no downloads until the exporter lands.
+
+**Where the docs and the code disagreed (found during this work):**
+
+- The line numbers in §1 were stale (252 / 377 / 485 on `main` at the time of the fix).
+- The ticket cites `planning/inbound-media-storage.md`; the file is `planning/inbound-media.md`.
+- `GoogleStorageBackend` has no `generate_link`, so the `google` backend finishes
+  exports with `"Base backend fake link"`. Recorded in `exporter/README.md`.
+- `exporter/README.md` lists `KAFKA_*` env vars and `requirements*.txt`. The exporter
+  polls the DB and uses Poetry. Recorded under Known Issues rather than rewritten.
+- `exports.service.js` said rows end `Completed`; the terminal status is
+  `Finished`. Fixed.
+- `documentation/exports-storage.md` contradicts itself on MinIO sizing: the
+  closing paragraph says 25Gi single PVC, and "Distributed, since media" says
+  4 × 50Gi. Not touched here.
