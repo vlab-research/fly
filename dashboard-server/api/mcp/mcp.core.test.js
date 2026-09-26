@@ -826,6 +826,8 @@ describe('mcp.core: data', () => {
     expect(shaped).to.not.have.any.keys('user_id', 'locked_at');
     expect(shapeExportRow({ ...row, status: 'Finished', export_link: 'https://x/y' }).export_link)
       .to.equal('https://x/y');
+    expect(shapeExportRow({ ...row, status: 'Finished', export_link: 'Not Found' }).export_link)
+      .to.equal(null);
   });
 
   it('tells the caller how to follow a started export', () => {
