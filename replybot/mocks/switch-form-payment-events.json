@@ -1,0 +1,47 @@
+{
+ "stitchEcho": {
+  "source": "whatsapp",
+  "account_id": "1203867182815254",
+  "platform": "whatsapp",
+  "phone_number_id": "1203867182815254",
+  "from": "15419799714",
+  "type": "bot_echo",
+  "metadata": {
+   "ref": "to_pay_1",
+   "type": "stitch",
+   "stitch": {
+    "form": "lacbopay1es",
+    "metadata": {
+     "phone": "+59171234567"
+    }
+   }
+  },
+  "timestamp": 1788566535365
+ },
+ "gateEcho": {
+  "source": "whatsapp",
+  "account_id": "1203867182815254",
+  "platform": "whatsapp",
+  "phone_number_id": "1203867182815254",
+  "from": "15419799714",
+  "type": "bot_echo",
+  "metadata": {
+   "ref": "pay_1_ready"
+  },
+  "timestamp": 1788566898000
+ },
+ "tap": {
+  "from": "15419799714",
+  "from_user_id": "US.1664653981761554",
+  "id": "wamid.TAPGATE",
+  "timestamp": 1788566900000,
+  "text": {
+   "body": "OK"
+  },
+  "type": "text",
+  "source": "whatsapp",
+  "platform": "whatsapp",
+  "phone_number_id": "1203867182815254",
+  "account_id": "1203867182815254"
+ }
+}
