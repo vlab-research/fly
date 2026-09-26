@@ -21,7 +21,7 @@
       "title": "Quick check before we continue.",
       "ref": "id-verification-auto",
       "properties": {
-        "description": "type: id_verification\nbuttonText: Verify\nmethods:\n  - type: auto"
+        "description": "type: id_verification\nbuttonText: Verify\nmethods:\n  - type: auto\nwait:\n  type: external\n  value:\n    type: bouncer:verified"
       },
       "validations": {
         "required": false

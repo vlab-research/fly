@@ -8,11 +8,9 @@ const {
   splitDestination,
   buildLinkTrackingUrl,
   buildMoviehouseUrl,
-  normalizeVerificationMethods,
   encodeVerificationMethods,
   verificationSignature,
   buildIdVerificationUrl,
-  ID_VERIFICATION_WAIT,
   IDENTITY_PARAMS,
   VIDEO_PARAM
 } = require('./generic-translator')
@@ -701,44 +699,16 @@ describe('translateTypeformField', () => {
   })
 
   // -------------------------------------------------------------------------
-  // `id_verification` -- bouncer.
+  // `id_verification` -- bouncer. replybot only signs and passes through; what
+  // the methods mean is tested in bouncer.
   // -------------------------------------------------------------------------
 
-  describe('normalizeVerificationMethods', () => {
-    const throwsInvalid = (methods, fragment) => {
-      let err
-      try { normalizeVerificationMethods(methods, 'ref_1') } catch (e) { err = e }
-      should.exist(err)
-      err.message.should.contain('[INVALID_FIELD_CONTENT]')
-      if (fragment) err.message.should.contain(fragment)
-    }
-
-    it('fills in the default provider', () => {
-      normalizeVerificationMethods([{ type: 'captcha' }], 'r')
-        .should.deep.equal([{ type: 'captcha', provider: 'default' }])
+  describe('encodeVerificationMethods', () => {
+    it('passes the methods through exactly as authored', () => {
+      const methods = [{ type: 'captcha', provider: 'anything', extra: 1 }, { type: 'unknown-to-replybot' }]
+      JSON.parse(Buffer.from(encodeVerificationMethods(methods), 'base64url').toString())
+        .should.deep.equal(methods)
     })
-
-    it('keeps an explicit provider', () => {
-      normalizeVerificationMethods([{ type: 'captcha', provider: 'turnstile' }], 'r')
-        .should.deep.equal([{ type: 'captcha', provider: 'turnstile' }])
-    })
-
-    it('refuses a missing or empty list', () => {
-      throwsInvalid(undefined, 'methods')
-      throwsInvalid([], 'methods')
-      throwsInvalid({ type: 'captcha' }, 'methods')
-    })
-
-    it('accepts auto, which bouncer gates per environment', () => {
-      normalizeVerificationMethods([{ type: 'auto' }], 'r')
-        .should.deep.equal([{ type: 'auto', provider: 'default' }])
-    })
-
-    it('refuses an unknown method', () => throwsInvalid([{ type: 'otp' }], "unknown method 'otp'"))
-    it('refuses an unknown provider', () => throwsInvalid([{ type: 'captcha', provider: 'recaptcha' }], "provider 'recaptcha'"))
-    it('refuses an unknown parameter', () => throwsInvalid([{ type: 'captcha', provder: 'turnstile' }], "parameter 'provder'"))
-    it('refuses a method twice', () => throwsInvalid([{ type: 'captcha' }, { type: 'captcha' }], 'twice'))
-    it('refuses a bare string', () => throwsInvalid(['captcha'], 'not an object'))
   })
 
   describe('verificationSignature', () => {
@@ -746,11 +716,11 @@ describe('translateTypeformField', () => {
     // link and signature; if either side's signing changes, one breaks.
     it('matches the vector bouncer verifies against', () => {
       const ctx = { user: { id: '1234567890' }, page: { id: 'acct-1' }, platform: 'whatsapp' }
-      const methods = encodeVerificationMethods(normalizeVerificationMethods([{ type: 'captcha' }], 'r'))
+      const methods = encodeVerificationMethods([{ type: 'captcha' }])
 
-      methods.should.equal('W3sidHlwZSI6ImNhcHRjaGEiLCJwcm92aWRlciI6ImRlZmF1bHQifV0')
+      methods.should.equal('W3sidHlwZSI6ImNhcHRjaGEifV0')
       verificationSignature('bouncer-test-vector-key', ctx, methods)
-        .should.equal('c0a8ef438ad169bcc0eda1faf601c89b76ce5482ae042c06db452d8361cef1fd')
+        .should.equal('ac7e674d994adeab7c7587782a52a09fd6297404d363115a76848e9ffe2be9eb')
     })
 
     it('differs for a different conversation or different methods', () => {
@@ -762,7 +732,7 @@ describe('translateTypeformField', () => {
 
   describe('buildIdVerificationUrl', () => {
     it('carries the identity, the methods and their signature', () => {
-      const methods = [{ type: 'captcha', provider: 'default' }]
+      const methods = [{ type: 'captcha' }]
       const { url, missing } = buildIdVerificationUrl('https://id.vlab.digital/verify', 'k', CTX, methods)
       const u = new URL(url)
       const m = u.searchParams.get('vlab_methods')
@@ -780,11 +750,12 @@ describe('translateTypeformField', () => {
 
   describe('translateTypeformField - id_verification', () => {
     const ENV = { BOUNCER_URL: 'https://id.vlab.digital/verify', BOUNCER_HMAC_KEY: 'k' }
+    const WAIT = { type: 'external', value: { type: 'bouncer:verified' } }
     const field = (md = {}) => ({
       type: 'id_verification',
       ref: 'verify_1',
       title: 'Before we pay you, one quick check.',
-      md: { type: 'id_verification', methods: [{ type: 'captcha' }], ...md },
+      md: { type: 'id_verification', methods: [{ type: 'captcha' }], wait: WAIT, ...md },
       properties: {}
     })
     const translate = f => translateTypeformField(f, CTX)
@@ -809,29 +780,24 @@ describe('translateTypeformField', () => {
       })
     })
 
-    it('waits for bouncer when the author wrote no wait', () => {
+    it("carries the survey's wait through untouched", () => {
       withEnv(ENV, () => {
-        translate(field()).metadata.wait.should.deep.equal(ID_VERIFICATION_WAIT)
+        translate(field()).metadata.wait.should.deep.equal(WAIT)
       })
     })
 
-    it("keeps the author's own wait", () => {
-      const wait = { op: 'or', vars: [ID_VERIFICATION_WAIT, { type: 'timeout', value: '1 day' }] }
+    it('does not judge the methods -- bouncer does', () => {
       withEnv(ENV, () => {
-        translate(field({ wait })).metadata.wait.should.deep.equal(wait)
+        const result = translate(field({ methods: [{ type: 'not-yet-invented', knob: 3 }] }))
+        const m = new URL(result.metadata.url).searchParams.get('vlab_methods')
+        JSON.parse(Buffer.from(m, 'base64url').toString())
+          .should.deep.equal([{ type: 'not-yet-invented', knob: 3 }])
       })
     })
 
-    it('refuses invalid methods', () => {
+    it('refuses a field with no methods list', () => {
       withEnv(ENV, () => {
-        thrown(() => translate(field({ methods: [{ type: 'otp' }] }))).message.should.contain('[INVALID_FIELD_CONTENT]')
-        thrown(() => translate(field({ methods: undefined }))).message.should.contain('[INVALID_FIELD_CONTENT]')
-      })
-    })
-
-    it('refuses keepMoving, which would skip the wait', () => {
-      withEnv(ENV, () => {
-        thrown(() => translate(field({ keepMoving: true }))).message.should.contain('[INVALID_FIELD_CONTENT]')
+        thrown(() => translate(field({ methods: undefined }))).message.should.contain('[MISSING_FIELD_CONTENT]')
       })
     })
 

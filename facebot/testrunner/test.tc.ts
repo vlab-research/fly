@@ -954,7 +954,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       q.get('vlab_account')!.should.equal(PAGE_A);
       q.get('vlab_platform')!.should.equal('messenger');
       JSON.parse(Buffer.from(q.get('vlab_methods')!, 'base64url').toString())
-        .should.eql([{ type: 'auto', provider: 'default' }]);
+        .should.eql([{ type: 'auto' }]);
 
       const page = await r2.get(link.href).response;
       page.status.should.equal(200);
@@ -977,7 +977,7 @@ describe('Test Bot flow Survey Integration Testing', () => {
       // out, must fail the signature -- on the page and on submit alike.
       const otherUser = tampered(link, 'vlab_user', uuid());
       const otherMethods = tampered(link, 'vlab_methods',
-        Buffer.from(JSON.stringify([{ type: 'captcha', provider: 'default' }])).toString('base64url'));
+        Buffer.from(JSON.stringify([{ type: 'captcha' }])).toString('base64url'));
 
       for (const bad of [otherUser, otherMethods]) {
         (await r2.get(bad.href).response).status.should.equal(400);

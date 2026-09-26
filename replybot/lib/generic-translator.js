@@ -63,18 +63,6 @@ const PROTOCOL_PARAM = 'p'
 const METHODS_PARAM = 'vlab_methods'
 const SIGNATURE_PARAM = 'vlab_sig'
 
-// The verification methods an `id_verification` field may request, and the
-// parameters each accepts. `default` lets bouncer choose the provider, so
-// switching providers never means editing surveys. Must match bouncer's
-// `allowedProviders` (`bouncer/methods.go`).
-//
-// `auto` passes with no participant action. It is for end-to-end tests of the
-// signed path, and bouncer refuses it unless BOUNCER_ALLOW_AUTO is set.
-const VERIFICATION_METHODS = {
-  captcha: { provider: ['default', 'turnstile'] },
-  auto: { provider: ['default'] }
-}
-
 // Pure. The conversation triple as query params, plus the components we could
 // not resolve. A component is stamped only when it is a non-empty string --
 // same rule hermes applies when stamping the envelope. An empty string would be
@@ -150,44 +138,11 @@ function buildMoviehouseUrl(base, videoId, ctx) {
   return { url, missing }
 }
 
-// Pure. Validate an `id_verification` field's `methods` and fill in defaults.
-// Strict on purpose: an unknown method, provider or parameter (a typo like
-// `provder`) throws instead of silently verifying less than the author asked.
-function normalizeVerificationMethods(methods, ref) {
-  const fail = msg => {
-    throw new Error(`[INVALID_FIELD_CONTENT] the 'id_verification' field '${ref}' ${msg}.`)
-  }
-
-  if (!Array.isArray(methods) || methods.length === 0) {
-    fail("needs a non-empty 'methods' list, e.g. methods: [{type: captcha}]")
-  }
-
-  const seen = new Set()
-  return methods.map((m, i) => {
-    if (!m || typeof m !== 'object' || Array.isArray(m)) fail(`has method ${i} that is not an object`)
-
-    const { type, ...params } = m
-    const spec = VERIFICATION_METHODS[type]
-    if (!spec) fail(`asks for unknown method '${type}' (known: ${Object.keys(VERIFICATION_METHODS).join(', ')})`)
-    if (seen.has(type)) fail(`asks for '${type}' twice`)
-    seen.add(type)
-
-    Object.keys(params).forEach(k => {
-      if (!spec[k]) fail(`gives '${type}' an unknown parameter '${k}'`)
-    })
-
-    const provider = params.provider === undefined ? 'default' : String(params.provider)
-    if (!spec.provider.includes(provider)) {
-      fail(`asks for unknown ${type} provider '${provider}' (known: ${spec.provider.join(', ')})`)
-    }
-
-    return { type, provider }
-  })
-}
-
-// Pure. The `vlab_methods` param: base64url JSON of the normalized methods.
-// bouncer signs and checks this exact string, so neither side ever has to
-// reproduce the other's JSON serialization.
+// Pure. The `vlab_methods` param: base64url JSON of the survey's `methods`,
+// exactly as authored. replybot does not interpret them -- which methods
+// exist, their parameters and providers are bouncer's (bouncer/verify). The
+// signature covers this exact string, so bouncer never has to reproduce
+// replybot's JSON serialization.
 function encodeVerificationMethods(methods) {
   return Buffer.from(JSON.stringify(methods)).toString('base64url')
 }
@@ -208,8 +163,7 @@ function verificationSignature(key, ctx, methodsParam) {
   return crypto.createHmac('sha256', String(key)).update(input).digest('hex')
 }
 
-// Pure. The full bouncer URL for an `id_verification` field. `methods` must
-// already be normalized.
+// Pure. The full bouncer URL for an `id_verification` field.
 function buildIdVerificationUrl(base, key, ctx, methods) {
   const { params, missing } = identityParams(ctx)
   const methodsParam = encodeVerificationMethods(methods)
@@ -574,27 +528,23 @@ function translateMoviehouse(field, ctx) {
   return webviewMessage(field, withExtensionsDefault(md), url, md.buttonText)
 }
 
-// The wait an `id_verification` field holds the conversation on, released by
-// bouncer's `bouncer:verified` event once every requested method has passed.
-const ID_VERIFICATION_WAIT = { type: 'external', value: { type: 'bouncer:verified' } }
-
-// `id_verification` -- the participant passes one or more checks on bouncer's
-// page before the survey continues:
+// `id_verification` -- the participant passes the checks the survey lists on
+// bouncer's page, and bouncer emits `bouncer:verified`, which the survey waits
+// on like any other external event:
 //
 //   type: id_verification
 //   buttonText: Verify you're human
 //   methods:
 //     - type: captcha
-//       provider: default
+//   wait:
+//     type: external
+//     value: { type: bouncer:verified }
 //
-// replybot validates the methods, builds the bouncer URL (base from
-// BOUNCER_URL, identity from the conversation, signed with BOUNCER_HMAC_KEY),
-// and supplies the wait when the author wrote none, because a verification
-// that does not hold the conversation verifies nothing. An authored `wait`
-// (e.g. one with a timeout) wins.
+// replybot's only job is the link: base from BOUNCER_URL, identity from the
+// conversation, `methods` passed through verbatim, all signed with
+// BOUNCER_HMAC_KEY. bouncer validates the methods when the link is opened.
 function translateIdVerification(field, ctx) {
   const md = field.md || {}
-  const methods = normalizeVerificationMethods(md.methods, field.ref)
   const base = serviceBase('BOUNCER_URL', 'id_verification', field.ref)
   const key = process.env.BOUNCER_HMAC_KEY
 
@@ -605,17 +555,14 @@ function translateIdVerification(field, ctx) {
     )
   }
 
-  // machine.js returns on `keepMoving` before it looks at `wait`, so the pair
-  // would send the button and move straight on without anyone being verified.
-  if (md.keepMoving) {
-    throw new Error(`[INVALID_FIELD_CONTENT] the 'id_verification' field '${field.ref}' sets keepMoving, which would skip the verification it exists to wait for.`)
+  if (!Array.isArray(md.methods)) {
+    throw new Error(`[MISSING_FIELD_CONTENT] the 'id_verification' field '${field.ref}' has no 'methods' list to send to bouncer.`)
   }
 
-  const { url, missing } = buildIdVerificationUrl(base, String(key).trim(), ctx, methods)
+  const { url, missing } = buildIdVerificationUrl(base, String(key).trim(), ctx, md.methods)
   warnIncomplete('id_verification', field.ref, missing)
 
-  const withWait = md.wait ? md : { ...md, wait: ID_VERIFICATION_WAIT }
-  return webviewMessage(field, withExtensionsDefault(withWait), url, md.buttonText || "Verify you're human")
+  return webviewMessage(field, withExtensionsDefault(md), url, md.buttonText || "Verify you're human")
 }
 
 // Messenger renders a webview button with `messenger_extensions: true` unless
@@ -791,11 +738,9 @@ module.exports = {
   buildServiceUrl,
   buildLinkTrackingUrl,
   buildMoviehouseUrl,
-  normalizeVerificationMethods,
   encodeVerificationMethods,
   verificationSignature,
   buildIdVerificationUrl,
-  ID_VERIFICATION_WAIT,
   IDENTITY_PARAMS,
   VIDEO_PARAM,
   DESTINATION_PARAM,

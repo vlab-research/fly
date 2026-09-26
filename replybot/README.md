@@ -943,29 +943,24 @@ To get tracking on a link to our own host, the researcher changes the field's `t
 - `gbvlinks.nandan.cloud` → dead. TLS fails (no Ingress claims the hostname, nginx serves the ingress controller's self-signed certificate); carries 193 stored fields.
 - `virtuallab-videos.netlify.com` → dead. 404 (`.netlify.com` alias, retired); carries 490 stored fields.
 
-### `id_verification`: signed, validated, and waits by default
+### `id_verification`: a signed pass-through
 
-The third first-party type points at **bouncer** (`bouncer/README.md`). The researcher lists the checks to run, each an object with its own parameters:
+The third first-party type points at **bouncer** (`bouncer/README.md`). Replybot knows nothing about verification methods. It builds a signed link and the survey does the rest:
 
 ```yaml
 type: id_verification
 methods:
   - type: captcha
-    provider: default   # or turnstile; omitted means default
+wait:
+  type: external
+  value: { type: bouncer:verified }
 ```
 
-It differs from the other two first-party types in four ways:
+- **`methods` pass through verbatim.** `encodeVerificationMethods` writes the authored list as `vlab_methods` (base64url JSON). Which methods exist, their parameters and providers are all bouncer's (`bouncer/verify`), and bouncer validates them when the link is opened. Adding a method never touches replybot. The only check here is that `methods` is a list (`[MISSING_FIELD_CONTENT]` otherwise).
+- **The link is signed.** `vlab_sig = hex(HMAC-SHA256(BOUNCER_HMAC_KEY, "v2|user|account|platform|<vlab_methods>"))` (`verificationSignature`). Signing the raw param string means neither side has to reproduce the other's JSON serialization. The signature stops a participant verifying another conversation or changing the methods. Both test suites assert the same test vector.
+- **Waiting is survey logic.** The author writes the `wait` on `bouncer:verified` like any other external wait (moviehouse, linksniffer), and replybot carries it through untouched.
 
-- **Methods are validated strictly.** `normalizeVerificationMethods` checks against `VERIFICATION_METHODS` (which must match bouncer's `allowedProviders`), fills in `provider: default`, and throws `[INVALID_FIELD_CONTENT]` for an empty list, an unknown type, provider or parameter, or a duplicate type.
-- **The link is signed.** The normalized list travels as `vlab_methods` (base64url JSON, `encodeVerificationMethods`), and `vlab_sig = hex(HMAC-SHA256(BOUNCER_HMAC_KEY, "v2|user|account|platform|<vlab_methods>"))` (`verificationSignature`). Signing the raw param string means neither side has to reproduce the other's JSON serialization. The signature stops a participant verifying another conversation or stripping a method out. Both test suites assert the same test vector.
-- **It supplies a wait.** With no authored `wait`, the metadata gets `{type: external, value: {type: bouncer:verified}}` (`ID_VERIFICATION_WAIT`). An authored wait wins.
-- **`keepMoving` is refused** with `[INVALID_FIELD_CONTENT]`, because `machine.js` returns on `keepMoving` before it reads `wait`.
-
-Config: `BOUNCER_URL` (public, from `devops/values/<env>.yaml`, e.g. `https://id.vlab.digital/verify`) and `BOUNCER_HMAC_KEY` (secret, `gbv-bot-envs` from `replybot/.env-<env>`; it must equal bouncer's). A missing key throws `[MISSING_SERVICE_SECRET]` at the point of use, following the same reasoning as `serviceBase`.
-
-`VERIFICATION_METHODS` also lists `auto`, a test-only method that passes with no participant action. Replybot accepts it, and bouncer refuses it unless `BOUNCER_ALLOW_AUTO=true`, which only the Facebot harness sets.
-
-Adding a method means adding it to `VERIFICATION_METHODS` here and to `allowedProviders`, `checkStep` and a page runner in bouncer. Deploy bouncer first, because bouncer refuses methods it does not know.
+Config: `BOUNCER_URL` (public, from `devops/values/<env>.yaml`, e.g. `https://id.vlab.digital/verify`) and `BOUNCER_HMAC_KEY` (secret, `gbv-bot-envs` from `replybot/.env-<env>`; it must equal bouncer's). Each throws at the point of use (`[MISSING_SERVICE_URL]`, `[MISSING_SERVICE_SECRET]`), following the same reasoning as `serviceBase`.
 
 ## WhatsApp Entry Points
 

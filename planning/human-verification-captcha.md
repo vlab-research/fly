@@ -7,7 +7,9 @@ attention-check docs, VIR-88 plausibility classifier, VIR-89 media challenges.
 **STATUS (2026-09-26): steps 1–5 of §8 built on `feature/human-verification`,
 not deployed.** The design was generalized from a single `captcha` type to
 `id_verification` with a list of parameterized methods before anything
-shipped. bouncer's and replybot's unit tests pass. Checked end to end in a real
+shipped, then restructured after PR #188 review: bouncer's methods sit behind one
+interface (`bouncer/verify`) and own their providers, and replybot passes `methods`
+through without reading them. bouncer's and replybot's unit tests pass. Checked end to end in a real
 browser against Cloudflare's test keys and a fake hermes. Next: the human steps in
 §7, then staging (§8.6). `tags.bouncer` is `false` in both environments until then.
 
@@ -34,22 +36,23 @@ the `wait`.
 type: id_verification
 buttonText: Verify you're human
 methods:
-  - type: captcha
-    provider: default     # or turnstile; omitted means default
+  - type: captcha          # provider optional; default is bouncer's choice
+wait:
+  type: external
+  value: { type: bouncer:verified }
 ```
 
-| method `type` | parameters | notes |
+| method `type` | parameters | providers |
 |---|---|---|
-| `captcha` | `provider`: `default` \| `turnstile` | `default` means "we pick" and is resolved in bouncer, so switching providers is a bouncer deploy with no survey edits |
-| `auto` | `provider`: `default` | **Test-only.** Passes with no participant action. bouncer refuses it unless `BOUNCER_ALLOW_AUTO=true` (only the Facebot harness sets it; staging and production pin it `"false"`) |
+| `captcha` | `provider` (optional; `default` or omitted means bouncer's choice) | `turnstile` (default) |
+| `auto` | none | none. **Test-only**, registered only when `BOUNCER_ALLOW_AUTO=true`; staging and production pin it to `"false"` |
 
-Rules, enforced in replybot (at translation) **and** in bouncer (on every request):
-- the list is non-empty;
-- the type is known;
-- each type appears at most once;
-- the provider is known for that type;
-- **there are no unknown parameters**, so a typo like `provder` fails loudly
-  instead of silently verifying less than was asked.
+The `wait` is survey logic, written by the author like any other external wait. The
+methods are validated **only in bouncer**, when the link is opened. bouncer rejects an
+empty list, an unknown or duplicate type, and any parameter the method does not
+understand (so a typo like `provder` is an error, not a silently ignored setting). A
+mistake therefore shows up as "This link isn't working" when a tester taps the button,
+not when the message is sent. That is the price of replybot not knowing the methods.
 
 ## 3. Shape
 
@@ -149,46 +152,47 @@ rule.
 
 ## 5. replybot
 
-- `normalizeVerificationMethods(methods, ref)` (pure) validates against
-  `VERIFICATION_METHODS`, fills in `provider: default`, and throws `[INVALID_FIELD_CONTENT]`.
-- `encodeVerificationMethods`, `verificationSignature` and `buildIdVerificationUrl` are
-  all pure.
-- `translateIdVerification`:
-  - base from `BOUNCER_URL` (`[MISSING_SERVICE_URL]` if unset);
-  - key from `BOUNCER_HMAC_KEY` (`[MISSING_SERVICE_SECRET]` if unset). Both throw at the
-    point of use, so other field types keep working;
-  - **injects the default wait** `{type: external, value: {type: bouncer:verified}}` when
-    none is authored. An authored wait (e.g. one with a timeout) wins;
-  - **refuses `keepMoving`**, because `machine.js` returns on `keepMoving` before it reads
-    `wait`, which would send the button and move on unverified;
-  - emits the usual `webview` wire message with `extensions: false`.
-- `generic-validator.js`: `id_verification: validateStatement`.
+replybot's only job is the signed link:
+- base from `BOUNCER_URL`;
+- identity from the conversation;
+- `methods` passed through **verbatim** (`encodeVerificationMethods`, base64url JSON);
+- signed with `BOUNCER_HMAC_KEY` (`verificationSignature`).
 
-**Recommended placement: immediately before a payment field.** This is documented in
-`documentation/questions.md` as the standard advice.
+It checks only that `methods` is a list (`[MISSING_FIELD_CONTENT]`). The URL and key
+each throw at the point of use if unset. It emits the usual `webview` wire message with
+`extensions: false`, and carries the author's `wait` through untouched.
+`generic-validator.js` has `id_verification: validateStatement`. Adding a method or
+provider never touches replybot.
+
+**Recommended placement: immediately before a payment field**, documented in
+`documentation/questions.md` along with "always write the wait".
 
 ## 6. bouncer
 
-| File | Contents |
+One interface, with methods owning their providers (`bouncer/README.md` § Structure):
+
+| Package | Role |
 |---|---|
-| `methods.go` | Pure. `Method`, `allowedProviders`, `defaultProvider`, `decodeMethods` (strict: unknown JSON fields rejected), `resolveMethods` |
-| `identity.go` | Pure. `parseLink` (every component required, platform ∈ {messenger, whatsapp}), `sign`/`verifySig` |
-| `turnstile.go` | Pure `judgeSiteverify`, plus a thin siteverify client |
-| `eventer.go` | Pure `buildEvent`, and `Send` for the IO |
-| `server.go` | `openLink` (parse → signature → methods), `checkStep` (one case per method:provider), and the handlers |
-| `page.html` | Embedded. One section per step, and a `runners` table keyed `type:provider`. Turnstile is rendered explicitly with `cData = vlab_sig` |
+| `verify` | The contract. `Method.Plan(params) → Step`; `Step.Ran() / Client() / Check(ctx, proof)`; `Registry.Plan(entries) → steps` (unknown/duplicate type, strips `type`); `DecodeParams` (strict); `ErrUnavailable` |
+| `methods/captcha` | The `captcha` method, a `Provider` interface, and the choice of default (`captcha.New(default, others...)`). `turnstile.go` + `turnstile.js` are one provider |
+| `methods/auto` | The test-only method: no parameters, no providers, always passes |
+| `main.go` | Builds the `Registry` from env. It is the only place that names methods and providers |
+| `server.go` | Link parsing, signature, page, submit, event. **No method or provider names** |
+| `page.html` | Generic: renders each step's runner JS once, then runs `window.bouncerRunners[step.runner]` in order |
 
 | Path | Method | Purpose |
 |---|---|---|
-| `/verify` | GET | Check the link, render the steps; 400 + "link isn't working" if it is bad |
-| `/verify/submit` | POST | `{vlab_*, results: [{token}, …]}` → check each step → event → `{status}` |
+| `/verify` | GET | Check the link, plan and render the steps; 400 + "link isn't working" if it is bad |
+| `/verify/submit` | POST | `{vlab_*, results: [proof, …]}` → each step checks its own proof → event → `{status}` |
 | `/health` | GET | `pong` |
 
-**Adding a method:**
-1. bouncer: `allowedProviders`/`defaultProvider`, a `checkStep` case, and a page
-   runner. A test asserts that every allowed provider resolves to one `checkStep` handles.
-2. replybot: `VERIFICATION_METHODS`.
-3. Deploy bouncer first.
+**Adding a method:** write a package that implements `verify.Method`, with a JS runner,
+and register it in `main.go`. Nothing else changes: not the server, the page template
+or replybot.
+
+**Events** are posted with a local struct, not `botparty.ExternalEvent`. botparty
+lives in a separate repo and has no `platform` field, and dinersclub, message-worker
+and dean each declare a local struct for the same reason (`documentation/event-envelope.md`).
 
 ## 7. Configuration and deploy (all through files, per CLAUDE.md)
 

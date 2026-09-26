@@ -266,8 +266,8 @@ const TYPEFORM_FIELD_SCHEMA = {
         '  webview        — "type: webview" plus `url`, `buttonText`, `keepMoving`\n' +
         '  link_tracking  — a tracked link/tel/mailto button; Fly builds the whole URL\n' +
         '  moviehouse     — a Vimeo video with play/pause/finish events; give `videoId`\n' +
-        '  id_verification — human checks, waits until they pass (put it before payment);\n' +
-        '                   `methods: [{type: captcha, provider: default}]`\n' +
+        '  id_verification — human checks before continuing (put it before payment);\n' +
+        '                   `methods: [{type: captcha}]` plus a `wait` on external `bouncer:verified`\n' +
         '  attachment     — an image or video; `attachment: {type, url}`\n' +
         '  stitch         — jump to another form: `stitch: {form: SHORTCODE}`\n' +
         '  wait / notify  — hold the conversation on a timeout or external event\n' +

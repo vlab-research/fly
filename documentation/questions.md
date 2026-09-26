@@ -265,20 +265,8 @@ opens produces no event at all.
 ## Verification (captcha)
 
 Hold the survey until the participant passes one or more checks. They tap a
-button, a page at `id.vlab.digital` runs each check you listed in order, and the
-survey continues once all of them pass.
-
-```yaml
-type: id_verification
-buttonText: Verify you're human
-methods:
-  - type: captcha
-```
-
-That is the whole field. Fly builds a signed link for this conversation, and it
-**waits for you**: an `id_verification` with no `wait` holds the conversation until
-the participant passes. To stop waiting eventually, write the wait yourself with a
-timeout and branch on what happened, exactly as for any other wait:
+button, a page at `id.vlab.digital` runs each check you listed in order, and once
+all of them pass it sends the event `bouncer:verified`, which your survey waits on:
 
 ```yaml
 type: id_verification
@@ -295,24 +283,30 @@ wait:
       value: 1 day
 ```
 
+Fly builds a signed link for this conversation. **Always write the `wait`.**
+Without it the survey sends the button and moves straight on, which verifies nobody,
+and `keepMoving` has the same effect. The timeout is up to you. Leave it out and a
+participant who never passes waits forever.
+
 **Methods available today:**
 
 | `type` | Parameters | What the participant sees |
 |---|---|---|
-| `captcha` | `provider`: `default` (the default; we pick), or `turnstile` (Cloudflare Turnstile) | Usually nothing or a single tap. Never a picture puzzle |
+| `captcha` | `provider` (optional): `default` or `turnstile` | Usually nothing or a single tap. Never a picture puzzle |
 
-Leave `provider` out unless you need a specific one. `default` lets us switch
-providers without you editing the survey. More methods will be added to this list.
-A misspelled method, provider or parameter stops the survey with an error rather
-than quietly checking less than you asked.
+Leave `provider` out unless you need a specific one. The default is our choice,
+so we can switch providers without you editing the survey. More methods will be
+added to this list.
+
+**Mistakes show up when the link is opened.** A misspelled method, provider or
+parameter makes the verification page say "This link isn't working" rather than
+quietly checking less than you asked. Tap the button once while testing your survey.
 
 **Put it immediately before the payment.** Bots come for the incentive, so a
 check there protects the money without adding friction to the start of the
 survey.
 
 A few things to know:
-- `keepMoving` is refused on an `id_verification` field. It would send the button
-  and carry on without waiting, which verifies nobody.
 - There is no "failed" event. Someone who fails just tries again on the page;
   someone who never passes stays waiting (or hits your timeout).
 - A captcha stops scripted bots. It does not stop a person paid to click
