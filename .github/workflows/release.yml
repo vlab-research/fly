@@ -40,6 +40,7 @@ jobs:
             dinersclub)     CTX=dinersclub         ; IMG=dinersclub       ;;
             scribble)       CTX=scribble           ; IMG=scribble         ;;
             linksniffer)    CTX=linksniffer        ; IMG=linksniffer      ;;
+            bouncer)        CTX=bouncer            ; IMG=bouncer          ;;
             formcentral)    CTX=formcentral        ; IMG=formcentral      ;;
             exporter)       CTX=exporter           ; IMG=exporter         ;;
             exodus)         CTX=exodus             ; IMG=exodus           ;;

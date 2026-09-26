@@ -14,6 +14,12 @@ dependencies:
   - name: linksniffer
     version: 0.0.2
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+  # Human verification (captcha), planning/human-verification-captcha.md.
+  - name: bouncer
+    version: 0.0.1
+    repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts
+    tags:
+      - bouncer
   - name: dashboard
     version: 0.0.2
     repository: oci://us-west1-docker.pkg.dev/toixotoixo/vlab-research/charts

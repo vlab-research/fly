@@ -8,6 +8,9 @@ tags:
   scratchbot: false
   scribble: true
   dean: true
+  # Off until the Turnstile widget, DNS and the `bouncer` secret exist for this
+  # environment -- see bouncer/README.md § Deploy.
+  bouncer: false
 
 kafkabrokers: &kb "kafka-headless.default.svc.cluster.local:29092"
 chatTopic: &topic "vlab-staging-chat-events"
@@ -454,6 +457,10 @@ replybot:
   # branch-deploy hostname.
   - name: MOVIEHOUSE_URL
     value: "https://staging--virtuallab-videos.netlify.app"
+  # The `id_verification` field type: bouncer's public page. BOUNCER_HMAC_KEY,
+  # which signs these links, comes from gbv-bot-envs (replybot/.env-staging).
+  - name: BOUNCER_URL
+    value: "https://staging.id.vlab.digital/verify"
   - name: STATE_STORE_LIMIT
     value: "10000"
   - name: NUM_SPINES
@@ -530,6 +537,55 @@ linksniffer:
       - secretName: gbv-linksniffer-cert
         hosts:
           - staging.links.vlab.digital
+
+  service:
+    type: ClusterIP
+    port: 80
+
+bouncer:
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/vlab-research/bouncer
+    tag: v0.0.1
+    pullPolicy: IfNotPresent
+
+  env:
+  - name: BOTSERVER_URL
+    value: "http://gbv-hermes/synthetic"
+  # Must match the ingress host below: siteverify reports the host the
+  # challenge was solved on, and bouncer rejects any other.
+  - name: BOUNCER_HOSTNAME
+    value: "staging.id.vlab.digital"
+  # The `auto` method verifies without any participant action. It exists for
+  # the testcontainers suite and must stay off in real environments.
+  - name: BOUNCER_ALLOW_AUTO
+    value: "false"
+  # Public. The secret half lives in the `bouncer` Secret (bouncer/.env-staging).
+  - name: TURNSTILE_SITE_KEY
+    value: "REPLACE-with-turnstile-site-key"
+
+  envFrom: bouncer
+
+  resources:
+    requests:
+      cpu: 5m
+      memory: 10Mi
+
+  ingress:
+    enabled: true
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      kubernetes.io/ingress.class: nginx
+    hosts:
+      - host: staging.id.vlab.digital
+        paths:
+          - path: '/verify'
+            pathType: Prefix
+    tls:
+      - secretName: gbv-bouncer-cert
+        hosts:
+          - staging.id.vlab.digital
 
   service:
     type: ClusterIP
