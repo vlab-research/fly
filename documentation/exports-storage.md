@@ -108,6 +108,64 @@ Both endpoints return an array of export status rows, most recent first. Each ro
 through `api/exports/exports.service.js`, as the REST controller does. See
 `documentation/agent-api.md` §9 "Data tools".
 
+## Object keys are scoped by owner
+
+Every export object is written at
+
+```
+exports/<owner prefix>/<survey_name><artifact>.csv
+```
+
+where `<owner prefix>` is the first 16 hex characters of `sha256(email)` of the
+researcher who requested it (`export_status.user_id`), and `<artifact>` is
+empty for `responses`, `_chat_log` for `chat_log`, and
+`_full_messages[_<start>_to_<end>]` for `full_messages`. The keys are built by
+pure functions in `exporter/exporter/keys.py`.
+
+**Why the owner is in the key.** `survey_name` is unique per researcher, not
+globally (in production `default` alone has 8 owners). When keys were
+`exports/<survey_name>*.csv`, two researchers exporting surveys with the same
+name wrote the same object, and the earlier one's presigned link, still valid
+for 7 hours, served the later one's respondent data (VIR-23,
+`planning/exporter-key-collision.md`). Every exporter query was correctly
+scoped by email; the flaw was entirely in the storage key.
+
+**Why a hash, not the email or the user id.** The email would put PII into
+presigned URLs, bucket listings and logs. `users.id` would need a lookup the
+exporter does not otherwise do, while the email is already on the job row. The
+prefix is an unsalted hash, so it separates owners without being a secret:
+anyone who knows an email can compute it. That is acceptable because keys are
+only ever reached through presigned URLs, never listed to researchers.
+
+**Why the key is stable per (owner, survey, artifact).** Re-exporting the same
+survey overwrites the owner's own previous object, which invalidates that
+owner's earlier link. Adding `export_id` to the key would fix that too, but it
+changes "latest export" semantics and was left as a separate product decision.
+
+**The key must stay under `exports/`.** The lifecycle rule below matches on
+that prefix, so a key outside it would never expire.
+
+### The dashboard serves only links under the caller's own prefix
+
+`listExports` (`dashboard-server/api/exports/exports.service.js`) is the only
+path by which an export link reaches anyone: REST `GET /exports/status*` and
+the MCP `list_exports` tool both go through it. It passes every row through
+`withOwnedLink` (`exports.keys.js`, pure). The dashboard recomputes the same
+owner prefix from the caller's email and serves a link only when its object
+key begins `exports/<that prefix>/`. Anything else is replaced by the `Not Found`
+placeholder, which the UI renders as no download button and the MCP returns as
+`null`.
+
+This check is on purpose, not redundant. The `export_status` row belonging
+to the caller does not prove that the object behind its link does. Every link
+issued before owner-scoped keys points at a shared `exports/<survey_name>*.csv`
+object that any researcher with that survey name may since have overwritten, so
+those links are refused. The two digests must agree: `test_keys.py` and
+`exports.keys.test.js` pin the same values.
+
+A side effect is that the dev backend's `"Base backend fake link"`, which is not
+a URL, is also hidden.
+
 ## Lifecycle: exports are temporary
 
 Exports are transient by design. After an export completes, the exporter hands

@@ -380,7 +380,7 @@ controller calls it, and `mcp.service.js` re-exports it:
 |---|---|---|
 | `api/states/states.service.js` | `resolveSurvey` (the ownership lookup `validateSurveyNameAccess` now calls), `statesSummary`, `listStates`, `stateDetail` | states routes, `get_states_summary`, `list_states`, `get_participant_state` |
 | `api/health/health.service.js` | `healthFindings`, `platformNotices` (fail-soft, never throws) | health and platform routes, `get_survey_health`, `get_platform_notices` |
-| `api/exports/exports.service.js` | `startExport`, `listExports` | exports routes, `start_export`, `list_exports` |
+| `api/exports/exports.service.js` | `startExport`, `listExports` (every link passes `exports.keys.js#withOwnedLink`, pure: a link is served only if its object key is under the caller's own owner prefix, see `documentation/exports-storage.md`) | exports routes, `start_export`, `list_exports` |
 | `api/responses/response.service.js` | `getResponses` (a survey with no responses is an empty page, not a `RequestError`) | `GET /responses`, `get_responses` |
 | `api/bails/bails.service.js` | `resolveVlabUser` (get-or-create from email, so an agent never sees a user id), `expected`-marked wrappers over `utils/bails` | bails routes, the seven `*_bail*` tools |
 | `api/credentials/credential.service.js` | `listMessagingAccounts` (IO only; redaction is `mcp.core#redactCredential`, pure, with a recursive no-secret test) | `list_messaging_accounts` |
