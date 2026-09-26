@@ -7,13 +7,14 @@
  * An export is asynchronous: starting one inserts a `Requested` row into
  * export_status and returns its id. The exporter (exporter/exporter/main.py)
  * polls that table — nothing is published to Kafka, whatever older docs say —
- * and moves the row through Processing to Completed (with a presigned download
+ * and moves the row through Processing to Finished (with a presigned download
  * link valid for 7 hours) or Failed. Listing is how a caller learns which.
  */
 
 const crypto = require('crypto');
 
 const { Exports, User } = require('../../queries');
+const { withOwnedLink } = require('./exports.keys');
 
 // The `source` column is the exporter's dispatch key. Anything that is not one
 // of the two named kinds is a plain responses export, which is also what the
@@ -39,18 +40,21 @@ async function startExport({ email, survey_name, export_type, options = {} }) {
  * ever requested. `Exports.all` throws when the user row does not exist; a key
  * whose account is gone has no exports, and an empty list says that better
  * than a 500.
+ *
+ * Every link passes through withOwnedLink: a row being the caller's does not
+ * make the object behind its link the caller's (see exports.keys.js).
  */
 async function listExports({ email, survey_name }) {
   if (survey_name) {
     const { responses } = await Exports.bySurvey(email, survey_name);
-    return responses;
+    return responses.map(withOwnedLink(email));
   }
 
   const user = await User.user({ email });
   if (!user) return [];
 
   const { responses } = await Exports.all(email);
-  return responses;
+  return responses.map(withOwnedLink(email));
 }
 
 module.exports = { startExport, listExports, sourceFor, SOURCE_MAP };

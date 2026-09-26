@@ -744,6 +744,7 @@ const MONITORING_TOOLS = [
 const EXPORT_STATUSES = ['Requested', 'Processing', 'Finished', 'Failed'];
 const EXPORT_DONE_STATUS = 'Finished';
 const EXPORT_LINK_TTL_HOURS = 7;
+const { EXPORT_LINK_PLACEHOLDER } = require('../exports/exports.keys');
 
 const EXPORT_TYPES = ['responses', 'chat_log', 'full_messages'];
 
@@ -2157,15 +2158,17 @@ function validateExportOptions(export_type, options) {
 
 // The row export_status stores, projected to what an agent needs. `user_id`
 // is the caller's own email and `locked_at` is the worker's business, so
-// neither is returned; the placeholder link ("Not Found") becomes null until
-// the export is actually done.
+// neither is returned; the placeholder link ("Not Found") becomes null, as
+// does any link on an export that is not done.
 function shapeExportRow(row) {
+  const downloadable = row.status === EXPORT_DONE_STATUS
+    && row.export_link !== EXPORT_LINK_PLACEHOLDER;
   return {
     id: row.id,
     survey_name: row.survey_id,
     export_type: row.source,
     status: row.status,
-    export_link: row.status === EXPORT_DONE_STATUS ? row.export_link : null,
+    export_link: downloadable ? row.export_link : null,
     updated: row.updated,
     retry_count: row.retry_count,
     options: row.options,

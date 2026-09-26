@@ -9,6 +9,7 @@ from toolz import pipe
 from vlab_prepro import Preprocessor
 
 from . import storage
+from .keys import chat_log_key, full_messages_key, responses_key
 from .db import query, execute
 from .log import log
 
@@ -249,7 +250,7 @@ def format_data(
 def export_data(cnf, export_id, user, survey, options: ExportOptions):
     log.info(f"starting csv export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
-    storage_backend = storage.get_storage_backend(file_path=f"exports/{survey}.csv")
+    storage_backend = storage.get_storage_backend(file_path=responses_key(user, survey))
 
     try:
         # Get responses and form data from database
@@ -367,14 +368,8 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
     start_time = full_messages_options.start_time
     end_time = full_messages_options.end_time
 
-    suffix = ""
-    if start_time or end_time:
-        def _stamp(dt):
-            return dt.strftime("%Y%m%dT%H%M%SZ") if dt else "open"
-        suffix = f"_{_stamp(start_time)}_to_{_stamp(end_time)}"
-
     storage_backend = storage.get_storage_backend(
-        file_path=f"exports/{survey}_full_messages{suffix}.csv"
+        file_path=full_messages_key(user, survey, start_time, end_time)
     )
 
     try:
@@ -482,7 +477,7 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options):
     log.info(f"starting chat log export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
     storage_backend = storage.get_storage_backend(
-        file_path=f"exports/{survey}_chat_log.csv"
+        file_path=chat_log_key(user, survey)
     )
 
     try:
