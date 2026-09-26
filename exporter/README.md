@@ -105,6 +105,19 @@ pip install -r requirements.dev.txt
 pytest exporter/ -s
 ```
 
+## Object Keys
+
+Every artifact is written to `exports/<sha256(email)[:16]>/<survey_name><artifact>.csv`
+(`exporter/keys.py`, pure). The owner prefix exists because `survey_name` is
+unique per researcher, not globally. Without it, researchers who share a survey
+name overwrite each other's exports and disclose respondent data through
+still-valid presigned links (VIR-23). Keys must stay under `exports/` or the
+3-day lifecycle rule stops expiring them. The dashboard-server recomputes the
+same prefix to refuse links that are not the caller's, so changing the digest
+means changing `dashboard-server/api/exports/exports.keys.js` in step. Full
+rationale: `documentation/exports-storage.md` § "Object keys are scoped by
+owner".
+
 ## Known Issues
 
 **Empty surveys fail instead of producing an empty CSV.** A `responses` export
@@ -120,6 +133,15 @@ the cause is identifiable, but the surfaced error is misleading — it reads lik
 schema problem rather than "there is no data". Note that `survey_id` in
 `export_status` holds `surveys.survey_name`, **not** the survey title, so an
 export requested against a title silently matches zero rows and hits this path.
+
+**The Google backend returns no real link.** `GoogleStorageBackend` does not
+override `generate_link`, so a `STORAGE_BACKEND=google` export finishes with
+`"Base backend fake link"`. Every live environment uses `s3` (MinIO).
+
+**Stale configuration notes above.** The `KAFKA_*` variables listed under
+"Export Types & Sources" are not read: the exporter polls `export_status` and
+does not use Kafka. Dependencies are managed with Poetry (`pyproject.toml`),
+not `requirements*.txt`; `poetry install` followed by `pytest` works.
 
 ## See Also
 

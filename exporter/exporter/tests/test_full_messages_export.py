@@ -262,7 +262,7 @@ class TestExportFullMessages:
         export_full_messages("db-url", "uuid-1", "user@test.com", "survey1", opts)
 
         mock_backend_factory.assert_called_once_with(
-            file_path="exports/survey1_full_messages.csv"
+            file_path="exports/f02f61d33aac1c8d/survey1_full_messages.csv"
         )
         mock_status.assert_any_call("db-url", "uuid-1", status="Querying")
         mock_status.assert_any_call("db-url", "uuid-1", status="Writing")
@@ -396,7 +396,7 @@ class TestExportFullMessages:
 
         # Unbounded run keeps the original filename
         mock_backend_factory.assert_called_once_with(
-            file_path="exports/survey1_full_messages.csv"
+            file_path="exports/f02f61d33aac1c8d/survey1_full_messages.csv"
         )
 
         # Messages query should not mention timestamp filters
@@ -422,7 +422,7 @@ class TestExportFullMessages:
 
         # Filename suffix encodes the window
         mock_backend_factory.assert_called_once_with(
-            file_path="exports/survey1_full_messages_20251001T000000Z_to_20251101T000000Z.csv"
+            file_path="exports/f02f61d33aac1c8d/survey1_full_messages_20251001T000000Z_to_20251101T000000Z.csv"
         )
 
         msg_sql = mock_query.call_args_list[1][0][1]
@@ -446,7 +446,7 @@ class TestExportFullMessages:
         export_full_messages("db-url", "uuid-10", "user@test.com", "survey1", opts)
 
         mock_backend_factory.assert_called_once_with(
-            file_path="exports/survey1_full_messages_20251001T000000Z_to_open.csv"
+            file_path="exports/f02f61d33aac1c8d/survey1_full_messages_20251001T000000Z_to_open.csv"
         )
 
         msg_sql = mock_query.call_args_list[1][0][1]
