@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/jackc/pgconn"
@@ -33,7 +34,11 @@ func mustExec(t testing.TB, conn *pgxpool.Pool, sql string, arguments ...interfa
 }
 
 func testPool() *pgxpool.Pool {
-	config, err := pgxpool.ParseConfig("postgres://root@localhost:5433/chatroach")
+	url := os.Getenv("DEAN_TEST_DATABASE_URL")
+	if url == "" {
+		url = "postgres://root@localhost:5433/chatroach"
+	}
+	config, err := pgxpool.ParseConfig(url)
 	handle(err)
 
 	ctx := context.Background()

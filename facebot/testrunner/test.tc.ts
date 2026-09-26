@@ -942,6 +942,34 @@ describe('Test Bot flow Survey Integration Testing', () => {
       ]);
     });
 
+    // The timeout arm nested in `op: or` is scheduled by states.timeout_date
+    // (migration 34) and accepted by replybot's waiting.js; the event arm never fires.
+    it('Sends message after the timeout arm of a compound or wait', async function() {
+      this.timeout(60000);
+
+      const userId = uuid();
+      const fields = getFields('forms/compoundWaitOr.json');
+
+      await sendMessage(makeReferral(userId, 'compoundWaitOr'));
+      await flowMaster(userId, [
+        [ok, fields[0], []],
+      ]);
+      const waiting = await waitFor(async () => {
+        const s = await getState(chatbase, userId);
+        return s?.current_state === 'WAIT_EXTERNAL_EVENT' ? s : null;
+      }, 30000);
+      waiting.state_json.wait.op.should.equal('or');
+      (waiting.timeout_date !== null).should.equal(true, 'timeout_date must be scheduled for a compound wait');
+      // "1 second" rounds up to the next whole second of waitStart.
+      await snooze(2500);
+      await triggerDean(stack.network, stack.deanImage, stack.deanEnv, 'timeouts');
+      await snooze(5000);
+      await flowMaster(userId, [
+        [ok, fields[1], [makeTextResponse(userId, 'LOL')]],
+        [ok, fields[2], []],
+      ]);
+    });
+
     it('Sends messages with notify token after timeout', async function() {
       this.timeout(60000);
 

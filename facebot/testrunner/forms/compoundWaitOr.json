@@ -1,0 +1,87 @@
+{
+  "id": "compoundWaitOr",
+  "title": "Integration Test Compound Wait",
+  "theme": {
+    "href": "https://api.typeform.com/themes/6lPNE6"
+  },
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/WA44hg"
+  },
+  "settings": {
+    "is_public": true,
+    "is_trial": false,
+    "language": "en",
+    "progress_bar": "percentage",
+    "show_progress_bar": true,
+    "show_typeform_branding": true,
+    "meta": {
+      "allow_indexing": false
+    }
+  },
+  "thankyou_screens": [
+    {
+      "ref": "8a4c9940-6f5b-410f-b76c-b63cba6b018f",
+      "title": "bla",
+      "properties": {
+        "show_button": true,
+        "share_icons": true,
+        "button_mode": "reload",
+        "button_text": "again"
+      }
+    },
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "cmpWaitStmt01",
+      "title": "Hey, I'll write you again in a bit.",
+      "ref": "c0a1f5e2-7b7e-4f3e-9d0c-3a1b2c4d5e60",
+      "properties": {
+        "description": "type: wait\nresponseMessage: Please wait!\nwait:\n    op: or\n    vars:\n        - type: external\n          value:\n              type: moviehouse:play\n              id: never-played\n        - type: timeout\n          value: 1 second",
+        "hide_marks": false,
+        "button_text": "Continue"
+      },
+      "type": "statement"
+    },
+    {
+      "id": "cmpWaitText01",
+      "title": "You like that?",
+      "ref": "c0a1f5e2-7b7e-4f3e-9d0c-3a1b2c4d5e61",
+      "validations": {
+        "required": false
+      },
+      "type": "short_text"
+    },
+    {
+      "ref": "8a4c9940-6f5b-410f-b76c-b63cba6b018f",
+      "title": "bla",
+      "properties": {
+        "show_button": true,
+        "share_icons": true,
+        "button_mode": "reload",
+        "button_text": "again"
+      },
+      "type": "thankyou_screen"
+    },
+    {
+      "ref": "default_tys",
+      "title": "Done! Your information was sent perfectly.",
+      "properties": {
+        "show_button": false,
+        "share_icons": false
+      },
+      "type": "thankyou_screen"
+    }
+  ],
+  "_links": {
+    "display": "https://example.typeform.com/to/compoundWaitOr"
+  },
+  "custom_messages": {}
+}

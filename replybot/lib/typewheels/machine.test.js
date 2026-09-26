@@ -854,6 +854,43 @@ describe('getState', () => {
   })
 
 
+  // Dean schedules a compound wait's timeout arm from states.timeout_date
+  // (devops/migrations/34-states-timeout-date-compound-wait.sql) and sends
+  // value == waitStart, which must satisfy the nested arm.
+  describe('dean timeout against a compound wait', () => {
+    const d = Date.now()
+    const waitingOn = wait => ({ ...echo, timestamp: d, payload: { ...echo.payload, metadata: { wait, ref: 'foo' } } })
+    const deanTimeout = synthetic({ type: 'timeout', value: d }, { timestamp: d + 1000 * 60 * 60 * 24 })
+    const play = synthetic({ type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }, { timestamp: d + 1000 * 60 * 60 * 25 })
+
+    it('ends an or wait through its string timeout arm', () => {
+      const wait = { op: 'or', vars: [{ type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }, { type: 'timeout', value: '1 day' }] }
+      const state = getState([referral, waitingOn(wait), deanTimeout])
+      state.state.should.equal('RESPONDING')
+      state.question.should.equal('foo')
+    })
+
+    it('ends an or wait through its relative timeout arm', () => {
+      const wait = { op: 'or', vars: [{ type: 'external', value: { type: 'linksniffer:click' } }, { type: 'timeout', value: { type: 'relative', timeout: '1 day' } }] }
+      getState([referral, waitingOn(wait), deanTimeout]).state.should.equal('RESPONDING')
+    })
+
+    it('keeps an and wait open until its other arm arrives', () => {
+      const wait = { op: 'and', vars: [{ type: 'external', value: { type: 'moviehouse:play', id: 'foobar' } }, { type: 'timeout', value: '1 day' }] }
+      const waiting = getState([referral, waitingOn(wait), deanTimeout])
+      waiting.state.should.equal('WAIT_EXTERNAL_EVENT')
+      waiting.waitStart.should.equal(d)
+
+      getState([referral, waitingOn(wait), deanTimeout, play]).state.should.equal('RESPONDING')
+    })
+
+    it('ignores a timeout sent for a different wait', () => {
+      const wait = { op: 'or', vars: [{ type: 'external', value: { type: 'linksniffer:click' } }, { type: 'timeout', value: { type: 'relative', timeout: '1 day' } }] }
+      const stale = synthetic({ type: 'timeout', value: d - 1000 }, { timestamp: d + 1000 })
+      getState([referral, waitingOn(wait), stale]).state.should.equal('WAIT_EXTERNAL_EVENT')
+    })
+  })
+
   it('Responds when it gets external events that fulfill other conditions', () => {
 
     const wait = {
