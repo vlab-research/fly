@@ -2,6 +2,7 @@
 
 const r2 = require('r2');
 const fb = require('../../config').FACEBOOK;
+const { HEALTH_FIELDS } = require('./whatsapp.core');
 
 /**
  * Exchanges an OAuth authorization code for a WhatsApp Business Account access token.
@@ -48,4 +49,22 @@ async function facebookSubscribeWaba(wabaId, accessToken) {
   }
 }
 
-module.exports = { facebookExchangeCode, facebookSubscribeWaba };
+/**
+ * Reads one phone number's health fields from the Graph API.
+ *
+ * @param {string} phoneNumberId
+ * @param {string} accessToken - the number's stored whatsapp_business token
+ * @returns {Promise<Object>} - Graph's JSON, or { error: {...} }
+ */
+async function facebookNumberHealth(phoneNumberId, accessToken) {
+  const params = new URLSearchParams({ fields: HEALTH_FIELDS.join(','), access_token: accessToken });
+  const url = `${fb.url}/${encodeURIComponent(phoneNumberId)}?${params.toString()}`;
+  try {
+    return await r2.get(url).json;
+  } catch (err) {
+    const safeMsg = (err.message || '').replace(/access_token=[^&\s]+/g, 'access_token=REDACTED');
+    throw new Error(safeMsg);
+  }
+}
+
+module.exports = { facebookExchangeCode, facebookSubscribeWaba, facebookNumberHealth };

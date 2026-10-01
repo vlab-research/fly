@@ -7,6 +7,9 @@ const {
   validateExchangeInput,
   parseExchangeResponse,
   parseSubscribeResponse,
+  parsePhoneNumberIds,
+  selectNumbers,
+  shapeNumberHealth,
 } = require('./whatsapp.core');
 
 describe('whatsapp.core', () => {
@@ -166,6 +169,88 @@ describe('whatsapp.core', () => {
 
     it('rejects a response with neither success nor error', () => {
       parseSubscribeResponse({}).ok.should.equal(false);
+    });
+  });
+
+  // -------------------------------------------------------
+  // number health
+  // -------------------------------------------------------
+  describe('parsePhoneNumberIds', () => {
+    it('reads absent, single, repeated and comma-separated values', () => {
+      parsePhoneNumberIds(undefined).should.deep.equal([]);
+      parsePhoneNumberIds('1').should.deep.equal(['1']);
+      parsePhoneNumberIds(['1', '2']).should.deep.equal(['1', '2']);
+      parsePhoneNumberIds('1, 2,,').should.deep.equal(['1', '2']);
+    });
+  });
+
+  describe('selectNumbers', () => {
+    const ROWS = [
+      { entity: 'facebook_page', key: 'p1', details: { access_token: 'PAGE' } },
+      { entity: 'whatsapp_business', key: 'w1', details: { access_token: 'T1', waba_id: 'a' } },
+      { entity: 'whatsapp_business', key: 'w2', details: { access_token: 'T2', waba_id: 'b' } },
+    ];
+
+    it('returns every WhatsApp number when none is requested', () => {
+      selectNumbers(ROWS, []).should.deep.equal({
+        ok: true,
+        numbers: [{ id: 'w1', accessToken: 'T1' }, { id: 'w2', accessToken: 'T2' }],
+      });
+    });
+
+    it('returns only the requested numbers', () => {
+      selectNumbers(ROWS, ['w2']).numbers.should.deep.equal([{ id: 'w2', accessToken: 'T2' }]);
+    });
+
+    it('refuses an id the caller does not own, naming the ones they do', () => {
+      const result = selectNumbers(ROWS, ['w2', 'other', 'p1']);
+      result.ok.should.equal(false);
+      result.error.should.include('other, p1');
+      result.known.should.deep.equal(['w1', 'w2']);
+    });
+  });
+
+  describe('shapeNumberHealth', () => {
+    const GRAPH = {
+      id: 'w1',
+      display_phone_number: '+1 555-0100',
+      verified_name: 'Lab',
+      quality_rating: 'RED',
+      health_status: {
+        can_send_message: 'LIMITED',
+        entities: [{ entity_type: 'PHONE_NUMBER', id: 'w1', can_send_message: 'LIMITED',
+          additional_info: ["Your messaging limit will decrease if your quality rating doesn't improve"] }],
+      },
+      throughput: { level: 'STANDARD' },
+      name_status: 'APPROVED',
+      status: 'CONNECTED',
+      future_field: 'not passed',
+    };
+
+    it('names every field, nulls the absent ones and keeps health_status verbatim', () => {
+      const shaped = shapeNumberHealth('w1', GRAPH);
+      shaped.should.deep.equal({
+        phone_number_id: 'w1',
+        display_phone_number: '+1 555-0100',
+        verified_name: 'Lab',
+        quality_rating: 'RED',
+        health_status: GRAPH.health_status,
+        messaging_limit_tier: null,
+        throughput: { level: 'STANDARD' },
+        name_status: 'APPROVED',
+        status: 'CONNECTED',
+        error: null,
+      });
+    });
+
+    it('keeps a Graph error on the number', () => {
+      const shaped = shapeNumberHealth('w1', { error: { code: 190, message: 'Session expired', fbtrace_id: 'x' } });
+      shaped.error.should.deep.equal({ code: 190, message: 'Session expired' });
+      (shaped.quality_rating === null).should.equal(true);
+    });
+
+    it('treats an empty body as an error', () => {
+      shapeNumberHealth('w1', null).error.message.should.include('Empty');
     });
   });
 });

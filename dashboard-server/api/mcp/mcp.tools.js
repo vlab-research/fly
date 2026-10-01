@@ -72,6 +72,7 @@ const TOOL_SCOPES = {
   // list_typeform_forms is surveys:read because /typeform maps to `surveys`,
   // for the reason ROUTE_RESOURCES gives.
   list_messaging_accounts: 'credentials:read',
+  get_whatsapp_health: 'credentials:read',
   list_typeform_forms: 'surveys:read',
 };
 
@@ -534,6 +535,14 @@ const TOOL_HANDLERS = {
     // Redaction is a pure function with a recursive no-secret test: nothing
     // from the credential's `details` blob leaves here but a display name.
     return toolResult({ count: rows.length, items: rows.map(redactCredential) });
+  },
+
+  async get_whatsapp_health(args, { email }) {
+    const result = await service.numberHealth({ email, phoneNumberIds: args.phone_number_ids || [] });
+    if (!result.ok) {
+      return toolError(`${result.error}. Your WhatsApp numbers: ${result.known.join(', ') || 'none'}.`);
+    }
+    return toolResult({ count: result.numbers.length, items: result.numbers });
   },
 
   async list_typeform_forms(args, { email }) {
