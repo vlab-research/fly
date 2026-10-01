@@ -185,19 +185,27 @@ func (d *DB) GetLatestEventSummariesByBailIDs(ctx context.Context, bailIDs []uui
 	return latest, nil
 }
 
-// GetEventsByUser retrieves recent events for a specific user with an optional limit
-// Events are ordered by timestamp descending (most recent first)
-func (d *DB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*BailEvent, error) {
-	query := `
+// GetEventsByUser retrieves recent events for a specific user, newest first.
+// A non-nil since keeps only events at or after it, applied before the limit so
+// a caller polling with since never loses events behind the limit.
+func (d *DB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int, since *time.Time) ([]*BailEvent, error) {
+	args := []interface{}{userID, limit}
+	sinceClause := ""
+	if since != nil {
+		args = append(args, *since)
+		sinceClause = "AND timestamp >= $3"
+	}
+
+	query := fmt.Sprintf(`
 		SELECT id, bail_id, user_id, bail_name, event_type, timestamp,
 		       users_matched, users_bailed, definition_snapshot, error, execution_results
 		FROM chatroach.bail_events
-		WHERE user_id = $1
+		WHERE user_id = $1 %s
 		ORDER BY timestamp DESC
 		LIMIT $2
-	`
+	`, sinceClause)
 
-	rows, err := d.pool.Query(ctx, query, userID, limit)
+	rows, err := d.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query events for user: %w", err)
 	}

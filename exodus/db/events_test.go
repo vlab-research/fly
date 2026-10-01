@@ -326,7 +326,7 @@ func TestGetEventsByUser(t *testing.T) {
 	}
 
 	// Test GetEventsByUser with limit
-	events, err := db.GetEventsByUser(context.Background(), userID1, 3)
+	events, err := db.GetEventsByUser(context.Background(), userID1, 3, nil)
 	if err != nil {
 		t.Fatalf("GetEventsByUser failed: %v", err)
 	}
@@ -344,12 +344,28 @@ func TestGetEventsByUser(t *testing.T) {
 	}
 
 	// Test with larger limit to get all events
-	allEvents, err := db.GetEventsByUser(context.Background(), userID1, 100)
+	allEvents, err := db.GetEventsByUser(context.Background(), userID1, 100, nil)
 	if err != nil {
 		t.Fatalf("GetEventsByUser failed: %v", err)
 	}
 	if len(allEvents) != 5 {
 		t.Errorf("Expected 5 events total, got %d", len(allEvents))
+	}
+
+	// since is applied before the limit: the two newest of the five, even with
+	// a limit that would otherwise admit all of them.
+	since := allEvents[1].Timestamp
+	recent, err := db.GetEventsByUser(context.Background(), userID1, 100, &since)
+	if err != nil {
+		t.Fatalf("GetEventsByUser with since failed: %v", err)
+	}
+	if len(recent) != 2 {
+		t.Errorf("Expected 2 events at or after since, got %d", len(recent))
+	}
+	for _, e := range recent {
+		if e.Timestamp.Before(since) {
+			t.Errorf("Event %s at %v is before since %v", e.ID, e.Timestamp, since)
+		}
 	}
 }
 

@@ -21,7 +21,7 @@ type DBInterface interface {
 	GetEventsByBailID(ctx context.Context, bailID uuid.UUID) ([]*db.BailEvent, error)
 	GetLatestEventsByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*db.BailEvent, error)
 	GetLatestEventSummariesByBailIDs(ctx context.Context, bailIDs []uuid.UUID) (map[uuid.UUID]*db.BailEventSummary, error)
-	GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*db.BailEvent, error)
+	GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int, since *time.Time) ([]*db.BailEvent, error)
 	GetMessagingCredentials(ctx context.Context, pageids []string) (map[string]platform.Credential, error)
 	Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error)
 	Close()
