@@ -3,9 +3,15 @@
 **Project:** `toixotoixo`. **Cluster:** `toixo`, zone `europe-west1-b`, one pool
 `bigpool` of 4 × `e2-highmem-4`.
 
-**Status (2026-10-01):** approved: 1 (`dropboxer`), 2 (static ingress IP), 3 (Loki).
-The `dropboxer` archive snapshot was started; everything else is staged in the repo
-and **not yet applied**. 4 (orphaned PVCs) is not approved. Prices below are
+**Status (2026-10-01):**
+
+- 1 `dropboxer` — ✅ done. Archive snapshot `dropboxer-final-2026-10` (READY,
+  175 GB stored), then VM and 1000 GB disk deleted.
+- 2 ingress IP — ✅ done. `35.241.211.222` reserved by Terraform as
+  `ingress-nginx`, the Service pinned to it (helm revision 2), `vlab` released.
+- 3 Loki — ⚠️ **half-applied, Loki DOWN.** StatefulSet and 600Gi PVC deleted; the
+  helm upgrade then failed (see below). Recovery steps under §3.
+- 4 orphaned PVCs — not approved. Prices below are
 list-price estimates and have not been checked against the bill. Get the billing
 breakdown by service and SKU before ranking anything bigger than these.
 
@@ -103,6 +109,29 @@ kubectl -n monitoring get pvc storage-loki-0     # 50Gi, Bound
 ```
 
 The old 600Gi disk's reclaim policy is `Delete`, so it goes with the PVC.
+
+**What went wrong, and the recovery.** The `loki-stack` 2.6.5 release, installed
+2022, carries a `policy/v1beta1` PodSecurityPolicy in both its stored release
+manifest and its default render. That API was removed in Kubernetes 1.25, so
+`helm upgrade` refuses to start. `helm template` does not check API
+availability, so the offline render did not catch it. Two fixes:
+
+1. `devops/loki.yaml` sets `loki.rbac.pspEnabled: false`, so the new render has
+   no PSP.
+2. Strip the PSP from the stored release with the `helm-mapkubeapis` plugin
+   (`helm plugin install https://github.com/helm/helm-mapkubeapis --verify=false`):
+
+```bash
+helm mapkubeapis loki --namespace monitoring
+helm upgrade loki grafana/loki-stack --version 2.6.5 -n monitoring -f devops/loki.yaml
+kubectl -n monitoring rollout status sts/loki
+kubectl -n monitoring get pvc storage-loki-0     # 50Gi, Bound
+```
+
+While Loki is down: Grafana log queries fail; nothing alerts on Loki. Promtail
+drops pod-log batches after its retry budget. The Kafka scrape resumes from the
+`loki` consumer group's offset, so payment-topic logs inside Kafka retention are
+not lost.
 
 ### 4. Orphaned PVCs (~20 GB, ~$1/month — hygiene)
 

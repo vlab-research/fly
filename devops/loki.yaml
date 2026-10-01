@@ -1,5 +1,8 @@
 loki:
   enabled: true
+  # PodSecurityPolicy was removed in Kubernetes 1.25; the chart still renders one by default.
+  rbac:
+    pspEnabled: false
   persistence:
     enabled: true
     accessModes:
