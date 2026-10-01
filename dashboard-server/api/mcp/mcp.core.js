@@ -925,6 +925,10 @@ const DATA_TOOLS = [
       'and resume. For a whole dataset use start_export instead — paging through',
       'thousands of answers is slow for you and for the database.',
       '',
+      '`question_ref` and `since` narrow the stream (e.g. who answered the last',
+      'question since a version went live). Pass the same filters on every page;',
+      'the cursor resumes the filtered stream.',
+      '',
       'Each row: userid, question_ref, question_text, response, translated_response,',
       'timestamp, surveyid, shortcode, flowid, metadata, ad_id, pageid.',
     ].join('\n'),
@@ -941,6 +945,15 @@ const DATA_TOOLS = [
         page_size: {
           type: 'integer',
           description: `Rows per page, 1..${GET_RESPONSES_PAGE.max}; default ${GET_RESPONSES_PAGE.default}.`,
+        },
+        question_ref: {
+          type: 'string',
+          minLength: 1,
+          description: 'Optional: only answers to this question ref.',
+        },
+        since: {
+          type: 'string',
+          description: 'Optional: only answers at or after this time, ISO 8601 with a zone (2026-09-30T12:00:00Z) or a date (midnight UTC).',
         },
       },
     },
@@ -1198,10 +1211,14 @@ const BAIL_CONDITION_TYPES = [
 ];
 
 const MAX_USER_LIST = 1000;
-const BAIL_EVENTS_LIMIT = { default: 100, max: 500 };
-// A bail that matched thousands of people lists thousands of ids. Events are a
-// debugging aid, not an export, so each one carries a sample plus the count.
-const BAIL_EVENT_USER_SAMPLE = 50;
+// Event limits and shaping are the bails core's, so the tool and GET
+// /bails/events cannot disagree about what an event looks like.
+const {
+  BAIL_EVENTS_LIMIT,
+  BAIL_EVENT_USER_SAMPLE,
+  shapeBailEvent,
+  shapeBailEvents,
+} = require('../bails/bails.core');
 const PREVIEW_USER_SAMPLE = 25;
 
 const BAIL_ID_ARG = {
@@ -1549,7 +1566,8 @@ const BAIL_TOOLS = [
       'The audit trail: every run of your bails, newest first, with how many',
       'participants matched and how many were actually moved.',
       '',
-      'With `bail_id`, one bail\'s history; without it, all of them. An `error` event',
+      'With `bail_id`, one bail\'s history; without it, all of them. `since` keeps only',
+      'events at or after that time, applied before `limit`. An `error` event',
       'carries the failure. users_matched greater than users_bailed means the bot',
       'refused some moves — check get_survey_health for the destination form. The',
       `moved participant ids are sampled at ${BAIL_EVENT_USER_SAMPLE} per event.`,
@@ -1566,6 +1584,10 @@ const BAIL_TOOLS = [
         limit: {
           type: 'integer',
           description: `Events to return, 1..${BAIL_EVENTS_LIMIT.max}; default ${BAIL_EVENTS_LIMIT.default}.`,
+        },
+        since: {
+          type: 'string',
+          description: 'Optional: only events at or after this time, ISO 8601 with a zone (2026-09-30T12:00:00Z) or a date (midnight UTC).',
         },
       },
     },
@@ -1711,40 +1733,6 @@ function shapeBailSummary({ bail, last_event: lastEvent }) {
 }
 
 const shapeBail = row => ({ ...shapeBailSummary(row), definition: row.bail.definition || null });
-
-/*
- * An event's `definition_snapshot` is the whole tree as it was at run time and
- * is dropped: it is the largest field by far, and get_bail answers "what does
- * this bail say" better than a copy inside every event does.
- */
-function shapeBailEvent(event) {
-  const results = event.execution_results || {};
-  const ids = Array.isArray(results.user_ids) ? results.user_ids : [];
-
-  return {
-    id: event.id,
-    bail_id: event.bail_id,
-    bail_name: event.bail_name || null,
-    event_type: event.event_type,
-    timestamp: event.timestamp,
-    users_matched: event.users_matched,
-    users_bailed: event.users_bailed,
-    error: event.error || null,
-    bailed_user_ids: ids.slice(0, BAIL_EVENT_USER_SAMPLE),
-    bailed_user_id_count: ids.length,
-  };
-}
-
-function shapeBailEvents(events, limit) {
-  const rows = Array.isArray(events) ? events : [];
-  const page = rows.slice(0, limit);
-
-  return {
-    count: page.length,
-    truncated: rows.length > page.length,
-    items: page.map(shapeBailEvent),
-  };
-}
 
 function shapeBailPreview(result) {
   const users = Array.isArray(result.users) ? result.users : [];

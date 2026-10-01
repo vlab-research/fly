@@ -467,4 +467,121 @@ describe('Response queries', () => {
       });
     });
   });
+
+  // question_ref and since narrow the stream; the cursor must resume the
+  // filtered stream, so paging one row at a time has to visit exactly the rows
+  // a single unpaged filtered read returns, in the same order.
+  describe('filters', () => {
+    let fSurvey;
+    const fSurveyName = 'SurveyFilters';
+    const at = {
+      early: '2026-09-01 10:00:00+00:00',
+      mid: '2026-09-15 10:00:00+00:00',
+      late: '2026-09-20 10:00:00+00:00',
+    };
+    // [userid, question_ref, when]
+    const rows = [
+      ['u1', 'complete', at.early],
+      ['u1', 'q1', at.early],
+      ['u2', 'complete', at.mid],
+      ['u3', 'q1', at.mid],
+      ['u3', 'complete', at.mid],
+      ['u4', 'complete', at.late],
+      ['u5', 'complete', at.late],
+    ];
+
+    before(async () => {
+      const user = await User.user({ email });
+      fSurvey = await Survey.create({
+        created: new Date(),
+        formid: 'filt1',
+        form: '{"form": "form detail"}',
+        messages: '{"foo": "bar"}',
+        shortcode: 777,
+        userid: user.id,
+        title: 'Filter survey',
+        metadata: '{}',
+        survey_name: fSurveyName,
+        translation_conf: '{}',
+      });
+
+      for (const [userid, ref, when] of rows) {
+        await vlabPool.query(
+          `INSERT INTO responses(parent_surveyid, parent_shortcode, surveyid, shortcode, flowid, userid, pageid, question_ref, question_idx, question_text, response, seed, timestamp)
+           VALUES ($1, '777', $1, '777', 1, $2, 'page1', $3, 1, 'text', 'yes', 1, $4)`,
+          [fSurvey.id, userid, ref, when],
+        );
+      }
+    });
+
+    after(async () => {
+      await vlabPool.query('DELETE FROM responses WHERE surveyid = $1', [fSurvey.id]);
+      await vlabPool.query('DELETE FROM surveys WHERE id = $1', [fSurvey.id]);
+    });
+
+    const key = r => `${r.userid}/${r.question_ref}`;
+
+    async function pageThrough(filters) {
+      const seen = [];
+      let after = null;
+      for (;;) {
+        const { responses } = await Response.all(email, fSurveyName, after, 1, filters);
+        if (!responses.length) return seen;
+        seen.push(...responses);
+        after = responses[responses.length - 1].token;
+      }
+    }
+
+    it('keeps only the answers to question_ref', async () => {
+      const { responses } = await Response.all(email, fSurveyName, null, 25, { questionRef: 'complete' });
+      responses.map(key).should.eql(['u1/complete', 'u2/complete', 'u3/complete', 'u4/complete', 'u5/complete']);
+    });
+
+    it('keeps only answers at or after since, inclusive', async () => {
+      const { responses } = await Response.all(email, fSurveyName, null, 25, { since: '2026-09-15T10:00:00Z' });
+      responses.map(key).should.eql(['u2/complete', 'u3/complete', 'u3/q1', 'u4/complete', 'u5/complete']);
+    });
+
+    it('combines both', async () => {
+      const { responses } = await Response.all(
+        email, fSurveyName, null, 25, { questionRef: 'complete', since: '2026-09-10T00:00:00Z' },
+      );
+      responses.map(key).should.eql(['u2/complete', 'u3/complete', 'u4/complete', 'u5/complete']);
+    });
+
+    it('pages forward with after through exactly the filtered stream', async () => {
+      const filters = { questionRef: 'complete', since: '2026-09-10T00:00:00Z' };
+      const { responses: whole } = await Response.all(email, fSurveyName, null, 25, filters);
+      const paged = await pageThrough(filters);
+      paged.map(key).should.eql(whole.map(key));
+    });
+
+    it('resumes the filtered stream from a token taken mid-way', async () => {
+      const filters = { questionRef: 'complete' };
+      const { responses: first } = await Response.all(email, fSurveyName, null, 2, filters);
+      const { responses: rest } = await Response.all(email, fSurveyName, first[1].token, 25, filters);
+      rest.map(key).should.eql(['u3/complete', 'u4/complete', 'u5/complete']);
+    });
+
+    describe('GET /responses', () => {
+      let authToken;
+      before(async () => { authToken = await makeAPIToken({ email }); });
+
+      it('applies question_ref and since from the query string', async () => {
+        const res = await request(app)
+          .get(`/api/v1/responses?survey=${fSurveyName}&question_ref=complete&since=2026-09-20T00:00:00Z&pageSize=25`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .expect(200);
+        res.body.responses.map(key).should.eql(['u4/complete', 'u5/complete']);
+      });
+
+      it('answers 400 for a since that is not a timestamp', async () => {
+        const res = await request(app)
+          .get(`/api/v1/responses?survey=${fSurveyName}&since=notatime`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .expect(400);
+        res.body.error.message.should.match(/since/);
+      });
+    });
+  });
 });

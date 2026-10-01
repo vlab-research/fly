@@ -11,6 +11,8 @@
 const core = require('./mcp.core');
 const service = require('./mcp.service');
 const { scopeGrants } = require('../auth/auth.core');
+const { parseResponseFilters } = require('../responses/response.core');
+const { parseTimestamp } = require('../../utils/timestamp');
 
 /*
  * The scope each tool actually needs.
@@ -114,7 +116,6 @@ const {
   buildBailRequest,
   shapeBail,
   shapeBailSummary,
-  shapeBailEvents,
   shapeBailPreview,
   redactCredential,
   shapeTypeformForms,
@@ -345,6 +346,9 @@ const TOOL_HANDLERS = {
   },
 
   get_responses(args, { email }) {
+    const parsed = parseResponseFilters(args);
+    if (!parsed.ok) return invalidArgsError([parsed.error]);
+
     return withSurvey(args, email, async () => {
       const pageSize = clampLimit(args.page_size, GET_RESPONSES_PAGE);
       const { responses } = await service.getResponses({
@@ -352,6 +356,7 @@ const TOOL_HANDLERS = {
         survey_name: args.survey_name,
         after: args.after || null,
         pageSize,
+        ...parsed.filters,
       });
       return toolResult(shapeResponsesPage(responses, pageSize));
     });
@@ -515,17 +520,14 @@ const TOOL_HANDLERS = {
   },
 
   list_bail_events(args, { email }) {
-    return withVlabUser(email, async user => {
-      const limit = clampLimit(args.limit, BAIL_EVENTS_LIMIT);
+    const since = parseTimestamp(args.since, 'since');
+    if (!since.ok) return invalidArgsError([since.error]);
 
-      // The per-bail endpoint returns the whole history and takes no limit, so
-      // that page is cut here; the user-wide one is limited in the query.
-      const result = args.bail_id
-        ? await service.bailEvents(user, args.bail_id)
-        : await service.userBailEvents(user, limit);
-
-      return toolResult(shapeBailEvents(result && result.events, limit));
-    });
+    return withVlabUser(email, async user => toolResult(await service.listBailEvents(user, {
+      bailId: args.bail_id || null,
+      limit: clampLimit(args.limit, BAIL_EVENTS_LIMIT),
+      since: since.value,
+    })));
   },
 
   // --- accounts ------------------------------------------------------------

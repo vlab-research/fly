@@ -48,7 +48,8 @@ everything else is `write`.
 
 The resource is the first path segment: `surveys`, `responses`, `exports`,
 `media`, `credentials` (which also covers `/facebook` and `/whatsapp`),
-`templates` (`/message-templates`), `tickets`, `users`, `platform`, `auth`.
+`templates` (`/message-templates`), `tickets`, `users` (which also covers
+`/bails`), `platform`, `auth`.
 `responses` is deliberately separate from `surveys`, so a key can read study
 structure without reading respondents' answers.
 
@@ -823,11 +824,13 @@ options}`. `status` is one of `Requested`, `Processing`, `Finished`, `Failed`
 `null` until `Finished`, then the presigned URL, valid for 7 hours. Without
 `survey_name` it is every export the caller has requested.
 
-**`get_responses({survey_name, after?, page_size?})`** — `GET /responses` (§10)
-with `page_size` **clamped to 500** (default 25) and the page shaped as
-`{page_size, next_cursor, items}`: `next_cursor` is the last row's `token`, or
-`null` on a short page, so the loop is "call, pass `next_cursor` as `after`,
-stop on null". Rows are §10's rows. Needs `responses:read`, which `surveys:*`
+**`get_responses({survey_name, after?, page_size?, question_ref?, since?})`** —
+`GET /responses` (§10) with `page_size` **clamped to 500** (default 25) and the
+page shaped as `{page_size, next_cursor, items}`: `next_cursor` is the last
+row's `token`, or `null` on a short page, so the loop is "call, pass
+`next_cursor` as `after`, stop on null". `question_ref` and `since` are §10's
+filters, validated the same way (`api/responses/response.core.js`); a bad
+`since` is a tool error. Rows are §10's rows. Needs `responses:read`, which `surveys:*`
 does not imply — that separation is deliberate.
 
 ### Messaging asset tools
@@ -933,13 +936,13 @@ fastest way to see that a condition means something other than intended. The
 definition goes through the same `buildBailRequest` as `create_bail`, so
 anything that previews cleanly can be created unchanged.
 
-**`list_bail_events({bail_id?, limit?})`** — the audit trail, `bail-events` for
-all bails or `.../bails/:id/events` for one. Each event keeps
-`users_matched`/`users_bailed` and a sample of 50 moved participant ids with the
-true count; the `definition_snapshot` is dropped, because `get_bail` answers
-"what does this bail say" better than a copy inside every event. The per-bail
-endpoint takes no limit and returns the whole history, so that page is cut
-client-side and flagged `truncated`.
+**`list_bail_events({bail_id?, limit?, since?})`** — the audit trail; the same
+read as `GET /bails/events` (§11), both calling
+`bails.service.js#listBailEvents`, with `limit` clamped to 500 rather than
+refused. Each event keeps `users_matched`/`users_bailed` and a sample of 50
+moved participant ids with the true count; the `definition_snapshot` is
+dropped, because `get_bail` answers "what does this bail say" better than a
+copy inside every event.
 
 One validation is **not** a relay of Exodus. `time_of_day`, `timezone` and
 `datetime` are checked for format here (`validateBailDefinition`) because
@@ -990,7 +993,7 @@ For agents that need to inspect individual responses (as opposed to bulk export)
 ### Request
 
 ```
-GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>
+GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>&question_ref=<ref>&since=<timestamp>
 ```
 
 | Parameter | Required | Default | Notes |
@@ -998,6 +1001,8 @@ GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>
 | `survey` | **yes** | — | Survey name; must be one the caller owns |
 | `after` | no | null | Opaque cursor token from the previous response's `responses[n].token` field. Omit to start from the beginning. |
 | `pageSize` | no | 25 | Number of responses per page. Has no maximum in the API, but agents should clamp to a reasonable value (e.g. 500). |
+| `question_ref` | no | — | Only answers to this question ref. |
+| `since` | no | — | Only answers with `timestamp >= since`. An ISO 8601 date-time with seconds and a zone (`2026-09-30T12:00:00Z`, `…+05:30`, fractional seconds kept) or a date (`2026-09-30`, midnight UTC). Anything else, a zone-less time included, is a `400` naming the parameter. |
 
 ### Response — `200`
 
@@ -1027,6 +1032,23 @@ indefinitely, so a consumer can store it and resume paging later.
 **Ordering:** Results are ordered by `(timestamp, userid, question_ref)` and pagination is keyed off these
 three fields. Responses are therefore sorted by submission time, with ties broken by participant id and question.
 
+**Filters and the cursor:** the filters narrow the rows without changing the
+ordering or the token, so a token from a filtered page resumes that filtered
+stream. Pass the same `question_ref` and `since` on every page; changing them
+mid-stream gives the new filters' rows after the token's position. Counting
+completes is one filtered stream: `question_ref=<last question>&since=<when
+the version went live>`, then distinct `userid`s.
+
+**Cost:** the query finds the survey's versions and reads each one's rows
+through the covering index `responses (surveyid, userid, timestamp,
+question_ref) STORING (...)`, then sorts the matches for the page. The
+filters are applied inside that index read, so a filtered page reads no more
+than an unfiltered one and sorts and returns only what matches, but every page
+still reads all of the survey's index entries. An index keyed
+`(surveyid, question_ref, timestamp)` would make a filtered read a seek; it
+has not been added because `responses` is the largest table and each extra
+covering index is close to another copy of it (see migration 28a's notes).
+
 **Scoping:** All responses are scoped to the caller's email; the caller can only read responses from surveys they own.
 
 **Empty surveys:** a survey with no responses yet answers `200 {"responses": []}`.
@@ -1039,7 +1061,55 @@ cap and an explicit `next_cursor`.
 
 ---
 
-## 11. Known gaps
+## 11. Bail events: `GET /api/v1/bails/events`
+
+What your bails actually did — every run, newest first — addressed by the key
+alone. The `/users/:userId/...` bail routes need a vlab user id that a key
+cannot discover; this one resolves the user from the caller's email the way the
+MCP bail tools do (get-or-create). Needs `users:read`: `/bails` counts as
+`users`, like the routes it sits beside.
+
+    GET /api/v1/bails/events                                   your latest 100 events, all bails
+    GET /api/v1/bails/events?since=2026-09-30T00:00:00Z&limit=500
+    GET /api/v1/bails/events?bail_id=<uuid>                    one bail's history
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `since` | — | Only events with `timestamp >= since`, same format as §10's `since`. Applied by Exodus **before** `limit`, so polling with the last `since` you saw never loses events behind the limit. |
+| `limit` | 100 | 1..500. Out of range or not an integer is a `400`, not a clamp. |
+| `bail_id` | — | Only this bail. Exodus returns that bail's whole history; `since` and `limit` are applied here. |
+
+`200`:
+
+```json
+{
+  "count": 1,
+  "truncated": false,
+  "items": [{
+    "id": "8c1f...", "bail_id": "b2a4...", "bail_name": "stuck-at-consent",
+    "event_type": "execution", "timestamp": "2026-09-30T12:00:03.12345Z",
+    "users_matched": 12, "users_bailed": 10, "error": null,
+    "bailed_user_ids": ["1234", "5678"], "bailed_user_id_count": 10
+  }]
+}
+```
+
+- `event_type` is `execution` or `error`; an `error` event carries Exodus's
+  error object in `error`. `users_matched > users_bailed` means the bot refused
+  some moves.
+- `bailed_user_ids` is a sample of at most 50, `bailed_user_id_count` the true
+  count. The `definition_snapshot` Exodus stores is not returned.
+- `truncated` is true when more events matched than `limit`. With `since` set
+  and `truncated` false, you have everything since then.
+- An Exodus `4xx` is relayed with its status and message; Exodus unreachable is
+  a `500`.
+
+The shaping is `api/bails/bails.core.js`; the MCP tool is `list_bail_events`
+(§9, "Bail tools").
+
+---
+
+## 12. Known gaps
 
 Marked here rather than guessed at.
 

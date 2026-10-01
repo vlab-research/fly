@@ -17,6 +17,7 @@
 
 const { User } = require('../../queries');
 const { BailsUtil } = require('../../utils');
+const { shapeBailEvents } = require('./bails.core');
 
 class BailFailure extends Error {
   constructor(message, status) {
@@ -52,7 +53,20 @@ const updateBail = ({ id }, bailId, bail) => exodus(BailsUtil.updateBail(id, bai
 const deleteBail = ({ id }, bailId) => exodus(BailsUtil.deleteBail(id, bailId));
 const previewBail = ({ id }, definition) => exodus(BailsUtil.previewBail(id, definition));
 const bailEvents = ({ id }, bailId) => exodus(BailsUtil.getBailEvents(id, bailId));
-const userBailEvents = ({ id }, limit) => exodus(BailsUtil.getUserEvents(id, limit));
+const userBailEvents = ({ id }, limit, since = null) =>
+  exodus(BailsUtil.getUserEvents(id, limit, since));
+
+/*
+ * The shaped event feed behind GET /bails/events and list_bail_events: one
+ * bail's history, or every bail's, newest first, cut to `limit` events at or
+ * after `since`. Arguments are already validated (bails.core.js).
+ */
+async function listBailEvents(user, { bailId = null, limit, since = null }) {
+  const result = bailId
+    ? await bailEvents(user, bailId)
+    : await userBailEvents(user, limit, since);
+  return shapeBailEvents(result && result.events, limit, since);
+}
 
 module.exports = {
   BailFailure,
@@ -65,4 +79,5 @@ module.exports = {
   previewBail,
   bailEvents,
   userBailEvents,
+  listBailEvents,
 };
