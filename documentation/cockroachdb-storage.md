@@ -13,6 +13,9 @@ the map below to the plan you need.
 | [`planning/cockroachdb-cost-reduction-plan.md`](../planning/cockroachdb-cost-reduction-plan.md) | The **disk / index-drop** work log. Tier 1 (`messages`), Tier 1b (`states`), Tier 2–4. Tracks what's applied. | Doing index work |
 | [`planning/cockroachdb-operator-and-v25-v26-migration.md`](../planning/cockroachdb-operator-and-v25-v26-migration.md) | Operator adoption + v25.4/v26 upgrades. **Its Phase 1 is cancelled.** | Planning upgrades |
 
+GCP costs outside CockroachDB (disks, IPs, compute discounts) are in
+[`planning/gcp-cost-reduction.md`](../planning/gcp-cost-reduction.md).
+
 **If you only read one other thing:** the memory/topology plan. It has the current
 priority order, and its Part 0 is an open production risk.
 
