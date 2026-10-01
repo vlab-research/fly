@@ -3,9 +3,14 @@
 **Goal:** Shrink the production CockroachDB cluster (and the GKE compute pool sized
 around it) by attacking the `messages` table, which is ~93% of all data.
 
-**Status as of 2026-07-26:** Phase 1 soak **complete and verified against prod**
-(schema correct, physical ~596 GB → ~407 GiB, GC settled). Phase 2 is ready to run
-once its two new preconditions are met — see below.
+**Status as of 2026-10-01:** Phase 2 (migration 19) was applied to production on
+2026-08-25 as part of the conversation-identity work
+(`planning/multi-platform-plan.md` §3.3). The same work added
+`messages_userid_account_timestamp_idx` (migration 26) and retired
+`messages_userid_timestamp_idx` as a NOT VISIBLE canary; migration 29 drops it
+and is **pending on production**. The `SELECT content` change shipped in replybot
+v0.0.221. Tier 1b is not authored. Current measurements:
+[`documentation/cockroachdb-storage.md`](../documentation/cockroachdb-storage.md#current-state--measured-2026-10-01).
 
 > 🔴 **Do not run Phase 2, and do not act on Tier 4, before reading
 > [`cockroachdb-memory-and-topology-plan.md`](./cockroachdb-memory-and-topology-plan.md).**
@@ -144,7 +149,7 @@ Full measurements and per-index reasoning:
 Not yet authored as files — the SQL below is the proposal.
 
 ```sql
--- Phase 1 (proposed devops/migrations/20-drop-cold-states-indexes.sql)
+-- Phase 1 (proposed; 20 and 21 are now taken — use the next free migration number)
 -- Three clear drops (~4.6 GiB):
 DROP INDEX chatroach.states@states_state_json_idx;
 DROP INDEX chatroach.states@states_payment_error_code_idx;
@@ -154,7 +159,7 @@ DROP INDEX chatroach.states@states_auto_index_fk_pageid_ref_facebook_pages;
 ALTER INDEX chatroach.states@states_current_state_timeout_date_idx NOT VISIBLE;
 ALTER INDEX chatroach.states@states_previous_with_token_previous_is_followup_form_start_time_current_state_updated_idx NOT VISIBLE;
 
--- Phase 2 (proposed devops/migrations/21-drop-states-canaries.sql), after clean soak:
+-- Phase 2 (proposed, next free number), after clean soak:
 -- DROP both canaries (~2.7 GiB).
 ```
 
@@ -225,7 +230,7 @@ the exporter's and dashboard-server's `STATE_MACHINE_STATES`.
 - **Abort switch (instant, no rebuild):**
       `ALTER INDEX chatroach.public.messages@messages_userid_idx VISIBLE;`
 
-### Phase 2 — drop the canary
+### Phase 2 — drop the canary — ✅ DONE 2026-08-25 (see `planning/multi-platform-plan.md` §3.3)
 
 **Preconditions (both new, both required):**
 1. 🔴 **Fix the replica co-location risk first** — two CRDB pods share one GKE node.
