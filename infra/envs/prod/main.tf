@@ -54,6 +54,22 @@ module "media_backup" {
   gsa_email   = google_service_account.media_backup.email
 }
 
+# The ingress-nginx LoadBalancer's address. Every *.vlab.digital record on NS1
+# points at it, and devops/ingress-nginx.yaml pins the Service to it; if this
+# were released, recreating the Service would change the IP behind all of them.
+resource "google_compute_address" "ingress" {
+  name         = "ingress-nginx"
+  project      = var.gcp_project
+  region       = var.gcp_region
+  address      = "35.241.211.222"
+  address_type = "EXTERNAL"
+  description  = "ingress-nginx controller LoadBalancer"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 output "gsa_email" {
   value = google_service_account.backup.email
 }
@@ -68,4 +84,8 @@ output "media_backup_gsa_email" {
 
 output "media_backup_bucket" {
   value = "gs://${module.media_backup.bucket_name}"
+}
+
+output "ingress_ip" {
+  value = google_compute_address.ingress.address
 }

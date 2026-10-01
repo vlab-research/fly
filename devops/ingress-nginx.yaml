@@ -1,0 +1,7 @@
+# Apply: helm upgrade ingress-nginx ingress-nginx/ingress-nginx --version 4.10.1 \
+#          -n ingress-nginx -f devops/ingress-nginx.yaml
+controller:
+  service:
+    # Reserved as a static address in infra/envs/prod (google_compute_address.ingress).
+    # Every *.vlab.digital record points here.
+    loadBalancerIP: 35.241.211.222

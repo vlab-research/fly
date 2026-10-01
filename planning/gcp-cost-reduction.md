@@ -3,7 +3,9 @@
 **Project:** `toixotoixo`. **Cluster:** `toixo`, zone `europe-west1-b`, one pool
 `bigpool` of 4 × `e2-highmem-4`.
 
-**Status (2026-10-01):** quick wins identified, **none applied**. Prices below are
+**Status (2026-10-01):** approved: 1 (`dropboxer`), 2 (static ingress IP), 3 (Loki).
+The `dropboxer` archive snapshot was started; everything else is staged in the repo
+and **not yet applied**. 4 (orphaned PVCs) is not approved. Prices below are
 list-price estimates and have not been checked against the bill. Get the billing
 breakdown by service and SKU before ranking anything bigger than these.
 
@@ -45,38 +47,62 @@ so take an archive snapshot first (billed on used bytes only, not the 1000 GB):
 gcloud compute snapshots create dropboxer-final-2026-10 \
   --source-disk=dropboxer --source-disk-zone=europe-west1-b \
   --snapshot-type=ARCHIVE --storage-location=europe-west1
+# Wait for the snapshot to be READY before deleting.
+gcloud compute snapshots describe dropboxer-final-2026-10 --format='value(status,storageBytes)'
 gcloud compute instances delete dropboxer --zone europe-west1-b --delete-disks=all
 ```
 
-### 2. Unused static IP `vlab` (34.77.32.208)
+Snapshot `dropboxer-final-2026-10` was started 2026-10-01.
 
-Reserved 2023-06-05, status `RESERVED`, no users, no forwarding rule. Ingress
-serves from `35.241.211.222`, an **ephemeral** address on the ingress-nginx
-LoadBalancer. Two options:
+### 2. Make the ingress IP permanent; release `vlab`
 
-- Release `vlab`: `gcloud compute addresses delete vlab --region europe-west1`.
-- Or promote the ingress IP to static and release `vlab`. Recreating that
-  Service today would change the IP behind every `*.vlab.digital` record.
-  Promoting it costs nothing while it is in use.
+Ingress serves from `35.241.211.222`, an **ephemeral** address on the
+ingress-nginx LoadBalancer. Recreating that Service would change the IP behind
+every `*.vlab.digital` record on NS1. Separately, the static IP `vlab`
+(34.77.32.208, reserved 2023-06-05) has no users and is billed while idle.
+
+Staged:
+
+- `infra/envs/prod/main.tf` — `google_compute_address.ingress` reserves
+  `35.241.211.222` in place. Reserving an in-use ephemeral address promotes it,
+  with no traffic interruption. `terraform plan`: 1 to add, 0 to change.
+- `devops/ingress-nginx.yaml` — pins `controller.service.loadBalancerIP`. The
+  render differs from the chart defaults in only that one line. The live release
+  has no user-supplied values, so this is its first values file.
+
+Apply, in this order:
+
+```bash
+cd infra/envs/prod && terraform apply
+gcloud compute addresses list     # ingress-nginx: IN_USE
+helm upgrade ingress-nginx ingress-nginx/ingress-nginx --version 4.10.1 \
+  -n ingress-nginx -f devops/ingress-nginx.yaml
+gcloud compute addresses delete vlab --region europe-west1
+```
 
 ### 3. Loki: 600Gi disk, 7.2 GB used
 
-Retention is 720h (30 days), so 7.2 GB is steady state. 50Gi leaves ~7×
-headroom.
+Retention is 720h (30 days), so 7.2 GB is steady state; 50Gi leaves ~7×
+headroom. The live release (`loki-stack` 2.6.5, revision 1, 2022-07) asks for
+50Gi; the PVC was later expanded by hand to 600Gi.
 
-**Config drift blocks a clean IaC apply.** The live release (`loki-stack`
-2.6.5, revision 1, 2022) has `size: 50Gi` in its values; the PVC was expanded by
-hand to 600Gi; and `devops/loki.yaml` says `100Gi` **and adds a
-`vlab-prod-response` promtail topic** that the live release does not scrape.
-Applying the repo file as-is would start ingesting a new Kafka topic. Decide
-which is right, fix `devops/loki.yaml`, then:
+`devops/loki.yaml` now matches the live release: `size: 50Gi`, and promtail
+scrapes `vlab-prod-payment` and `^promtail.*` only. The file previously also
+listed `vlab-prod-response`, which the live release has never scraped. **Whether
+to collect it is an open question**, deliberately left out so the shrink changes
+only the disk. `helm template` with the file renders identically to the live
+values.
 
 ```bash
-# A PVC cannot shrink. Recreate it; the last 30 days of logs are lost.
+# A PVC cannot shrink, so recreate it. The last 30 days of logs are lost (accepted).
 kubectl -n monitoring delete sts loki --cascade=orphan
 kubectl -n monitoring delete pvc storage-loki-0
+kubectl -n monitoring delete pod loki-0
 helm upgrade loki grafana/loki-stack --version 2.6.5 -n monitoring -f devops/loki.yaml
+kubectl -n monitoring get pvc storage-loki-0     # 50Gi, Bound
 ```
+
+The old 600Gi disk's reclaim policy is `Delete`, so it goes with the PVC.
 
 ### 4. Orphaned PVCs (~20 GB, ~$1/month — hygiene)
 
