@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -403,7 +402,7 @@ func (s *Server) GetBailEvents(c echo.Context) error {
 }
 
 // GetUserEvents retrieves recent event history for a user
-// GET /users/:userId/bail-events?limit=<n>&since=<rfc3339>
+// GET /users/:userId/bail-events
 func (s *Server) GetUserEvents(c echo.Context) error {
 	userIDStr := c.Param("userId")
 	userID, err := uuid.Parse(userIDStr)
@@ -421,19 +420,10 @@ func (s *Server) GetUserEvents(c echo.Context) error {
 		}
 	}
 
-	var since *time.Time
-	if sinceStr := c.QueryParam("since"); sinceStr != "" {
-		t, err := time.Parse(time.RFC3339Nano, sinceStr)
-		if err != nil {
-			return respondError(c, http.StatusBadRequest, "invalid_since", "since must be an RFC 3339 timestamp, e.g. 2026-09-30T12:00:00Z")
-		}
-		since = &t
-	}
-
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
-	dbEvents, err := s.db.GetEventsByUser(ctx, userID, limit, since)
+	dbEvents, err := s.db.GetEventsByUser(ctx, userID, limit)
 	if err != nil {
 		return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
 	}

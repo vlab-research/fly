@@ -162,11 +162,11 @@ func (m *mockDB) GetLatestEventSummariesByBailIDs(ctx context.Context, bailIDs [
 	return latest, nil
 }
 
-func (m *mockDB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int, since *time.Time) ([]*db.BailEvent, error) {
+func (m *mockDB) GetEventsByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*db.BailEvent, error) {
 	var result []*db.BailEvent
 	count := 0
 	for _, event := range m.events {
-		if event.UserID == userID && (since == nil || !event.Timestamp.Before(*since)) {
+		if event.UserID == userID {
 			result = append(result, event)
 			count++
 			if count >= limit {
@@ -763,49 +763,6 @@ func TestGetBailEvents(t *testing.T) {
 
 	if response.Events[0].UsersMatched != 10 {
 		t.Errorf("Expected 10 users matched, got %d", response.Events[0].UsersMatched)
-	}
-}
-
-func TestGetUserEvents_Since(t *testing.T) {
-	userID := uuid.New()
-	bailID := uuid.New()
-	now := time.Now().UTC()
-
-	event := func(at time.Time) *db.BailEvent {
-		return &db.BailEvent{
-			ID: uuid.New(), BailID: &bailID, UserID: userID, BailName: "b",
-			EventType: "execution", Timestamp: at, DefinitionSnapshot: json.RawMessage(`{}`),
-		}
-	}
-	server := New(&mockDB{events: []*db.BailEvent{event(now), event(now.Add(-2 * time.Hour))}})
-
-	call := func(query string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/users/"+userID.String()+"/bail-events?"+query, nil)
-		rec := httptest.NewRecorder()
-		c := server.echo.NewContext(req, rec)
-		c.SetPath("/users/:userId/bail-events")
-		c.SetParamNames("userId")
-		c.SetParamValues(userID.String())
-		if err := server.GetUserEvents(c); err != nil {
-			t.Fatalf("GetUserEvents failed: %v", err)
-		}
-		return rec
-	}
-
-	rec := call("since=" + now.Add(-time.Hour).Format(time.RFC3339Nano))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var response EventsListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
-	if len(response.Events) != 1 {
-		t.Errorf("Expected 1 event since an hour ago, got %d", len(response.Events))
-	}
-
-	if rec := call("since=yesterday"); rec.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400 for an unparseable since, got %d", rec.Code)
 	}
 }
 

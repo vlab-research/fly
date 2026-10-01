@@ -964,7 +964,7 @@ execution time; the entries that did are in `user_ids`.
 ### Get User Events
 
 ```
-GET /users/:userId/bail-events?limit=100&since=2026-09-30T00:00:00Z
+GET /users/:userId/bail-events?limit=100
 Authorization: Bearer {token}
 ```
 
@@ -972,9 +972,6 @@ Returns recent events across **all** bails owned by the user (not scoped to a sp
 
 Query parameters:
 - `limit`: integer 1–1000, default 100
-- `since`: optional RFC 3339 timestamp; only events with `timestamp >= since`, applied before `limit` (served by `idx_bail_events_user (user_id, timestamp DESC)`). Unparseable is `400 invalid_since`.
-
-Agents reach this through dashboard-server's key-scoped `GET /api/v1/bails/events` (`documentation/agent-api.md` §11).
 
 **Response** (200 OK): Same `EventsListResponse` shape as Get Bail Events.
 
