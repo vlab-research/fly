@@ -132,7 +132,6 @@ module.exports = {
   previewBail: bails.previewBail,
   bailEvents: bails.bailEvents,
   userBailEvents: bails.userBailEvents,
-  listBailEvents: bails.listBailEvents,
 
 
   // accounts (api/credentials, api/whatsapp, api/typeform)

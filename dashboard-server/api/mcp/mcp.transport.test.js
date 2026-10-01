@@ -33,7 +33,6 @@ const proxyquire = require('proxyquire').noCallThru();
 
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { TOOLS, MCP_BODY_LIMIT_BYTES } = require('./mcp.core');
-const { shapeBailEvents } = require('../bails/bails.core');
 const {
   StreamableHTTPClientTransport,
 } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
@@ -220,10 +219,6 @@ const fakeService = {
   async userBailEvents(user, limit) {
     seen.push({ name: 'userBailEvents', args: user, limit });
     return { events: [BAIL_EVENT] };
-  },
-  async listBailEvents(user, query) {
-    seen.push({ name: 'listBailEvents', args: user, query });
-    return shapeBailEvents([BAIL_EVENT], query.limit, query.since);
   },
 
   // accounts
@@ -716,7 +711,7 @@ describe('mcp transport: bails and accounts', () => {
     const client = await connect();
     const out = await client.callTool({ name: 'list_bail_events', arguments: { limit: 10 } });
 
-    expect(seen.find(c => c.name === 'listBailEvents').query).to.eql({ bailId: null, limit: 10, since: null });
+    expect(seen.find(c => c.name === 'userBailEvents').limit).to.equal(10);
     const [event] = payload(out).items;
     expect(event).to.not.have.property('definition_snapshot');
     expect(event.bailed_user_ids).to.eql(['p1', 'p2', 'p3']);
@@ -728,7 +723,8 @@ describe('mcp transport: bails and accounts', () => {
     const client = await connect();
     await client.callTool({ name: 'list_bail_events', arguments: { bail_id: 'b1' } });
 
-    expect(seen.find(c => c.name === 'listBailEvents').query.bailId).to.equal('b1');
+    expect(seen.find(c => c.name === 'bailEvents').bailId).to.equal('b1');
+    expect(seen.find(c => c.name === 'userBailEvents')).to.equal(undefined);
 
     await client.close();
   });

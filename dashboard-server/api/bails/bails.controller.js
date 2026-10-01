@@ -8,7 +8,6 @@
 
 const { User } = require('../../queries');
 const service = require('./bails.service');
-const { parseBailEventsQuery } = require('./bails.core');
 
 function handle(err, res) {
   console.error('Bails API Error:', err);
@@ -139,20 +138,6 @@ exports.getUserEvents = async (req, res) => {
     const { limit } = req.query;
     const result = await service.userBailEvents(req.vlabUser, limit ? parseInt(limit) : 100);
     res.status(200).json(result);
-  } catch (err) {
-    handle(err, res);
-  }
-};
-
-// The caller's own bail events, with the user resolved from the credential
-// rather than a :userId it would first have to discover.
-exports.listEvents = async (req, res) => {
-  try {
-    const parsed = parseBailEventsQuery(req.query);
-    if (!parsed.ok) return res.status(400).json({ error: { message: parsed.error } });
-
-    const user = await service.resolveVlabUser({ email: req.user.email });
-    res.status(200).json(await service.listBailEvents(user, parsed.query));
   } catch (err) {
     handle(err, res);
   }

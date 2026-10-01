@@ -69,9 +69,8 @@ async function getBailEvents(userId, bailId) {
 }
 
 // Get all bail events for a user
-async function getUserEvents(userId, limit = 100, since = null) {
-  const sinceParam = since ? `&since=${encodeURIComponent(since)}` : '';
-  return exodusRequest('GET', `/users/${userId}/bail-events?limit=${limit}${sinceParam}`);
+async function getUserEvents(userId, limit = 100) {
+  return exodusRequest('GET', `/users/${userId}/bail-events?limit=${limit}`);
 }
 
 module.exports = {

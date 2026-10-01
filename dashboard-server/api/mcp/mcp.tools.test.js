@@ -70,7 +70,6 @@ function makeService(overrides = {}) {
     previewBail: record('previewBail'),
     bailEvents: record('bailEvents'),
     userBailEvents: record('userBailEvents'),
-    listBailEvents: record('listBailEvents'),
     // accounts
     listMessagingAccounts: record('listMessagingAccounts'),
     numberHealth: record('numberHealth'),
@@ -1130,36 +1129,37 @@ describe('mcp.tools: preview_bail', () => {
 });
 
 describe('mcp.tools: list_bail_events', () => {
-  const PAGE = { count: 0, truncated: false, items: [] };
+  const events = n => Array.from({ length: n }, (_, i) => ({
+    id: `e${i}`, bail_id: 'b1', event_type: 'execution', timestamp: '2026-01-01T00:00:00Z',
+    users_matched: 1, users_bailed: 1, execution_results: { user_ids: ['u1'] },
+    definition_snapshot: { huge: true },
+  }));
 
-  it('asks the shared feed for the clamped limit when no bail is named', async () => {
-    const { runTool, calls } = loadTools({ listBailEvents: async () => PAGE });
-    const out = await runTool('list_bail_events', { limit: 9000 }, CONTEXT);
+  it('asks the user-wide feed for the clamped limit when no bail is named', async () => {
+    const { runTool, calls } = loadTools({ userBailEvents: async () => ({ events: events(3) }) });
+    await runTool('list_bail_events', { limit: 9000 }, CONTEXT);
 
-    expect(calls[1].name).to.equal('listBailEvents');
-    expect(calls[1].args2).to.eql({ bailId: null, limit: 500, since: null });
-    expect(payloadOf(out)).to.eql(PAGE);
+    expect(calls[1].name).to.equal('userBailEvents');
+    expect(calls[1].args2).to.equal(500);
   });
 
-  it('passes bail_id and since through', async () => {
-    const { runTool, calls } = loadTools({ listBailEvents: async () => PAGE });
-    await runTool('list_bail_events', { bail_id: 'b1', limit: 4, since: '2026-09-30' }, CONTEXT);
+  it('cuts the per-bail history client-side, since that endpoint takes no limit', async () => {
+    const { runTool, calls } = loadTools({ bailEvents: async () => ({ events: events(10) }) });
+    const out = await runTool('list_bail_events', { bail_id: 'b1', limit: 4 }, CONTEXT);
 
-    expect(calls[1].args2).to.eql({ bailId: 'b1', limit: 4, since: '2026-09-30T00:00:00Z' });
+    expect(calls[1].name).to.equal('bailEvents');
+    expect(calls[1].args2).to.equal('b1');
+
+    const body = payloadOf(out);
+    expect(body.count).to.equal(4);
+    expect(body.truncated).to.equal(true);
+    expect(body.items[0]).to.not.have.property('definition_snapshot');
   });
 
   it('defaults the limit when none is given', async () => {
-    const { runTool, calls } = loadTools({ listBailEvents: async () => PAGE });
+    const { runTool, calls } = loadTools({ userBailEvents: async () => ({ events: [] }) });
     await runTool('list_bail_events', {}, CONTEXT);
-    expect(calls[1].args2.limit).to.equal(100);
-  });
-
-  it('refuses a since that is not a timestamp, before resolving the user', async () => {
-    const { runTool, calls } = loadTools();
-    const out = await runTool('list_bail_events', { since: 'yesterday' }, CONTEXT);
-
-    expect(out.isError).to.equal(true);
-    expect(calls).to.have.lengthOf(0);
+    expect(calls[1].args2).to.equal(100);
   });
 });
 

@@ -41,10 +41,6 @@ describe('auth.core: route -> required scope', () => {
     requiredScope('GET', '/surveys/mysurvey/health').should.equal('surveys:read');
   });
 
-  it('treats /bails as users, like the /users/:userId/bails it reads', () => {
-    requiredScope('GET', '/bails/events?since=2026-09-30').should.equal('users:read');
-  });
-
   it('keeps responses separate from surveys — respondent data is not study structure', () => {
     requiredScope('GET', '/responses').should.not.equal(requiredScope('GET', '/surveys'));
   });

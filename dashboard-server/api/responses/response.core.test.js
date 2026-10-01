@@ -15,10 +15,18 @@ describe('response.core: parseResponseFilters', () => {
     });
   });
 
-  it('refuses a since that is not a timestamp', () => {
-    const out = parseResponseFilters({ since: 'last tuesday' });
-    expect(out.ok).to.equal(false);
-    expect(out.error).to.match(/since/);
+  it('passes a zoned timestamp through unchanged', () => {
+    for (const ts of ['2026-09-30T12:00:00Z', '2026-09-30T12:00:00.123456+00:00', '2026-09-30T08:00:00-04:00']) {
+      expect(parseResponseFilters({ since: ts }).filters.since).to.equal(ts);
+    }
+  });
+
+  it('refuses garbage, zone-less times and impossible dates', () => {
+    for (const bad of ['last tuesday', '1', '2026-09-30T12:00:00', '2026-09-30 12:00:00Z', '2026-02-30', '2026-09-30T25:00:00Z', ['2026-09-30']]) {
+      const out = parseResponseFilters({ since: bad });
+      expect(out.ok, JSON.stringify(bad)).to.equal(false);
+      expect(out.error).to.match(/^since must be/);
+    }
   });
 
   // ?question_ref=a&question_ref=b arrives from express as an array.

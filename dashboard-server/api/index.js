@@ -19,7 +19,6 @@ router
   .use('/surveys/:surveyName/states', require('./states'))
   .use('/surveys/:surveyName/health', require('./health'))
   .use('/platform', require('./health/platform.routes'))
-  .get('/users/:userId/bail-events', bailsController.validateUserAccess, bailsController.getUserEvents)
-  .get('/bails/events', bailsController.listEvents);
+  .get('/users/:userId/bail-events', bailsController.validateUserAccess, bailsController.getUserEvents);
 
 module.exports = router;

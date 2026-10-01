@@ -80,8 +80,6 @@ const ROUTE_RESOURCES = {
   'message-templates': 'templates',
   tickets: 'tickets',
   users: 'users',
-  // The key-scoped bail reads; the rest of bails sit under /users/:userId.
-  bails: 'users',
   platform: 'platform',
   // Key management. Never implicitly granted: a scoped key that could mint an
   // unscoped one is not scoped at all.

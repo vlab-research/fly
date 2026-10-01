@@ -12,7 +12,6 @@ const core = require('./mcp.core');
 const service = require('./mcp.service');
 const { scopeGrants } = require('../auth/auth.core');
 const { parseResponseFilters } = require('../responses/response.core');
-const { parseTimestamp } = require('../../utils/timestamp');
 
 /*
  * The scope each tool actually needs.
@@ -116,6 +115,7 @@ const {
   buildBailRequest,
   shapeBail,
   shapeBailSummary,
+  shapeBailEvents,
   shapeBailPreview,
   redactCredential,
   shapeTypeformForms,
@@ -520,14 +520,17 @@ const TOOL_HANDLERS = {
   },
 
   list_bail_events(args, { email }) {
-    const since = parseTimestamp(args.since, 'since');
-    if (!since.ok) return invalidArgsError([since.error]);
+    return withVlabUser(email, async user => {
+      const limit = clampLimit(args.limit, BAIL_EVENTS_LIMIT);
 
-    return withVlabUser(email, async user => toolResult(await service.listBailEvents(user, {
-      bailId: args.bail_id || null,
-      limit: clampLimit(args.limit, BAIL_EVENTS_LIMIT),
-      since: since.value,
-    })));
+      // The per-bail endpoint returns the whole history and takes no limit, so
+      // that page is cut here; the user-wide one is limited in the query.
+      const result = args.bail_id
+        ? await service.bailEvents(user, args.bail_id)
+        : await service.userBailEvents(user, limit);
+
+      return toolResult(shapeBailEvents(result && result.events, limit));
+    });
   },
 
   // --- accounts ------------------------------------------------------------
