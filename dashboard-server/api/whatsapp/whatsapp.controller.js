@@ -4,6 +4,7 @@ const {
   validateExchangeInput,
   parseExchangeResponse,
   parseSubscribeResponse,
+  parsePhoneNumberIds,
 } = require('./whatsapp.core');
 
 /**
@@ -12,9 +13,10 @@ const {
  * @param {Object} deps
  * @param {Function} deps.facebookClient - async (code) => fbResponseBody
  * @param {Function} deps.subscribeClient - async (wabaId, accessToken) => fbResponseBody
+ * @param {Function} deps.numberHealth - whatsapp.service#makeNumberHealth's function
  * @returns {Object} - Express handler functions
  */
-function makeHandlers({ facebookClient, subscribeClient }) {
+function makeHandlers({ facebookClient, subscribeClient, numberHealth }) {
 
   async function exchangeCode(req, res) {
     const { code, phone_number_id, waba_id } = req.body;
@@ -57,7 +59,21 @@ function makeHandlers({ facebookClient, subscribeClient }) {
     }
   }
 
-  return { exchangeCode };
+  async function getNumberHealth(req, res) {
+    try {
+      const result = await numberHealth({
+        email: req.user.email,
+        phoneNumberIds: parsePhoneNumberIds(req.query.phone_number_id),
+      });
+      if (!result.ok) return res.status(404).json({ error: result.error, known: result.known });
+      return res.status(200).json({ numbers: result.numbers });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: e.message || 'Internal server error' });
+    }
+  }
+
+  return { exchangeCode, getNumberHealth };
 }
 
 module.exports = { makeHandlers };

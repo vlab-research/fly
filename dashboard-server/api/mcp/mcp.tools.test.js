@@ -72,6 +72,7 @@ function makeService(overrides = {}) {
     userBailEvents: record('userBailEvents'),
     // accounts
     listMessagingAccounts: record('listMessagingAccounts'),
+    numberHealth: record('numberHealth'),
     listTypeformForms: record('listTypeformForms'),
     '@noCallThru': true,
   };
@@ -1171,6 +1172,43 @@ describe('mcp.tools: list_messaging_accounts', () => {
   it('needs credentials:read', async () => {
     const { runTool, calls } = loadTools();
     const out = await runTool('list_messaging_accounts', {}, { ...CONTEXT, scopes: ['surveys:read'] });
+
+    expect(out.isError).to.equal(true);
+    expect(calls).to.have.lengthOf(0);
+  });
+});
+
+describe('mcp.tools: get_whatsapp_health', () => {
+  const NUMBER = { phone_number_id: 'w1', quality_rating: 'RED', error: null };
+
+  it('passes the requested ids and returns the numbers as items', async () => {
+    const { runTool, calls } = loadTools({ numberHealth: async () => ({ ok: true, numbers: [NUMBER] }) });
+    const body = payloadOf(await runTool('get_whatsapp_health', { phone_number_ids: ['w1'] }, CONTEXT));
+
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, phoneNumberIds: ['w1'] });
+    expect(body).to.eql({ count: 1, items: [NUMBER] });
+  });
+
+  it('reads all numbers when none is named', async () => {
+    const { runTool, calls } = loadTools({ numberHealth: async () => ({ ok: true, numbers: [] }) });
+    await runTool('get_whatsapp_health', {}, CONTEXT);
+
+    expect(calls[0].args.phoneNumberIds).to.eql([]);
+  });
+
+  it('answers an id that is not the caller\'s with the ones that are', async () => {
+    const { runTool } = loadTools({
+      numberHealth: async () => ({ ok: false, error: 'No WhatsApp number connected to your account with phone_number_id w9', known: ['w1'] }),
+    });
+    const out = await runTool('get_whatsapp_health', { phone_number_ids: ['w9'] }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.include('w9').and.include('Your WhatsApp numbers: w1');
+  });
+
+  it('needs credentials:read', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('get_whatsapp_health', {}, { ...CONTEXT, scopes: ['surveys:read'] });
 
     expect(out.isError).to.equal(true);
     expect(calls).to.have.lengthOf(0);

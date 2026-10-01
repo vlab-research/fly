@@ -25,6 +25,7 @@ describe('whatsapp.controller (makeHandlers)', () => {
     return makeHandlers({
       facebookClient: overrides.facebookClient || defaultFacebookClient,
       subscribeClient: overrides.subscribeClient || defaultSubscribeClient,
+      numberHealth: overrides.numberHealth,
     });
   }
 
@@ -191,6 +192,42 @@ describe('whatsapp.controller (makeHandlers)', () => {
 
       console.error = originalError;
       loggedOutput.should.not.include('token123');
+    });
+  });
+
+  // -------------------------------------------------------
+  // getNumberHealth
+  // -------------------------------------------------------
+  describe('getNumberHealth', () => {
+    const req = { user: { email: 'test@vlab.com' }, query: { phone_number_id: 'w1,w2' } };
+
+    it('reads the caller\'s requested numbers and returns them', async () => {
+      let captured;
+      const handlers = makeTestHandlers({
+        numberHealth: async args => { captured = args; return { ok: true, numbers: [{ phone_number_id: 'w1' }] }; },
+      });
+      const res = mockRes();
+      await handlers.getNumberHealth(req, res);
+      captured.should.deep.equal({ email: 'test@vlab.com', phoneNumberIds: ['w1', 'w2'] });
+      res.statusCode.should.equal(200);
+      res.body.should.deep.equal({ numbers: [{ phone_number_id: 'w1' }] });
+    });
+
+    it('returns 404 with the caller\'s numbers for one they do not own', async () => {
+      const handlers = makeTestHandlers({
+        numberHealth: async () => ({ ok: false, error: 'No WhatsApp number ... w2', known: ['w1'] }),
+      });
+      const res = mockRes();
+      await handlers.getNumberHealth(req, res);
+      res.statusCode.should.equal(404);
+      res.body.known.should.deep.equal(['w1']);
+    });
+
+    it('returns 500 when the read throws', async () => {
+      const handlers = makeTestHandlers({ numberHealth: async () => { throw new Error('Network error'); } });
+      const res = mockRes();
+      await handlers.getNumberHealth(req, res);
+      res.statusCode.should.equal(500);
     });
   });
 });

@@ -80,7 +80,9 @@ const BAILS_NOTE = [
 
 const ACCOUNTS_NOTE = [
   'ACCOUNTS. list_messaging_accounts gives the account_id the message-template',
-  'tools take; list_typeform_forms gives the formid create_survey takes.',
+  'tools take; list_typeform_forms gives the formid create_survey takes;',
+  'get_whatsapp_health reads a WhatsApp number\'s quality rating and sending',
+  'status live from Meta.',
   'Connecting either account is a browser login and cannot be done from here.',
   'Nothing in this server returns an access token, and nothing writes a',
   'credential or an API key — do those in the dashboard.',
@@ -1773,6 +1775,33 @@ const ACCOUNT_TOOLS = [
       'returned by this or any other tool.',
     ].join('\n'),
     inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+  },
+
+  {
+    name: 'get_whatsapp_health',
+    description: [
+      'Read your WhatsApp business numbers\' sending health live from Meta: quality_rating',
+      '(GREEN, YELLOW, RED, UNKNOWN), health_status (can_send_message AVAILABLE, LIMITED',
+      'or BLOCKED, overall and per entity, with Meta\'s errors and notes verbatim),',
+      'messaging_limit_tier, throughput, name_status, status and display_phone_number.',
+      '',
+      'Each read calls Meta, so a single read can flicker (UNKNOWN for a moment); confirm',
+      'a change with a second read before acting on it. A number whose read fails has',
+      '`error` set and its other fields null. Access tokens are never returned.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        phone_number_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Optional: only these numbers (account_id of a whatsapp_business row in ' +
+            'list_messaging_accounts). Omit for all your WhatsApp numbers.',
+        },
+      },
+    },
   },
 
   {

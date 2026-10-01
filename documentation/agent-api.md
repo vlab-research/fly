@@ -463,6 +463,52 @@ Messaging credentials also dual-write an account registry; see the "Credentials
 and the messaging account registry" section of `dashboard-server/README.md`
 before creating one programmatically.
 
+### WhatsApp number health: `GET /api/v1/whatsapp/health`
+
+The live sending health of your WhatsApp numbers, read from Meta's Graph API
+with each number's stored `whatsapp_business` token. Needs `credentials:read`
+(the `/whatsapp` segment). The token is used server-side and never returned.
+
+    GET /api/v1/whatsapp/health                          all your WhatsApp numbers
+    GET /api/v1/whatsapp/health?phone_number_id=123,456  only these (repeating the parameter also works)
+
+`200`:
+
+```json
+{"numbers": [{
+  "phone_number_id": "1203867182815254",
+  "display_phone_number": "+1 541-920-2635",
+  "verified_name": "Virtual Lab",
+  "quality_rating": "RED",
+  "health_status": {"can_send_message": "LIMITED", "entities": [
+    {"entity_type": "PHONE_NUMBER", "id": "1203867182815254", "can_send_message": "LIMITED",
+     "additional_info": ["Your messaging limit will decrease if your quality rating doesn't improve"]},
+    {"entity_type": "WABA", "id": "...", "can_send_message": "AVAILABLE"}]},
+  "messaging_limit_tier": null,
+  "throughput": {"level": "STANDARD"},
+  "name_status": "APPROVED",
+  "status": "CONNECTED",
+  "error": null
+}]}
+```
+
+- The fields are Meta's phone-number fields of the same names, each `null` when
+  Meta leaves it out (`messaging_limit_tier` often is). `health_status` is passed
+  through as Meta sends it: per-entity `errors` (`error_code`,
+  `error_description`, `possible_solution`) and `additional_info` are the notes
+  WhatsApp Manager shows, verbatim. Some entity errors are about unrelated
+  features (SIP calling, 138024/138025) and say nothing about messaging.
+- A number whose Graph read fails (expired token, permissions) comes back with
+  `error: {code, message}` and its other fields `null`; the other numbers are
+  still read. A network failure reaching Meta is a `500`.
+- A `phone_number_id` that is not one of yours is a `404`
+  `{error, known}`, `known` listing your WhatsApp `phone_number_id`s.
+- Every call is a live Graph read. `quality_rating` reflects days of blocks and
+  reports and a single read can flicker (`UNKNOWN` for a moment): confirm a
+  change with a second read before acting on it.
+
+The MCP tool is `get_whatsapp_health` (§9, "Account tools").
+
 ---
 
 ## 7. `metadata` and `translation_conf`
@@ -628,6 +674,7 @@ see it. **The scope is enforced per tool instead** (`TOOL_SCOPES` in
 | `preview_bail` | `users:write` |
 | `list_bail_events` | `users:read` |
 | `list_messaging_accounts` | `credentials:read` |
+| `get_whatsapp_health` | `credentials:read` |
 | `list_typeform_forms` | `surveys:read` |
 
 The rule behind the table: a tool needs exactly the scope the REST route it
@@ -903,7 +950,7 @@ failure is invisible from the outside, so it is refused before the write.
 
 ### Account tools
 
-Two lists of identifiers other tools take.
+Two lists of identifiers other tools take, and the WhatsApp numbers' health.
 
 **`list_messaging_accounts()`** — the connected Messenger pages and WhatsApp
 business numbers, as `{entity, account_id, name, created}`. `account_id` is what
@@ -912,6 +959,13 @@ token and is never returned: `mcp.core.js#redactCredential` copies four fields
 by name rather than filtering a copy, and a recursive no-secret test walks the
 result at every depth. Connecting an account is a Meta browser flow and cannot
 be done from here.
+
+**`get_whatsapp_health({phone_number_ids?})`** — `GET /whatsapp/health` (§6)
+as `{count, items}`, one item per number in the REST shape. Omit
+`phone_number_ids` for all your WhatsApp numbers; one that is not yours is a
+tool error naming the ones that are. The pure shaping is
+`api/whatsapp/whatsapp.core.js#shapeNumberHealth`, which names every field it
+returns.
 
 **`list_typeform_forms()`** — `GET /typeform/form` shaped down to
 `{formid, title, last_updated_at}` per form, which is what `create_survey`
