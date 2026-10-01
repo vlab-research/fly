@@ -692,9 +692,7 @@ describe('mcp.tools: data', () => {
         CONTEXT,
       );
 
-      expect(calls[1].args).to.eql({
-        email: CONTEXT.email, survey_name: 'HPV', after: 'abc', pageSize: 500, questionRef: null, since: null,
-      });
+      expect(calls[1].args).to.eql({ email: CONTEXT.email, survey_name: 'HPV', after: 'abc', pageSize: 500 });
       const body = payloadOf(out);
       expect(body.page_size).to.equal(500);
       expect(body.next_cursor).to.equal('t499');
@@ -707,26 +705,6 @@ describe('mcp.tools: data', () => {
 
       expect(calls[1].args).to.include({ after: null, pageSize: 25 });
       expect(payloadOf(out).next_cursor).to.equal(null);
-    });
-
-    it('passes question_ref and since through to the read', async () => {
-      const { runTool, calls } = loadTools({ getResponses: async () => ({ responses: [] }) });
-      await runTool(
-        'get_responses',
-        { survey_name: 'HPV', question_ref: 'complete', since: '2026-09-01T00:00:00Z' },
-        CONTEXT,
-      );
-
-      expect(calls[1].args).to.include({ questionRef: 'complete', since: '2026-09-01T00:00:00Z' });
-    });
-
-    it('refuses a since that is not a timestamp, before any read', async () => {
-      const { runTool, calls } = loadTools();
-      const out = await runTool('get_responses', { survey_name: 'HPV', since: 'last week' }, CONTEXT);
-
-      expect(out.isError).to.equal(true);
-      expect(textOf(out)).to.match(/since must be an ISO 8601 timestamp/);
-      expect(calls).to.have.lengthOf(0);
     });
 
     // The whole reason `responses` is its own resource.

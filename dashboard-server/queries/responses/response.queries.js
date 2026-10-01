@@ -22,25 +22,7 @@ class RequestError extends Error {}
 // from (userid, timestamp, question_ref). Neither the ORDER BY tuple nor the
 // WHERE tuple changes, and `ad_id` collides with no cursor key.
 
-// The optional filters narrow the rows without touching the ORDER BY or the
-// cursor tuple, so a token taken from a filtered page resumes that same
-// filtered stream.
-function filterClauses({ questionRef = null, since = null } = {}, firstParam) {
-  const clauses = [];
-  const params = [];
-  if (questionRef) {
-    params.push(questionRef);
-    clauses.push(`AND question_ref = $${firstParam + params.length - 1}`);
-  }
-  if (since) {
-    params.push(since);
-    clauses.push(`AND timestamp >= $${firstParam + params.length - 1}::TIMESTAMPTZ`);
-  }
-  return { sql: clauses.join('\n  '), params };
-}
-
-async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool, filters = {}) {
-  const extra = filterClauses(filters, 7);
+async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool) {
   const query = `SELECT parent_surveyid,
   parent_shortcode,
   surveyid,
@@ -62,7 +44,6 @@ async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool, f
   WHERE users.email = $1
   AND surveys.survey_name = $2
   AND (timestamp, responses.userid, question_ref) > ($3, $4, $5)
-  ${extra.sql}
   ORDER BY (timestamp, responses.userid, question_ref)
   LIMIT $6`;
 
@@ -73,7 +54,6 @@ async function _all(email, surveyName, timestamp, userid, ref, pageSize, pool, f
     userid,
     ref,
     pageSize,
-    ...extra.params,
   ]);
 
   return rows;
@@ -96,7 +76,7 @@ async function checkUserExists(email, pool) {
   return rows;
 }
 
-async function all(email, surveyName, after = null, pageSize = 25, filters = {}) {
+async function all(email, surveyName, after = null, pageSize = 25) {
   var [timestamp, userid, ref] =
     after !== null
       ? token.decoded(after)
@@ -116,7 +96,6 @@ async function all(email, surveyName, after = null, pageSize = 25, filters = {})
     ref,
     pageSize,
     this,
-    filters,
   );
 
   if (!user.exists || !survey.exists) {
@@ -214,7 +193,6 @@ module.exports = {
   name: 'Response',
   RequestError,
   _all,
-  filterClauses,
   checkSurveyExists,
   checkUserExists,
   queries: pool => ({

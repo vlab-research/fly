@@ -5,9 +5,7 @@
  * tool. Cursor paging is the query's own: every row carries an opaque `token`
  * encoding (timestamp, userid, question_ref), and passing the last row's token
  * as `after` fetches the next page. The token is stable, so a caller can stop
- * and resume later. `questionRef` and `since` (an RFC 3339 string, already
- * validated by response.core.js) narrow the stream; pass the same ones on every
- * page.
+ * and resume later.
  */
 
 const { Response } = require('../../queries');
@@ -19,11 +17,9 @@ const { RequestError } = require('../../queries/responses/response.queries');
  * paged read that is simply an empty page, so it is reported as one.
  * Ownership is enforced inside the query: it joins on the caller's email.
  */
-async function getResponses({
-  email, survey_name, after = null, pageSize = 25, questionRef = null, since = null,
-}) {
+async function getResponses({ email, survey_name, after = null, pageSize = 25 }) {
   try {
-    const { responses } = await Response.all(email, survey_name, after, pageSize, { questionRef, since });
+    const { responses } = await Response.all(email, survey_name, after, pageSize);
     return { responses };
   } catch (err) {
     if (err instanceof RequestError) return { responses: [] };

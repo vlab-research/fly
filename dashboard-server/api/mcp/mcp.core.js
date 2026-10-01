@@ -925,10 +925,6 @@ const DATA_TOOLS = [
       'and resume. For a whole dataset use start_export instead — paging through',
       'thousands of answers is slow for you and for the database.',
       '',
-      '`question_ref` and `since` narrow the stream (e.g. who answered the last',
-      'question since a version went live). Pass the same filters on every page;',
-      'the cursor resumes the filtered stream.',
-      '',
       'Each row: userid, question_ref, question_text, response, translated_response,',
       'timestamp, surveyid, shortcode, flowid, metadata, ad_id, pageid.',
     ].join('\n'),
@@ -945,15 +941,6 @@ const DATA_TOOLS = [
         page_size: {
           type: 'integer',
           description: `Rows per page, 1..${GET_RESPONSES_PAGE.max}; default ${GET_RESPONSES_PAGE.default}.`,
-        },
-        question_ref: {
-          type: 'string',
-          minLength: 1,
-          description: 'Optional: only answers to this question ref.',
-        },
-        since: {
-          type: 'string',
-          description: 'Optional: only answers at or after this time, ISO 8601 with a zone (2026-09-30T12:00:00Z) or a date (midnight UTC).',
         },
       },
     },

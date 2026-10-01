@@ -11,7 +11,6 @@
 const core = require('./mcp.core');
 const service = require('./mcp.service');
 const { scopeGrants } = require('../auth/auth.core');
-const { parseResponseFilters } = require('../responses/response.core');
 
 /*
  * The scope each tool actually needs.
@@ -346,9 +345,6 @@ const TOOL_HANDLERS = {
   },
 
   get_responses(args, { email }) {
-    const parsed = parseResponseFilters(args);
-    if (!parsed.ok) return invalidArgsError([parsed.error]);
-
     return withSurvey(args, email, async () => {
       const pageSize = clampLimit(args.page_size, GET_RESPONSES_PAGE);
       const { responses } = await service.getResponses({
@@ -356,7 +352,6 @@ const TOOL_HANDLERS = {
         survey_name: args.survey_name,
         after: args.after || null,
         pageSize,
-        ...parsed.filters,
       });
       return toolResult(shapeResponsesPage(responses, pageSize));
     });

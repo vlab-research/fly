@@ -823,13 +823,11 @@ options}`. `status` is one of `Requested`, `Processing`, `Finished`, `Failed`
 `null` until `Finished`, then the presigned URL, valid for 7 hours. Without
 `survey_name` it is every export the caller has requested.
 
-**`get_responses({survey_name, after?, page_size?, question_ref?, since?})`** —
-`GET /responses` (§10) with `page_size` **clamped to 500** (default 25) and the
-page shaped as `{page_size, next_cursor, items}`: `next_cursor` is the last
-row's `token`, or `null` on a short page, so the loop is "call, pass
-`next_cursor` as `after`, stop on null". `question_ref` and `since` are §10's
-filters, validated the same way (`api/responses/response.core.js`); a bad
-`since` is a tool error. Rows are §10's rows. Needs `responses:read`, which `surveys:*`
+**`get_responses({survey_name, after?, page_size?})`** — `GET /responses` (§10)
+with `page_size` **clamped to 500** (default 25) and the page shaped as
+`{page_size, next_cursor, items}`: `next_cursor` is the last row's `token`, or
+`null` on a short page, so the loop is "call, pass `next_cursor` as `after`,
+stop on null". Rows are §10's rows. Needs `responses:read`, which `surveys:*`
 does not imply — that separation is deliberate.
 
 ### Messaging asset tools
@@ -992,7 +990,7 @@ For agents that need to inspect individual responses (as opposed to bulk export)
 ### Request
 
 ```
-GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>&question_ref=<ref>&since=<timestamp>
+GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>
 ```
 
 | Parameter | Required | Default | Notes |
@@ -1000,8 +998,6 @@ GET /api/v1/responses?survey=<name>&after=<token>&pageSize=<n>&question_ref=<ref
 | `survey` | **yes** | — | Survey name; must be one the caller owns |
 | `after` | no | null | Opaque cursor token from the previous response's `responses[n].token` field. Omit to start from the beginning. |
 | `pageSize` | no | 25 | Number of responses per page. Has no maximum in the API, but agents should clamp to a reasonable value (e.g. 500). |
-| `question_ref` | no | — | Only answers to this question ref. |
-| `since` | no | — | Only answers with `timestamp >= since`. An ISO 8601 date-time with seconds and a zone (`2026-09-30T12:00:00Z`, `…+05:30`, fractional seconds kept) or a date (`2026-09-30`, midnight UTC). Anything else, a zone-less time included, is a `400` naming the parameter. |
 
 ### Response — `200`
 
@@ -1030,23 +1026,6 @@ indefinitely, so a consumer can store it and resume paging later.
 
 **Ordering:** Results are ordered by `(timestamp, userid, question_ref)` and pagination is keyed off these
 three fields. Responses are therefore sorted by submission time, with ties broken by participant id and question.
-
-**Filters and the cursor:** the filters narrow the rows without changing the
-ordering or the token, so a token from a filtered page resumes that filtered
-stream. Pass the same `question_ref` and `since` on every page; changing them
-mid-stream gives the new filters' rows after the token's position. Counting
-completes is one filtered stream: `question_ref=<last question>&since=<when
-the version went live>`, then distinct `userid`s.
-
-**Cost:** the query finds the survey's versions and reads each one's rows
-through the covering index `responses (surveyid, userid, timestamp,
-question_ref) STORING (...)`, then sorts the matches for the page. The
-filters are applied inside that index read, so a filtered page reads no more
-than an unfiltered one and sorts and returns only what matches, but every page
-still reads all of the survey's index entries. An index keyed
-`(surveyid, question_ref, timestamp)` would make a filtered read a seek; it
-has not been added because `responses` is the largest table and each extra
-covering index is close to another copy of it (see migration 28a's notes).
 
 **Scoping:** All responses are scoped to the caller's email; the caller can only read responses from surveys they own.
 
