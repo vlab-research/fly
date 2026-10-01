@@ -60,11 +60,15 @@ const userBailEvents = ({ id }, limit, since = null) =>
  * The shaped event feed behind GET /bails/events and list_bail_events: one
  * bail's history, or every bail's, newest first, cut to `limit` events at or
  * after `since`. Arguments are already validated (bails.core.js).
+ *
+ * The user-wide feed is limited by Exodus, so it is asked for one event more
+ * than `limit`: that extra event is the only way shapeBailEvents can tell a
+ * full page from a truncated one. It is dropped there.
  */
 async function listBailEvents(user, { bailId = null, limit, since = null }) {
   const result = bailId
     ? await bailEvents(user, bailId)
-    : await userBailEvents(user, limit, since);
+    : await userBailEvents(user, limit + 1, since);
   return shapeBailEvents(result && result.events, limit, since);
 }
 

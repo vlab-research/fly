@@ -306,10 +306,13 @@ describe('Bails: GET /bails/events', () => {
     execution_results: { user_ids: ['u1', 'u2'] },
   });
 
-  function load(reply) {
+  // `replyFor` may be a function of the requested URL, to stand in for an Exodus
+  // that honours ?limit=.
+  function load(replyFor) {
     const sent = [];
     const r2Stub = (url, opts) => {
       sent.push({ url, method: opts.method });
+      const reply = typeof replyFor === 'function' ? replyFor(url) : replyFor;
       return {
         response: Promise.resolve({
           ok: reply.status < 400, status: reply.status, statusText: '', json: async () => reply.body,
@@ -334,7 +337,7 @@ describe('Bails: GET /bails/events', () => {
 
     await controller.listEvents(req({ limit: '20', since: '2026-09-30T00:00:00Z' }), res);
 
-    expect(sent[0].url).to.match(/\/users\/user-1\/bail-events\?limit=20&since=2026-09-30T00%3A00%3A00Z$/);
+    expect(sent[0].url).to.match(/\/users\/user-1\/bail-events\?limit=21&since=2026-09-30T00%3A00%3A00Z$/);
     expect(res.statusCode).to.equal(200);
     expect(res.body).to.eql({
       count: 1,
@@ -345,6 +348,36 @@ describe('Bails: GET /bails/events', () => {
         bailed_user_ids: ['u1', 'u2'], bailed_user_id_count: 2,
       }],
     });
+  });
+
+  // Exodus holding `total` events since the floor, newest first.
+  const exodusWith = total => url => {
+    const limit = Number(new URL(url).searchParams.get('limit'));
+    const events = Array.from({ length: Math.min(total, limit) }, (_, i) =>
+      event(`e${i}`, new Date(Date.parse('2026-09-30T12:00:00Z') - i * 1000).toISOString()));
+    return { status: 200, body: { events } };
+  };
+
+  it('marks the user-wide feed truncated when more events match than limit', async () => {
+    const { controller } = load(exodusWith(700));
+    const res = fakeRes();
+
+    await controller.listEvents(req({ limit: '500', since: '2026-09-01T00:00:00Z' }), res);
+
+    expect(res.body.truncated).to.equal(true);
+    expect(res.body.count).to.equal(500);
+    expect(res.body.items).to.have.lengthOf(500);
+    expect(res.body.items[499].id).to.equal('e499');
+  });
+
+  it('does not mark the user-wide feed truncated when exactly limit events match', async () => {
+    const { controller } = load(exodusWith(500));
+    const res = fakeRes();
+
+    await controller.listEvents(req({ limit: '500', since: '2026-09-01T00:00:00Z' }), res);
+
+    expect(res.body.truncated).to.equal(false);
+    expect(res.body.count).to.equal(500);
   });
 
   it('reads one bail\'s history and applies since and limit to it here', async () => {
