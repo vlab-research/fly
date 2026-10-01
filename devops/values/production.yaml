@@ -42,7 +42,9 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 # v0.0.78 -> v0.0.79: the Monitor tab's `awaiting-payment` finding counts
 # respondents parked on a payment for longer than dean's grace, the only place
 # a withheld payment failure is visible to the survey owner.
-versionDashboard: &vdashboard v0.0.79
+# v0.0.79 -> v0.0.80: GET /api/v1/whatsapp/health and MCP get_whatsapp_health,
+# a live read of the caller's WhatsApp numbers' quality and sending status.
+versionDashboard: &vdashboard v0.0.80
 versionBotserver: &vbotserver v0.0.12
 # v0.0.3-wa -> v0.0.5: carries 36808aa5 "feat(envelope): every event carries
 # platform and account_id" -- the PRODUCER side of the conversation-identity
