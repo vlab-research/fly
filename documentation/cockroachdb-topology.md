@@ -85,28 +85,36 @@ before the next. With `terminationGracePeriodSeconds: 300` plus rejoin and
 catch-up per pod, budget tens of minutes. Run it outside a traffic peak.
 
 No manual `kubectl delete pod` is needed: each pod is rescheduled by the
-controller under the new hard constraint as it comes back. Given the placement
-above, pod 3 is recreated first, finds nodes `xof0`/`ijmm`/`hkwa` occupied by
-pods 0/1/2, and is left with `hhtr` — the intended result. Final placement:
+controller under the new hard constraint as it comes back. The four GKE nodes
+were replaced by a pool upgrade around 2026-09-20, and on 2026-10-01 the pods
+happened to land on four distinct nodes:
 
-| Pod | Node |
+| Pod | Node (2026-10-01) |
 |---|---|
-| `gbv-cockroachdb-0` | `xof0` |
-| `gbv-cockroachdb-1` | `ijmm` |
-| `gbv-cockroachdb-2` | `hkwa` |
-| `gbv-cockroachdb-3` | `hhtr` (moved) |
+| `gbv-cockroachdb-0` | `3x0x` |
+| `gbv-cockroachdb-1` | `wl4c` |
+| `gbv-cockroachdb-2` | `39gm` |
+| `gbv-cockroachdb-3` | `4v3q` |
+
+That placement is luck, not configuration: the live StatefulSet still renders
+`preferredDuringScheduling...`, and the next node replacement can stack two
+pods again. With the placement already spread, the rollout moves nothing. Each
+pod comes back on the node it left, because that is the only node without a
+CockroachDB pod. **Re-check placement immediately before applying.** If two
+pods share a node at that moment, the rollout moves the higher-ordinal one onto
+the empty node.
 
 The restart is safe at RF3: only one pod is down at a time, so every range keeps
 at least 2 of 3 replicas and quorum throughout. The PDB (`budget.maxUnavailable:
 1`) enforces this.
 
-Preconditions, verified 2026-07-26:
+Preconditions:
 
-- **The PVC can follow the pod.** `datadir-gbv-cockroachdb-3` is a zonal `pd-ssd`
-  volume pinned to `europe-west1-b`, and all four nodes are in that zone, so it
-  reattaches on `hhtr`.
-- **The target node has room.** `hhtr` was at 6,798Mi of ~28,394Mi allocatable
-  memory (23%) and 1,364m of 3,920m CPU; an 8000Mi / 200m pod fits with headroom.
+- **The PVC can follow the pod.** Every `datadir-gbv-cockroachdb-*` is a zonal
+  `pd-ssd` volume in `europe-west1-b`, the zone of every node in the pool.
+- **The rendered diff is only the affinity block.** Verified 2026-10-01 by
+  diffing `helm template` against the live StatefulSet's pod spec; the other
+  differences are API-server defaults.
 
 Afterwards, **wait for zero under-replicated ranges before starting any other
 work** — notably the range-size and index migrations in

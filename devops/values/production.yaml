@@ -1528,22 +1528,12 @@ cockroachdb:
         memory: 8000Mi
     budget:
       maxUnavailable: 1
-    # HARD anti-affinity — one CRDB pod per GKE node, no exceptions.
-    #
-    # The chart default is `soft` (preferredDuringScheduling...), which let the
-    # scheduler stack gbv-cockroachdb-1 and gbv-cockroachdb-3 onto the same node
-    # while a fourth node ran none. At 4 nodes / RF3, half of all ranges then had
-    # 2 of 3 replicas on one machine — losing it meant quorum loss, not a
-    # survivable single-node failure. See documentation/cockroachdb-topology.md.
-    #
-    # `topologySpreadConstraints` does NOT cover this: the chart default keys it
-    # on topology.kubernetes.io/zone with whenUnsatisfiable: ScheduleAnyway, and
-    # every node is in europe-west1-b, so it is trivially satisfied and inert.
-    #
-    # Trade-off, deliberately accepted: with replicas == node count there is no
-    # spare, so a lost node leaves its pod Pending until the node returns. That
-    # is correct for RF3 (the cluster tolerates one node down). Do NOT "fix" this
-    # back to soft during an incident — doing so restores the quorum-loss risk.
+    # One CRDB pod per node. At 4 pods / RF3, two pods on one node put 2 of 3
+    # replicas of about half the ranges on one machine, so losing it is quorum
+    # loss. With no spare node, a lost node leaves its pod Pending; that is
+    # expected and must not be "fixed" by going back to soft. The zone-keyed
+    # topologySpreadConstraints do not cover this: the pool is single-zone.
+    # See documentation/cockroachdb-topology.md.
     podAntiAffinity:
       type: hard
       topologyKey: kubernetes.io/hostname

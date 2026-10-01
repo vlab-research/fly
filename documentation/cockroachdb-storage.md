@@ -21,6 +21,50 @@ priority order, and its Part 0 is an open production risk.
 > cluster. Disk and memory are coupled through **replica count**, not bytes: every
 > index dropped removes ranges, and replica count is what drives the Go heap.
 
+## Current state — measured 2026-10-01
+
+The sections below this one are the July 2026 measurements. They remain the
+reasoning of record, but several numbers have moved, mostly because of the
+conversation-identity migration (`planning/multi-platform-plan.md`), which
+added an account-scoped index to `messages` and backfilled `account_id` into
+~107M rows.
+
+| | July 2026 | 2026-10-01 |
+|---|---|---|
+| CRDB version | v24.1.28 | v24.1.28 |
+| `messages` indexes | `primary`, `userid_timestamp`, `userid` (NOT VISIBLE) | `primary`, `userid_account_timestamp`, `userid_timestamp` (**NOT VISIBLE** — migration 29 drops it) |
+| Ranges, cluster-wide | 11,801 | **19,768** (`messages` 16,617) |
+| Replicas per node | ~8,850 | **14,490–15,191** |
+| RSS per pod (`sys.rss`) | 7.22–7.89 GiB | **7.94–8.15 GiB** — all four over the `8000Mi` (7.81 GiB) request |
+| Go heap per pod | 0.86–1.85 GiB | 1.24–3.38 GiB |
+| Block cache hit rate | 75–82% | 84–91% |
+| Physical used per store | 98–105 GiB | 108–112 GiB of 240Gi |
+| Pod placement | two pods on one node | four distinct nodes, by chance — anti-affinity is still `soft` live |
+
+What happened to `messages`:
+
+- Migration 19 (drop `messages_userid_idx`) ran on production 2026-08-25.
+- Migration 26 built `messages_userid_account_timestamp_idx` and made
+  `messages_userid_timestamp_idx` NOT VISIBLE. The replay read now uses the
+  account-scoped index. Migration 29 drops the retired one; it has been applied
+  on staging, **not production**. Until it runs, `content` is stored 3× on
+  production.
+- `SELECT *` → `SELECT content` shipped (replybot v0.0.221). The replay query
+  now lives in `replybot/lib/chatbase/chatbase.js`, not the external
+  `chatbase-postgres` package.
+- Migration 30 sets an explicit **table-level** zone on `messages` at
+  `range_max_bytes = 64 MiB`. Raising `RANGE default` alone no longer reaches
+  `messages`; see the range-size section of the memory plan.
+
+Replica count is the number to watch. It grew ~70% since July, the Go heap grew
+with it, and it sits ~50% above CockroachDB's practical ~10,000-per-node
+guidance on 4-vCPU nodes.
+
+> `kubectl top pod` reports 9.3–11.6 GiB for these pods. That is the cgroup
+> working set, which includes page cache. Use `sys.rss` from
+> `crdb_internal.kv_node_status` for the process's own memory.
+
+
 ---
 
 How storage is distributed across the production CockroachDB cluster, why the
@@ -212,7 +256,7 @@ This is the fact that governs any archival design:
    (`state:{userid}`, 24h TTL — `replybot/lib/typewheels/statestore.js`). On a miss,
    `getState` replays the user's event history through the state machine. The
    events come from **CockroachDB `messages`**, via the `@vlab-research/chatbase-postgres`
-   backend (`Chatbase.get()` — `chatbase-postgres/lib/index.js:21-37`), which joins
+   backend (`Chatbase.get()` — then `chatbase-postgres/lib/index.js:21-37`, now `replybot/lib/chatbase/chatbase.js`), which joins
    `states` and filters on the `message_pointer` checkpoint (see below).
    (Note: state recompute reads `messages`, **not** Kafka — Kafka is only the runtime
    ingest stream.)

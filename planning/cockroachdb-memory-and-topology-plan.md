@@ -3,15 +3,18 @@
 **Author of measurements:** session of 2026-07-26, read-only against prod via
 port-forwarded SQL (`localhost:5432`) and `kubectl get/describe`.
 
-**Status:** nothing in this document has been applied to production.
+**Status (2026-10-01):** none of Parts 0–4 has been applied to production, but
+the ground has moved. Re-measured numbers are in
+[`documentation/cockroachdb-storage.md`](../documentation/cockroachdb-storage.md#current-state--measured-2026-10-01).
+In short: replicas per node rose from ~8,850 to ~15,000, RSS is now over request
+on all four pods, migration 19 and the `SELECT content` change both shipped
+through the conversation-identity work, and migration 30 pinned `messages` to
+64 MiB ranges at the table level.
 
-**Part 0 is written but NOT applied** (2026-07-26). The values change is staged on
-branch `feature/cockroachdb-optimization` (off `main`) — the branch carrying this
-whole work stream — together with
-[`documentation/cockroachdb-topology.md`](../documentation/cockroachdb-topology.md),
-which is now the runbook of record for it. Helm rendering was verified locally;
-the diff against the current pod template is *only* the anti-affinity block.
-Part 0 remains an open production availability risk until it is applied.
+**Part 0 is staged on `feature/cockroachdb-optimization` and not applied.** The
+four pods currently sit on four distinct nodes, but only by chance after a node
+pool replacement; the live anti-affinity is still `soft`. The runbook is
+[`documentation/cockroachdb-topology.md`](../documentation/cockroachdb-topology.md).
 
 **New here?** The entry point for all CockroachDB size/cost/memory work is
 [`documentation/cockroachdb-storage.md`](../documentation/cockroachdb-storage.md) —
@@ -40,16 +43,17 @@ it's the measured ground truth and maps out these documents. This plan carries t
 
 ## Priority order
 
-| # | Action | Gate | Why |
+| # | Action | Gate | Status (2026-10-01) |
 |---|---|---|---|
-| **0** | **Fix CRDB replica co-location** | none — do first | Live quorum-loss risk |
-| 1 | `SELECT content` PR in `chatbase-postgres` | none | Removes an index join; unblocks 2 |
-| 2 | Migration 19 (drop `messages_userid_idx` canary) | 0 | −2,916 ranges |
-| 3 | Zone config → 512 MiB ranges, as a migration | 2 | −13× replicas: the big memory win |
-| 4 | Tier 1b `states` index cleanup | independent | Write path |
-| 5 | Re-measure RSS; set `cache` from evidence | 3, 4 | Don't guess the number |
-| 6 | Operator → v25.4 → value separation | 5 | Makes a small cache viable |
-| 7 | `8000Mi` → `~4000Mi`, then `e2-highmem-4` → `e2-standard-4` | 6 soaked | The actual bill |
+| **0** | **Hard anti-affinity for CRDB** | none — do first | Staged on this branch, not applied |
+| 1 | `SELECT content` in the replay read | none | ✅ Shipped, replybot v0.0.221 |
+| 2 | Migration 19 (drop `messages_userid_idx`) | 0 | ✅ Applied 2026-08-25 |
+| 2b | Migration 29 (drop `messages_userid_timestamp_idx`, NOT VISIBLE since migration 26) | 0 | Applied on staging, **pending on production** |
+| 3 | Larger ranges for `RANGE default` **and** the `messages` table zone | 2b, plus a decision on migration 30 | Not started — see Part 2 |
+| 4 | Tier 1b `states` index cleanup | independent | Not authored; migration numbers 20/21 are taken, use the next free number |
+| 5 | Re-measure RSS; set `cache` from evidence | 3, 4 | — |
+| 6 | Operator → v25.4 → value separation | 5 | Re-verify the support dates and value separation before scheduling |
+| 7 | `8000Mi` → `~4000Mi`, then `e2-highmem-4` → `e2-standard-4` | 6 soaked | — |
 
 Steps 0–4 need no version upgrade and no new infrastructure.
 
@@ -239,6 +243,17 @@ tick load. **Measure the index work in replicas, not gigabytes.**
 ---
 
 # Part 2 — The `range_max_bytes` fossil (largest free win)
+
+> **Conflict with migration 30 (2026-10-01).** Migration 30 deliberately sets a
+> table-level zone on `messages` at 64 MiB, so the `RANGE default` change below
+> no longer reaches the table that holds ~85% of the ranges. Its reasoning (rows
+> averaging 34.8 KB and reaching 351 KB make 512 MiB ranges a memory spike for
+> single-range operations) was measured on **staging**. Production `messages`
+> rows average ~1–1.5 KB with a max of ~36 KB (`planning/conversation-identity.md`),
+> so that concern is much weaker there. Raising the range size on production
+> needs an explicit decision to supersede migration 30 for `messages` (a new
+> migration, probably with a middle value such as 256 MiB), not just a change to
+> `RANGE default`. Today's figures: 19,768 ranges, ~15,000 replicas per node.
 
 ## Evidence
 
