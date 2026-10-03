@@ -70,6 +70,20 @@ resource "google_compute_address" "ingress" {
   }
 }
 
+# Destination for Cloud Billing's BigQuery export. The export itself is switched
+# on in the Billing console (Billing export -> BigQuery export); there is no API
+# for it. See planning/gcp-cost-reduction.md.
+resource "google_bigquery_dataset" "billing_export" {
+  dataset_id  = "billing_export"
+  project     = var.gcp_project
+  location    = "EU"
+  description = "Cloud Billing export (standard and detailed usage cost)"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 output "gsa_email" {
   value = google_service_account.backup.email
 }

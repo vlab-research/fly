@@ -19,6 +19,23 @@ breakdown by service and SKU before ranking anything bigger than these.
 CockroachDB, which sizes the node pool, has its own plans. Start at
 [`documentation/cockroachdb-storage.md`](../documentation/cockroachdb-storage.md).
 
+## Billing export to BigQuery
+
+Destination dataset `toixotoixo:billing_export` (EU) is created by Terraform
+(`infra/envs/prod`, 2026-10-03). Turning the export on has no API, so it is a
+one-time console step for a billing admin on account `01CA2F-134945-38E431`
+("Virtual Lab"):
+
+1. Console → Billing → *Virtual Lab* → **Billing export** → **BigQuery export**.
+2. **Standard usage cost** → Edit settings → project `toixotoixo`, dataset
+   `billing_export` → Save.
+3. **Detailed usage cost** → same project and dataset → Save. This adds
+   per-resource rows (each disk, each node), which is what attributes cost to a
+   workload.
+
+Tables appear within a few hours. History before enabling is limited, so use
+Billing → Reports in the console for the months before then.
+
 ## Where the money probably is
 
 | Item | Shape | Rough list price / month |
