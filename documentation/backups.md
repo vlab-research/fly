@@ -38,7 +38,7 @@ Two pieces, kept deliberately separate:
 2. **The schedule itself** lives in `devops/migrations/prod/15-chatroach-scheduled-backup.sql` and is applied like every other DB migration:
 
    ```bash
-   ./devops/run-prod-migration.sh devops/migrations/prod/15-chatroach-scheduled-backup.sql
+   devops/run-migration.sh vprod devops/migrations/prod/15-chatroach-scheduled-backup.sql
    ```
 
    It's under `migrations/prod/` (not the top-level `migrations/`) because dev/test runs a single-node CRDB without GCS access — `CREATE SCHEDULE FOR BACKUP` validates the destination at create time and fails there. The bulk dev runners (`Makefile` `test-db`, `scripts/bootstrap-fly.sh`) glob `migrations/*.sql` and skip the subdirectory. See `devops/migrations/prod/README.md` for the full convention.
@@ -163,7 +163,7 @@ When staging CockroachDB is healthy:
 2. Apply: creates `cockroachdb-backup-staging@` GSA, `gs://vlab-research-crdb-backups-staging`, IAM, and WI binding for `vstag/gbv-cockroachdb`.
 3. Add the `serviceAccount.annotations` block to `devops/values/staging.yaml` under `cockroachdb.statefulset.serviceAccount` (same shape as `production.yaml`, different GSA email).
 4. `helm upgrade gbv vlab -f values/staging.yaml -n vstag`.
-5. Add a parallel migration `devops/migrations/prod/16-chatroach-scheduled-backup-staging.sql` (or run the existing prod SQL adapted to the staging bucket URL) and apply via `run-prod-migration.sh` against `vstag` — the runner currently hard-codes `vprod`, so adapt the script or run the SQL by hand against `vstag`.
+5. Add a parallel migration `devops/migrations/prod/16-chatroach-scheduled-backup-staging.sql` (or run the existing prod SQL adapted to the staging bucket URL) and apply it with `devops/run-migration.sh vstag <file>`.
 6. Drop the staging `dumper:` block and the `gbv-dumper-keys` secret in the same teardown shape as prod.
 
 ## Dumper teardown
