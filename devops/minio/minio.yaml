@@ -157,7 +157,7 @@ spec:
         - name: minio
           # Pinned deliberately: applying this file must never silently upgrade
           # MinIO, least of all during the maintenance window above.
-          # Our own build from the release's source tag (the minio-image repo):
+          # Our own build from the release's source tag (devops/minio/image/):
           # MinIO no longer distributes community images or binaries, and a node
           # without a cached copy cannot start the pod. The digest guards
           # against the tag being moved or removed.
