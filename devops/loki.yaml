@@ -1,10 +1,13 @@
 loki:
   enabled: true
+  # PodSecurityPolicy was removed in Kubernetes 1.25; the chart still renders one by default.
+  rbac:
+    pspEnabled: false
   persistence:
     enabled: true
     accessModes:
       - ReadWriteOnce
-    size: 100Gi
+    size: 50Gi
 
 
 promtail:
@@ -19,7 +22,6 @@ promtail:
             group_id: loki
             topics:
             - vlab-prod-payment
-            - vlab-prod-response
             - ^promtail.*
             labels:
               job: kafka

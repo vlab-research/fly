@@ -1528,6 +1528,15 @@ cockroachdb:
         memory: 8000Mi
     budget:
       maxUnavailable: 1
+    # One CRDB pod per node. At 4 pods / RF3, two pods on one node put 2 of 3
+    # replicas of about half the ranges on one machine, so losing it is quorum
+    # loss. With no spare node, a lost node leaves its pod Pending; that is
+    # expected and must not be "fixed" by going back to soft. The zone-keyed
+    # topologySpreadConstraints do not cover this: the pool is single-zone.
+    # See documentation/cockroachdb-topology.md.
+    podAntiAffinity:
+      type: hard
+      topologyKey: kubernetes.io/hostname
     serviceAccount:
       create: true
       annotations:
