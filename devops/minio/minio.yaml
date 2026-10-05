@@ -1,7 +1,7 @@
 # MinIO — S3-compatible object storage for transient CSV exports and (new)
 # permanent media assets.
 #
-# This is a hand-rolled MinIO (upstream minio/minio image), NOT the Bitnami helm
+# This is a hand-rolled MinIO (our own build of upstream MinIO), NOT the Bitnami helm
 # chart. `devops/values/minio.yaml` is Bitnami-shaped and is NOT what deploys
 # this — see the header of that file. THIS FILE IS THE APPLIED SOURCE OF TRUTH.
 #
@@ -157,10 +157,11 @@ spec:
         - name: minio
           # Pinned deliberately: applying this file must never silently upgrade
           # MinIO, least of all during the maintenance window above.
-          # Quay, not Docker Hub: MinIO no longer publishes to Docker Hub, and a
-          # node without a cached copy cannot start the pod. The digest guards
+          # Our own build from the release's source tag (the minio-image repo):
+          # MinIO no longer distributes community images or binaries, and a node
+          # without a cached copy cannot start the pod. The digest guards
           # against the tag being moved or removed.
-          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          image: us-west1-docker.pkg.dev/toixotoixo/vlab-research/minio:RELEASE.2025-09-07T16-13-09Z@sha256:09b37fa91ec6766eeaa0ef57c7ea3c4d1c8aee30ec96280b1ee38d4b2253d609
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
