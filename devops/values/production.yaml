@@ -1087,9 +1087,21 @@ exporter:
     repository: "ghcr.io/vlab-research/exporter"
     pullPolicy: Always
     tag: *vexporter
+  # The exporter loads a whole survey into memory; a large responses export
+  # reaches ~4.5Gi. Without a limit an oversized export drives the whole node
+  # out of memory, including the cockroach replicas scheduled beside it.
+  resources:
+    requests:
+      memory: 3Gi
+    limits:
+      memory: 6Gi
   env:
     - name: "APP_NAME"
       value: "exporter"
+    # Every worker thread shares the pod's memory limit, so this bounds how
+    # many large exports can pile into one pod.
+    - name: "WORKER_THREADS"
+      value: "2"
   envSecrets:
     - exporter
 
