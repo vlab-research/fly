@@ -56,7 +56,7 @@ const KVLinkModal = ({ items, title, description, successText, handleCreate, loa
 KVLinkModal.propTypes = {
   items: PropTypes.array.isRequired,
   title: PropTypes.string.isRequired,
-  description: PropTypes.string.isRequired,
+  description: PropTypes.node.isRequired,
   successText: PropTypes.string.isRequired,
   handleCreate: PropTypes.func.isRequired,
   loading: PropTypes.bool,

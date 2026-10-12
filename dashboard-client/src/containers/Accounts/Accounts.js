@@ -43,7 +43,7 @@ const accountConfs = [
     to: '/connect/api-keys',
     title: 'Fly API Keys',
     entity: 'api_token',
-    description: 'API Keys for connecting Fly to other applications',
+    description: 'API Keys for connecting Fly to other applications, including AI agents over MCP',
     getName: c => c.details.name,
     buttonText: 'Create',
   },

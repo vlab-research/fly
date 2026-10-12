@@ -68,7 +68,15 @@ const ApiKeys = () => {
     history.go(-1);
   }
 
-  const description = `To create a new API Key.`
+  const description = (
+    <>
+      To create a new API Key. To connect an AI agent such as Claude Code or Codex
+      over MCP, give it this key — see{' '}
+      <a href="https://vlab.digital/docs/agents/" target="_blank" rel="noopener noreferrer">
+        Connecting an Agent
+      </a>.
+    </>
+  );
 
 
   if (token) {
