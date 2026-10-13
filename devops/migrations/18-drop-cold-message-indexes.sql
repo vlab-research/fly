@@ -55,7 +55,7 @@
  * Idempotent (IF EXISTS).
  *
  * APPLY:
- *   ./devops/run-prod-migration.sh devops/migrations/18-drop-cold-message-indexes.sql
+ *   devops/run-migration.sh vprod devops/migrations/18-drop-cold-message-indexes.sql
  */
 
 -- Global time-ordered covering index; manual batch-replay tool only.

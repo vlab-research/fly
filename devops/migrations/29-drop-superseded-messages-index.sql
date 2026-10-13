@@ -75,12 +75,8 @@
  * SAFETY: DROP INDEX is an online schema change; it does not block reads or
  * writes. Idempotent (IF EXISTS), and the guards are inert on a re-run.
  *
- * APPLY -- do NOT use devops/run-migration.sh. Its `kubectl run -i --rm` client
- * loses its websocket and prints `ERROR: Migration failed` over SQL that
- * COMMITTED. Verify against the schema, never against the exit code.
- *
- *   kubectl exec -i -n <ns> gbv-cockroachdb-0 -- ./cockroach sql --insecure \
- *     --database=chatroach < devops/migrations/29-drop-superseded-messages-index.sql
+ * APPLY:
+ *   devops/run-migration.sh <ns> devops/migrations/29-drop-superseded-messages-index.sql
  */
 
 -- GUARD 1: refuse if the replacement is missing or not serving traffic. Dropping

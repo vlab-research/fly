@@ -49,7 +49,7 @@
  * SAFETY: online schema change; does not block reads/writes. Idempotent (IF EXISTS).
  *
  * APPLY:
- *   ./devops/run-prod-migration.sh devops/migrations/19-drop-message-userid-idx.sql
+ *   devops/run-migration.sh vprod devops/migrations/19-drop-message-userid-idx.sql
  */
 
 DROP INDEX IF EXISTS chatroach.public.messages@messages_userid_idx;
