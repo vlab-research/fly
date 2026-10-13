@@ -45,7 +45,7 @@ The test database is **pre-populated with the full production schema** via all m
 **When to run**: Every development session, in CI before merge  
 **Command**: `npm run test:tc` from `facebot/testrunner/`
 
-Testcontainers boots a complete, isolated Docker network with every component: CockroachDB, Redpanda, Redis, Hermes (botserver), Replybot, Message-Worker, Scribble (states + responses), Formcentral, Dinersclub, Facebot mock, and Dean. The webhook entry point is **Hermes** — the Rust drop-in replacement for the deprecated Node botserver — running under the `botserver` network alias. Each test run is independent—no shared state across developers, no cluster flakiness, no need to wait for external resources.
+Testcontainers boots a complete, isolated Docker network with every component: CockroachDB, Redpanda, Redis, Hermes (botserver), Replybot, Message-Worker, Scribble (states + responses), Formcentral, Dinersclub, Bouncer (verification pages, with the test-only `auto` method enabled), Facebot mock, and Dean. The webhook entry point is **Hermes** — the Rust drop-in replacement for the deprecated Node botserver — running under the `botserver` network alias. Each test run is independent—no shared state across developers, no cluster flakiness, no need to wait for external resources.
 
 **Speed**: Cold start ~60s (rebuilds all images), warm ~30s (containers only)  
 **Dean behavior**: Triggered imperatively per test via `triggerDean()`—no cron waits needed. Timeout tests run in ~2s instead of ~180s.

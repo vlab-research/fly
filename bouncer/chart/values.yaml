@@ -1,0 +1,25 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/vlab-research/bouncer
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Non-secret config. See bouncer/README.md § Environment.
+env: []
+
+# Name of the Secret holding TURNSTILE_SECRET_KEY and BOUNCER_HMAC_KEY,
+# applied from bouncer/.env-<env> by devops/secrets.sh.
+envFrom: bouncer
+
+resources: {}
+
+ingress:
+  enabled: false
+  annotations: {}
+  hosts: []
+  tls: []
+
+service:
+  type: ClusterIP
+  port: 80
