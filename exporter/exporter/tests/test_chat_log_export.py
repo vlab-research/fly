@@ -127,7 +127,7 @@ class TestExportChatLog:
 
         # Verify storage backend path
         mock_backend_factory.assert_called_once_with(
-            file_path="exports/survey1_chat_log.csv"
+            file_path="exports/f02f61d33aac1c8d/survey1_chat_log.csv"
         )
 
         # Verify status progressed through stages and ended Finished
