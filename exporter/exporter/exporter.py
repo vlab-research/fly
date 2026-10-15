@@ -5,12 +5,20 @@ import tempfile
 
 import pandas as pd
 from pydantic import BaseModel
-from toolz import pipe
-from vlab_prepro import Preprocessor
+from vlab_prepro import PreprocessingError, Preprocessor
 
 from . import storage
 from .db import query, execute
 from .log import log
+
+
+# Users per batch for responses and chat_log exports. Peak memory grows with
+# this, not with the survey; see "Memory" in exporter/README.md.
+EXPORT_USER_BATCH_SIZE = int(os.getenv("EXPORT_USER_BATCH_SIZE", "1000"))
+
+
+def batched(items, size):
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 # --- Full Messages Export: event classification and streaming ---
@@ -190,86 +198,218 @@ class InvalidOptionsError(BaseException):
     pass
 
 
-def format_data(
-    responses: pd.DataFrame,
-    form_data: pd.DataFrame,
-    options: ExportOptions,
-):
-    p = Preprocessor()
-    fns = []
+# Errors that come from the export's options or data, so every attempt fails the
+# same way: the worker marks the job Failed instead of retrying it.
+NON_RETRYABLE_ERRORS = (PreprocessingError, InvalidOptionsError)
 
-    if options.keep_final_answer:
-        fns.append(p.keep_final_answer)
 
-    # TODO: autopopulate metadata??? Just add it all?
-    #
+def validate_options(options: ExportOptions):
+    if options.pivot and not options.response_value:
+        raise InvalidOptionsError(
+            f"To pivot to wide format we need a response_value. Options: {options}"
+        )
+
+
+def metadata_keys(options: ExportOptions):
     # `ad_id` is always exported, never opt-in. It is the key a researcher joins
     # vlab's (network, ad_id) -> stratum mapping on, and this CSV is the whole
     # manual join path for people working in R or Stata. Leaving it to the
     # free-text "Metadata to add as columns" box would mean most exports simply
     # ship without the join key, which defeats the point. Requested keys follow
     # it, de-duplicated so asking for `ad_id` explicitly stays harmless.
-    #
-    # Guarded on the column existing because `add_metadata` reaches for
-    # `df.metadata`, and this step is now unconditional where it used to run
-    # only when the user opted in -- so any frame lacking that column would
-    # newly raise. (Note: the fully columnless `pd.DataFrame([])` produced by a
-    # zero-response survey still fails earlier, inside `add_form_data`'s merge
-    # on 'surveyid'. That is a pre-existing bug this guard neither causes nor
-    # cures; see the xfail in tests/test_exporter.py.)
-    metadata_keys = list(
-        dict.fromkeys(ALWAYS_EXPORTED_METADATA + (options.metadata or []))
-    )
-    if metadata_keys and "metadata" in responses.columns:
-        fns.append(p.add_metadata(metadata_keys))
+    return list(dict.fromkeys(ALWAYS_EXPORTED_METADATA + (options.metadata or [])))
+
+
+def _mapped_dtype(values):
+    """The dtype Series.map gives a column holding these values."""
+    return pd.Series(list(values), dtype=object).map(lambda v: v).dtype
+
+
+# One stand-in value per kind of JSON value (see get_metadata_kinds).
+_KIND_EXAMPLES = {
+    "float": 0.5,
+    "string": "",
+    "boolean": True,
+    "null": None,
+    "object": {},
+    "array": [],
+}
+
+
+def metadata_dtypes(kinds):
+    """
+    Maps each metadata key to the dtype pandas infers for its column over the
+    whole survey, from the (key, kind, min_int, max_int) rows of
+    get_metadata_kinds. The inferred dtype depends only on which kinds of value
+    the column holds and on the range of its ints, so one example of each
+    stands in for every row.
+    """
+    examples = {}
+    for key, kind, lo, hi in kinds:
+        vals = [int(lo), int(hi)] if kind == "int" else [_KIND_EXAMPLES[kind]]
+        examples.setdefault(key, []).extend(vals)
+    return {key: _mapped_dtype(vals) for key, vals in examples.items()}
+
+
+def _add_metadata(p, keys, question_refs, dtypes):
+    """
+    Preprocessor.add_metadata, except that the `<key>_metadata` naming (used
+    when a question shares the key's name) and each column's dtype are given,
+    not taken from the rows at hand. Every batch of an export gets the
+    survey-wide answer, so all batches write the same columns the same way: an
+    int key missing on some rows is 1.0 in every batch, not 1 in some.
+    """
+
+    def add(df):
+        parsed = [json.loads(m) for m in df.metadata]
+        refs = set(df.question_ref.unique()) if question_refs is None else question_refs
+        for key in keys:
+            col = f"{key}_metadata" if key in refs else key
+            values = pd.Series([m.get(key) for m in parsed], index=df.index, dtype=object)
+            dtype = _mapped_dtype(values) if dtypes is None else dtypes.get(key, object)
+            df[col] = values if dtype == object else values.astype(dtype)
+            p.keys.add(col)
+        return df
+
+    return add
+
+
+def _pivot(p, answer_column, question_refs):
+    def pivot(df):
+        wide = p.pivot(answer_column, df)
+        refs = set(df.question_ref.unique()) if question_refs is None else question_refs
+        return wide.reindex(columns=sorted(p.keys) + sorted(refs))
+
+    return pivot
+
+
+def format_data(
+    responses: pd.DataFrame,
+    form_data: pd.DataFrame,
+    options: ExportOptions,
+    question_refs=None,
+    dtypes=None,
+):
+    """
+    Runs a responses export's preprocessing over `responses`.
+
+    `question_refs` (every question_ref in the survey) and `dtypes` (the
+    metadata columns' dtypes, from metadata_dtypes()) describe the whole
+    survey. A batch of its users passes them so that its columns, their order
+    and their formatting match every other batch's. Left out, they are taken
+    from `responses`.
+
+    Returns an empty frame as soon as a step leaves no rows; its columns are
+    then incomplete, so callers skip it.
+    """
+    validate_options(options)
+    p = Preprocessor()
+    steps = [p.add_form_data(form_data, prefix="form")]
+
+    if options.keep_final_answer:
+        steps.append(p.keep_final_answer)
+
+    keys = metadata_keys(options)
+    if keys and "metadata" in responses.columns:
+        steps.append(_add_metadata(p, keys, question_refs, dtypes))
 
     if options.drop_users_without:
-        fns.append(p.drop_users_without(options.drop_users_without))
+        steps.append(p.drop_users_without(options.drop_users_without))
 
     if options.drop_duplicated_users:
-        fns.append(p.drop_duplicated_users(["shortcode"]))
+        steps.append(p.drop_duplicated_users(["shortcode"]))
 
     if options.add_duration:
-        fns.append(p.add_duration())
+        steps.append(p.add_duration())
 
     if options.pivot:
-        if not options.response_value:
-            raise InvalidOptionsError(
-                f"To pivot to wide format we need a response_value. Options: {options}"
-            )
-        fns.append(p.pivot(options.response_value))
+        steps.append(_pivot(p, options.response_value, question_refs))
 
-    return pipe(
-        responses,
-        p.add_form_data(form_data, prefix="form"),
-        *fns,
-    )
+    df = responses
+    for step in steps:
+        if len(df) == 0:
+            break
+        df = step(df)
+    return df
 
 
-def export_data(cnf, export_id, user, survey, options: ExportOptions):
+def append_csv(fh, df, header):
+    """
+    Appends df's rows to an open export CSV whose columns are `header`, or, if
+    header is None, starts it with df's columns as the header line. Empty
+    frames are skipped. Returns the header.
+    """
+    if len(df) == 0:
+        return header
+    if header is None:
+        df.to_csv(fh, index=False)
+        return list(df.columns)
+    if set(df.columns) != set(header):
+        raise ValueError(
+            f"batch columns {sorted(df.columns)} do not match the export's "
+            f"header {header}"
+        )
+    df.to_csv(fh, index=False, header=False, columns=header)
+    return header
+
+
+def export_data(cnf, export_id, user, survey, options: ExportOptions,
+                batch_size=None):
+    """
+    Export a survey's responses as CSV, processed batch_size users at a time,
+    so memory depends on the batch size and not on the survey. Every
+    preprocessing step needs only one user's rows, which is what makes the
+    batches independent.
+    """
     log.info(f"starting csv export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
     storage_backend = storage.get_storage_backend(file_path=f"exports/{survey}.csv")
 
     try:
-        # Get responses and form data from database
-        responses = get_responses(cnf, user, survey)
-        users = int(responses['userid'].nunique()) if len(responses) else 0
-        set_metadata(cnf, export_id, responses=len(responses), users=users)
+        validate_options(options)
+        userids = get_survey_userids(cnf, user, survey)
+        batches = batched(userids, batch_size or EXPORT_USER_BATCH_SIZE)
+        set_metadata(
+            cnf, export_id, users=len(userids), responses=0, rows=0,
+            batches_done=0, batches=len(batches),
+        )
+
         form_data = get_form_data(cnf, user, survey)
+        question_refs = set(get_question_refs(cnf, user, survey))
+        dtypes = metadata_dtypes(get_metadata_kinds(
+            cnf, user, survey, metadata_keys(options), options.keep_final_answer
+        ))
 
-        # process data using the vlab prepro library
-        set_export_status(cnf, export_id, status="Formatting")
-        dd = format_data(responses, form_data, options)
-        set_metadata(cnf, export_id, rows=len(dd))
-
-        # store as csv on configured backend
         set_export_status(cnf, export_id, status="Writing")
-        storage_backend.save_to_csv(dd)
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, newline=""
+        )
+        try:
+            header = None
+            n_responses = n_rows = 0
+            for i, batch in enumerate(batches, 1):
+                responses = get_responses(cnf, user, survey, batch)
+                dd = format_data(responses, form_data, options, question_refs, dtypes)
+                header = append_csv(tmp, dd, header)
+                n_responses += len(responses)
+                n_rows += len(dd)
+                # Free this batch before the next is fetched, or two are held at once.
+                del responses, dd
+                set_metadata(
+                    cnf, export_id, responses=n_responses, rows=n_rows, batches_done=i
+                )
+            tmp.close()
+
+            set_export_status(cnf, export_id, status="Uploading")
+            storage_backend.save_file(tmp.name)
+        finally:
+            tmp.close()
+            os.unlink(tmp.name)
+
         url = storage_backend.generate_link()
         set_export_status(cnf, export_id, url, status="Finished")
         log.info(f"finished csv export for survey: {survey}")
-    except Exception as e:
+    except (Exception, *NON_RETRYABLE_ERRORS) as e:
         set_metadata(cnf, export_id, error=str(e)[:500])
         set_export_status(cnf, export_id, status="Failed")
         raise e
@@ -301,10 +441,105 @@ def set_metadata(cnf, export_id, **fields):
     log.info(f"export {export_id} metadata: {fields}")
 
 
-def get_responses(cnf, user, survey):
+# The survey's responses joined to its owner. Through surveyid, not shortcode:
+# shortcodes are reused across owners' surveys, so a shortcode filter pulls in
+# other researchers' users.
+_SURVEY_RESPONSES = """
+    FROM responses r
+    JOIN surveys s ON r.surveyid = s.id
+    JOIN users u ON s.userid = u.id
+    WHERE u.email = %s AND s.survey_name = %s
+"""
+
+
+def get_survey_userids(cnf, user, survey):
+    """The userids that responded to the survey, sorted."""
+    q = f"SELECT DISTINCT r.userid {_SURVEY_RESPONSES} ORDER BY r.userid"
+    return [row[0] for row in query(cnf, q, vals=(user, survey))]
+
+
+def get_question_refs(cnf, user, survey):
+    """Every question_ref answered in the survey, sorted."""
+    q = f"SELECT DISTINCT r.question_ref {_SURVEY_RESPONSES} ORDER BY r.question_ref"
+    return [row[0] for row in query(cnf, q, vals=(user, survey))]
+
+
+def get_metadata_kinds(cnf, user, survey, keys, final_answers_only):
     """
-    Returns the responses of a survey in a dataframe
+    For each metadata key, the kinds of value it takes across the survey's
+    responses, as (key, kind, min_int, max_int) rows. kind is how Python's json
+    module reads the value: 'int', 'float', 'string', 'boolean', 'object',
+    'array', or 'null' (JSON null or key absent). min_int and max_int are set
+    for 'int' only.
+
+    final_answers_only limits it to the rows keep_final_answer keeps, the last
+    answer per (userid, surveyid, question_ref): the metadata step runs after
+    that one, so the dropped rows never reach it.
     """
+    if not keys:
+        return []
+
+    if final_answers_only:
+        rows = f"""
+            SELECT metadata FROM (
+                SELECT r.metadata, row_number() OVER (
+                    PARTITION BY r.userid, r.surveyid, r.question_ref
+                    ORDER BY r.timestamp DESC
+                ) AS nth
+                {_SURVEY_RESPONSES}
+            ) AS answers WHERE nth = 1
+        """
+    else:
+        rows = f"SELECT r.metadata {_SURVEY_RESPONSES}"
+
+    # A JSON number is an int to json.loads iff its text is all digits.
+    q = f"""
+        WITH answers AS ({rows}),
+        valued AS (
+            SELECT k.key, answers.metadata ->> k.key AS txt,
+                   jsonb_typeof(answers.metadata -> k.key) AS typ
+            FROM answers, unnest(%s::STRING[]) AS k(key)
+        ),
+        kinds AS (
+            SELECT key, txt,
+                   CASE
+                       WHEN typ = 'number' AND txt ~ '^-?[0-9]+$' THEN 'int'
+                       WHEN typ = 'number' THEN 'float'
+                       ELSE COALESCE(typ, 'null')
+                   END AS kind
+            FROM valued
+        )
+        SELECT key, kind,
+               min(CASE WHEN kind = 'int' THEN txt::DECIMAL END)::STRING,
+               max(CASE WHEN kind = 'int' THEN txt::DECIMAL END)::STRING
+        FROM kinds
+        GROUP BY key, kind
+    """
+    return list(query(cnf, q, vals=(user, survey, list(keys))))
+
+
+RESPONSE_COLUMNS = [
+    "parent_surveyid",
+    "parent_shortcode",
+    "surveyid",
+    "flowid",
+    "userid",
+    "question_ref",
+    "question_idx",
+    "question_text",
+    "response",
+    "timestamp",
+    "metadata",
+    "pageid",
+    "translated_response",
+]
+
+
+def get_responses(cnf, user, survey, userids):
+    """
+    Returns the responses of `userids` to the survey in a dataframe
+    """
+    placeholders = ",".join(["%s"] * len(userids))
     q = f"""
         SELECT parent_surveyid,
                parent_shortcode,
@@ -324,10 +559,11 @@ def get_responses(cnf, user, survey):
         LEFT JOIN users ON surveys.userid = users.id
         WHERE users.email = %s
         AND surveys.survey_name = %s
+        AND responses.userid IN ({placeholders})
         ORDER BY (responses.userid, timestamp, question_ref)
     """
-    dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
-    return pd.DataFrame(dat)
+    dat = query(cnf, q, vals=(user, survey, *userids))
+    return pd.DataFrame(list(dat), columns=RESPONSE_COLUMNS)
 
 
 def get_form_data(cnf, user, survey):
@@ -393,17 +629,7 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         if not allowed_types:
             log.warning(f"full messages export {export_id}: allowed_types is empty, no rows will match")
 
-        # Step 1: collect distinct userids for this survey (small result set).
-        # Filter via surveyid (not shortcode) — shortcodes are reused across
-        # different owners' surveys, so a shortcode-IN filter pulls foreign users.
-        userid_q = """
-            SELECT DISTINCT r.userid
-            FROM responses r
-            JOIN surveys s ON r.surveyid = s.id
-            JOIN users u ON s.userid = u.id
-            WHERE u.email = %s AND s.survey_name = %s
-        """
-        userids = [row[0] for row in query(cnf, userid_q, vals=(user, survey))]
+        userids = get_survey_userids(cnf, user, survey)
         log.info(
             f"full messages export {export_id}: found {len(userids)} users"
         )
@@ -473,10 +699,11 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         raise e
 
 
-def export_chat_log(cnf, export_id, user, survey, chat_log_options):
+def export_chat_log(cnf, export_id, user, survey, chat_log_options, batch_size=None):
     """
     Export raw chat log data as CSV for a survey.
-    No preprocessing -- just a direct dump of the chat_log table.
+    No preprocessing -- just a direct dump of the chat_log table, queried in
+    batches of users and streamed to a file.
     Optional columns (raw_payload, metadata) are controlled by chat_log_options.
     """
     log.info(f"starting chat log export for survey: {survey}")
@@ -486,14 +713,38 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options):
     )
 
     try:
-        chat_data = get_chat_log(cnf, user, survey, chat_log_options)
-        set_metadata(cnf, export_id, rows=len(chat_data))
+        userids = get_chat_log_userids(cnf, user, survey)
+        batches = batched(userids, batch_size or EXPORT_USER_BATCH_SIZE)
+        set_metadata(
+            cnf, export_id, users=len(userids), rows=0,
+            batches_done=0, batches=len(batches),
+        )
 
-        if chat_data.empty:
+        if not userids:
             log.warning(f"no chat log data found for survey: {survey}")
 
         set_export_status(cnf, export_id, status="Writing")
-        storage_backend.save_to_csv(chat_data)
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, newline=""
+        )
+        try:
+            # "\n" line endings, as pandas' to_csv writes them.
+            writer = csv.writer(tmp, lineterminator="\n")
+            writer.writerow(chat_log_columns(chat_log_options))
+            n_rows = 0
+            for i, batch in enumerate(batches, 1):
+                for row in get_chat_log(cnf, user, survey, chat_log_options, batch):
+                    writer.writerow(row)
+                    n_rows += 1
+                set_metadata(cnf, export_id, rows=n_rows, batches_done=i)
+            tmp.close()
+
+            set_export_status(cnf, export_id, status="Uploading")
+            storage_backend.save_file(tmp.name)
+        finally:
+            tmp.close()
+            os.unlink(tmp.name)
+
         url = storage_backend.generate_link()
         set_export_status(cnf, export_id, url, status="Finished")
         log.info(f"finished chat log export for survey: {survey}")
@@ -503,11 +754,48 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options):
         raise e
 
 
-def get_chat_log(cnf, user, survey, chat_log_options):
+CHAT_LOG_COLUMNS = [
+    "userid",
+    "pageid",
+    "timestamp",
+    "direction",
+    "content",
+    "question_ref",
+    "shortcode",
+    "surveyid",
+    "message_type",
+]
+
+
+def chat_log_columns(chat_log_options):
+    columns = list(CHAT_LOG_COLUMNS)
+    if chat_log_options.include_metadata:
+        columns.append("metadata")
+    if chat_log_options.include_raw_payload:
+        columns.append("raw_payload")
+    return columns
+
+
+# chat_log rows belong to a survey through their shortcode.
+_SURVEY_CHAT_LOG = """
+    FROM chat_log cl
+    INNER JOIN surveys s ON cl.shortcode = s.shortcode
+    INNER JOIN users u ON s.userid = u.id
+    WHERE u.email = %s AND s.survey_name = %s
+"""
+
+
+def get_chat_log_userids(cnf, user, survey):
+    """The userids with chat log rows in the survey, sorted."""
+    q = f"SELECT DISTINCT cl.userid {_SURVEY_CHAT_LOG} ORDER BY cl.userid"
+    return [row[0] for row in query(cnf, q, vals=(user, survey))]
+
+
+def get_chat_log(cnf, user, survey, chat_log_options, userids):
     """
-    Returns chat log data for a survey as a dataframe.
-    Base columns are always included. metadata and raw_payload
-    are conditionally appended based on chat_log_options.
+    Yields the chat log rows of `userids` in the survey, as tuples in
+    chat_log_columns() order. metadata and raw_payload are included
+    according to chat_log_options.
     """
     base_columns = (
         "cl.userid, cl.pageid, cl.timestamp::string AS timestamp, cl.direction, "
@@ -521,13 +809,13 @@ def get_chat_log(cnf, user, survey, chat_log_options):
     if chat_log_options.include_raw_payload:
         optional_columns += ", cl.raw_payload::string AS raw_payload"
 
+    # DISTINCT because a survey has a surveys row per version, so the join
+    # repeats each chat_log row once per version of its form.
+    placeholders = ",".join(["%s"] * len(userids))
     q = f"""
         SELECT DISTINCT {base_columns}{optional_columns}
-        FROM chat_log cl
-        INNER JOIN surveys s ON cl.shortcode = s.shortcode
-        INNER JOIN users u ON s.userid = u.id
-        WHERE u.email = %s AND s.survey_name = %s
+        {_SURVEY_CHAT_LOG}
+        AND cl.userid IN ({placeholders})
         ORDER BY cl.userid, timestamp
     """
-    dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
-    return pd.DataFrame(dat)
+    return query(cnf, q, vals=(user, survey, *userids))

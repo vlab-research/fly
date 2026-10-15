@@ -215,21 +215,6 @@ def test_format_data_ad_id_mixed_rows_line_up(df_with_ad_id, form_df):
     assert missing_rows["ad_id"].isna().all()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "PRE-EXISTING BUG, not caused by ad_id. A survey with zero responses "
-        "yields pd.DataFrame([]) -- no columns at all -- and Preprocessor."
-        "add_form_data merges on 'surveyid', raising KeyError long before the "
-        "ad_id/add_metadata step is ever reached. Verified to fail identically "
-        "without the ad_id change. A fix exists on the unmerged branch "
-        "feature/exporter-integration-tests (commit 07ff6c4e, 'handle "
-        "zero-response surveys with proper DataFrame columns'); this test is "
-        "left here as an xfail so the gap stays visible, and it flips to XPASS "
-        "the moment that fix lands."
-    ),
-    strict=True,
-    raises=KeyError,
-)
 def test_format_data_empty_responses_does_not_crash(form_df):
     # A survey with zero responses yields pd.DataFrame([]) -- no columns at
     # all. format_data must not blow up on that input.

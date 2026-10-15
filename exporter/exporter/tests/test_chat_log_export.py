@@ -1,6 +1,6 @@
 from unittest.mock import patch, MagicMock, call
 
-import pandas as pd
+import os
 import pytest
 
 from exporter.exporter import (
@@ -35,21 +35,13 @@ class TestSetExportStatus:
 class TestGetChatLog:
     @patch("exporter.exporter.query")
     def test_base_columns_only(self, mock_query):
-        mock_query.return_value = iter([
-            {
-                "userid": "u1", "pageid": "p1", "timestamp": "2025-01-01",
-                "direction": "incoming", "content": "hello", "question_ref": "q1",
-                "shortcode": "sc1", "surveyid": "s1", "message_type": "text",
-            }
-        ])
+        row = ("u1", "p1", "2025-01-01", "incoming", "hello", "q1", "sc1", "s1", "text")
+        mock_query.return_value = iter([row])
 
         opts = ChatLogExportOptions(include_metadata=False, include_raw_payload=False)
-        result = get_chat_log("db-url", "user@test.com", "survey1", opts)
+        result = list(get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"]))
 
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 1
-        assert "metadata" not in result.columns
-        assert "raw_payload" not in result.columns
+        assert result == [row]
 
         # Verify SQL does not include optional columns
         sql = mock_query.call_args[0][1]
@@ -61,7 +53,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions(include_metadata=True, include_raw_payload=False)
-        get_chat_log("db-url", "user@test.com", "survey1", opts)
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
 
         sql = mock_query.call_args[0][1]
         assert "cl.metadata::string" in sql
@@ -72,7 +64,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions(include_metadata=False, include_raw_payload=True)
-        get_chat_log("db-url", "user@test.com", "survey1", opts)
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
 
         sql = mock_query.call_args[0][1]
         assert "cl.raw_payload::string" in sql
@@ -83,7 +75,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions(include_metadata=True, include_raw_payload=True)
-        get_chat_log("db-url", "user@test.com", "survey1", opts)
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
 
         sql = mock_query.call_args[0][1]
         assert "cl.metadata::string" in sql
@@ -94,7 +86,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions()
-        get_chat_log("db-url", "user@test.com", "survey1", opts)
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
 
         sql = mock_query.call_args[0][1]
         assert "INNER JOIN surveys s ON cl.shortcode = s.shortcode" in sql
@@ -103,24 +95,42 @@ class TestGetChatLog:
         assert "s.survey_name = %s" in sql
 
     @patch("exporter.exporter.query")
-    def test_passes_user_and_survey_as_params(self, mock_query):
+    def test_passes_user_survey_and_batch_as_params(self, mock_query):
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions()
-        get_chat_log("db-url", "user@test.com", "my-survey", opts)
+        get_chat_log("db-url", "user@test.com", "my-survey", opts, ["u1", "u2"])
 
-        assert mock_query.call_args[1]["vals"] == ("user@test.com", "my-survey")
+        sql = mock_query.call_args[0][1]
+        assert "cl.userid IN (%s,%s)" in sql
+        assert mock_query.call_args[1]["vals"] == ("user@test.com", "my-survey", "u1", "u2")
+
+
+def _backend():
+    backend = MagicMock()
+    backend.generate_link.return_value = "http://download-link"
+    backend.uploaded = None
+
+    def save_file(path):
+        with open(path, newline="") as f:
+            backend.uploaded = f.read()
+
+    backend.save_file.side_effect = save_file
+    return backend
 
 
 class TestExportChatLog:
     @patch("exporter.exporter.get_chat_log")
+    @patch("exporter.exporter.get_chat_log_userids")
     @patch("exporter.exporter.storage.get_storage_backend")
     @patch("exporter.exporter.set_export_status")
-    def test_success_flow(self, mock_status, mock_backend_factory, mock_get_chat_log):
-        mock_backend = MagicMock()
-        mock_backend.generate_link.return_value = "http://download-link"
-        mock_backend_factory.return_value = mock_backend
-        mock_get_chat_log.return_value = pd.DataFrame({"userid": ["u1"]})
+    def test_success_flow(self, mock_status, mock_backend_factory, mock_userids, mock_get_chat_log):
+        backend = _backend()
+        mock_backend_factory.return_value = backend
+        mock_userids.return_value = ["u1"]
+        mock_get_chat_log.return_value = iter([
+            ("u1", "p1", "2025-01-01", "incoming", "hi, there", None, "sc1", "s1", "text"),
+        ])
 
         opts = ChatLogExportOptions()
         export_chat_log("db-url", "uuid-1", "user@test.com", "survey1", opts)
@@ -133,16 +143,40 @@ class TestExportChatLog:
         # Verify status progressed through stages and ended Finished
         mock_status.assert_any_call("db-url", "uuid-1", status="Querying")
         mock_status.assert_any_call("db-url", "uuid-1", status="Writing")
+        mock_status.assert_any_call("db-url", "uuid-1", status="Uploading")
         mock_status.assert_any_call("db-url", "uuid-1", "http://download-link", status="Finished")
 
-        # Verify data was saved
-        mock_backend.save_to_csv.assert_called_once()
+        assert backend.uploaded == (
+            "userid,pageid,timestamp,direction,content,question_ref,shortcode,surveyid,message_type\n"
+            'u1,p1,2025-01-01,incoming,"hi, there",,sc1,s1,text\n'
+        )
 
     @patch("exporter.exporter.get_chat_log")
+    @patch("exporter.exporter.get_chat_log_userids")
     @patch("exporter.exporter.storage.get_storage_backend")
     @patch("exporter.exporter.set_export_status")
-    def test_failure_sets_failed_status(self, mock_status, mock_backend_factory, mock_get_chat_log):
-        mock_get_chat_log.side_effect = RuntimeError("db error")
+    def test_queries_in_user_batches(self, mock_status, mock_backend_factory, mock_userids, mock_get_chat_log):
+        backend = _backend()
+        mock_backend_factory.return_value = backend
+        mock_userids.return_value = ["u1", "u2", "u3"]
+        mock_get_chat_log.side_effect = lambda cnf, user, survey, opts, batch: iter(
+            [(u, "p", "t", "d", "c", "q", "sc", "s", "m") for u in batch]
+        )
+
+        opts = ChatLogExportOptions()
+        export_chat_log("db-url", "uuid-1", "user@test.com", "survey1", opts, batch_size=2)
+
+        batches = [c[0][4] for c in mock_get_chat_log.call_args_list]
+        assert batches == [["u1", "u2"], ["u3"]]
+        assert [line.split(",")[0] for line in backend.uploaded.splitlines()] == [
+            "userid", "u1", "u2", "u3",
+        ]
+
+    @patch("exporter.exporter.get_chat_log_userids")
+    @patch("exporter.exporter.storage.get_storage_backend")
+    @patch("exporter.exporter.set_export_status")
+    def test_failure_sets_failed_status(self, mock_status, mock_backend_factory, mock_userids):
+        mock_userids.side_effect = RuntimeError("db error")
 
         opts = ChatLogExportOptions()
         with pytest.raises(RuntimeError, match="db error"):
@@ -152,18 +186,20 @@ class TestExportChatLog:
         mock_status.assert_any_call("db-url", "uuid-2", status="Querying")
         mock_status.assert_any_call("db-url", "uuid-2", status="Failed")
 
-    @patch("exporter.exporter.get_chat_log")
+    @patch("exporter.exporter.get_chat_log_userids")
     @patch("exporter.exporter.storage.get_storage_backend")
     @patch("exporter.exporter.set_export_status")
-    def test_empty_data_still_exports(self, mock_status, mock_backend_factory, mock_get_chat_log):
-        mock_backend = MagicMock()
-        mock_backend.generate_link.return_value = "http://link"
-        mock_backend_factory.return_value = mock_backend
-        mock_get_chat_log.return_value = pd.DataFrame()
+    def test_empty_data_exports_header_only(self, mock_status, mock_backend_factory, mock_userids):
+        backend = _backend()
+        mock_backend_factory.return_value = backend
+        mock_userids.return_value = []
 
-        opts = ChatLogExportOptions()
+        opts = ChatLogExportOptions(include_metadata=True, include_raw_payload=True)
         export_chat_log("db-url", "uuid-3", "user@test.com", "survey1", opts)
 
-        # Empty data still gets saved and status set to Finished
-        mock_backend.save_to_csv.assert_called_once()
-        mock_status.assert_any_call("db-url", "uuid-3", "http://link", status="Finished")
+        assert backend.uploaded == (
+            "userid,pageid,timestamp,direction,content,question_ref,shortcode,"
+            "surveyid,message_type,metadata,raw_payload\n"
+        )
+        mock_status.assert_any_call("db-url", "uuid-3", "http://download-link", status="Finished")
+        assert not os.path.exists(backend.save_file.call_args[0][0])
