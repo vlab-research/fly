@@ -6,7 +6,13 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from .exporter import ExportOptions, export_data, export_chat_log, export_full_messages
+from .exporter import (
+    NON_RETRYABLE_ERRORS,
+    ExportOptions,
+    export_chat_log,
+    export_data,
+    export_full_messages,
+)
 from .db import query, execute
 from .log import log
 
@@ -117,6 +123,21 @@ def process_job(cnf, job):
         export_data(cnf, export_id, user, survey, opts)
 
 
+def run_job(cnf, job, max_retries, worker=""):
+    """
+    Process a claimed job. If it fails, put it back for another attempt unless
+    that was its last or the error would recur on every attempt.
+    """
+    try:
+        process_job(cnf, job)
+    except NON_RETRYABLE_ERRORS as e:
+        log.error(f"{worker}export {job['id']} failed, not retrying: {e}")
+    except BaseException as e:
+        log.error(f"{worker}export {job['id']} failed (attempt {job['retry_count']}): {e}")
+        if job['retry_count'] < max_retries:
+            reset_for_retry(cnf, job['id'])
+
+
 def worker_loop(thread_id, database_url, max_retries, stuck_timeout_minutes, poll_interval):
     log.info(f"worker {thread_id} started")
     while True:
@@ -125,12 +146,7 @@ def worker_loop(thread_id, database_url, max_retries, stuck_timeout_minutes, pol
             if job is None:
                 time.sleep(poll_interval)
                 continue
-            try:
-                process_job(database_url, job)
-            except BaseException as e:
-                log.error(f"worker {thread_id} export {job['id']} failed (attempt {job['retry_count']}): {e}")
-                if job['retry_count'] < max_retries:
-                    reset_for_retry(database_url, job['id'])
+            run_job(database_url, job, max_retries, worker=f"worker {thread_id} ")
         except BaseException as e:
             log.error(f"worker {thread_id} unexpected error: {e}")
             time.sleep(poll_interval)
