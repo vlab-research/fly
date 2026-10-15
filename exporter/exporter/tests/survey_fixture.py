@@ -20,6 +20,10 @@ v2, so it is a float column). Users, each with something an option acts on:
 
 `score` is written as JSON number text: 1.0, 1E+3 and 7, read as float,
 float and int.
+
+EDGE_FORMS and edge_rows() are a second survey of values that are hard to
+write identically: metadata of every JSON kind (see EDGE_METADATA) and text
+with commas, quotes, newlines, carriage returns and non-ASCII characters.
 """
 import json
 import uuid
@@ -115,17 +119,68 @@ def response_rows():
     return rows
 
 
-def build(survey_name="fixture-survey", surveyids=None):
+EDGE_FORMS = [
+    ("edge_v1", "edge", "2021-01-01 00:00:00+00", '{"wave": 1}'),
+]
+
+# Per user, the metadata keys of every kind of JSON value a column can mix:
+# b booleans (and a string "true"), obj objects and arrays (and a string), f
+# floats (one below 1e-4), gi ints with gaps, s strings that look like numbers,
+# u non-ASCII, c a string with a comma, quotes and a newline, e an empty string.
+EDGE_METADATA = {
+    "e01": {"b": True, "obj": {"z": 1, "a": [1, 2.5, "x"]}, "f": 0.5, "gi": 1,
+            "s": "007", "u": "ünïcødé 🎉", "c": 'a, "b"\nc', "e": ""},
+    "e02": {"b": False, "obj": [], "f": 1.25, "s": "1.50", "u": "日本語"},
+    "e03": {"b": "true", "obj": "plain", "f": 1690000000000.5, "gi": 3, "s": "1e5"},
+    "e04": {"b": None, "obj": {"nested": {"deep": True}}, "f": 2.5e-05, "gi": 1690000000000},
+    "e05": {"obj": None, "f": 100.0},
+    "e06": {"f": 1e16, "gi": -2},
+}
+
+EDGE_TEXT = [
+    # (question_ref, question_text, response)
+    ("t1", 'Question 1, with "quotes"\nand a newline: ü?', "a,b"),
+    ("t2", "Question\r\n2", 'he said "hi"'),
+    ("t3", "Question 3 🎉", "multi\r\nline\rand cr"),
+    ("t4", "Question 4", ""),
+    ("t5", " leading and trailing ", " spaced "),
+]
+
+
+def edge_rows():
+    """The edge survey's responses as dicts keyed by form key instead of surveyid."""
+    rows = []
+    for n, (userid, md) in enumerate(EDGE_METADATA.items()):
+        start = T0 + timedelta(hours=n, microseconds=(500 if n % 2 else 0))
+        for i, (ref, text, response) in enumerate(EDGE_TEXT):
+            rows.append({
+                "form": "edge_v1",
+                "flowid": 1,
+                "userid": userid,
+                "question_ref": ref,
+                "question_idx": i + 1,
+                "question_text": text,
+                "response": response,
+                "timestamp": _ts(start + timedelta(seconds=7 * i)),
+                "metadata": json.dumps({"ad_id": f"ad-{userid}", **md}, ensure_ascii=False),
+                "pageid": "page-1",
+                "translated_response": response.upper() if i % 2 else None,
+            })
+    return rows
+
+
+def build(survey_name="fixture-survey", surveyids=None, forms=FORMS, rows=response_rows):
     """
     Returns (form_rows, response_rows): form rows as get_form_data returns them
     and response rows with RESPONSE_COLUMNS, sorted as get_responses sorts
     them. surveyids maps form key to id; fresh uuids if not given.
     """
-    surveyids = surveyids or {key: str(uuid.uuid4()) for key, *_ in FORMS}
+    form_defs = forms
+    surveyids = surveyids or {key: str(uuid.uuid4()) for key, *_ in form_defs}
 
     forms = []
     versions = {}
-    for key, shortcode, created, metadata in sorted(FORMS, key=lambda f: (f[1], f[2])):
+    for key, shortcode, created, metadata in sorted(form_defs, key=lambda f: (f[1], f[2])):
         versions[shortcode] = versions.get(shortcode, 0) + 1
         forms.append({
             "surveyid": surveyids[key],
@@ -136,9 +191,9 @@ def build(survey_name="fixture-survey", surveyids=None):
             "metadata": metadata,
         })
 
-    shortcodes = {key: shortcode for key, shortcode, *_ in FORMS}
+    shortcodes = {key: shortcode for key, shortcode, *_ in form_defs}
     responses = []
-    for r in response_rows():
+    for r in rows():
         sid = surveyids[r["form"]]
         responses.append({
             "parent_surveyid": sid,
@@ -151,10 +206,14 @@ def build(survey_name="fixture-survey", surveyids=None):
     return forms, responses
 
 
-def frames(survey_name="fixture-survey"):
-    """(responses, form_data) DataFrames, as the export's queries return them."""
-    forms, responses = build(survey_name)
+def frames(survey_name="fixture-survey", **kwargs):
+    """
+    (responses, form_data) pandas DataFrames, as the whole-survey export's
+    queries returned them.
+    """
+    forms, responses = build(survey_name, **kwargs)
     return (
         pd.DataFrame(responses)[RESPONSE_COLUMNS],
         pd.DataFrame(forms),
     )
+

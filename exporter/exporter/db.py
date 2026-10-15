@@ -29,6 +29,16 @@ def query(cnf, q, vals=(), as_dict=False):
             yield x
 
 
+def stream(cnf, q, vals=()):
+    """
+    Yields the rows of q as tuples as the server sends them, without holding
+    the whole result in the client first, as query() does.
+    """
+    with _connect(cnf) as conn:
+        with conn.cursor() as cur:
+            yield from cur.stream(q, vals)
+
+
 def execute(cnf, q, vals=()):
     with _connect(cnf) as conn:
         with conn.cursor() as cur:

@@ -1,14 +1,15 @@
 import csv
+import itertools
 import json
 import os
 import tempfile
 
-import pandas as pd
+import polars as pl
 from pydantic import BaseModel
 from vlab_prepro import PreprocessingError, Preprocessor
 
 from . import storage
-from .db import query, execute
+from .db import execute, query, stream
 from .log import log
 
 
@@ -208,6 +209,8 @@ def validate_options(options: ExportOptions):
         raise InvalidOptionsError(
             f"To pivot to wide format we need a response_value. Options: {options}"
         )
+    for key in metadata_keys(options):
+        _json_path(key)
 
 
 def metadata_keys(options: ExportOptions):
@@ -220,56 +223,65 @@ def metadata_keys(options: ExportOptions):
     return list(dict.fromkeys(ALWAYS_EXPORTED_METADATA + (options.metadata or [])))
 
 
-def _mapped_dtype(values):
-    """The dtype Series.map gives a column holding these values."""
-    return pd.Series(list(values), dtype=object).map(lambda v: v).dtype
+def _json_path(key):
+    """A JSONPath selecting `key` of the top-level object."""
+    # The path parser reads \" in a quoted name, but has no escape for a
+    # backslash, so a key holding one can't be selected.
+    if "\\" in key:
+        raise InvalidOptionsError(f"Metadata keys cannot contain a backslash: {key!r}")
+    return '$["' + key.replace('"', '\\"') + '"]'
 
 
-# One stand-in value per kind of JSON value (see get_metadata_kinds).
-_KIND_EXAMPLES = {
-    "float": 0.5,
-    "string": "",
-    "boolean": True,
-    "null": None,
-    "object": {},
-    "array": [],
-}
-
-
-def metadata_dtypes(kinds):
+def metadata_value(key):
     """
-    Maps each metadata key to the dtype pandas infers for its column over the
-    whole survey, from the (key, kind, min_int, max_int) rows of
-    get_metadata_kinds. The inferred dtype depends only on which kinds of value
-    the column holds and on the range of its ints, so one example of each
-    stands in for every row.
+    The value of `key` in each row's metadata JSON, as text: a string as is,
+    a number as Polars prints it (an int as written), true/false as
+    True/False, an object or array as JSON, null or absent as null. Each row
+    is rendered on its own, so a value comes out the same in every batch.
     """
-    examples = {}
-    for key, kind, lo, hi in kinds:
-        vals = [int(lo), int(hi)] if kind == "int" else [_KIND_EXAMPLES[kind]]
-        examples.setdefault(key, []).extend(vals)
-    return {key: _mapped_dtype(vals) for key, vals in examples.items()}
+    path = _json_path(key)
+    md = pl.col("metadata").str
+    value = md.json_path_match(path)
+    # json_path_match unquotes strings, so a filter that only a real boolean
+    # passes tells true from "true".
+    return (
+        pl.when((value == "true") & md.json_path_match(path + "[?(@ == true)]").is_not_null())
+        .then(pl.lit("True"))
+        .when((value == "false") & md.json_path_match(path + "[?(@ == false)]").is_not_null())
+        .then(pl.lit("False"))
+        .otherwise(value)
+    )
 
 
-def _add_metadata(p, keys, question_refs, dtypes):
+def _add_form_data(p, form_data):
+    add = p.add_form_data(form_data, prefix="form")
+
+    def step(df):
+        df = add(df)
+        # A form metadata key of ints that some version lacks is written as
+        # floats (1.0), as pandas typed it; Polars would keep it Int64.
+        form = p.form_df
+        ints_with_gaps = [
+            c for c in form.columns
+            if form.schema[c].is_integer() and form[c].null_count() > 0
+        ]
+        return df.with_columns(pl.col(ints_with_gaps).cast(pl.Float64))
+
+    return step
+
+
+def _add_metadata(p, keys, question_refs):
     """
-    Preprocessor.add_metadata, except that the `<key>_metadata` naming (used
-    when a question shares the key's name) and each column's dtype are given,
-    not taken from the rows at hand. Every batch of an export gets the
-    survey-wide answer, so all batches write the same columns the same way: an
-    int key missing on some rows is 1.0 in every batch, not 1 in some.
+    Adds a column per metadata key. A key is named `<key>_metadata` when a
+    question shares its name; given the survey's question_refs, that is
+    decided for the whole survey, so every batch names its columns alike.
     """
 
     def add(df):
-        parsed = [json.loads(m) for m in df.metadata]
-        refs = set(df.question_ref.unique()) if question_refs is None else question_refs
-        for key in keys:
-            col = f"{key}_metadata" if key in refs else key
-            values = pd.Series([m.get(key) for m in parsed], index=df.index, dtype=object)
-            dtype = _mapped_dtype(values) if dtypes is None else dtypes.get(key, object)
-            df[col] = values if dtype == object else values.astype(dtype)
-            p.keys.add(col)
-        return df
+        refs = set(df["question_ref"].unique()) if question_refs is None else question_refs
+        names = [f"{k}_metadata" if k in refs else k for k in keys]
+        p.keys.update(names)
+        return df.with_columns(metadata_value(k).alias(n) for k, n in zip(keys, names))
 
     return add
 
@@ -277,41 +289,39 @@ def _add_metadata(p, keys, question_refs, dtypes):
 def _pivot(p, answer_column, question_refs):
     def pivot(df):
         wide = p.pivot(answer_column, df)
-        refs = set(df.question_ref.unique()) if question_refs is None else question_refs
-        return wide.reindex(columns=sorted(p.keys) + sorted(refs))
+        refs = set(df["question_ref"].unique()) if question_refs is None else question_refs
+        missing = [pl.lit(None, pl.String).alias(r) for r in refs if r not in wide.columns]
+        return wide.with_columns(missing).select(sorted(p.keys) + sorted(refs))
 
     return pivot
 
 
 def format_data(
-    responses: pd.DataFrame,
-    form_data: pd.DataFrame,
+    responses: pl.DataFrame,
+    form_data: pl.DataFrame,
     options: ExportOptions,
     question_refs=None,
-    dtypes=None,
 ):
     """
     Runs a responses export's preprocessing over `responses`.
 
-    `question_refs` (every question_ref in the survey) and `dtypes` (the
-    metadata columns' dtypes, from metadata_dtypes()) describe the whole
-    survey. A batch of its users passes them so that its columns, their order
-    and their formatting match every other batch's. Left out, they are taken
-    from `responses`.
+    `question_refs` is every question_ref in the survey. A batch of its users
+    passes it so that its columns and their order match every other batch's.
+    Left out, it is taken from `responses`.
 
     Returns an empty frame as soon as a step leaves no rows; its columns are
     then incomplete, so callers skip it.
     """
     validate_options(options)
     p = Preprocessor()
-    steps = [p.add_form_data(form_data, prefix="form")]
+    steps = [_add_form_data(p, form_data)]
 
     if options.keep_final_answer:
         steps.append(p.keep_final_answer)
 
     keys = metadata_keys(options)
     if keys and "metadata" in responses.columns:
-        steps.append(_add_metadata(p, keys, question_refs, dtypes))
+        steps.append(_add_metadata(p, keys, question_refs))
 
     if options.drop_users_without:
         steps.append(p.drop_users_without(options.drop_users_without))
@@ -333,23 +343,71 @@ def format_data(
     return df
 
 
+def _float_text(s):
+    # Polars prints floats as Python's repr does, except below 1e-4, where
+    # repr (and so pandas) switches to an exponent: 1e-05, not 0.00001.
+    text = s.cast(pl.String)
+    tiny = ((s.abs() < 1e-4) & (s != 0)).fill_null(False)
+    if tiny.any():
+        text = text.scatter(tiny.arg_true(), [repr(v) for v in s.filter(tiny)])
+    return text.set(s.is_nan().fill_null(False), None)
+
+
+def _datetime_text(col, time_zone):
+    # As pandas writes a timezone-aware value: a fraction only when it is
+    # non-zero, and then to the microsecond unless there are nanoseconds.
+    offset = "%:z" if time_zone else ""
+    ns = col.dt.nanosecond()
+    return (
+        pl.when(ns == 0).then(col.dt.strftime("%Y-%m-%d %H:%M:%S" + offset))
+        .when(ns % 1000 == 0).then(col.dt.strftime("%Y-%m-%d %H:%M:%S%.6f" + offset))
+        .otherwise(col.dt.strftime("%Y-%m-%d %H:%M:%S%.9f" + offset))
+    )
+
+
+def csv_frame(df):
+    """
+    df with its values as text the way pandas' to_csv writes them, so the
+    files read the same as pandas-made exports of the same study: True/False,
+    floats as repr, datetimes as str(Timestamp), and empty strings unquoted
+    (write_csv would write "" for them).
+    """
+    columns = []
+    for name, dtype in df.schema.items():
+        col = pl.col(name)
+        if dtype == pl.Boolean:
+            columns.append(
+                pl.when(col).then(pl.lit("True")).when(~col).then(pl.lit("False")).alias(name)
+            )
+        elif dtype == pl.String:
+            columns.append(pl.when(col != "").then(col).alias(name))
+        elif dtype.is_float():
+            columns.append(_float_text(df[name]))
+        elif isinstance(dtype, pl.Datetime):
+            columns.append(_datetime_text(col, dtype.time_zone).alias(name))
+        elif dtype.is_nested():
+            json_text = pl.struct(col.alias("v")).struct.json_encode().str.slice(5).str.head(-1)
+            columns.append(pl.when(col.is_not_null()).then(json_text).alias(name))
+    return df.with_columns(columns)
+
+
 def append_csv(fh, df, header):
     """
-    Appends df's rows to an open export CSV whose columns are `header`, or, if
-    header is None, starts it with df's columns as the header line. Empty
-    frames are skipped. Returns the header.
+    Appends df's rows to an open (binary) export CSV whose columns are
+    `header`, or, if header is None, starts it with df's columns as the
+    header line. Empty frames are skipped. Returns the header.
     """
     if len(df) == 0:
         return header
     if header is None:
-        df.to_csv(fh, index=False)
+        csv_frame(df).write_csv(fh)
         return list(df.columns)
     if set(df.columns) != set(header):
         raise ValueError(
             f"batch columns {sorted(df.columns)} do not match the export's "
             f"header {header}"
         )
-    df.to_csv(fh, index=False, header=False, columns=header)
+    csv_frame(df.select(header)).write_csv(fh, include_header=False)
     return header
 
 
@@ -376,20 +434,15 @@ def export_data(cnf, export_id, user, survey, options: ExportOptions,
 
         form_data = get_form_data(cnf, user, survey)
         question_refs = set(get_question_refs(cnf, user, survey))
-        dtypes = metadata_dtypes(get_metadata_kinds(
-            cnf, user, survey, metadata_keys(options), options.keep_final_answer
-        ))
 
         set_export_status(cnf, export_id, status="Writing")
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False, newline=""
-        )
+        tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False)
         try:
             header = None
             n_responses = n_rows = 0
             for i, batch in enumerate(batches, 1):
                 responses = get_responses(cnf, user, survey, batch)
-                dd = format_data(responses, form_data, options, question_refs, dtypes)
+                dd = format_data(responses, form_data, options, question_refs)
                 header = append_csv(tmp, dd, header)
                 n_responses += len(responses)
                 n_rows += len(dd)
@@ -464,86 +517,40 @@ def get_question_refs(cnf, user, survey):
     return [row[0] for row in query(cnf, q, vals=(user, survey))]
 
 
-def get_metadata_kinds(cnf, user, survey, keys, final_answers_only):
-    """
-    For each metadata key, the kinds of value it takes across the survey's
-    responses, as (key, kind, min_int, max_int) rows. kind is how Python's json
-    module reads the value: 'int', 'float', 'string', 'boolean', 'object',
-    'array', or 'null' (JSON null or key absent). min_int and max_int are set
-    for 'int' only.
+RESPONSE_SCHEMA = {
+    "parent_surveyid": pl.String,
+    "parent_shortcode": pl.String,
+    "surveyid": pl.String,
+    "flowid": pl.Int64,
+    "userid": pl.String,
+    "question_ref": pl.String,
+    "question_idx": pl.Int64,
+    "question_text": pl.String,
+    "response": pl.String,
+    "timestamp": pl.String,
+    "metadata": pl.String,
+    "pageid": pl.String,
+    "translated_response": pl.String,
+}
 
-    final_answers_only limits it to the rows keep_final_answer keeps, the last
-    answer per (userid, surveyid, question_ref): the metadata step runs after
-    that one, so the dropped rows never reach it.
-    """
-    if not keys:
-        return []
+RESPONSE_COLUMNS = list(RESPONSE_SCHEMA)
 
-    if final_answers_only:
-        rows = f"""
-            SELECT metadata FROM (
-                SELECT r.metadata, row_number() OVER (
-                    PARTITION BY r.userid, r.surveyid, r.question_ref
-                    ORDER BY r.timestamp DESC
-                ) AS nth
-                {_SURVEY_RESPONSES}
-            ) AS answers WHERE nth = 1
-        """
-    else:
-        rows = f"SELECT r.metadata {_SURVEY_RESPONSES}"
-
-    # A JSON number is an int to json.loads iff its text is all digits.
-    q = f"""
-        WITH answers AS ({rows}),
-        valued AS (
-            SELECT k.key, answers.metadata ->> k.key AS txt,
-                   jsonb_typeof(answers.metadata -> k.key) AS typ
-            FROM answers, unnest(%s::STRING[]) AS k(key)
-        ),
-        kinds AS (
-            SELECT key, txt,
-                   CASE
-                       WHEN typ = 'number' AND txt ~ '^-?[0-9]+$' THEN 'int'
-                       WHEN typ = 'number' THEN 'float'
-                       ELSE COALESCE(typ, 'null')
-                   END AS kind
-            FROM valued
-        )
-        SELECT key, kind,
-               min(CASE WHEN kind = 'int' THEN txt::DECIMAL END)::STRING,
-               max(CASE WHEN kind = 'int' THEN txt::DECIMAL END)::STRING
-        FROM kinds
-        GROUP BY key, kind
-    """
-    return list(query(cnf, q, vals=(user, survey, list(keys))))
-
-
-RESPONSE_COLUMNS = [
-    "parent_surveyid",
-    "parent_shortcode",
-    "surveyid",
-    "flowid",
-    "userid",
-    "question_ref",
-    "question_idx",
-    "question_text",
-    "response",
-    "timestamp",
-    "metadata",
-    "pageid",
-    "translated_response",
-]
+# Rows turned into a frame at a time while a batch's responses stream in. Each
+# row is a tuple of Python objects until then, many times its size in the frame.
+RESPONSE_CHUNK_ROWS = 5000
 
 
 def get_responses(cnf, user, survey, userids):
     """
-    Returns the responses of `userids` to the survey in a dataframe
+    Returns the responses of `userids` to the survey as a DataFrame with
+    RESPONSE_SCHEMA. timestamp stays CockroachDB's text, which is what a
+    long export writes unless add_duration parses it.
     """
     placeholders = ",".join(["%s"] * len(userids))
     q = f"""
-        SELECT parent_surveyid,
+        SELECT parent_surveyid::string,
                parent_shortcode,
-               surveyid,
+               surveyid::string,
                flowid,
                responses.userid,
                question_ref,
@@ -562,15 +569,29 @@ def get_responses(cnf, user, survey, userids):
         AND responses.userid IN ({placeholders})
         ORDER BY (responses.userid, timestamp, question_ref)
     """
-    dat = query(cnf, q, vals=(user, survey, *userids))
-    return pd.DataFrame(list(dat), columns=RESPONSE_COLUMNS)
+    rows = stream(cnf, q, vals=(user, survey, *userids))
+    chunks = [pl.DataFrame(schema=RESPONSE_SCHEMA)]
+    while chunk := list(itertools.islice(rows, RESPONSE_CHUNK_ROWS)):
+        chunks.append(pl.DataFrame(chunk, schema=RESPONSE_SCHEMA, orient="row"))
+    return pl.concat(chunks, rechunk=True)
+
+
+FORM_SCHEMA = {
+    "surveyid": pl.String,
+    "shortcode": pl.String,
+    "survey_name": pl.String,
+    "version": pl.Int64,
+    "survey_created": pl.String,
+    "metadata": pl.String,
+}
 
 
 def get_form_data(cnf, user, survey):
     """
-    Returns the form data that is related to a specific survey in a dataframe
+    Returns every version of the survey's forms as a DataFrame with
+    FORM_SCHEMA: version numbers each shortcode's forms by creation.
     """
-    q = f"""
+    q = """
         WITH t AS (
           SELECT surveys.*, row_number() OVER (partition BY shortcode ORDER BY created) AS version
           FROM surveys
@@ -578,7 +599,7 @@ def get_form_data(cnf, user, survey):
           WHERE users.email = %s
           AND survey_name = %s
         )
-        SELECT id as surveyid,
+        SELECT id::string as surveyid,
                shortcode,
                survey_name,
                version,
@@ -587,8 +608,8 @@ def get_form_data(cnf, user, survey):
         FROM t
         ORDER BY shortcode, created
     """
-    dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
-    return pd.DataFrame(dat)
+    rows = query(cnf, q, vals=(user, survey))
+    return pl.DataFrame(rows, schema=FORM_SCHEMA, orient="row")
 
 
 def export_full_messages(cnf, export_id, user, survey, full_messages_options):

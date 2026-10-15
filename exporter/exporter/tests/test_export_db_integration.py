@@ -13,18 +13,20 @@ import pytest
 
 from exporter.db import execute, query
 from exporter.exporter import (
+    FORM_SCHEMA,
+    RESPONSE_SCHEMA,
     ExportOptions,
     export_chat_log,
     export_data,
     get_form_data,
-    get_metadata_kinds,
+    get_responses,
     metadata_keys,
 )
 from exporter.main import ChatLogExportOptions, claim_job, run_job
 from exporter.tests import reference_export, survey_fixture
 from exporter.tests.conftest import DB_URL
 from exporter.tests.test_batched_export import (
-    ALL_METADATA,
+    EDGE_OPTIONS,
     OPTIONS,
     FakeBackend,
     assert_equivalent,
@@ -34,6 +36,7 @@ from exporter.tests.test_batched_export import (
 pytestmark = pytest.mark.integration
 
 FIXTURE_USERIDS = [f"u{n:02d}" for n in range(1, 11)]
+EDGE_USERIDS = list(survey_fixture.EDGE_METADATA)
 OTHER_USERIDS = ["x01"]
 CHAT_USERIDS = ["c01", "c02", "c03", "u01"]
 
@@ -89,12 +92,13 @@ def seeded():
     """
     The survey_fixture survey, owned by a fresh researcher, plus another
     researcher's survey of the same name and shortcode answered by one of the
-    same users, an empty survey, and chat log rows.
+    same users, an empty survey, the survey_fixture edge survey, and chat log
+    rows.
     """
     if not DB_URL:
         pytest.skip("DATABASE_URL not set — run 'make test-db' in devops/ first")
     cnf = DB_URL
-    all_userids = FIXTURE_USERIDS + OTHER_USERIDS + CHAT_USERIDS
+    all_userids = FIXTURE_USERIDS + OTHER_USERIDS + CHAT_USERIDS + EDGE_USERIDS
     _delete_rows(cnf, all_userids)
 
     tag = uuid.uuid4().hex[:8]
@@ -102,6 +106,7 @@ def seeded():
     other = f"other-{tag}@test.example"
     survey = f"survey-{tag}"
     empty_survey = f"empty-{tag}"
+    edge_survey = f"edge-{tag}"
 
     owner_id = _insert_user(cnf, owner)
     other_id = _insert_user(cnf, other)
@@ -121,6 +126,15 @@ def seeded():
 
     _insert_form(cnf, owner_id, empty_survey, "empty", "2020-01-01 00:00:00+00", '{"wave": 1}')
 
+    edge_ids = {
+        key: _insert_form(cnf, owner_id, edge_survey, shortcode, created, metadata)
+        for key, shortcode, created, metadata in survey_fixture.EDGE_FORMS
+    }
+    _, edge_responses = survey_fixture.build(
+        edge_survey, edge_ids, forms=survey_fixture.EDGE_FORMS, rows=survey_fixture.edge_rows
+    )
+    _insert_responses(cnf, edge_responses)
+
     chat = []
     for i, userid in enumerate(CHAT_USERIDS):
         for j, (direction, shortcode) in enumerate(
@@ -136,6 +150,7 @@ def seeded():
 
     yield {
         "cnf": cnf, "owner": owner, "survey": survey, "empty_survey": empty_survey,
+        "edge_survey": edge_survey,
         "surveyids": set(surveyids.values()), "responses": responses,
     }
 
@@ -159,7 +174,7 @@ def _export_row(cnf, export_id):
 
 def _reference_responses(s, survey, options):
     responses = reference_export.get_responses(s["cnf"], s["owner"], survey)
-    form_data = get_form_data(s["cnf"], s["owner"], survey)
+    form_data = reference_export.get_form_data(s["cnf"], s["owner"], survey)
     return reference_export.export_responses_csv(responses, form_data, options)
 
 
@@ -173,7 +188,7 @@ def test_export_matches_whole_survey_export(seeded, insert_export, export_id, na
     new = _export(s, export_data, export_id, s["owner"], s["survey"], options, batch_size=batch_size)
     old = _reference_responses(s, s["survey"], options)
 
-    assert_equivalent(old, new, options.pivot)
+    assert_equivalent(old, new, options.pivot, metadata_keys(options))
 
     row = _export_row(s["cnf"], export_id)
     batches = -(-10 // batch_size)
@@ -194,21 +209,28 @@ def test_export_excludes_other_researchers_survey_of_same_name(seeded, export_id
     assert len(rows) == len(s["responses"])
 
 
-@pytest.mark.parametrize("final_answers_only", [False, True])
-def test_metadata_kinds_match_json_parsing(seeded, final_answers_only):
+@pytest.mark.parametrize("batch_size", [1, 2, 100])
+@pytest.mark.parametrize("name", EDGE_OPTIONS)
+def test_edge_values_match_whole_survey_export(seeded, export_id, name, batch_size):
+    # The metadata is what CockroachDB's jsonb::string makes of the fixture's
+    # JSON, so the pivot's user metadata is read back from the database.
     s = seeded
-    keys = metadata_keys(ExportOptions(metadata=ALL_METADATA))
-    responses = reference_export.get_responses(s["cnf"], s["owner"], s["survey"])
+    options = ExportOptions(**EDGE_OPTIONS[name])
+    new = _export(s, export_data, export_id, s["owner"], s["edge_survey"], options, batch_size=batch_size)
+    old = _reference_responses(s, s["edge_survey"], options)
+    responses = reference_export.get_responses(s["cnf"], s["owner"], s["edge_survey"])
+    user_metadata = {r.userid: json.loads(r.metadata) for r in responses.itertuples()}
+    assert_equivalent(old, new, options.pivot, metadata_keys(options), user_metadata)
 
-    from_sql = get_metadata_kinds(s["cnf"], s["owner"], s["survey"], keys, final_answers_only)
-    from_python = reference_export.metadata_kinds(responses, keys, final_answers_only)
 
-    def norm(rows):
-        return {(k, kind, None if lo is None else int(lo), None if hi is None else int(hi))
-                for k, kind, lo, hi in rows}
-
-    assert norm(from_sql) == norm(from_python)
-    assert {kind for k, kind, *_ in from_sql if k == "score"} == {"int", "float", "null"}
+def test_queries_return_their_schemas(seeded):
+    s = seeded
+    form_data = get_form_data(s["cnf"], s["owner"], s["survey"])
+    responses = get_responses(s["cnf"], s["owner"], s["survey"], ["u01", "u02"])
+    assert form_data.schema == FORM_SCHEMA and form_data.height == 3
+    assert responses.schema == RESPONSE_SCHEMA
+    assert set(responses["userid"]) == {"u01", "u02"}
+    assert responses["surveyid"].is_in(s["surveyids"]).all()
 
 
 @pytest.mark.parametrize("opts", [{}, {"pivot": True, "response_value": "response"}])

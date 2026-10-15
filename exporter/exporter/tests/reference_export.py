@@ -1,19 +1,22 @@
 """
 The whole-survey responses and chat_log exports, as they were before exports
-were batched by user. Tests run them beside the batched exports and compare
-the files.
+were batched by user and moved to Polars: pandas frames from the queries, run
+through vlab_prepro 0.5.3 and written with to_csv. Tests run them beside the
+current exports and compare the files.
 
-Only tests use this module. Keep it as it is: it is the reference the batched
-code is held to.
+`vlab_prepro_053.py` is 0.5.3's preprocess.py, copied verbatim from the wheel
+on PyPI (sha256 iM6yRtsbS9Vi50H5yxkWhezwyUxApZ1P98FbSPmEU7k in its RECORD),
+so the reference does not move when vlab_prepro does.
+
+Only tests use this module. Keep it as it is: it is the reference the export
+is held to.
 """
-import json
-
 import pandas as pd
 from toolz import pipe
-from vlab_prepro import Preprocessor
 
 from exporter.db import query
 from exporter.exporter import ALWAYS_EXPORTED_METADATA, ExportOptions, InvalidOptionsError
+from exporter.tests.vlab_prepro_053 import PreprocessingError, Preprocessor  # noqa: F401
 
 
 def format_data(responses: pd.DataFrame, form_data: pd.DataFrame, options: ExportOptions):
@@ -78,6 +81,28 @@ def get_responses(cnf, user, survey):
     return pd.DataFrame(dat)
 
 
+def get_form_data(cnf, user, survey):
+    q = """
+        WITH t AS (
+          SELECT surveys.*, row_number() OVER (partition BY shortcode ORDER BY created) AS version
+          FROM surveys
+          LEFT JOIN users ON surveys.userid = users.id
+          WHERE users.email = %s
+          AND survey_name = %s
+        )
+        SELECT id as surveyid,
+               shortcode,
+               survey_name,
+               version,
+               created::string as survey_created,
+               metadata::string
+        FROM t
+        ORDER BY shortcode, created
+    """
+    dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
+    return pd.DataFrame(dat)
+
+
 def export_responses_csv(responses, form_data, options):
     """The CSV text the whole-survey export uploaded."""
     return format_data(responses, form_data, options).to_csv(index=False)
@@ -106,39 +131,3 @@ def get_chat_log(cnf, user, survey, chat_log_options):
     """
     dat = list(query(cnf, q, vals=(user, survey), as_dict=True))
     return pd.DataFrame(dat)
-
-
-def metadata_kinds(responses, keys, final_answers_only):
-    """
-    What get_metadata_kinds computes in SQL, computed in Python from a
-    responses frame: (key, kind, min_int, max_int) rows.
-    """
-    df = responses
-    if final_answers_only:
-        df = Preprocessor().keep_final_answer(df)
-
-    seen = {}
-    for raw in df.metadata:
-        md = json.loads(raw)
-        for key in keys:
-            v = md.get(key)
-            if isinstance(v, bool):
-                kind = "boolean"
-            elif isinstance(v, int):
-                kind = "int"
-            elif isinstance(v, float):
-                kind = "float"
-            elif isinstance(v, str):
-                kind = "string"
-            elif isinstance(v, dict):
-                kind = "object"
-            elif isinstance(v, list):
-                kind = "array"
-            else:
-                kind = "null"
-            seen.setdefault((key, kind), []).append(v)
-
-    return [
-        (key, kind, min(vs), max(vs)) if kind == "int" else (key, kind, None, None)
-        for (key, kind), vs in seen.items()
-    ]
