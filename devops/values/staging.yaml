@@ -62,7 +62,7 @@ versionScribble: &vscribble v0.0.34
 # withheld and re-driven; see production.yaml.
 versionDinersclub: &vdinersclub v0.0.54
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.6.12
+versionExporter: &vexporter v0.7.0
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
 # v0.2.7: malformed timing rejected at write; timing errors recorded (VIR-57);
 # see production.yaml.
