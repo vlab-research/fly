@@ -1,9 +1,7 @@
 import os
 from datetime import timedelta
-from io import BytesIO
 from typing import Optional
 
-import pandas as pd
 from google.cloud import storage
 from minio import Minio
 from minio.commonconfig import ENABLED, Filter
@@ -41,10 +39,6 @@ class BaseStorageBackend(BaseSettings):
     def __init__(self, **data):
         super().__init__(**data)
 
-    def save_to_csv(self, df: pd.DataFrame):
-        log.info("BaseStorage only prints:")
-        log.info(df)
-
     def save_file(self, path: str):
         log.info(f"BaseStorage save_file: {path}")
 
@@ -58,13 +52,6 @@ class GoogleStorageBackend(BaseStorageBackend):
     """
 
     bucket_name: str = Field(..., env="GOOGLE_STORAGE_BUCKET")
-
-    def save_to_csv(self, df: pd.DataFrame):
-        client = storage.Client()
-        bucket = client.get_bucket(self.bucket_name)
-        bucket.blob(self.file_path).upload_from_string(
-            df.to_csv(index=False), "text/csv"
-        )
 
     def save_file(self, path: str):
         client = storage.Client()
@@ -133,18 +120,6 @@ class S3StorageBackend(BaseStorageBackend):
             client.set_bucket_lifecycle(self.bucket_name, config)
         except Exception as e:
             log.warning(f"Could not apply exports lifecycle policy: {e}")
-
-    def save_to_csv(self, df: pd.DataFrame):
-        client = self._ensure_client()
-
-        csv = df.to_csv(index=False).encode("utf-8")
-        client.put_object(
-            bucket_name=self.bucket_name,
-            object_name=self.file_path,
-            length=len(csv),
-            data=BytesIO(csv),
-            content_type="text/csv",
-        )
 
     def save_file(self, path: str):
         client = self._ensure_client()

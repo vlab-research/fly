@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-import pandas as pd
+import polars as pl
 import pytest
 
 from exporter.exporter import *
@@ -8,10 +8,6 @@ from exporter.exporter import *
 
 def ts(h, m, s):
     return datetime(2020, 1, 1, h, m, s).replace(tzinfo=timezone.utc).isoformat()
-
-
-def dt(h, m, s):
-    return pd.Timestamp(datetime(2020, 1, 1, h, m, s), tz="UTC")
 
 
 def make_df(data):
@@ -26,7 +22,7 @@ def make_df(data):
         "metadata",
     ]
 
-    return pd.DataFrame(data, columns=columns)
+    return pl.DataFrame(data, schema=columns, orient="row")
 
 
 @pytest.fixture
@@ -59,7 +55,7 @@ def form_df():
         ("c", "fooz", 1, ts(12, 1, 0), '{"wave": "0"}'),
     ]
 
-    return pd.DataFrame(data, columns=columns)
+    return pl.DataFrame(data, schema=columns, orient="row")
 
 
 # NOTE: the column counts in the shape assertions below each include the
@@ -151,10 +147,10 @@ def test_format_data_adds_ad_id_column_when_not_requested(df_with_ad_id, form_df
     res = format_data(df_with_ad_id, form_df, options)
     assert "ad_id" in res.columns
 
-    row_a1 = res[(res.surveyid == "a") & (res.userid == "1") & (res.question_ref == "A")].iloc[0]
+    row_a1 = res.filter(surveyid="a", userid="1", question_ref="A").row(0, named=True)
     assert row_a1["ad_id"] == "ad-100"
 
-    row_b2 = res[(res.surveyid == "b") & (res.userid == "2")].iloc[0]
+    row_b2 = res.filter(surveyid="b", userid="2").row(0, named=True)
     assert row_b2["ad_id"] == "ad-200"
 
 
@@ -167,7 +163,7 @@ def test_format_data_ad_id_alongside_requested_metadata(df_with_ad_id, form_df):
     assert "ad_id" in res.columns
     assert "stratumid" in res.columns
 
-    row = res[(res.surveyid == "a") & (res.userid == "1") & (res.question_ref == "A")].iloc[0]
+    row = res.filter(surveyid="a", userid="1", question_ref="A").row(0, named=True)
     assert row["ad_id"] == "ad-100"
     assert row["stratumid"] == "Z"
 
@@ -180,7 +176,7 @@ def test_format_data_explicit_ad_id_request_is_not_duplicated(df_with_ad_id, for
     res = format_data(df_with_ad_id, form_df, options)
     assert list(res.columns).count("ad_id") == 1
 
-    row = res[(res.surveyid == "b") & (res.userid == "2")].iloc[0]
+    row = res.filter(surveyid="b", userid="2").row(0, named=True)
     assert row["ad_id"] == "ad-200"
 
 
@@ -189,9 +185,8 @@ def test_format_data_row_without_ad_id_is_null_not_string_none(df_with_ad_id, fo
 
     res = format_data(df_with_ad_id, form_df, options)
 
-    row = res[(res.surveyid == "c") & (res.userid == "3")].iloc[0]
-    assert pd.isna(row["ad_id"])
-    assert row["ad_id"] != "None"
+    row = res.filter(surveyid="c", userid="3").row(0, named=True)
+    assert row["ad_id"] is None
 
 
 def test_format_data_ad_id_mixed_rows_line_up(df_with_ad_id, form_df):
@@ -206,35 +201,18 @@ def test_format_data_ad_id_mixed_rows_line_up(df_with_ad_id, form_df):
         ("b", "2"): "ad-200",
     }
     for (surveyid, userid), expected_ad_id in expected.items():
-        rows = res[(res.surveyid == surveyid) & (res.userid == userid)]
-        assert not rows.empty
+        rows = res.filter(surveyid=surveyid, userid=userid)
+        assert not rows.is_empty()
         assert (rows["ad_id"] == expected_ad_id).all()
 
-    missing_rows = res[(res.surveyid == "c") & (res.userid == "3")]
-    assert not missing_rows.empty
-    assert missing_rows["ad_id"].isna().all()
+    missing_rows = res.filter(surveyid="c", userid="3")
+    assert not missing_rows.is_empty()
+    assert missing_rows["ad_id"].is_null().all()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "PRE-EXISTING BUG, not caused by ad_id. A survey with zero responses "
-        "yields pd.DataFrame([]) -- no columns at all -- and Preprocessor."
-        "add_form_data merges on 'surveyid', raising KeyError long before the "
-        "ad_id/add_metadata step is ever reached. Verified to fail identically "
-        "without the ad_id change. A fix exists on the unmerged branch "
-        "feature/exporter-integration-tests (commit 07ff6c4e, 'handle "
-        "zero-response surveys with proper DataFrame columns'); this test is "
-        "left here as an xfail so the gap stays visible, and it flips to XPASS "
-        "the moment that fix lands."
-    ),
-    strict=True,
-    raises=KeyError,
-)
 def test_format_data_empty_responses_does_not_crash(form_df):
-    # A survey with zero responses yields pd.DataFrame([]) -- no columns at
-    # all. format_data must not blow up on that input.
-    responses = pd.DataFrame([])
+    responses = pl.DataFrame(schema=RESPONSE_SCHEMA)
     options = ExportOptions()
 
     res = format_data(responses, form_df, options)
-    assert res.empty
+    assert res.is_empty()

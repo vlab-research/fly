@@ -45,20 +45,22 @@ def insert_export(db_url):
     Factory fixture that inserts an export_status row and cleans it up after
     the test. Returns a callable:
         insert_export(export_id, status="Requested", source="responses",
-                      options=None, retry_count=0, locked_at=None)
+                      options=None, retry_count=0, locked_at=None,
+                      user_id="test@example.com", survey_id="test-survey")
     """
     inserted = []
 
     def _insert(eid, status="Requested", source="responses",
-                options=None, retry_count=0, locked_at=None):
+                options=None, retry_count=0, locked_at=None,
+                user_id="test@example.com", survey_id="test-survey"):
         inserted.append(eid)
         execute(db_url, """
             INSERT INTO export_status
                 (id, user_id, survey_id, status, export_link, source,
                  options, retry_count, locked_at)
-            VALUES (%s, 'test@example.com', 'test-survey', %s, 'Not Found',
-                    %s, %s::jsonb, %s, %s)
-        """, vals=(eid, status, source, json.dumps(options or {}), retry_count, locked_at))
+            VALUES (%s, %s, %s, %s, 'Not Found', %s, %s::jsonb, %s, %s)
+        """, vals=(eid, user_id, survey_id, status, source,
+                   json.dumps(options or {}), retry_count, locked_at))
         return eid
 
     yield _insert

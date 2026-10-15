@@ -8,8 +8,10 @@ from exporter.main import (
     claim_job,
     reset_for_retry,
     process_job,
+    run_job,
 )
-from exporter.exporter import ExportOptions
+from exporter.exporter import ExportOptions, InvalidOptionsError
+from vlab_prepro import PreprocessingError
 
 
 class TestChatLogExportOptions:
@@ -156,3 +158,41 @@ class TestResetForRetry:
         vals = mock_execute.call_args[1]["vals"]
         assert "Requested" in sql
         assert vals == ("job-123",)
+
+
+class TestRunJob:
+    JOB = {
+        "id": "job-1", "user_id": "u@e.com", "survey_id": "s",
+        "source": "responses", "options": {}, "retry_count": 1,
+    }
+
+    @patch("exporter.main.reset_for_retry")
+    @patch("exporter.main.process_job")
+    def test_success_is_not_reset(self, mock_process, mock_reset):
+        run_job("db-url", self.JOB, max_retries=3)
+        mock_reset.assert_not_called()
+
+    @patch("exporter.main.reset_for_retry")
+    @patch("exporter.main.process_job")
+    def test_failure_is_retried(self, mock_process, mock_reset):
+        mock_process.side_effect = RuntimeError("db went away")
+        run_job("db-url", self.JOB, max_retries=3)
+        mock_reset.assert_called_once_with("db-url", "job-1")
+
+    @patch("exporter.main.reset_for_retry")
+    @patch("exporter.main.process_job")
+    def test_last_attempt_is_not_retried(self, mock_process, mock_reset):
+        mock_process.side_effect = RuntimeError("db went away")
+        run_job("db-url", {**self.JOB, "retry_count": 3}, max_retries=3)
+        mock_reset.assert_not_called()
+
+    @pytest.mark.parametrize("error", [
+        PreprocessingError("Could not pivot"),
+        InvalidOptionsError("To pivot to wide format we need a response_value"),
+    ])
+    @patch("exporter.main.reset_for_retry")
+    @patch("exporter.main.process_job")
+    def test_option_errors_are_not_retried(self, mock_process, mock_reset, error):
+        mock_process.side_effect = error
+        run_job("db-url", self.JOB, max_retries=3)
+        mock_reset.assert_not_called()

@@ -37,8 +37,90 @@ Stale jobs (jobs stuck in `Processing` longer than `STUCK_TIMEOUT_MINUTES`) are 
 The exporter supports three export sources, each with its own handler:
 
 - **`responses`**: Survey response data in pivot or flat format. See `export_data()` in `exporter.py` and the vlab-prepro library for formatting options.
-- **`chat_log`**: Conversation history with optional raw payload and metadata fields. See `export_chat_log()` in `exporter.py`.
+- **`chat_log`**: Conversation history with optional raw payload and metadata fields, written row by row with no preprocessing. See `export_chat_log()` in `exporter.py`.
 - **`full_messages`**: Complete message history with event-type filtering and optional raw JSON. Covers all message sources (Messenger, WhatsApp, synthetic) and event types (conversation, referrals, payments, system, etc.). See `export_full_messages()` in `exporter.py` and `documentation/full-messages-export.md` for details.
+
+### Responses and chat_log: batches of users
+
+Both exports fetch the survey's userids once, sorted, then query and write
+`EXPORT_USER_BATCH_SIZE` users at a time, appending to a temp CSV that is
+uploaded with `save_file()` at the end. `full_messages` does the same with its
+own batch size of 500. Memory therefore depends on the batch size, not the
+survey; the temp file on the pod's disk holds the whole CSV.
+
+A responses batch is Polars from end to end: the query's rows go straight
+into a `pl.DataFrame` (`RESPONSE_SCHEMA`), run through the vlab-prepro
+pipeline (`format_data()`; vlab-prepro returns Polars when given Polars), and
+are appended with `write_csv`. pandas is not used. Running the pipeline per
+batch is correct because every step it uses needs only one user's rows
+(`keep_final_answer`, `drop_users_without`, `drop_duplicated_users`,
+`add_duration` and `pivot` all group by user; form data and metadata are
+row-wise). Batches must still write identical columns, formatted identically:
+
+- **Form data** is fetched once and passed whole to every batch, so flattened
+  form-metadata columns get the same type in each. A key of ints missing on
+  some version is written as floats (`1.0`) everywhere.
+- **Metadata columns** (`ad_id`, always, plus the requested keys) are each
+  row's own JSON value as text (`metadata_value()`), never a type inferred
+  over the rows at hand: strings as they are, numbers as Polars prints them
+  (ints as written, so `1`, never `1.0`), booleans `True`/`False`, objects and
+  arrays as compact JSON, null or absent empty. A key is named
+  `<key>_metadata` when any question in the survey has that ref
+  (`get_question_refs()`). A key containing a backslash can't be expressed as
+  a JSONPath, so it fails the export as invalid options.
+- **Pivot columns** are the key columns sorted, then every question_ref in the
+  survey sorted, so a question no user in a batch, or in the export, answered
+  is an empty column.
+
+`csv_frame()` writes values the way pandas' `to_csv` does, so files read the
+same as pandas-made exports of the same study: booleans `True`/`False`, floats
+as Python's `repr` (`12.0`, `1e-05`), timestamps as `str(pd.Timestamp)` (a
+fraction only when non-zero: `2020-01-01 12:00:00+00:00`,
+`2020-01-01 12:00:00.123456+00:00`), empty strings and nulls as empty fields,
+minimal quoting, `\n` line ends.
+
+The long format's header is the first non-empty batch's columns; a batch with
+other columns fails the export. A batch left with no rows (e.g. every user
+dropped by `drop_users_without`) is skipped. An export with no rows at all is
+an empty file (`chat_log`: header only).
+
+Compared with the whole-survey pandas export (vlab-prepro 0.5.3, kept in
+`tests/reference_export.py`), rows can come out in a different order (batches
+are in userid order), pivot columns are in the fixed order above, and
+metadata cells differ where pandas inferred a type for the whole column: an
+int in a column pandas made float is `1` rather than `1.0`, an object is
+`{"a":1}` rather than `{'a': 1}`, and a float below 1e-4 is `0.000025` rather
+than `2.5e-05`. Everything else is the same cell for cell and byte for byte;
+`tests/test_batched_export.py` and `tests/test_export_db_integration.py` check
+this, the latter against CockroachDB.
+
+Progress is written to `export_status.metadata` as it goes: `users` and
+`batches` up front, then a running `responses` (responses only), `rows` and
+`batches_done` after each batch.
+
+### Memory
+
+Peak RSS of one export of a synthetic survey shaped like the largest production
+one (13k users, 50 responses each, 650k rows, 334 MB long-format CSV), local
+CockroachDB, 8 cores, with the Dockerfile's
+`_RJEM_MALLOC_CONF=dirty_decay_ms:0,muzzy_decay_ms:0`, 2026-10-15:
+
+| `EXPORT_USER_BATCH_SIZE` | long format | pivot (`keep_final_answer`) |
+|---|---|---|
+| 250 | 281 MB | 265 MB |
+| 500 (default) | 292-339 MB | 277-319 MB |
+| 1000 | 322 MB | 292 MB |
+| 2000 | 392 MB | 334 MB |
+
+About 200 MB of that is imports alone: vlab-prepro imports pandas, which
+imports pyarrow. Runs vary by about 30 MB. Without the jemalloc setting peaks
+are 15-70 MB higher (Polars' default keeps freed pages for a second). A long
+export with `keep_final_answer` and `add_duration` peaks at about 360 MB at
+500. Run time is about 12 s whatever the batch size (14 s with
+`add_duration`). Responses are fetched in chunks of `RESPONSE_CHUNK_ROWS` rows
+because a batch's rows as Python tuples take several times their size in a
+frame. Memory per batch scales with responses per user, so a survey with far
+more than 50 responses per user needs a smaller batch for the same peak.
 
 ## Job Lifecycle
 
@@ -60,6 +142,12 @@ Failed (max retries exhausted or unrecoverable error)
 
 On failure, if `retry_count < MAX_EXPORT_RETRIES`, the job is reset to `Requested` for the next worker to retry. Exceeding `MAX_EXPORT_RETRIES` marks it `Failed`.
 
+Errors that would recur on every attempt are not retried: a vlab-prepro
+`PreprocessingError` (e.g. "Could not pivot", or `drop_users_without` naming a
+column that was not added) and `InvalidOptionsError` (pivot without a
+`response_value`) leave the job `Failed` after the first attempt, with the
+message in `metadata.error` (`NON_RETRYABLE_ERRORS` in `exporter.py`).
+
 ## Configuration
 
 | Env Var | Default | Purpose |
@@ -70,6 +158,7 @@ On failure, if `retry_count < MAX_EXPORT_RETRIES`, the job is reset to `Requeste
 | `MAX_EXPORT_RETRIES` | 3 | Maximum attempts per job before marking Failed |
 | `STUCK_TIMEOUT_MINUTES` | 120 | Minutes a Processing job can be locked before resetting to Requested |
 | `STORAGE_BACKEND` | (no-op) | Storage backend: `google` (GCS), `s3` (MinIO), or unset for dev |
+| `EXPORT_USER_BATCH_SIZE` | 500 | Users per batch in `responses` and `chat_log` exports; peak memory grows with it (see Memory) |
 
 ### Storage-Specific Configuration
 
@@ -85,7 +174,7 @@ On failure, if `retry_count < MAX_EXPORT_RETRIES`, the job is reset to `Requeste
 
 ## Development
 
-**Requires Python 3.9+**
+**Requires Python 3.11+**
 
 ### Install Dependencies
 
@@ -105,21 +194,19 @@ pip install -r requirements.dev.txt
 pytest exporter/ -s
 ```
 
+Tests marked `integration` run against a real CockroachDB and are skipped
+unless `DATABASE_URL` is set:
+
+```bash
+make -C ../devops test-db
+DATABASE_URL=postgresql://root@localhost:5433/chatroach pytest exporter/
+```
+
 ## Known Issues
 
-**Empty surveys fail instead of producing an empty CSV.** A `responses` export
-for a survey with zero responses fails all retries and lands in `Failed` with:
-
-```
-"['metadata'] not found in axis"
-```
-
-The formatting step drops a `metadata` column that does not exist on an empty
-dataframe. The job metadata correctly records `{"responses": 0, "users": 0}`, so
-the cause is identifiable, but the surfaced error is misleading — it reads like a
-schema problem rather than "there is no data". Note that `survey_id` in
-`export_status` holds `surveys.survey_name`, **not** the survey title, so an
-export requested against a title silently matches zero rows and hits this path.
+`survey_id` in `export_status` holds `surveys.survey_name`, **not** the survey
+title, so an export requested against a title matches zero users and finishes
+with an empty file.
 
 ## See Also
 
