@@ -1,6 +1,6 @@
 # Exporter: bounded memory by exporting in batches of users, on a Polars vlab_prepro
 
-**Status 2026-10-15: Parts A and C implemented on `fix/exporter-streaming`; Part B (vlab_prepro 0.6.0) implemented, not yet on PyPI, so the exporter's `poetry.lock` is not updated yet.** Linear: VIR-92 (client ticket). Related:
+**Status 2026-10-15: DEPLOYED.** vlab_prepro 0.6.0 on PyPI; exporter v0.7.0 in vstag and vprod. Production check: the Kenya Girl Effect long export that had OOM-failed (648,452 rows, 13,400 users, add_duration, 8 metadata keys) finished in ~3 minutes at a sampled pod peak of 178Mi. Linear: VIR-92 (client ticket). Related:
 VIR-96 (one Kubernetes Job per export, `exporter-k8s-job-dispatch.md`), which
 this plan does not replace, and VIR-23 (object keys collide), which it does not
 fix.
