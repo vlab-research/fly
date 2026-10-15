@@ -14,7 +14,7 @@ from .log import log
 
 # Users per batch for responses and chat_log exports. Peak memory grows with
 # this, not with the survey; see "Memory" in exporter/README.md.
-EXPORT_USER_BATCH_SIZE = int(os.getenv("EXPORT_USER_BATCH_SIZE", "1000"))
+EXPORT_USER_BATCH_SIZE = int(os.getenv("EXPORT_USER_BATCH_SIZE", "500"))
 
 
 def batched(items, size):
