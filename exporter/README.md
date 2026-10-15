@@ -48,36 +48,51 @@ uploaded with `save_file()` at the end. `full_messages` does the same with its
 own batch size of 500. Memory therefore depends on the batch size, not the
 survey; the temp file on the pod's disk holds the whole CSV.
 
-A responses batch runs the full vlab-prepro pipeline (`format_data()`) on its
-own. That is correct because every step it uses needs only one user's rows
+A responses batch is Polars from end to end: the query's rows go straight
+into a `pl.DataFrame` (`RESPONSE_SCHEMA`), run through the vlab-prepro
+pipeline (`format_data()`; vlab-prepro returns Polars when given Polars), and
+are appended with `write_csv`. pandas is not used. Running the pipeline per
+batch is correct because every step it uses needs only one user's rows
 (`keep_final_answer`, `drop_users_without`, `drop_duplicated_users`,
 `add_duration` and `pivot` all group by user; form data and metadata are
-row-wise). Batches must still write identical columns, formatted identically,
-so a few things are decided once for the whole survey before the first batch:
+row-wise). Batches must still write identical columns, formatted identically:
 
 - **Form data** is fetched once and passed whole to every batch, so flattened
-  form-metadata columns get the same dtype in each (a key missing on one
-  version is a float column, `1.0`, everywhere).
-- **Metadata columns** (`ad_id`, always, plus the requested keys) take their
-  dtype from the kinds of JSON value each key has across the survey
-  (`get_metadata_kinds()`, one SQL query), as pandas would infer it over the
-  whole survey: an int key missing on some rows is `1.0` in every batch, not
-  `1` in batches where it is never missing. A key is named `<key>_metadata`
-  when any question in the survey has that ref.
+  form-metadata columns get the same type in each. A key of ints missing on
+  some version is written as floats (`1.0`) everywhere.
+- **Metadata columns** (`ad_id`, always, plus the requested keys) are each
+  row's own JSON value as text (`metadata_value()`), never a type inferred
+  over the rows at hand: strings as they are, numbers as Polars prints them
+  (ints as written, so `1`, never `1.0`), booleans `True`/`False`, objects and
+  arrays as compact JSON, null or absent empty. A key is named
+  `<key>_metadata` when any question in the survey has that ref
+  (`get_question_refs()`). A key containing a backslash can't be expressed as
+  a JSONPath, so it fails the export as invalid options.
 - **Pivot columns** are the key columns sorted, then every question_ref in the
-  survey sorted (`get_question_refs()`), so a question no user in a batch, or
-  in the export, answered is an empty column.
+  survey sorted, so a question no user in a batch, or in the export, answered
+  is an empty column.
+
+`csv_frame()` writes values the way pandas' `to_csv` does, so files read the
+same as pandas-made exports of the same study: booleans `True`/`False`, floats
+as Python's `repr` (`12.0`, `1e-05`), timestamps as `str(pd.Timestamp)` (a
+fraction only when non-zero: `2020-01-01 12:00:00+00:00`,
+`2020-01-01 12:00:00.123456+00:00`), empty strings and nulls as empty fields,
+minimal quoting, `\n` line ends.
 
 The long format's header is the first non-empty batch's columns; a batch with
 other columns fails the export. A batch left with no rows (e.g. every user
 dropped by `drop_users_without`) is skipped. An export with no rows at all is
 an empty file (`chat_log`: header only).
 
-Compared with exporting the whole survey at once, rows can come out in a
-different order (batches are in userid order), and pivot columns are in the
-fixed order above. Cell values are the same; `tests/test_batched_export.py` and
-`tests/test_export_db_integration.py` check this against the whole-survey
-export kept in `tests/reference_export.py`.
+Compared with the whole-survey pandas export (vlab-prepro 0.5.3, kept in
+`tests/reference_export.py`), rows can come out in a different order (batches
+are in userid order), pivot columns are in the fixed order above, and
+metadata cells differ where pandas inferred a type for the whole column: an
+int in a column pandas made float is `1` rather than `1.0`, an object is
+`{"a":1}` rather than `{'a': 1}`, and a float below 1e-4 is `0.000025` rather
+than `2.5e-05`. Everything else is the same cell for cell and byte for byte;
+`tests/test_batched_export.py` and `tests/test_export_db_integration.py` check
+this, the latter against CockroachDB.
 
 Progress is written to `export_status.metadata` as it goes: `users` and
 `batches` up front, then a running `responses` (responses only), `rows` and
@@ -87,22 +102,25 @@ Progress is written to `export_status.metadata` as it goes: `users` and
 
 Peak RSS of one export of a synthetic survey shaped like the largest production
 one (13k users, 50 responses each, 650k rows, 334 MB long-format CSV), local
-CockroachDB, 2026-10-15:
+CockroachDB, 8 cores, with the Dockerfile's
+`_RJEM_MALLOC_CONF=dirty_decay_ms:0,muzzy_decay_ms:0`, 2026-10-15:
 
 | `EXPORT_USER_BATCH_SIZE` | long format | pivot (`keep_final_answer`) |
 |---|---|---|
-| whole survey at once (exporter before batching) | 1977 MB | 1488 MB |
-| 100 | 126 MB | 127 MB |
-| 250 | 141 MB | 144 MB |
-| 500 (default) | 166 MB | 173 MB |
-| 1000 | 219 MB | 231 MB |
-| 2000 | 324 MB | 347 MB |
-| 4000 | 501 MB | 577 MB |
+| 250 | 281 MB | 265 MB |
+| 500 (default) | 292-339 MB | 277-319 MB |
+| 1000 | 322 MB | 292 MB |
+| 2000 | 392 MB | 334 MB |
 
-About 100 MB per 50k rows in a batch, over a ~110 MB baseline. Run time was
-flat from 500 up and rose below it (100: twice as long), from per-batch
-overhead. Memory per batch scales with responses per user, so a survey with
-far more than 50 responses per user needs a smaller batch for the same peak.
+About 200 MB of that is imports alone: vlab-prepro imports pandas, which
+imports pyarrow. Runs vary by about 30 MB. Without the jemalloc setting peaks
+are 15-70 MB higher (Polars' default keeps freed pages for a second). A long
+export with `keep_final_answer` and `add_duration` peaks at about 360 MB at
+500. Run time is about 12 s whatever the batch size (14 s with
+`add_duration`). Responses are fetched in chunks of `RESPONSE_CHUNK_ROWS` rows
+because a batch's rows as Python tuples take several times their size in a
+frame. Memory per batch scales with responses per user, so a survey with far
+more than 50 responses per user needs a smaller batch for the same peak.
 
 ## Job Lifecycle
 
@@ -156,7 +174,7 @@ message in `metadata.error` (`NON_RETRYABLE_ERRORS` in `exporter.py`).
 
 ## Development
 
-**Requires Python 3.9+**
+**Requires Python 3.11+**
 
 ### Install Dependencies
 
