@@ -262,6 +262,57 @@ The events you can `wait` on are `moviehouse:play`, `moviehouse:pause`,
 `wait` with no timeout applies, and applies harder: a video the participant never
 opens produces no event at all.
 
+## Verification (captcha)
+
+Hold the survey until the participant passes one or more checks. They tap a
+button, a page at `id.vlab.digital` runs each check you listed in order, and once
+all of them pass it sends the event `bouncer:verified`, which your survey waits on:
+
+```yaml
+type: id_verification
+buttonText: Verify you're human
+methods:
+  - type: captcha
+wait:
+  op: or
+  vars:
+    - type: external
+      value:
+        type: bouncer:verified
+    - type: timeout
+      value: 1 day
+```
+
+Fly builds a signed link for this conversation. **Always write the `wait`.**
+Without it the survey sends the button and moves straight on, which verifies nobody,
+and `keepMoving` has the same effect. The timeout is up to you. Leave it out and a
+participant who never passes waits forever.
+
+**Methods available today:**
+
+| `type` | Parameters | What the participant sees |
+|---|---|---|
+| `captcha` | `provider` (optional): `default` or `turnstile` | Usually nothing or a single tap. Never a picture puzzle |
+
+Leave `provider` out unless you need a specific one. The default is our choice,
+so we can switch providers without you editing the survey. More methods will be
+added to this list.
+
+**Mistakes show up when the link is opened.** A misspelled method, provider or
+parameter makes the verification page say "This link isn't working" rather than
+quietly checking less than you asked. Tap the button once while testing your survey.
+
+**Put it immediately before the payment.** Bots come for the incentive, so a
+check there protects the money without adding friction to the start of the
+survey.
+
+A few things to know:
+- There is no "failed" event. Someone who fails just tries again on the page;
+  someone who never passes stays waiting (or hits your timeout).
+- A captcha stops scripted bots. It does not stop a person paid to click
+  through, or a bot that pays a captcha-solving service. It raises the cost of an
+  attack; it is not proof of a unique, genuine respondent.
+
 ### Why these replaced the old way of doing it
 
 Both of these used to be written as a `webview` (below) with a hand-built URL —
