@@ -1492,5 +1492,5 @@ deploying a change to the credentials join or the user-list resolution. Per enab
 shows which `(bail, pageid)` populations the owner-scoped join excludes, whether each excluded
 account belongs to another researcher or to nobody, and which user-list pageids would be
 skipped. An empty result means no bail's population changes. It contains only SELECTs and is
-**not** a migration — do not run it through `devops/run-prod-migration.sh`.
+**not** a migration — do not run it through `devops/run-migration.sh`.
 
