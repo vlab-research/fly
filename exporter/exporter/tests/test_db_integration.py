@@ -1,5 +1,6 @@
 """
-Integration tests for claim_job and reset_for_retry against a live CockroachDB.
+Integration tests for claim_job, reset_for_retry and mark_failed against a
+live CockroachDB.
 
 Run `make test-db` in devops/ first, then:
     DATABASE_URL=postgresql://root@localhost:5433/chatroach python -m pytest -m integration
@@ -11,8 +12,8 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from exporter.db import query
-from exporter.main import FullMessagesExportOptions, claim_job, reset_for_retry
+from exporter.db import execute, query
+from exporter.main import FullMessagesExportOptions, claim_job, mark_failed, reset_for_retry
 
 pytestmark = pytest.mark.integration
 
@@ -38,6 +39,18 @@ class TestClaimJob:
 
         row = next(query(db_url, "SELECT status FROM export_status WHERE id = %s", vals=(export_id,)))
         assert row[0] == "Processing"
+
+    def test_claim_clears_the_previous_attempts_error_only(self, db_url, export_id, insert_export):
+        insert_export(export_id, retry_count=1)
+        execute(db_url, """
+            UPDATE export_status SET metadata = '{"error": "restart transaction", "users": 7}'
+            WHERE id = %s
+        """, vals=(export_id,))
+
+        claim_job(db_url, max_retries=3, stuck_timeout_minutes=120)
+
+        row = next(query(db_url, "SELECT metadata FROM export_status WHERE id = %s", vals=(export_id,)))
+        assert row[0] == {"users": 7}
 
     def test_ignores_processing_rows(self, db_url, export_id, insert_export):
         insert_export(export_id, status="Processing")
@@ -122,6 +135,21 @@ class TestResetForRetry:
         ))
         assert row[0] == "Requested"
         assert row[1] is None
+
+
+class TestMarkFailed:
+    def test_sets_failed_with_error_kept_alongside_progress(self, db_url, export_id, insert_export):
+        insert_export(export_id, status="Writing", locked_at=datetime.now(timezone.utc))
+        execute(db_url, """UPDATE export_status SET metadata = '{"users": 7}' WHERE id = %s""",
+                vals=(export_id,))
+
+        mark_failed(db_url, export_id, RuntimeError("Could not pivot"))
+
+        row = next(query(
+            db_url, "SELECT status, locked_at, metadata FROM export_status WHERE id = %s",
+            vals=(export_id,),
+        ))
+        assert row == ("Failed", None, {"users": 7, "error": "Could not pivot"})
 
 
 class TestJsonbRoundtrip:

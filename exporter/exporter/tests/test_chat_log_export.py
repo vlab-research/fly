@@ -9,6 +9,7 @@ from exporter.exporter import (
     get_chat_log,
 )
 from exporter.main import ChatLogExportOptions
+from exporter.tests.conftest import SNAPSHOT
 
 
 class TestSetExportStatus:
@@ -39,7 +40,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([row])
 
         opts = ChatLogExportOptions(include_metadata=False, include_raw_payload=False)
-        result = list(get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"]))
+        result = list(get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"], as_of=None))
 
         assert result == [row]
 
@@ -53,7 +54,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions(include_metadata=True, include_raw_payload=False)
-        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"], as_of=None)
 
         sql = mock_query.call_args[0][1]
         assert "cl.metadata::string" in sql
@@ -64,7 +65,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions(include_metadata=False, include_raw_payload=True)
-        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"], as_of=None)
 
         sql = mock_query.call_args[0][1]
         assert "cl.raw_payload::string" in sql
@@ -75,7 +76,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions(include_metadata=True, include_raw_payload=True)
-        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"], as_of=None)
 
         sql = mock_query.call_args[0][1]
         assert "cl.metadata::string" in sql
@@ -86,7 +87,7 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions()
-        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"])
+        get_chat_log("db-url", "user@test.com", "survey1", opts, ["u1"], as_of=None)
 
         sql = mock_query.call_args[0][1]
         assert "INNER JOIN surveys s ON cl.shortcode = s.shortcode" in sql
@@ -99,11 +100,12 @@ class TestGetChatLog:
         mock_query.return_value = iter([])
 
         opts = ChatLogExportOptions()
-        get_chat_log("db-url", "user@test.com", "my-survey", opts, ["u1", "u2"])
+        get_chat_log("db-url", "user@test.com", "my-survey", opts, ["u1", "u2"], as_of=SNAPSHOT)
 
         sql = mock_query.call_args[0][1]
         assert "cl.userid IN (%s,%s)" in sql
         assert mock_query.call_args[1]["vals"] == ("user@test.com", "my-survey", "u1", "u2")
+        assert mock_query.call_args[1]["as_of"] == SNAPSHOT
 
 
 def _backend():
@@ -159,7 +161,7 @@ class TestExportChatLog:
         backend = _backend()
         mock_backend_factory.return_value = backend
         mock_userids.return_value = ["u1", "u2", "u3"]
-        mock_get_chat_log.side_effect = lambda cnf, user, survey, opts, batch: iter(
+        mock_get_chat_log.side_effect = lambda cnf, user, survey, opts, batch, as_of: iter(
             [(u, "p", "t", "d", "c", "q", "sc", "s", "m") for u in batch]
         )
 
@@ -168,6 +170,8 @@ class TestExportChatLog:
 
         batches = [c[0][4] for c in mock_get_chat_log.call_args_list]
         assert batches == [["u1", "u2"], ["u3"]]
+        assert mock_userids.call_args[1]["as_of"] == SNAPSHOT
+        assert {c[1]["as_of"] for c in mock_get_chat_log.call_args_list} == {SNAPSHOT}
         assert [line.split(",")[0] for line in backend.uploaded.splitlines()] == [
             "userid", "u1", "u2", "u3",
         ]
@@ -175,16 +179,15 @@ class TestExportChatLog:
     @patch("exporter.exporter.get_chat_log_userids")
     @patch("exporter.exporter.storage.get_storage_backend")
     @patch("exporter.exporter.set_export_status")
-    def test_failure_sets_failed_status(self, mock_status, mock_backend_factory, mock_userids):
+    def test_failure_is_raised_for_the_worker(self, mock_status, mock_backend_factory, mock_userids):
         mock_userids.side_effect = RuntimeError("db error")
 
         opts = ChatLogExportOptions()
         with pytest.raises(RuntimeError, match="db error"):
             export_chat_log("db-url", "uuid-2", "user@test.com", "survey1", opts)
 
-        # Failure during the Querying stage terminates with Failed
-        mock_status.assert_any_call("db-url", "uuid-2", status="Querying")
-        mock_status.assert_any_call("db-url", "uuid-2", status="Failed")
+        # main.run_job decides between a retry and Failed.
+        assert mock_status.call_args_list == [call("db-url", "uuid-2", status="Querying")]
 
     @patch("exporter.exporter.get_chat_log_userids")
     @patch("exporter.exporter.storage.get_storage_backend")

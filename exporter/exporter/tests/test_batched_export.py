@@ -43,6 +43,7 @@ from exporter.exporter import (
     metadata_value,
 )
 from exporter.tests import reference_export, survey_fixture
+from exporter.tests.conftest import SNAPSHOT
 
 BATCH_SIZES = [1, 2, 3, 100]
 
@@ -491,16 +492,25 @@ class FakeBackend:
 def _run_export(responses, form_data, options, batch_size):
     """
     Runs export_data against Polars frames instead of the database. Returns
-    the backend and the set_export_status and set_metadata mocks, and the
-    error export_data raised, if any.
+    the backend, which also lists the `as_of` of every read, the
+    set_export_status and set_metadata mocks, and the error export_data
+    raised, if any.
     """
     backend = FakeBackend()
+    backend.read_as_of = []
+
+    def read(result):
+        def fn(*args, as_of):
+            backend.read_as_of.append(as_of)
+            return result(*args)
+        return fn
+
     db = {
-        "get_survey_userids": lambda cnf, user, survey: sorted(responses["userid"].unique()),
-        "get_form_data": lambda cnf, user, survey: form_data,
-        "get_question_refs": lambda cnf, user, survey: sorted(responses["question_ref"].unique()),
-        "get_responses": lambda cnf, user, survey, userids:
-            responses.filter(pl.col("userid").is_in(userids)),
+        "get_survey_userids": read(lambda cnf, user, survey: sorted(responses["userid"].unique())),
+        "get_form_data": read(lambda cnf, user, survey: form_data),
+        "get_question_refs": read(lambda cnf, user, survey: sorted(responses["question_ref"].unique())),
+        "get_responses": read(lambda cnf, user, survey, userids:
+                              responses.filter(pl.col("userid").is_in(userids))),
     }
     error = None
     with patch.multiple("exporter.exporter", **db), \
@@ -530,6 +540,7 @@ def test_export_data_uploads_the_batched_csv(survey, batch_size):
     assert statuses == ["Querying", "Writing", "Uploading", "Finished"]
 
     batches = -(-10 // batch_size)
+    assert backend.read_as_of == [SNAPSHOT] * (3 + batches)
     first = metadata.call_args_list[0].kwargs
     assert first == {
         "users": 10, "responses": 0, "rows": 0, "batches_done": 0, "batches": batches,
@@ -556,11 +567,12 @@ def test_export_data_of_empty_survey_finishes(survey, opts):
     ({"pivot": True}, InvalidOptionsError, "response_value"),
     ({"metadata": ["a\\b"]}, InvalidOptionsError, "backslash"),
 ])
-def test_export_data_marks_option_errors_failed(survey, opts, error_type, message):
+def test_export_data_raises_option_errors_for_the_worker(survey, opts, error_type, message):
     backend, status, metadata, error = _run_export(
         *to_polars(*survey), ExportOptions(**opts), 3
     )
     assert isinstance(error, error_type)
-    assert status.call_args_list[-1].kwargs["status"] == "Failed"
-    assert message in metadata.call_args_list[-1].kwargs["error"]
+    assert message in str(error)
+    assert "Failed" not in [c.kwargs.get("status") for c in status.call_args_list]
+    assert all("error" not in c.kwargs for c in metadata.call_args_list)
     assert backend.uploaded is None

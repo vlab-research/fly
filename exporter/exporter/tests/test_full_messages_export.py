@@ -17,6 +17,7 @@ from exporter.exporter import (
     FULL_MESSAGES_COLUMNS,
 )
 from exporter.main import FullMessagesExportOptions
+from exporter.tests.conftest import SNAPSHOT
 
 
 # --- classify_event ---
@@ -269,19 +270,20 @@ class TestExportFullMessages:
         mock_status.assert_any_call("db-url", "uuid-1", status="Uploading")
         mock_status.assert_any_call("db-url", "uuid-1", "http://download-link", status="Finished")
         mock_backend.save_file.assert_called_once()
+        assert {c.kwargs["as_of"] for c in mock_query.call_args_list} == {SNAPSHOT}
 
     @patch("exporter.exporter.query")
     @patch("exporter.exporter.storage.get_storage_backend")
     @patch("exporter.exporter.set_export_status")
-    def test_failure_sets_failed_status(self, mock_status, mock_backend_factory, mock_query):
+    def test_failure_is_raised_for_the_worker(self, mock_status, mock_backend_factory, mock_query):
         mock_query.side_effect = RuntimeError("db error")
 
         opts = FullMessagesExportOptions()
         with pytest.raises(RuntimeError, match="db error"):
             export_full_messages("db-url", "uuid-2", "user@test.com", "survey1", opts)
 
-        mock_status.assert_any_call("db-url", "uuid-2", status="Querying")
-        mock_status.assert_any_call("db-url", "uuid-2", status="Failed")
+        # main.run_job decides between a retry and Failed.
+        assert [c.kwargs["status"] for c in mock_status.call_args_list] == ["Querying"]
 
     @patch("exporter.exporter.query")
     @patch("exporter.exporter.storage.get_storage_backend")

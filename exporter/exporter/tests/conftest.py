@@ -10,16 +10,21 @@ import pytest
 from exporter.db import execute, query
 
 
+SNAPSHOT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
 @pytest.fixture(autouse=True)
-def _stub_set_metadata(request):
+def _stub_export_db_calls(request):
     """
-    Unit tests don't have a real DB; stub set_metadata so its UPDATE no-ops.
-    Integration tests (marked) opt out and exercise the real call.
+    Unit tests don't have a real DB; stub set_metadata so its UPDATE no-ops,
+    and snapshot_timestamp to return SNAPSHOT. Integration tests (marked) opt
+    out and exercise the real calls.
     """
     if request.node.get_closest_marker("integration"):
         yield
         return
-    with patch("exporter.exporter.set_metadata"):
+    with patch("exporter.exporter.set_metadata"), \
+            patch("exporter.exporter.snapshot_timestamp", return_value=SNAPSHOT):
         yield
 
 # Set DATABASE_URL to the test CockroachDB to run integration tests.

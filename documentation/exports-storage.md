@@ -98,7 +98,7 @@ Both endpoints return an array of export status rows, most recent first. Each ro
 | `updated` | timestamp | Last update time; used to identify stale exports for pruning |
 | `retry_count` | integer | Number of times the exporter has retried this export (normally 0 unless a transient failure occurred) |
 | `locked_at` | timestamp or null | When the exporter locked this row to begin processing; cleared when the status updates. Helps detect stalled jobs. |
-| `metadata` | object | Application metadata, if any |
+| `metadata` | object | Progress counters (`users`, `batches`, `rows`, ...). `error` is set only once the export is `Failed`; a retry is `Requested` again with the previous attempt's `error` removed. |
 
 **Polling behavior:** Exports are async: the exporter polls `export_status` for `Requested` rows (`exporter/exporter/main.py`, migration 16); nothing is published to Kafka. Callers should poll `/exports/status` or `/exports/status/survey` every few seconds until the export reaches a terminal status (`Finished` or `Failed`) and the `export_link` is valid. A `Finished` export's presigned URL is valid for 7 hours, so downloads must happen within that window.
 

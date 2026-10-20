@@ -49,9 +49,10 @@ def claim_job(cnf, max_retries, stuck_timeout_minutes):
     SELECT a candidate, then UPDATE only if it's still Requested — safe for
     concurrent workers since only one UPDATE will succeed per job_id.
 
-    Returns the claimed row dict, or None if no work is available.
-    If retry_count exceeds max_retries after claiming, marks the job Failed
-    and returns None.
+    Returns the claimed row dict, or None if no work is available. Claiming
+    removes metadata.error, left by an earlier failure of a job requested
+    again. If retry_count exceeds max_retries after claiming, marks the job
+    Failed and returns None.
     """
     # Reset stale in-flight jobs (any worker-managed status with an old lock).
     # Idempotent — safe for all threads to run on every poll.
@@ -77,7 +78,8 @@ def claim_job(cnf, max_retries, stuck_timeout_minutes):
     # Step 2: guarded UPDATE — concurrent workers safely lose the race
     rows = list(query(cnf, """
         UPDATE export_status
-        SET status = 'Processing', locked_at = NOW(), retry_count = retry_count + 1
+        SET status = 'Processing', locked_at = NOW(), retry_count = retry_count + 1,
+            metadata = metadata - 'error'
         WHERE id = %s AND status = 'Requested'
         RETURNING id, user_id, survey_id, source, options, retry_count
     """, vals=(job_id,), as_dict=True))
@@ -88,9 +90,7 @@ def claim_job(cnf, max_retries, stuck_timeout_minutes):
     job = rows[0]
 
     if job['retry_count'] > max_retries:
-        execute(cnf, """
-            UPDATE export_status SET status = 'Failed', locked_at = NULL WHERE id = %s
-        """, vals=(job['id'],))
+        mark_failed(cnf, job['id'], f"export did not finish in {max_retries} attempts")
         log.error(f"export {job['id']} exceeded max retries ({max_retries}), marked Failed")
         return None
 
@@ -101,6 +101,15 @@ def reset_for_retry(cnf, export_id):
     execute(cnf, """
         UPDATE export_status SET status = 'Requested', locked_at = NULL WHERE id = %s
     """, vals=(export_id,))
+
+
+def mark_failed(cnf, export_id, error):
+    execute(cnf, """
+        UPDATE export_status
+        SET status = 'Failed', locked_at = NULL,
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('error', %s::STRING)
+        WHERE id = %s
+    """, vals=(str(error)[:500], export_id))
 
 
 def process_job(cnf, job):
@@ -126,16 +135,20 @@ def process_job(cnf, job):
 def run_job(cnf, job, max_retries, worker=""):
     """
     Process a claimed job. If it fails, put it back for another attempt unless
-    that was its last or the error would recur on every attempt.
+    that was its last or the error would recur on every attempt; only then is
+    it Failed, with the error in metadata.
     """
     try:
         process_job(cnf, job)
     except NON_RETRYABLE_ERRORS as e:
         log.error(f"{worker}export {job['id']} failed, not retrying: {e}")
+        mark_failed(cnf, job['id'], e)
     except BaseException as e:
         log.error(f"{worker}export {job['id']} failed (attempt {job['retry_count']}): {e}")
         if job['retry_count'] < max_retries:
             reset_for_retry(cnf, job['id'])
+        else:
+            mark_failed(cnf, job['id'], e)
 
 
 def worker_loop(thread_id, database_url, max_retries, stuck_timeout_minutes, poll_interval):

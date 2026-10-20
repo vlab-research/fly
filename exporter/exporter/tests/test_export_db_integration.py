@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from exporter.db import execute, query
+from exporter.db import execute, query, snapshot_timestamp
 from exporter.exporter import (
     FORM_SCHEMA,
     RESPONSE_SCHEMA,
@@ -24,7 +24,7 @@ from exporter.exporter import (
 )
 from exporter.main import ChatLogExportOptions, claim_job, run_job
 from exporter.tests import reference_export, survey_fixture
-from exporter.tests.conftest import DB_URL
+from exporter.tests.conftest import DB_URL, wait_for_follower_reads
 from exporter.tests.test_batched_export import (
     EDGE_OPTIONS,
     OPTIONS,
@@ -147,6 +147,7 @@ def seeded():
                 json.dumps({"raw": j}), json.dumps({"seq": j}),
             ))
     _insert_chat_log(cnf, chat)
+    wait_for_follower_reads(cnf)
 
     yield {
         "cnf": cnf, "owner": owner, "survey": survey, "empty_survey": empty_survey,
@@ -225,8 +226,9 @@ def test_edge_values_match_whole_survey_export(seeded, export_id, name, batch_si
 
 def test_queries_return_their_schemas(seeded):
     s = seeded
-    form_data = get_form_data(s["cnf"], s["owner"], s["survey"])
-    responses = get_responses(s["cnf"], s["owner"], s["survey"], ["u01", "u02"])
+    as_of = snapshot_timestamp(s["cnf"])
+    form_data = get_form_data(s["cnf"], s["owner"], s["survey"], as_of=as_of)
+    responses = get_responses(s["cnf"], s["owner"], s["survey"], ["u01", "u02"], as_of=as_of)
     assert form_data.schema == FORM_SCHEMA and form_data.height == 3
     assert responses.schema == RESPONSE_SCHEMA
     assert set(responses["userid"]) == {"u01", "u02"}
