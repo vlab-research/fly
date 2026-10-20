@@ -1,12 +1,13 @@
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
 
-from exporter.db import execute
+from exporter.db import execute, query
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +26,19 @@ def _stub_set_metadata(request):
 # Quick start: `make test-db` in devops/, then:
 #   DATABASE_URL=postgresql://root@localhost:5433/chatroach python -m pytest
 DB_URL = os.environ.get("DATABASE_URL")
+
+
+def wait_for_follower_reads(cnf, timeout=30):
+    """
+    Waits until what was committed before the call can be read at
+    follower_read_timestamp(), the timestamp exports read at.
+    """
+    committed = list(query(cnf, "SELECT now()"))[0][0]
+    deadline = time.monotonic() + timeout
+    while not list(query(cnf, "SELECT follower_read_timestamp() > %s", vals=(committed,)))[0][0]:
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"follower_read_timestamp() did not pass {committed}")
+        time.sleep(0.2)
 
 
 @pytest.fixture
