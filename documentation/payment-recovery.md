@@ -227,8 +227,9 @@ The two sources are complementary, not redundant:
   survey. Read them together: `Held: wallet / auth` climbing on the counter, and
   one survey's waiting rows growing, is that survey's wallet.
 - **`waitStart` is when the respondent first reached the payment.** dean's
-  retries keep it (`state.waitStart || nxt.timestamp`), so it measures how long
-  someone has really been waiting, not time since the last retry.
+  retries and the respondent's own messages during the wait keep it (an echo of
+  the same wait question reuses `state.waitStart`), so it measures how long
+  someone has really been waiting, not time since the last retry or message.
 - **Time a Result by its envelope `timestamp`, never `payload.timestamp`.**
   dinersclub leaves the latter zero (`0001-01-01T00:00:00Z`) on most failure
   Results, and md's `e_payment_<provider>_timestamp` inherits the zero.

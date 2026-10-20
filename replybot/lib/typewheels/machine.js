@@ -259,6 +259,14 @@ function _repeat(state, message) {
   }
 }
 
+// A wait question re-sent while its wait is in progress (the isRepeat answer to
+// a message during the wait, or a dean redo) continues that wait: dean fires
+// timeouts at waitStart + duration, so restarting it here would postpone them.
+// Any other wait question starts a new one.
+function _waitStart(state, md, nxt) {
+  return (md.ref === state.question && state.waitStart) || nxt.timestamp
+}
+
 function _blankStart(event) {
   return {
     action: 'SWITCH_FORM',
@@ -587,18 +595,17 @@ function exec(state, nxt) {
           action: 'HANDOFF',
           question: md.ref,
           wait: { type: 'handover' },
-          waitStart: state.waitStart || nxt.timestamp,
+          waitStart: _waitStart(state, md, nxt),
           handoff: md.handoff
         }
       }
 
       if (md.wait) {
-        const waitStart = state.waitStart || nxt.timestamp
         return {
           action: 'WAIT_EXTERNAL_EVENT',
           question: md.ref,
           wait: md.wait,
-          waitStart
+          waitStart: _waitStart(state, md, nxt)
         }
       }
 
@@ -721,9 +728,10 @@ function apply(state, output) {
 
     case 'RESPOND':
 
-      // NOTE: by removing errors/retries/waits on RESPOND, we are "resetting"
-      // our retry-on-error process (and exponential backoff) whenever
-      // the user responds. I think this is reasonable. But it's implicit here.
+      // Responding resets the retry-on-error process (and its backoff) and
+      // drops the wait. waitStart stays, as on RESPOND_AGAIN: a message during a
+      // wait is answered by re-sending the wait question, whose echo resumes the
+      // wait from it (_waitStart). A fulfilled wait nulls it; QOUT and END clear it.
       return {
         ...state,
         state: 'RESPONDING',
@@ -735,7 +743,6 @@ function apply(state, output) {
         errorOnset: undefined, // user responded: the error episode is over
         retries: undefined, // remove retries when responding
         wait: undefined, // remove wait when user responds
-        waitStart: undefined, // remove waitStart when user responds
         qa: updateQA(state.qa, update(output))
       }
 
@@ -792,6 +799,8 @@ function apply(state, output) {
         error: undefined, // question sent, no error context
         errorOnset: undefined, // question sent: any retry succeeded, episode over
         retries: undefined, // question sent, no retry context
+        wait: undefined, // question sent, no wait context
+        waitStart: undefined, // question sent, no wait context
       }
 
     case 'HANDOFF':
@@ -831,6 +840,7 @@ function apply(state, output) {
         error: undefined, // completed, no error context
         errorOnset: undefined, // completed: episode over
         wait: undefined, // completed, no wait context
+        waitStart: undefined, // completed, no wait context
         retries: undefined, // completed, no retry context
       }
 
