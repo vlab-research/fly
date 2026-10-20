@@ -819,7 +819,7 @@ describe('getState', () => {
   })
 
 
-  it('Responds while waiting with response and gets fresh waitstart on new wait', () => {
+  it('Responds while waiting with response and repeats with old waitstart', () => {
 
     const wait = { type: 'timeout', value: '2 days' }
 
@@ -832,7 +832,7 @@ describe('getState', () => {
     ]
     const state = getState(log)
     state.state.should.equal('WAIT_EXTERNAL_EVENT')
-    state.waitStart.should.equal(10)
+    state.waitStart.should.equal(5)
   })
 
 
@@ -1159,12 +1159,10 @@ describe('getState', () => {
       state.error.ts.should.equal(200)
     })
 
-    it('clears a pending wait when blocking', () => {
+    it('blocks a participant who is waiting', () => {
       const wait = { type: 'timeout', value: '2 days' }
       const state = getState([referral, echo, text, _echo({ wait, ref: 'bar' }), failed(131026)])
       state.state.should.equal('BLOCKED')
-      should.not.exist(state.wait)
-      should.not.exist(state.waitStart)
     })
 
     it('is a no-op when the user is already BLOCKED, keeping the first error', () => {
@@ -1348,62 +1346,13 @@ describe('getState', () => {
       should.not.exist(state.retries)
     })
 
-    it('clears wait when entering ERROR from WAIT_EXTERNAL_EVENT', () => {
-      const wait = { type: 'timeout', value: '2 days' }
-      const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
-      const log = [referral, echo, text, _echo({ wait, ref: 'bar' }), report]
-      const state = getState(log)
-      state.state.should.equal('ERROR')
-      should.not.exist(state.wait)
-      should.not.exist(state.waitStart)
-      state.error.code.should.equal('FOO')
-    })
-
-    it('clears wait when entering BLOCKED from WAIT_EXTERNAL_EVENT', () => {
-      const wait = { type: 'timeout', value: '2 days' }
-      const fbReport = synthetic({ type: 'machine_report', value: { error: { tag: 'FB', code: 200, message: 'foo' } } })
-      const log = [referral, echo, text, _echo({ wait, ref: 'bar' }), fbReport]
-      const state = getState(log)
-      state.state.should.equal('BLOCKED')
-      should.not.exist(state.wait)
-      should.not.exist(state.waitStart)
-    })
-
-    it('clears error, wait, and retries on END', () => {
+    it('clears error and retries on END', () => {
       const report = synthetic({ type: 'machine_report', value: { error: { tag: 'INTERNAL', code: 'FOO' } } })
       const log = [referral, echo, text, report, tyEcho]
       const state = getState(log)
       state.state.should.equal('END')
       should.not.exist(state.error)
-      should.not.exist(state.wait)
       should.not.exist(state.retries)
-    })
-
-    it('clears wait but keeps waitStart when user responds while waiting', () => {
-      const wait = { type: 'timeout', value: '2 days' }
-      const log = [referral, echo, delivery, text, _echo({ wait, ref: 'bar' }), text]
-      const state = getState(log)
-      state.state.should.equal('RESPONDING')
-      should.not.exist(state.wait)
-      state.waitStart.should.equal(5)
-    })
-
-    it('clears waitStart when a response while waiting moves on to a question', () => {
-      const wait = { type: 'timeout', value: '2 days' }
-      const log = [referral, echo, delivery, text, _echo({ wait, ref: 'bar' }), text, _echo({ ref: 'baz' })]
-      const state = getState(log)
-      state.state.should.equal('QOUT')
-      should.not.exist(state.wait)
-      should.not.exist(state.waitStart)
-    })
-
-    it('clears waitStart when a response while waiting ends the survey', () => {
-      const wait = { type: 'timeout', value: '2 days' }
-      const log = [referral, echo, delivery, text, _echo({ wait, ref: 'bar' }), text, tyEcho]
-      const state = getState(log)
-      state.state.should.equal('END')
-      should.not.exist(state.wait)
-      should.not.exist(state.waitStart)
     })
   })
 })
@@ -3048,6 +2997,20 @@ describe('Handoff functionality', () => {
     actions.handoff.userid.should.equal('1989430067808669')
   })
 
+  it('should not create handoff when no handoff metadata exists', () => {
+    const form = {
+      logic: [],
+      fields: [
+        { type: 'statement', title: 'foo', ref: 'foo' }
+      ]
+    }
+
+    const log = [referral, _echo('foo')]
+    const actions = getMessage(log, form, user, { id: '1855355231229529' })
+
+    should.not.exist(actions.handoff)
+  })
+
   it('should throw for unsupported handoff mode', () => {
     const form = {
       logic: [],
@@ -4514,25 +4477,5 @@ describe('a participant message during a timeout wait', () => {
       log = reply(log, at(event, ts), ts + 1)
     }
     getState(log).waitStart.should.equal(T0)
-  })
-
-  it('gives a new wait reached by a valid answer its own start', () => {
-    const form = {
-      logic: [],
-      fields: [
-        { type: 'multiple_choice', title: 'ready?', ref: 'ready', properties: { choices: [{ label: 'Continue' }], description: 'wait:\n  type: timeout\n  value: 1 week' } },
-        { type: 'statement', title: 'later', ref: 'later', properties: { description: 'type: wait\nwait:\n  type: timeout\n  value: 2 months' } }
-      ]
-    }
-    const reply = (log, event, ts) => [...log, event, ...getMessage([...log, event], form, user).messages
-      .map((m, i) => ({ ...echo, timestamp: ts + i, payload: { ...echo.payload, metadata: m.metadata } }))]
-
-    const first = reply([], at(referral, 1), T0)
-    getState(first).waitStart.should.equal(T0)
-
-    const state = getState(reply(first, at(qr, T1), T2))
-    state.state.should.equal('WAIT_EXTERNAL_EVENT')
-    state.question.should.equal('later')
-    state.waitStart.should.equal(T2)
   })
 })

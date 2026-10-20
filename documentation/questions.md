@@ -394,11 +394,11 @@ JSON:
 
 `value` written as "1 minute" or "2 hours" or "2 days".
 
-If the participant writes during the wait (any text, media, quick reply or
-button), the bot replies with `responseMessage` and sends the wait message
-again. The wait keeps counting from when it started: messages do not push the
-timeout back. See `replybot/README.md`, "A message during a wait does not
-restart it".
+A wait's start lasts until that wait is fulfilled; participant messages never
+change it. If the participant writes during the wait (any text, media, quick
+reply or button), the bot replies with `responseMessage` and sends the wait
+message again, and the timeout still falls at the original start plus `value`.
+See `replybot/README.md`, "A wait's start lasts until the wait is fulfilled".
 
 
 ### Absolute timeout:

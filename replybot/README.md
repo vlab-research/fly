@@ -313,31 +313,35 @@ the `error_tag`/`fb_error_code` computed columns that StatesList filters on.
 | Field | Lives in |
 |---|---|
 | `error` | `ERROR`, `BLOCKED` |
-| `wait` | `WAIT_EXTERNAL_EVENT` |
-| `waitStart` | `WAIT_EXTERNAL_EVENT`; `RESPONDING` only while answering a message or retry inside a wait |
 | `retries` | `RESPONDING`, `ERROR`, `BLOCKED` |
 | `errorOnset` | `RESPONDING` (only while a retry is in flight) |
 
-### A message during a wait does not restart it
+`wait` and `waitStart` are not transient in this sense; see the next section.
+
+### A wait's start lasts until the wait is fulfilled
 
 `waitStart` is what dean times a wait from (`waitStart + duration`), and
-replybot accepts only a timeout whose value equals the current `waitStart`. A
-participant who writes during a non-handoff wait (text, media, quick reply,
-postback) goes through `RESPOND`: the wait field fails validation, so the bot
-sends its `responseMessage` and re-sends the wait question (`isRepeat`). The
-echo of that re-send re-enters the wait. Two rules keep the timer where it was:
+replybot accepts only a timeout whose value equals `waitStart`. The rule is:
 
-- `RESPOND` and `RESPOND_AGAIN` drop `wait` but keep `waitStart`, so it
-  survives the `RESPONDING` blip.
-- An echo that enters a wait reuses `state.waitStart` only when it is the same
-  question (`md.ref === state.question`, `_waitStart` in `machine.js`);
-  any other wait question starts a new wait at the echo's timestamp.
-  `WAIT_RESPONSE` and `END` clear `waitStart`, so a participant who moves on
-  never carries an old start into a later wait.
+- An echo that enters a wait sets `waitStart: state.waitStart || nxt.timestamp`.
+- `waitStart` (with `wait`) is cleared in exactly one place: when the wait is
+  fulfilled (`stateUpdate: { wait: null, waitStart: null }` in `machine.js`).
+- Nothing else touches it. Participant messages never change it, and nor do
+  `RESPOND`, `RESPOND_AGAIN`, `WAIT_RESPONSE`, `END`, `ERROR` or `BLOCKED`.
 
-A timeout that arrives during the blip lands in `RESPONDING`, which only
-records it; dean fires again for the same `waitStart` (up to its retry cap) once
-the participant is back in `WAIT_EXTERNAL_EVENT`.
+So a participant who writes during a wait (text, media, quick reply, postback)
+gets the `responseMessage` and the wait question again, and the echo of that
+re-send re-enters the same wait with the same start. A dean retry after
+`ERROR`/`BLOCKED` resumes it the same way. dean only reads `wait`/`waitStart`
+on `WAIT_EXTERNAL_EVENT` rows, so the values left on other states are inert.
+A timeout that arrives while the participant is briefly `RESPONDING` is only
+recorded; dean fires again for the same `waitStart` (up to its retry cap) once
+they are back in `WAIT_EXTERNAL_EVENT`.
+
+The consequence: a wait left without being fulfilled (for example, by a valid
+answer to a question that also carries a wait) leaves its `waitStart` behind,
+and the next wait in the same form starts from it. A new form (`SWITCH_FORM`,
+`RESET`) starts from a fresh state.
 
 ### An error is an episode, not an event
 

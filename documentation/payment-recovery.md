@@ -177,8 +177,8 @@ parked on an ageing `payment:*` wait is the independent cross-check.
 payment failure, and moving a failed payment to `ERROR` would be wrong twice
 over: `redo` never retries the payment, and `Errored` gates on
 `error_tag = ANY('NETWORK','INTERNAL','STATE_ACTIONS')`, which a payment failure
-does not carry. The `ERROR` transition also clears `wait`/`waitStart`,
-destroying what `Payments` selects on.
+does not carry. And `ERROR` takes the respondent out of `WAIT_EXTERNAL_EVENT`,
+the state `Payments` selects on.
 
 > `repeat_payment` never lands in `externalEvents`, which is why `Payments`
 > cannot cap attempts by counting them there. See `dean/README.md`,
@@ -227,9 +227,10 @@ The two sources are complementary, not redundant:
   survey. Read them together: `Held: wallet / auth` climbing on the counter, and
   one survey's waiting rows growing, is that survey's wallet.
 - **`waitStart` is when the respondent first reached the payment.** dean's
-  retries and the respondent's own messages during the wait keep it (an echo of
-  the same wait question reuses `state.waitStart`), so it measures how long
-  someone has really been waiting, not time since the last retry or message.
+  retries and the respondent's own messages keep it: a wait's start lasts until
+  that wait is fulfilled (`state.waitStart || nxt.timestamp`), so it measures
+  how long someone has really been waiting, not time since the last retry or
+  message.
 - **Time a Result by its envelope `timestamp`, never `payload.timestamp`.**
   dinersclub leaves the latter zero (`0001-01-01T00:00:00Z`) on most failure
   Results, and md's `e_payment_<provider>_timestamp` inherits the zero.

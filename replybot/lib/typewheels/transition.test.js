@@ -3,6 +3,7 @@ const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
 const { _initialState } = require('./machine')
+const { MachineIOError } = require('../errors')
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 
 process.env.FALLBACK_FORM = 'fallback'
@@ -69,6 +70,39 @@ describe('machine.run', () => {
     report.timestamp.should.equal(timestamp)
     report.error.message.should.equal('foo')
     report.error.tag.should.equal('STATE_ACTIONS')
+    report.publish.should.be.true
+  })
+
+  it('returns specific tag error if run throws MachineIOError', async () => {
+
+    const m = new Machine()
+
+    m.transition = () => ({ newState: {}, output: {} })
+    m.actionsResponses = () => ({})
+    m.act = () => { throw new MachineIOError('BAZ', 'foo', { code: 'FB' }) }
+    const timestamp = Date.now()
+    const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
+    report.user.should.equal('bar')
+    report.timestamp.should.equal(timestamp)
+    report.error.message.should.equal('foo')
+    report.error.tag.should.equal('BAZ')
+    report.error.code.should.equal('FB')
+    report.publish.should.be.true
+  })
+
+  it('returns specific tag error if actionsResponses throws MachineIOError', async () => {
+
+    const m = new Machine()
+    m.transition = () => ({ newState: {}, output: {} })
+    m.actionsResponses = () => Promise.reject(new MachineIOError('BAZ', 'foo', { code: 'FB' }))
+    m.act = () => ({})
+    const timestamp = Date.now()
+    const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
+    report.user.should.equal('bar')
+    report.timestamp.should.equal(timestamp)
+    report.error.message.should.equal('foo')
+    report.error.tag.should.equal('BAZ')
+    report.error.code.should.equal('FB')
     report.publish.should.be.true
   })
 
