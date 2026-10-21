@@ -1,7 +1,8 @@
 name: exporter-test
 
-# Triggers on changes to exporter source, migrations (schema used by integration
-# tests), the Makefile (test-db target), or this workflow itself.
+# `devops/migrations/**` and `devops/Makefile` are triggers because the
+# integration tests run against the schema `make test-db` builds from them, so
+# either can break this suite without touching a file under `exporter/`.
 on:
   pull_request:
     paths:
@@ -30,7 +31,7 @@ jobs:
           python-version: '3.11'
       - name: Install Poetry
         run: |
-          curl -sSL https://install.python-poetry.org | python3 -
+          curl -sSL https://install.python-poetry.org | POETRY_VERSION=2.5.1 python3 -
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Start test database
         run: make -C ../devops test-db
