@@ -49,6 +49,8 @@ def wait_for_follower_reads(cnf, timeout=30):
 @pytest.fixture
 def db_url():
     if not DB_URL:
+        if os.environ.get("CI"):
+            pytest.fail("DATABASE_URL not set in CI — integration tests cannot run")
         pytest.skip("DATABASE_URL not set — run 'make test-db' in devops/ first")
     return DB_URL
 

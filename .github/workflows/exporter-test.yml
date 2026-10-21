@@ -1,0 +1,43 @@
+name: exporter-test
+
+# Triggers on changes to exporter source, migrations (schema used by integration
+# tests), the Makefile (test-db target), or this workflow itself.
+on:
+  pull_request:
+    paths:
+      - 'exporter/**'
+      - 'devops/migrations/**'
+      - 'devops/Makefile'
+      - '.github/workflows/exporter-test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'exporter/**'
+      - 'devops/migrations/**'
+      - 'devops/Makefile'
+      - '.github/workflows/exporter-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: exporter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Start test database
+        run: make -C ../devops test-db
+      - name: Install dependencies
+        run: poetry install
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://root@localhost:5433/chatroach
+          CI: true
+        run: poetry run pytest -v
