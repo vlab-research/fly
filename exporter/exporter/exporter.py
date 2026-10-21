@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from vlab_prepro import PreprocessingError, Preprocessor
 
 from . import storage
-from .db import execute, query, stream
+from .db import execute, query, snapshot_timestamp, stream
 from .log import log
 
 
@@ -417,55 +417,53 @@ def export_data(cnf, export_id, user, survey, options: ExportOptions,
     Export a survey's responses as CSV, processed batch_size users at a time,
     so memory depends on the batch size and not on the survey. Every
     preprocessing step needs only one user's rows, which is what makes the
-    batches independent.
+    batches independent. Every read is of the survey at one snapshot, taken
+    at the start. Errors are raised for the worker (main.run_job) to record.
     """
     log.info(f"starting csv export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
     storage_backend = storage.get_storage_backend(file_path=f"exports/{survey}.csv")
 
+    validate_options(options)
+    as_of = snapshot_timestamp(cnf)
+    log.info(f"export {export_id} reads as of {as_of}")
+    userids = get_survey_userids(cnf, user, survey, as_of=as_of)
+    batches = batched(userids, batch_size or EXPORT_USER_BATCH_SIZE)
+    set_metadata(
+        cnf, export_id, users=len(userids), responses=0, rows=0,
+        batches_done=0, batches=len(batches),
+    )
+
+    form_data = get_form_data(cnf, user, survey, as_of=as_of)
+    question_refs = set(get_question_refs(cnf, user, survey, as_of=as_of))
+
+    set_export_status(cnf, export_id, status="Writing")
+    tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False)
     try:
-        validate_options(options)
-        userids = get_survey_userids(cnf, user, survey)
-        batches = batched(userids, batch_size or EXPORT_USER_BATCH_SIZE)
-        set_metadata(
-            cnf, export_id, users=len(userids), responses=0, rows=0,
-            batches_done=0, batches=len(batches),
-        )
+        header = None
+        n_responses = n_rows = 0
+        for i, batch in enumerate(batches, 1):
+            responses = get_responses(cnf, user, survey, batch, as_of=as_of)
+            dd = format_data(responses, form_data, options, question_refs)
+            header = append_csv(tmp, dd, header)
+            n_responses += len(responses)
+            n_rows += len(dd)
+            # Free this batch before the next is fetched, or two are held at once.
+            del responses, dd
+            set_metadata(
+                cnf, export_id, responses=n_responses, rows=n_rows, batches_done=i
+            )
+        tmp.close()
 
-        form_data = get_form_data(cnf, user, survey)
-        question_refs = set(get_question_refs(cnf, user, survey))
+        set_export_status(cnf, export_id, status="Uploading")
+        storage_backend.save_file(tmp.name)
+    finally:
+        tmp.close()
+        os.unlink(tmp.name)
 
-        set_export_status(cnf, export_id, status="Writing")
-        tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False)
-        try:
-            header = None
-            n_responses = n_rows = 0
-            for i, batch in enumerate(batches, 1):
-                responses = get_responses(cnf, user, survey, batch)
-                dd = format_data(responses, form_data, options, question_refs)
-                header = append_csv(tmp, dd, header)
-                n_responses += len(responses)
-                n_rows += len(dd)
-                # Free this batch before the next is fetched, or two are held at once.
-                del responses, dd
-                set_metadata(
-                    cnf, export_id, responses=n_responses, rows=n_rows, batches_done=i
-                )
-            tmp.close()
-
-            set_export_status(cnf, export_id, status="Uploading")
-            storage_backend.save_file(tmp.name)
-        finally:
-            tmp.close()
-            os.unlink(tmp.name)
-
-        url = storage_backend.generate_link()
-        set_export_status(cnf, export_id, url, status="Finished")
-        log.info(f"finished csv export for survey: {survey}")
-    except (Exception, *NON_RETRYABLE_ERRORS) as e:
-        set_metadata(cnf, export_id, error=str(e)[:500])
-        set_export_status(cnf, export_id, status="Failed")
-        raise e
+    url = storage_backend.generate_link()
+    set_export_status(cnf, export_id, url, status="Finished")
+    log.info(f"finished csv export for survey: {survey}")
 
 
 def set_export_status(cnf, export_id, url="Not Found", status="Failed"):
@@ -505,16 +503,16 @@ _SURVEY_RESPONSES = """
 """
 
 
-def get_survey_userids(cnf, user, survey):
+def get_survey_userids(cnf, user, survey, *, as_of):
     """The userids that responded to the survey, sorted."""
     q = f"SELECT DISTINCT r.userid {_SURVEY_RESPONSES} ORDER BY r.userid"
-    return [row[0] for row in query(cnf, q, vals=(user, survey))]
+    return [row[0] for row in query(cnf, q, vals=(user, survey), as_of=as_of)]
 
 
-def get_question_refs(cnf, user, survey):
+def get_question_refs(cnf, user, survey, *, as_of):
     """Every question_ref answered in the survey, sorted."""
     q = f"SELECT DISTINCT r.question_ref {_SURVEY_RESPONSES} ORDER BY r.question_ref"
-    return [row[0] for row in query(cnf, q, vals=(user, survey))]
+    return [row[0] for row in query(cnf, q, vals=(user, survey), as_of=as_of)]
 
 
 RESPONSE_SCHEMA = {
@@ -540,7 +538,7 @@ RESPONSE_COLUMNS = list(RESPONSE_SCHEMA)
 RESPONSE_CHUNK_ROWS = 5000
 
 
-def get_responses(cnf, user, survey, userids):
+def get_responses(cnf, user, survey, userids, *, as_of):
     """
     Returns the responses of `userids` to the survey as a DataFrame with
     RESPONSE_SCHEMA. timestamp stays CockroachDB's text, which is what a
@@ -569,7 +567,7 @@ def get_responses(cnf, user, survey, userids):
         AND responses.userid IN ({placeholders})
         ORDER BY (responses.userid, timestamp, question_ref)
     """
-    rows = stream(cnf, q, vals=(user, survey, *userids))
+    rows = stream(cnf, q, vals=(user, survey, *userids), as_of=as_of)
     chunks = [pl.DataFrame(schema=RESPONSE_SCHEMA)]
     while chunk := list(itertools.islice(rows, RESPONSE_CHUNK_ROWS)):
         chunks.append(pl.DataFrame(chunk, schema=RESPONSE_SCHEMA, orient="row"))
@@ -586,7 +584,7 @@ FORM_SCHEMA = {
 }
 
 
-def get_form_data(cnf, user, survey):
+def get_form_data(cnf, user, survey, *, as_of):
     """
     Returns every version of the survey's forms as a DataFrame with
     FORM_SCHEMA: version numbers each shortcode's forms by creation.
@@ -608,7 +606,7 @@ def get_form_data(cnf, user, survey):
         FROM t
         ORDER BY shortcode, created
     """
-    rows = query(cnf, q, vals=(user, survey))
+    rows = query(cnf, q, vals=(user, survey), as_of=as_of)
     return pl.DataFrame(rows, schema=FORM_SCHEMA, orient="row")
 
 
@@ -617,6 +615,7 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
     Export full message history for a survey as CSV.
     Streams rows through a generator — never loads all messages into memory.
     Event type filtering happens in the generator before rows hit disk.
+    Every read is at one snapshot, as in export_data.
     """
     log.info(f"starting full messages export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
@@ -634,90 +633,89 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
         file_path=f"exports/{survey}_full_messages{suffix}.csv"
     )
 
-    try:
-        allowed_types = expand_groups(full_messages_options.event_groups)
-        include_raw = full_messages_options.include_raw_json
-        columns = FULL_MESSAGES_COLUMNS_WITH_RAW if include_raw else FULL_MESSAGES_COLUMNS
+    allowed_types = expand_groups(full_messages_options.event_groups)
+    include_raw = full_messages_options.include_raw_json
+    columns = FULL_MESSAGES_COLUMNS_WITH_RAW if include_raw else FULL_MESSAGES_COLUMNS
 
-        log.info(
-            f"full messages export {export_id}: "
-            f"groups={full_messages_options.event_groups}, "
-            f"allowed_types={sorted(allowed_types)}, "
-            f"include_raw_json={include_raw}, "
-            f"start_time={start_time}, end_time={end_time}"
-        )
+    log.info(
+        f"full messages export {export_id}: "
+        f"groups={full_messages_options.event_groups}, "
+        f"allowed_types={sorted(allowed_types)}, "
+        f"include_raw_json={include_raw}, "
+        f"start_time={start_time}, end_time={end_time}"
+    )
 
-        if not allowed_types:
-            log.warning(f"full messages export {export_id}: allowed_types is empty, no rows will match")
+    if not allowed_types:
+        log.warning(f"full messages export {export_id}: allowed_types is empty, no rows will match")
 
-        userids = get_survey_userids(cnf, user, survey)
-        log.info(
-            f"full messages export {export_id}: found {len(userids)} users"
-        )
-        set_metadata(cnf, export_id, users=len(userids))
+    as_of = snapshot_timestamp(cnf)
+    log.info(f"export {export_id} reads as of {as_of}")
+    userids = get_survey_userids(cnf, user, survey, as_of=as_of)
+    log.info(
+        f"full messages export {export_id}: found {len(userids)} users"
+    )
+    set_metadata(cnf, export_id, users=len(userids))
 
-        stats = {"total": 0, "json_errors": 0, "filtered": 0, "yielded": 0}
+    stats = {"total": 0, "json_errors": 0, "filtered": 0, "yielded": 0}
 
-        # Step 2: query messages in batches of userids to force index usage
-        # and avoid full table scan on the 101M-row messages table
-        def _batched_message_rows():
-            batch_size = 500
-            for i in range(0, len(userids), batch_size):
-                batch = userids[i : i + batch_size]
-                placeholders = ",".join(["%s"] * len(batch))
-                q = (
-                    f"SELECT m.userid, m.timestamp::string AS timestamp, m.content "
-                    f"FROM messages m "
-                    f"WHERE m.userid IN ({placeholders})"
-                )
-                extra_vals = []
-                if start_time is not None:
-                    q += " AND m.timestamp >= %s"
-                    extra_vals.append(start_time)
-                if end_time is not None:
-                    q += " AND m.timestamp < %s"
-                    extra_vals.append(end_time)
-                q += " ORDER BY m.userid, m.timestamp ASC"
-                yield from query(cnf, q, vals=tuple(batch) + tuple(extra_vals), as_dict=True)
-
-        rows = _iter_messages(_batched_message_rows(), allowed_types, include_raw, stats)
-
-        set_export_status(cnf, export_id, status="Writing")
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False, newline=""
-        )
-        try:
-            writer = csv.DictWriter(tmp, fieldnames=columns)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
-            tmp.close()
-
-            set_metadata(cnf, export_id, rows=stats["yielded"])
-            set_export_status(cnf, export_id, status="Uploading")
-            storage_backend.save_file(tmp.name)
-        finally:
-            os.unlink(tmp.name)
-
-        log.info(
-            f"full messages export {export_id} stats: "
-            f"total_rows={stats['total']}, json_errors={stats['json_errors']}, "
-            f"filtered_out={stats['filtered']}, written={stats['yielded']}"
-        )
-
-        if stats["total"] == 0:
-            log.warning(
-                f"full messages export {export_id}: query returned 0 rows for "
-                f"survey={survey}, user={user}"
+    # Step 2: query messages in batches of userids to force index usage
+    # and avoid full table scan on the 101M-row messages table
+    def _batched_message_rows():
+        batch_size = 500
+        for i in range(0, len(userids), batch_size):
+            batch = userids[i : i + batch_size]
+            placeholders = ",".join(["%s"] * len(batch))
+            q = (
+                f"SELECT m.userid, m.timestamp::string AS timestamp, m.content "
+                f"FROM messages m "
+                f"WHERE m.userid IN ({placeholders})"
+            )
+            extra_vals = []
+            if start_time is not None:
+                q += " AND m.timestamp >= %s"
+                extra_vals.append(start_time)
+            if end_time is not None:
+                q += " AND m.timestamp < %s"
+                extra_vals.append(end_time)
+            q += " ORDER BY m.userid, m.timestamp ASC"
+            yield from query(
+                cnf, q, vals=tuple(batch) + tuple(extra_vals), as_dict=True, as_of=as_of
             )
 
-        url = storage_backend.generate_link()
-        set_export_status(cnf, export_id, url, status="Finished")
-        log.info(f"finished full messages export for survey: {survey}")
-    except Exception as e:
-        set_metadata(cnf, export_id, error=str(e)[:500])
-        set_export_status(cnf, export_id, status="Failed")
-        raise e
+    rows = _iter_messages(_batched_message_rows(), allowed_types, include_raw, stats)
+
+    set_export_status(cnf, export_id, status="Writing")
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False, newline=""
+    )
+    try:
+        writer = csv.DictWriter(tmp, fieldnames=columns)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+        tmp.close()
+
+        set_metadata(cnf, export_id, rows=stats["yielded"])
+        set_export_status(cnf, export_id, status="Uploading")
+        storage_backend.save_file(tmp.name)
+    finally:
+        os.unlink(tmp.name)
+
+    log.info(
+        f"full messages export {export_id} stats: "
+        f"total_rows={stats['total']}, json_errors={stats['json_errors']}, "
+        f"filtered_out={stats['filtered']}, written={stats['yielded']}"
+    )
+
+    if stats["total"] == 0:
+        log.warning(
+            f"full messages export {export_id}: query returned 0 rows for "
+            f"survey={survey}, user={user}"
+        )
+
+    url = storage_backend.generate_link()
+    set_export_status(cnf, export_id, url, status="Finished")
+    log.info(f"finished full messages export for survey: {survey}")
 
 
 def export_chat_log(cnf, export_id, user, survey, chat_log_options, batch_size=None):
@@ -726,6 +724,7 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options, batch_size=N
     No preprocessing -- just a direct dump of the chat_log table, queried in
     batches of users and streamed to a file.
     Optional columns (raw_payload, metadata) are controlled by chat_log_options.
+    Every read is at one snapshot, as in export_data.
     """
     log.info(f"starting chat log export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
@@ -733,46 +732,43 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options, batch_size=N
         file_path=f"exports/{survey}_chat_log.csv"
     )
 
+    as_of = snapshot_timestamp(cnf)
+    log.info(f"export {export_id} reads as of {as_of}")
+    userids = get_chat_log_userids(cnf, user, survey, as_of=as_of)
+    batches = batched(userids, batch_size or EXPORT_USER_BATCH_SIZE)
+    set_metadata(
+        cnf, export_id, users=len(userids), rows=0,
+        batches_done=0, batches=len(batches),
+    )
+
+    if not userids:
+        log.warning(f"no chat log data found for survey: {survey}")
+
+    set_export_status(cnf, export_id, status="Writing")
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False, newline=""
+    )
     try:
-        userids = get_chat_log_userids(cnf, user, survey)
-        batches = batched(userids, batch_size or EXPORT_USER_BATCH_SIZE)
-        set_metadata(
-            cnf, export_id, users=len(userids), rows=0,
-            batches_done=0, batches=len(batches),
-        )
+        # "\n" line endings, as pandas' to_csv writes them.
+        writer = csv.writer(tmp, lineterminator="\n")
+        writer.writerow(chat_log_columns(chat_log_options))
+        n_rows = 0
+        for i, batch in enumerate(batches, 1):
+            for row in get_chat_log(cnf, user, survey, chat_log_options, batch, as_of=as_of):
+                writer.writerow(row)
+                n_rows += 1
+            set_metadata(cnf, export_id, rows=n_rows, batches_done=i)
+        tmp.close()
 
-        if not userids:
-            log.warning(f"no chat log data found for survey: {survey}")
+        set_export_status(cnf, export_id, status="Uploading")
+        storage_backend.save_file(tmp.name)
+    finally:
+        tmp.close()
+        os.unlink(tmp.name)
 
-        set_export_status(cnf, export_id, status="Writing")
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False, newline=""
-        )
-        try:
-            # "\n" line endings, as pandas' to_csv writes them.
-            writer = csv.writer(tmp, lineterminator="\n")
-            writer.writerow(chat_log_columns(chat_log_options))
-            n_rows = 0
-            for i, batch in enumerate(batches, 1):
-                for row in get_chat_log(cnf, user, survey, chat_log_options, batch):
-                    writer.writerow(row)
-                    n_rows += 1
-                set_metadata(cnf, export_id, rows=n_rows, batches_done=i)
-            tmp.close()
-
-            set_export_status(cnf, export_id, status="Uploading")
-            storage_backend.save_file(tmp.name)
-        finally:
-            tmp.close()
-            os.unlink(tmp.name)
-
-        url = storage_backend.generate_link()
-        set_export_status(cnf, export_id, url, status="Finished")
-        log.info(f"finished chat log export for survey: {survey}")
-    except Exception as e:
-        set_metadata(cnf, export_id, error=str(e)[:500])
-        set_export_status(cnf, export_id, status="Failed")
-        raise e
+    url = storage_backend.generate_link()
+    set_export_status(cnf, export_id, url, status="Finished")
+    log.info(f"finished chat log export for survey: {survey}")
 
 
 CHAT_LOG_COLUMNS = [
@@ -806,13 +802,13 @@ _SURVEY_CHAT_LOG = """
 """
 
 
-def get_chat_log_userids(cnf, user, survey):
+def get_chat_log_userids(cnf, user, survey, *, as_of):
     """The userids with chat log rows in the survey, sorted."""
     q = f"SELECT DISTINCT cl.userid {_SURVEY_CHAT_LOG} ORDER BY cl.userid"
-    return [row[0] for row in query(cnf, q, vals=(user, survey))]
+    return [row[0] for row in query(cnf, q, vals=(user, survey), as_of=as_of)]
 
 
-def get_chat_log(cnf, user, survey, chat_log_options, userids):
+def get_chat_log(cnf, user, survey, chat_log_options, userids, *, as_of):
     """
     Yields the chat log rows of `userids` in the survey, as tuples in
     chat_log_columns() order. metadata and raw_payload are included
@@ -839,4 +835,4 @@ def get_chat_log(cnf, user, survey, chat_log_options, userids):
         AND cl.userid IN ({placeholders})
         ORDER BY cl.userid, timestamp
     """
-    return query(cnf, q, vals=(user, survey, *userids))
+    return query(cnf, q, vals=(user, survey, *userids), as_of=as_of)

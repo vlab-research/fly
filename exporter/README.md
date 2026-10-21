@@ -7,7 +7,7 @@ A database-polling service that processes export jobs for survey responses, chat
 The exporter runs as a set of daemon worker threads that continuously poll the `export_status` table in CockroachDB for jobs to process. Each worker:
 1. Calls `claim_job()` every `POLL_INTERVAL_SECONDS` to atomically claim a `Requested` job and transition it to `Processing`
 2. Calls `process_job()` to execute the export (querying data, formatting to CSV, uploading to storage)
-3. Updates the job to `Finished` on success or resets it to `Requested` for retry on failure
+3. Updates the job to `Finished` on success; on failure `run_job()` resets it to `Requested` for a retry, or marks it `Failed` when that was its last attempt or the error would recur
 
 Stale jobs (jobs stuck in `Processing` longer than `STUCK_TIMEOUT_MINUTES`) are automatically reset back to `Requested` for reprocessing.
 
@@ -98,6 +98,30 @@ Progress is written to `export_status.metadata` as it goes: `users` and
 `batches` up front, then a running `responses` (responses only), `rows` and
 `batches_done` after each batch.
 
+### One snapshot per export
+
+Every read of an export (`responses`, `chat_log` and `full_messages`) is
+`AS OF SYSTEM TIME` one timestamp, `follower_read_timestamp()` taken when the
+export starts (`db.snapshot_timestamp()`; about 5 s in the past). So:
+
+- All batches read the same data: a user answering mid-export doesn't show up
+  in one batch's query and not another's. Responses written in the few seconds
+  before the export started are not in it.
+- Reads of a live survey are not restarted by concurrent writes. A read at the
+  present can fail with `ReadWithinUncertaintyIntervalError` (40001) when
+  `responses` is being written, and CockroachDB does not retry it itself: the
+  statement follows psycopg's `BEGIN` in a separate round trip, and even in
+  autocommit it can't once a batch has sent the client more than
+  `sql.defaults.results_buffer.size` (512 KiB). A historical read has no
+  uncertainty interval, and at a closed timestamp it never waits on, or
+  pushes, in-flight writes.
+- The snapshot must stay within the tables' `gc.ttlseconds` (production
+  90000 s) for the length of an attempt; `STUCK_TIMEOUT_MINUTES` bounds that.
+
+psycopg runs every query in a transaction it opened, where a query's own
+`AS OF SYSTEM TIME` clause fails with "inconsistent AS OF SYSTEM TIME
+timestamp", so reads set it with `SET TRANSACTION AS OF SYSTEM TIME` first.
+
 ### Memory
 
 Peak RSS of one export of a synthetic survey shaped like the largest production
@@ -140,7 +164,7 @@ Failed (max retries exhausted or unrecoverable error)
 [Reset to Requested if stuck > STUCK_TIMEOUT_MINUTES]
 ```
 
-On failure, if `retry_count < MAX_EXPORT_RETRIES`, the job is reset to `Requested` for the next worker to retry. Exceeding `MAX_EXPORT_RETRIES` marks it `Failed`.
+On failure, if `retry_count < MAX_EXPORT_RETRIES`, the job is reset to `Requested` for the next worker to retry, and only the worker (`run_job()`) marks a job `Failed`, so an export being retried never shows `Failed`. The error is written to `metadata.error` when the job is marked `Failed`, and claiming a job removes any `metadata.error`. Exceeding `MAX_EXPORT_RETRIES` marks it `Failed`.
 
 Errors that would recur on every attempt are not retried: a vlab-prepro
 `PreprocessingError` (e.g. "Could not pivot", or `drop_users_without` naming a
@@ -195,7 +219,8 @@ pytest exporter/ -s
 ```
 
 Tests marked `integration` run against a real CockroachDB and are skipped
-unless `DATABASE_URL` is set:
+unless `DATABASE_URL` is set. Exports read at `follower_read_timestamp()`, so
+fixtures call `wait_for_follower_reads()` after seeding (about 5 s):
 
 ```bash
 make -C ../devops test-db

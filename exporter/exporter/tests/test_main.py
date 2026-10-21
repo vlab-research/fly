@@ -6,6 +6,7 @@ from exporter.main import (
     ChatLogExportOptions,
     FullMessagesExportOptions,
     claim_job,
+    mark_failed,
     reset_for_retry,
     process_job,
     run_job,
@@ -127,7 +128,17 @@ class TestClaimJob:
 
     @patch("exporter.main.query")
     @patch("exporter.main.execute")
-    def test_marks_failed_when_max_retries_exceeded(self, mock_execute, mock_query):
+    def test_claim_clears_previous_attempts_error(self, mock_execute, mock_query):
+        mock_query.side_effect = [iter([("job-1",)]), iter([])]
+        claim_job("db-url", max_retries=3, stuck_timeout_minutes=120)
+        claim_sql = mock_query.call_args_list[1][0][1]
+        assert "SET status = 'Processing'" in claim_sql
+        assert "metadata = metadata - 'error'" in claim_sql
+
+    @patch("exporter.main.mark_failed")
+    @patch("exporter.main.query")
+    @patch("exporter.main.execute")
+    def test_marks_failed_when_max_retries_exceeded(self, mock_execute, mock_query, mock_failed):
         job_row = {
             "id": "job-1", "user_id": "u@e.com", "survey_id": "s",
             "source": "responses", "options": {}, "retry_count": 4,  # > max_retries=3
@@ -135,9 +146,7 @@ class TestClaimJob:
         mock_query.side_effect = [iter([("job-1",)]), iter([job_row])]
         result = claim_job("db-url", max_retries=3, stuck_timeout_minutes=120)
         assert result is None
-        # Should have called execute to mark it Failed
-        failed_calls = [c for c in mock_execute.call_args_list if "SET status = 'Failed'" in str(c)]
-        assert len(failed_calls) == 1
+        mock_failed.assert_called_once_with("db-url", "job-1", "export did not finish in 3 attempts")
 
     @patch("exporter.main.query")
     @patch("exporter.main.execute")
@@ -160,39 +169,59 @@ class TestResetForRetry:
         assert vals == ("job-123",)
 
 
+class TestMarkFailed:
+    @patch("exporter.main.execute")
+    def test_sets_failed_and_merges_truncated_error(self, mock_execute):
+        mark_failed("db-url", "job-123", RuntimeError("x" * 600))
+        sql = mock_execute.call_args[0][1]
+        vals = mock_execute.call_args[1]["vals"]
+        assert "SET status = 'Failed', locked_at = NULL" in sql
+        assert "jsonb_build_object('error'" in sql
+        assert vals == ("x" * 500, "job-123")
+
+
 class TestRunJob:
     JOB = {
         "id": "job-1", "user_id": "u@e.com", "survey_id": "s",
         "source": "responses", "options": {}, "retry_count": 1,
     }
 
+    @patch("exporter.main.mark_failed")
     @patch("exporter.main.reset_for_retry")
     @patch("exporter.main.process_job")
-    def test_success_is_not_reset(self, mock_process, mock_reset):
+    def test_success_is_not_reset(self, mock_process, mock_reset, mock_failed):
         run_job("db-url", self.JOB, max_retries=3)
         mock_reset.assert_not_called()
+        mock_failed.assert_not_called()
 
+    @patch("exporter.main.mark_failed")
     @patch("exporter.main.reset_for_retry")
     @patch("exporter.main.process_job")
-    def test_failure_is_retried(self, mock_process, mock_reset):
+    def test_failure_is_retried_without_failing(self, mock_process, mock_reset, mock_failed):
         mock_process.side_effect = RuntimeError("db went away")
         run_job("db-url", self.JOB, max_retries=3)
         mock_reset.assert_called_once_with("db-url", "job-1")
+        mock_failed.assert_not_called()
 
+    @patch("exporter.main.mark_failed")
     @patch("exporter.main.reset_for_retry")
     @patch("exporter.main.process_job")
-    def test_last_attempt_is_not_retried(self, mock_process, mock_reset):
-        mock_process.side_effect = RuntimeError("db went away")
+    def test_last_attempt_fails_with_its_error(self, mock_process, mock_reset, mock_failed):
+        error = RuntimeError("db went away")
+        mock_process.side_effect = error
         run_job("db-url", {**self.JOB, "retry_count": 3}, max_retries=3)
         mock_reset.assert_not_called()
+        mock_failed.assert_called_once_with("db-url", "job-1", error)
 
     @pytest.mark.parametrize("error", [
         PreprocessingError("Could not pivot"),
         InvalidOptionsError("To pivot to wide format we need a response_value"),
     ])
+    @patch("exporter.main.mark_failed")
     @patch("exporter.main.reset_for_retry")
     @patch("exporter.main.process_job")
-    def test_option_errors_are_not_retried(self, mock_process, mock_reset, error):
+    def test_option_errors_fail_without_retry(self, mock_process, mock_reset, mock_failed, error):
         mock_process.side_effect = error
         run_job("db-url", self.JOB, max_retries=3)
         mock_reset.assert_not_called()
+        mock_failed.assert_called_once_with("db-url", "job-1", error)
