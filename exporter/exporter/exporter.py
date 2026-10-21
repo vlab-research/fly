@@ -10,6 +10,7 @@ from vlab_prepro import PreprocessingError, Preprocessor
 
 from . import storage
 from .db import execute, query, snapshot_timestamp, stream
+from .keys import chat_log_key, full_messages_key, responses_key
 from .log import log
 
 
@@ -422,7 +423,7 @@ def export_data(cnf, export_id, user, survey, options: ExportOptions,
     """
     log.info(f"starting csv export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
-    storage_backend = storage.get_storage_backend(file_path=f"exports/{survey}.csv")
+    storage_backend = storage.get_storage_backend(file_path=responses_key(user, survey))
 
     validate_options(options)
     as_of = snapshot_timestamp(cnf)
@@ -623,14 +624,8 @@ def export_full_messages(cnf, export_id, user, survey, full_messages_options):
     start_time = full_messages_options.start_time
     end_time = full_messages_options.end_time
 
-    suffix = ""
-    if start_time or end_time:
-        def _stamp(dt):
-            return dt.strftime("%Y%m%dT%H%M%SZ") if dt else "open"
-        suffix = f"_{_stamp(start_time)}_to_{_stamp(end_time)}"
-
     storage_backend = storage.get_storage_backend(
-        file_path=f"exports/{survey}_full_messages{suffix}.csv"
+        file_path=full_messages_key(user, survey, start_time, end_time)
     )
 
     allowed_types = expand_groups(full_messages_options.event_groups)
@@ -729,7 +724,7 @@ def export_chat_log(cnf, export_id, user, survey, chat_log_options, batch_size=N
     log.info(f"starting chat log export for survey: {survey}")
     set_export_status(cnf, export_id, status="Querying")
     storage_backend = storage.get_storage_backend(
-        file_path=f"exports/{survey}_chat_log.csv"
+        file_path=chat_log_key(user, survey)
     )
 
     as_of = snapshot_timestamp(cnf)
