@@ -21,7 +21,9 @@ chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
 # v0.0.79: `awaiting-payment` health finding; see production.yaml.
-versionDashboard: &vdashboard v0.0.80
+# v0.0.81: refuses export links outside the caller's owner prefix (VIR-23).
+#   Needs exporter v0.7.2 live first.
+versionDashboard: &vdashboard v0.0.81
 versionBotserver: &vbotserver v0.0.12
 # Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
 # suffix guards WhatsApp work from reaching production, and WhatsApp is in
