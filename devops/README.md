@@ -1,5 +1,8 @@
 # FLY Deployment
 
+To read production logs (Loki, `kubectl`, Cloud Logging, and how far back
+each goes), see [LOGGING.md](LOGGING.md).
+
 ## Setting up dev environment
 
 You will need to install [kind][1] as well as [MkCert][2] in order to run the full development setup

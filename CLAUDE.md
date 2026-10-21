@@ -136,6 +136,7 @@ When this migration finishes, delete this section.
 | **`<project>/README.md`** | Describe the PARTS | Architecture, structure, setup, dependencies — **read before working in that app; update when app structure changes** |
 | **`documentation/<feature>.md`** | Describe the FEATURES | Cross-component behavior, data flows — **read before exploring code; update after exploration** |
 | **`planning/`** | Plans for WORK | Implementation plans, findings (temporary) |
+| **`devops/LOGGING.md`** | Production LOGS | Where Fly and vlab logs are kept and how far back each goes. Loki holds the history; `kubectl logs` and Cloud Logging don't |
 
 ## Code Comments
 

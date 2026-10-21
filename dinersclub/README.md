@@ -352,6 +352,10 @@ VALUES ('user-123', 'secrets', 'bearer_token', '{"value": "token_xyz789"}');
 - HTTP_REQUEST_FAILED: Network error
 - HTTP status code (e.g., "400", "500"): From non-2xx response
 
+**The result is always typed `payment:http`** (`http_provider.go`), regardless of the endpoint or provider config — so the survey's flattened hidden fields are always `e_payment_http_success`, `e_payment_http_error_message`, `e_payment_http_id`, never a name derived from the endpoint.
+
+**A non-2xx response is a failure whose `code` is the HTTP status string.** None of the HTTP-status rows in `classify.go`'s `recoveryByCode` table resolve to `respondent` — they land on `transient` (5xx, 429) or `precondition` (everything else, including an unlisted status, which falls to the unknown-code default). Both classes are withheld from the respondent and leave the payment parked in `WAIT_EXTERNAL_EVENT` for dean's re-drive (see "Error Handling" below). So an endpoint that must always reach the respondent has to answer 2xx and encode any respondent-facing outcome in the body, extracted via `responsePath`/`errorMessage` — the HTTP status itself can never become a message the respondent sees.
+
 **Enabled via**:
 ```bash
 DINERSCLUB_PROVIDERS=http
@@ -1166,17 +1170,19 @@ misses := cache.Metrics.Misses()
 
 ### Debugging HTTP Provider
 
-Enable request logging:
+This dump runs unconditionally on every `Payout` call, not behind a flag:
 ```go
 // httputil.DumpRequestOut logs full request to stdout
 dump, _ := httputil.DumpRequestOut(req, true)
 log.Println(string(dump))
 ```
 
-This includes:
-- HTTP method and URL
-- All headers
-- Request body
+It captures the request as built, i.e. **after** secret interpolation:
+- HTTP method and URL (including any secret interpolated into the URL)
+- All headers (including an interpolated `Authorization` header)
+- Request body (including any interpolated secret)
+
+**Known issue**: this logs resolved secrets to stdout in cleartext on every HTTP-provider payout.
 
 ## Common Issues
 
