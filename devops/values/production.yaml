@@ -182,7 +182,10 @@ versionScribble: &vscribble v0.0.34
 # No env or config change.
 versionDinersclub: &vdinersclub v0.0.54
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.7.1
+# v0.7.2: export objects are keyed under exports/<owner-hash>/ so researchers who
+#   share a survey name no longer overwrite each other (PR #185, VIR-23). Ship
+#   BEFORE dashboard v0.0.81, which refuses links outside the caller's prefix.
+versionExporter: &vexporter v0.7.2
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
 # second account's rows" -- multi-account specific, so it only manifests once a
 # participant exists on two accounts. Part of the same rollout stack.
