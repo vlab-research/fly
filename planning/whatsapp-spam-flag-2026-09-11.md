@@ -192,3 +192,31 @@ real time, amplified by validation loops and the pay-fail → re-ask loop.
 The reports that produced the RED rating are consistent with unpaid
 participants (Nigeria after the block; LAC after DingConnect failures),
 not with unsolicited sends.
+
+## Update 2026-09-24 — what the number has sent since the 09-19 pause
+
+Read-only, `states` (pageid 1203867182815254) joined to `messages`. Button and
+list replies start `{"context"`, not `{"from"`, so count both as inbound.
+
+| day | bot messages | follow-ups | refused (131047) | new ad conversations |
+|---|---|---|---|---|
+| 09-19 | 33,537 | 187 | 81 | 477 |
+| 09-20 | 1,136 | 63 | 4 | 3 |
+| 09-21 | 222 | 11 | 0 | 4 |
+| 09-22 | 261 | 2 | 0 | 4 |
+| 09-23 | 165 | 0 | 48 | 0 |
+| 09-24 | 45 | 1 | 5 | 2 |
+
+- Since 09-20 almost every send is a reply to someone mid-survey. No blasts.
+- **Bails that went out after the 24h window closed.** Bail `lachn-reloadly-backlog-to-end-20260923`
+  (56 Honduran respondents, 02:15 UTC) and `lac-reconciled-to-end-20260924` (51,
+  16:53 UTC) both send `end_paid_by_hand`. 48 and 5 of those sends were refused
+  with 131047, and those respondents are now `BLOCKED`. The 09-21 note already
+  says to stop bailing people who are outside the window.
+- **Follow-ups repeat on each stall.** Since 09-09, 665 respondents were nudged:
+  115 twice, 22 three times, 3 four times, each on a different day. Since dean
+  v0.0.48 (09-22), 3 follow-ups in total. WhatsApp still has no platform opt-out.
+- A `redo` can land 50 min after a follow-up and send the same question a
+  third time with no reply in between (59164774815, `sn_4`, 09-21 05:10 → 06:00).
+- About 12 Nigerian `USER_BLOCKED` numbers wrote to us since 09-20 and got no
+  reply.
