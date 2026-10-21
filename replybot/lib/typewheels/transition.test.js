@@ -3,6 +3,7 @@ const chai = require('chai')
 const should = chai.should()
 const { Machine } = require('./transition')
 const { _initialState } = require('./machine')
+const { MachineIOError } = require('../errors')
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
 
 process.env.FALLBACK_FORM = 'fallback'
@@ -69,6 +70,39 @@ describe('machine.run', () => {
     report.timestamp.should.equal(timestamp)
     report.error.message.should.equal('foo')
     report.error.tag.should.equal('STATE_ACTIONS')
+    report.publish.should.be.true
+  })
+
+  it('returns specific tag error if run throws MachineIOError', async () => {
+
+    const m = new Machine()
+
+    m.transition = () => ({ newState: {}, output: {} })
+    m.actionsResponses = () => ({})
+    m.act = () => { throw new MachineIOError('BAZ', 'foo', { code: 'FB' }) }
+    const timestamp = Date.now()
+    const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
+    report.user.should.equal('bar')
+    report.timestamp.should.equal(timestamp)
+    report.error.message.should.equal('foo')
+    report.error.tag.should.equal('BAZ')
+    report.error.code.should.equal('FB')
+    report.publish.should.be.true
+  })
+
+  it('returns specific tag error if actionsResponses throws MachineIOError', async () => {
+
+    const m = new Machine()
+    m.transition = () => ({ newState: {}, output: {} })
+    m.actionsResponses = () => Promise.reject(new MachineIOError('BAZ', 'foo', { code: 'FB' }))
+    m.act = () => ({})
+    const timestamp = Date.now()
+    const report = await m.run({ state: 'QOUT' }, 'bar', { event: 'hello', timestamp })
+    report.user.should.equal('bar')
+    report.timestamp.should.equal(timestamp)
+    report.error.message.should.equal('foo')
+    report.error.tag.should.equal('BAZ')
+    report.error.code.should.equal('FB')
     report.publish.should.be.true
   })
 
@@ -807,5 +841,71 @@ describe('Machine integrated', () => {
       report.publish.should.be.true
       report.commands.should.eql([])
     })
+  })
+})
+
+
+// The full replybot loop for one WhatsApp conversation: each event runs through
+// Machine.run on the state the previous run produced, and every send_message
+// command is fed back as its echo, the way message-worker reports it.
+describe('machine.run: a participant writing during a timeout wait', () => {
+  const DAY = 1000 * 60 * 60 * 24
+  const T0 = 1000
+  const source = { type: 'whatsapp', account_id: WA_PHONE_NUMBER_ID }
+  const form = {
+    logic: [],
+    fields: [
+      { type: 'short_text', title: 'q1', ref: 'q1' },
+      { type: 'statement', title: 'Thank you, we will be in touch', ref: 'thanks', properties: { description: 'type: wait\nresponseMessage: Stay tuned!\nwait:\n  type: timeout\n  value: 2 months' } },
+      { type: 'short_text', title: 'q2', ref: 'q2' }
+    ]
+  }
+  const waText = (body, timestamp) => ({ ...text, user_id: WA_USER_ID, source, timestamp, payload: { ...text.payload, text: body } })
+  const echoOf = (command, timestamp) => ({
+    event_id: `evt_test_echo_${timestamp}`,
+    user_id: WA_USER_ID,
+    timestamp,
+    source,
+    event_type: 'bot_message_sent',
+    payload: { type: 'bot_message_sent', is_echo: true, text: command.message.text, metadata: command.message.metadata }
+  })
+
+  const machine = () => {
+    const m = new Machine()
+    m.getForm = () => Promise.resolve([form, 'survey'])
+    return m
+  }
+
+  // Runs `event`, then the echo of each command it produced (from `echoAt`, 1ms apart).
+  const step = async (m, state, event, echoAt) => {
+    const report = await m.run(state, WA_USER_ID, event)
+    should.not.exist(report.error)
+    let s = report.newState
+    for (const [i, c] of (report.commands || []).filter(c => c.type === 'send_message').entries()) {
+      const r = await m.run(s, WA_USER_ID, echoOf(c, echoAt + i))
+      should.not.exist(r.error)
+      s = r.newState
+    }
+    return { report, state: s }
+  }
+
+  it('keeps the original waitStart, so the timeout dean fires for it still releases the participant', async () => {
+    const m = machine()
+    let { state } = await step(m, _initialState(), { ...whatsappReferral, timestamp: 1 }, 2)
+    ;({ state } = await step(m, state, waText('first answer', 3), T0))
+    state.state.should.equal('WAIT_EXTERNAL_EVENT')
+    state.waitStart.should.equal(T0)
+
+    const during = await step(m, state, waText('hello?', 10 * DAY), 10 * DAY + 1)
+    during.report.commands.map(c => c.message.text).should.eql(['Stay tuned!', 'Thank you, we will be in touch'])
+    during.report.commands.forEach(c => c.platform.should.equal('whatsapp'))
+    during.state.state.should.equal('WAIT_EXTERNAL_EVENT')
+    during.state.waitStart.should.equal(T0)
+
+    const timeout = { event_id: 'evt_test_timeout', user_id: WA_USER_ID, timestamp: T0 + 61 * DAY, source: { type: 'synthetic', account_id: WA_PHONE_NUMBER_ID, platform: 'whatsapp' }, event_type: 'synthetic_timeout', payload: T0 }
+    const released = await m.run(during.state, WA_USER_ID, timeout)
+    should.not.exist(released.error)
+    released.newState.state.should.equal('RESPONDING')
+    released.commands.map(c => c.message.metadata.ref).should.eql(['q2'])
   })
 })

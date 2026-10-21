@@ -313,9 +313,35 @@ the `error_tag`/`fb_error_code` computed columns that StatesList filters on.
 | Field | Lives in |
 |---|---|
 | `error` | `ERROR`, `BLOCKED` |
-| `wait` / `waitStart` | `WAIT_EXTERNAL_EVENT` |
 | `retries` | `RESPONDING`, `ERROR`, `BLOCKED` |
 | `errorOnset` | `RESPONDING` (only while a retry is in flight) |
+
+`wait` and `waitStart` are not transient in this sense; see the next section.
+
+### A wait's start lasts until the wait is fulfilled
+
+`waitStart` is what dean times a wait from (`waitStart + duration`), and
+replybot accepts only a timeout whose value equals `waitStart`. The rule is:
+
+- An echo that enters a wait sets `waitStart: state.waitStart || nxt.timestamp`.
+- `waitStart` (with `wait`) is cleared in exactly one place: when the wait is
+  fulfilled (`stateUpdate: { wait: null, waitStart: null }` in `machine.js`).
+- Nothing else touches it. Participant messages never change it, and nor do
+  `RESPOND`, `RESPOND_AGAIN`, `WAIT_RESPONSE`, `END`, `ERROR` or `BLOCKED`.
+
+So a participant who writes during a wait (text, media, quick reply, postback)
+gets the `responseMessage` and the wait question again, and the echo of that
+re-send re-enters the same wait with the same start. A dean retry after
+`ERROR`/`BLOCKED` resumes it the same way. dean only reads `wait`/`waitStart`
+on `WAIT_EXTERNAL_EVENT` rows, so the values left on other states are inert.
+A timeout that arrives while the participant is briefly `RESPONDING` is only
+recorded; dean fires again for the same `waitStart` (up to its retry cap) once
+they are back in `WAIT_EXTERNAL_EVENT`.
+
+The consequence: a wait left without being fulfilled (for example, by a valid
+answer to a question that also carries a wait) leaves its `waitStart` behind,
+and the next wait in the same form starts from it. A new form (`SWITCH_FORM`,
+`RESET`) starts from a fresh state.
 
 ### An error is an episode, not an event
 

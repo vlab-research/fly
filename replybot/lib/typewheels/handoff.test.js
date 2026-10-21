@@ -113,6 +113,7 @@ describe('Handoff Question Parsing', () => {
 
       result.should.be.an('object')
       result.type.should.equal('statement')
+      should.not.exist(result.md.handoff)
     })
 
     it('should not add handoff md for YAML with different type', () => {
@@ -143,6 +144,7 @@ describe('Handoff Question Parsing', () => {
 
       result.should.be.an('object')
       result.type.should.equal('statement')
+      should.not.exist(result.md)
     })
 
     it('should handle missing description gracefully', () => {
@@ -157,6 +159,7 @@ describe('Handoff Question Parsing', () => {
 
       result.should.be.an('object')
       result.type.should.equal('statement')
+      should.not.exist(result.md)
     })
   })
 })

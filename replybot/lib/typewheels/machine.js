@@ -721,7 +721,7 @@ function apply(state, output) {
 
     case 'RESPOND':
 
-      // NOTE: by removing errors/retries/waits on RESPOND, we are "resetting"
+      // NOTE: by removing errors/retries on RESPOND, we are "resetting"
       // our retry-on-error process (and exponential backoff) whenever
       // the user responds. I think this is reasonable. But it's implicit here.
       return {
@@ -734,8 +734,6 @@ function apply(state, output) {
         error: undefined, // remove error when responding
         errorOnset: undefined, // user responded: the error episode is over
         retries: undefined, // remove retries when responding
-        wait: undefined, // remove wait when user responds
-        waitStart: undefined, // remove waitStart when user responds
         qa: updateQA(state.qa, update(output))
       }
 
@@ -769,7 +767,6 @@ function apply(state, output) {
         state: 'RESPONDING',
         error: undefined, // remove stale error on retry (keep retries for backoff)
         errorOnset: episodeOnset(state), // ...but remember when the episode began
-        wait: undefined, // remove stale wait on retry
       }
 
 
@@ -830,7 +827,6 @@ function apply(state, output) {
         question: output.question,
         error: undefined, // completed, no error context
         errorOnset: undefined, // completed: episode over
-        wait: undefined, // completed, no wait context
         retries: undefined, // completed, no retry context
       }
 
@@ -840,8 +836,6 @@ function apply(state, output) {
         state: 'BLOCKED',
         error: output.error,
         errorOnset: undefined, // consumed: the onset now lives on error.ts
-        wait: undefined, // blocked, clear prior wait
-        waitStart: undefined, // blocked, clear prior waitStart
       }
 
     case 'UNBLOCK':
@@ -853,8 +847,6 @@ function apply(state, output) {
         state: 'ERROR',
         error: output.error,
         errorOnset: undefined, // consumed: the onset now lives on error.ts
-        wait: undefined, // errored, clear prior wait
-        waitStart: undefined, // errored, clear prior waitStart
       }
 
     default:
