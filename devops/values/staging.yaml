@@ -41,7 +41,9 @@ versionHermes: &vhermes v0.0.5
 # planning/conversation-identity.md §5.
 # v0.0.229: stamps state_json.lastInbound, the respondent's last own message
 #   (PR #180). Deploy BEFORE migration 33 and dean v0.0.48; harmless alone.
-versionReplybot: &vreplybot v0.0.229
+# v0.0.230: a participant message during a wait no longer restarts the
+#   countdown; a wait's start lasts until the wait is fulfilled (PR #200).
+versionReplybot: &vreplybot v0.0.230
 versionLinksniffer: &vlinksniffer v0.0.9
 # v0.0.48: FollowUps measures from states.last_inbound and only nudges
 #   someone who has answered (PR #180). REQUIRES MIGRATION 33 -- the query
@@ -62,7 +64,7 @@ versionScribble: &vscribble v0.0.34
 # withheld and re-driven; see production.yaml.
 versionDinersclub: &vdinersclub v0.0.54
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.7.0
+versionExporter: &vexporter v0.7.1
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
 # v0.2.7: malformed timing rejected at write; timing errors recorded (VIR-57);
 # see production.yaml.
