@@ -173,9 +173,16 @@ parked on an ageing `payment:*` wait is the independent cross-check.
 | `WAIT_EXTERNAL_EVENT` | `Payments` | `repeat_payment` | `MAKE_PAYMENT` | **re-runs the payment** |
 | `ERROR` | `Errored` | `redo` | `RESPOND_AGAIN` | re-sends the last message |
 
+`redo` re-sends the last message but never publishes its payment, even when that
+message carries a payment block (`act()`'s `RESPOND_AGAIN` branch, see
+`replybot/README.md` "Where a payment comes from"). The original send already
+published it, and a second publish would reuse the provider's idempotency key
+and come back as a duplicate-rejection failure on a respondent who may have been
+paid.
+
 `WAIT_EXTERNAL_EVENT` + `Payments` is the correct machinery for a retryable
 payment failure, and moving a failed payment to `ERROR` would be wrong twice
-over: `redo` never retries the payment, and `Errored` gates on
+over: `redo` never publishes a payment, and `Errored` gates on
 `error_tag = ANY('NETWORK','INTERNAL','STATE_ACTIONS')`, which a payment failure
 does not carry. And `ERROR` takes the respondent out of `WAIT_EXTERNAL_EVENT`,
 the state `Payments` selects on.
@@ -282,6 +289,13 @@ The retry budget now applies to declined payments, not only to system faults: a
 to the respondent.
 
 ## 8. Known gaps
+
+- **Respondents stranded by VIR-46 are not re-driven by the fix.** Until the
+  fix shipped, a payment field reached by a stitch (`SWITCH_FORM`) was rendered
+  but never published. Those respondents sit in
+  `WAIT_EXTERNAL_EVENT` on a `payment:*` wait whose payment dinersclub never
+  received. dean's `Payments` sweep is the only thing that can pay them, and only
+  inside its 14-day window; anyone older needs a bail or a manual re-drive.
 
 - **`CUSTOM_IDENTIFIER_ALREADY_USED` is reported as a failure** (2,385
   occurrences), but 1,483 of the 2,393 states carrying it also record

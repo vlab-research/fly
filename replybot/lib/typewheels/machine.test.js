@@ -4479,3 +4479,150 @@ describe('a participant message during a timeout wait', () => {
     getState(log).waitStart.should.equal(T0)
   })
 })
+
+
+// A message rendered for the first time publishes the payment it carries: a
+// stitch into a form whose first field is a payment is the path besides RESPOND.
+// A redo re-renders a message whose payment was already published, so it must
+// not publish it again.
+describe('act() publishes the payment a rendered message carries', () => {
+  // A WhatsApp stitch into a payment form, its echo, and the participant tapping OK.
+  const stitchEcho = {
+    source: 'whatsapp',
+    account_id: '1203867182815254',
+    platform: 'whatsapp',
+    phone_number_id: '1203867182815254',
+    from: '15419799714',
+    type: 'bot_echo',
+    metadata: {
+      ref: 'to_pay_1',
+      type: 'stitch',
+      stitch: {
+        form: 'lacbopay1es',
+        metadata: {
+          phone: '+59171234567'
+        }
+      }
+    },
+    timestamp: 1788566535365
+  }
+  const gateEcho = {
+    source: 'whatsapp',
+    account_id: '1203867182815254',
+    platform: 'whatsapp',
+    phone_number_id: '1203867182815254',
+    from: '15419799714',
+    type: 'bot_echo',
+    metadata: {
+      ref: 'pay_1_ready'
+    },
+    timestamp: 1788566898000
+  }
+  const tap = {
+    from: '15419799714',
+    from_user_id: 'US.1664653981761554',
+    id: 'wamid.TAPGATE',
+    timestamp: 1788566900000,
+    text: {
+      body: 'OK'
+    },
+    type: 'text',
+    source: 'whatsapp',
+    platform: 'whatsapp',
+    phone_number_id: '1203867182815254',
+    account_id: '1203867182815254'
+  }
+
+  const PAYMENT_MD = JSON.stringify({
+    type: 'wait',
+    wait: { type: 'external', value: { type: 'payment:dingconnect', id: 'p1' } },
+    payment: {
+      provider: 'dingconnect',
+      key: 'DINGCONNECT_API_KEY',
+      details: { id: 'p1', account_number: '+59171234567', amount: 5 }
+    }
+  })
+
+  const sendField = {
+    id: 'f1', ref: 'p1_send', type: 'statement', title: 'Sending…',
+    properties: { description: PAYMENT_MD }
+  }
+  const gateField = {
+    id: 'g1', ref: 'pay_1_ready', type: 'multiple_choice',
+    title: 'We are ready to send your payment.',
+    properties: { choices: [{ ref: 'OK', label: 'OK' }] }
+  }
+
+  const ctxFor = fields => ({
+    form: { id: 'PAYFORM', title: 'pay', fields, thankyou_screens: [] },
+    user: { id: 'U1' }, page: { id: 'P1' },
+    timestamp: 1788566896445, platform: 'whatsapp'
+  })
+
+  // End of the previous part, about to receive the stitch echo into the pay form.
+  const priorState = () => ({
+    state: 'RESPONDING', question: 'q22_phone', qa: [], forms: ['lacbo1es'],
+    md: { form: 'lacbo1es', phone: '+59171234567' }
+  })
+
+  const redo = {
+    event_id: 'evt_redo', user_id: '15419799714', timestamp: 1788567000000,
+    source: { type: 'synthetic' }, event_type: 'synthetic_redo', payload: null
+  }
+
+  it('a stitch resolves to SWITCH_FORM', () => {
+    exec(priorState(), parseEvent(stitchEcho)).action.should.equal('SWITCH_FORM')
+  })
+
+  it('publishes the payment when the payment field is first in the stitched-into form', () => {
+    const state = priorState()
+    const output = exec(state, parseEvent(stitchEcho))
+    const result = act(ctxFor([sendField]), state, output)
+
+    result.messages.should.have.length(1)
+    should.exist(result.payment)
+    result.payment.provider.should.equal('dingconnect')
+    result.payment.details.id.should.equal('p1')
+    result.payment.userid.should.equal('U1')
+    result.payment.pageid.should.equal('P1')
+    result.payment.platform.should.equal('whatsapp')
+  })
+
+  it('publishes the payment once, from the RESPOND, when an acknowledged statement comes first', () => {
+    const fields = [gateField, sendField]
+    const ctx = ctxFor(fields)
+    let state = priorState()
+
+    const o1 = exec(state, parseEvent(stitchEcho))
+    const r1 = act(ctx, state, o1)
+    state = apply(state, o1)
+    o1.action.should.equal('SWITCH_FORM')
+    should.not.exist(r1.payment)
+
+    const o2 = exec(state, parseEvent(gateEcho))
+    state = apply(state, o2)
+    state.state.should.equal('QOUT')
+    state.question.should.equal('pay_1_ready')
+
+    const o3 = exec(state, parseEvent(tap))
+    const r3 = act(ctx, state, o3)
+    o3.action.should.equal('RESPOND')
+    should.exist(r3.payment)
+    r3.payment.provider.should.equal('dingconnect')
+    r3.payment.details.id.should.equal('p1')
+  })
+
+  it('does not publish the payment again when a redo regenerates the payment message', () => {
+    const ctx = ctxFor([gateField, sendField])
+    const state = [stitchEcho, gateEcho, tap]
+      .map(parseEvent)
+      .reduce((s, e) => apply(s, exec(s, e)), priorState())
+
+    const output = exec(state, parseEvent(redo))
+    const result = act(ctx, state, output)
+
+    output.action.should.equal('RESPOND_AGAIN')
+    result.messages.map(m => m.metadata && m.metadata.ref).should.include('p1_send')
+    should.not.exist(result.payment)
+  })
+})
