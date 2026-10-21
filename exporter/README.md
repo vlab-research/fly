@@ -215,7 +215,7 @@ pip install -r requirements.dev.txt
 ### Running Tests
 
 ```bash
-pytest exporter/ -s
+poetry run pytest -v
 ```
 
 Tests marked `integration` run against a real CockroachDB and are skipped
@@ -224,8 +224,14 @@ fixtures call `wait_for_follower_reads()` after seeding (about 5 s):
 
 ```bash
 make -C ../devops test-db
-DATABASE_URL=postgresql://root@localhost:5433/chatroach pytest exporter/
+DATABASE_URL=postgresql://root@localhost:5433/chatroach poetry run pytest
 ```
+
+**CI:** The GitHub Actions workflow `.github/workflows/exporter-test.yml` runs
+both unit and integration tests on every change to `exporter/`,
+`devops/migrations/` (schema), `devops/Makefile` (test-db target), or the
+workflow itself. The workflow fails if integration tests would skip (guard
+against broken DB setup), not just if they fail.
 
 ## Known Issues
 

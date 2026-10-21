@@ -1,0 +1,44 @@
+name: exporter-test
+
+# `devops/migrations/**` and `devops/Makefile` are triggers because the
+# integration tests run against the schema `make test-db` builds from them, so
+# either can break this suite without touching a file under `exporter/`.
+on:
+  pull_request:
+    paths:
+      - 'exporter/**'
+      - 'devops/migrations/**'
+      - 'devops/Makefile'
+      - '.github/workflows/exporter-test.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'exporter/**'
+      - 'devops/migrations/**'
+      - 'devops/Makefile'
+      - '.github/workflows/exporter-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: exporter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | POETRY_VERSION=2.5.1 python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Start test database
+        run: make -C ../devops test-db
+      - name: Install dependencies
+        run: poetry install --with dev
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://root@localhost:5433/chatroach
+          CI: true
+        run: poetry run pytest -v
