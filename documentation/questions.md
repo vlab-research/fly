@@ -439,6 +439,10 @@ NOTE: The token only gives you permission to send a single message. As such, the
 
 ALSO NOTE: You need one time notification permission to use the notify type. To get that go to Advanced Messaging under your Page Settings to request the permission.
 
+NOTE on the two payment types below: the `payment` block is not tied to `type: wait` — replybot picks up a `payment` from any outbound message's metadata (`getPaymentFromMessage` in `machine.js`), and every field-type translator merges the field's Description YAML into that message's metadata, so a `payment` block on a `short_text`, `multiple_choice`, or `statement` field fires exactly like one on a `wait`. The `wait` in the examples below only pauses the conversation until the result lands; it is not what triggers the payment.
+
+The `e_payment_reloadly_*` / `e_payment_http_*` hidden fields are written to `md` the moment dinersclub's result event arrives, whether or not the conversation is still in `WAIT_EXTERNAL_EVENT` for that payment. And because `md` persists across a `RESPOND` and across a stitch to another form, a logic jump anywhere later — even in a form the participant has since been stitched into — can still branch on these keys after the wait that set them is long gone.
+
 ## Payment - Reloadly
 
 JSON:

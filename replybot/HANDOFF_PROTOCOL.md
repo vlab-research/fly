@@ -221,9 +221,9 @@ This happens when a user sends a text message while the machine is in `WAIT_EXTE
 
 1. **machine.js missing guard**: The `TEXT`, `QUICK_REPLY`, `POSTBACK`, and `MEDIA` event handlers only checked for `RESPONDING` and `USER_BLOCKED` states. User input during a handoff wait was treated as a response to the handoff field, triggering the validator. Fixed by adding `_isHandoffWait(state)` — checks `state.state === 'WAIT_EXTERNAL_EVENT' && state.wait.type === 'handover'` — to all four handlers. Regular `wait` fields (timeouts) still accept user input; only handoff waits are blocked.
 
-2. **translate-typeform validator missing `handoff`**: The translator dispatch table had `handoff` (added in 0.2.17) but the validator dispatch table did not. Even if the machine guard is bypassed, the validator would throw. Fixed in translate-typeform 0.2.18 by adding `handoff: validateStatement` to the validator lookup (handoff fields don't accept user input, same as `wait` and `statement`).
+2. **No `handoff` entry in the validator lookup, then or now**: replybot's own validator dispatch table (`lib/generic-validator.js`, the `lookup` object) has no `handoff` key — `wait`, `statement`, and `stitch` all resolve to `validateStatement`, but `handoff` does not. replybot does not call into `@vlab-research/translate-typeform`'s validator at runtime; that package is only a declared dependency, used elsewhere. So there is no validator-lookup entry backing up the machine guard: if `_isHandoffWait` is ever bypassed, `validator()` still throws `There is no validator for the question of type handoff`.
 
-The machine.js guard is the primary fix. The validator entry is defense-in-depth.
+`_isHandoffWait` is therefore the only guard against this crash, not one layer of two. Anyone adding a genuine defense-in-depth entry should add `handoff: validateStatement` to `lib/generic-validator.js`'s `lookup`, not to translate-typeform.
 
 ## Related Documentation
 
