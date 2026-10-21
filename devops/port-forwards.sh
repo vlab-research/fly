@@ -9,6 +9,7 @@
 #   AlertManager :9093  — used by /study-health (active-alert view)
 #   CockroachDB  :26257 — used by /study-health (states / error analytics), svc
 #                          gbv-cockroachdb-public in vprod
+#   Loki         :3100  — container log history; see LOGGING.md
 #
 # Idempotent: skips a forward whose local port is already listening. Backgrounds
 # each forward; stop them all with:  pkill -f 'kubectl.*port-forward'
@@ -28,6 +29,7 @@ fwd() { # name  local:remote  svc  namespace
 fwd prometheus   9090:9090   prometheus-kube-prometheus-prometheus   monitoring
 fwd alertmanager 9093:9093   prometheus-kube-prometheus-alertmanager monitoring
 fwd cockroach    26257:26257 gbv-cockroachdb-public                  vprod
+fwd loki         3100:3100   loki                                    monitoring
 
 echo
 echo "Forwards backgrounded. The 'prometheus' MCP server queries http://localhost:9090."
