@@ -865,10 +865,14 @@ function act(ctx, state, output) {
       return withPayment(ctx, respond(ctxWithMd, qa, output))
     }
 
+    // A redo re-sends a message whose payment the original RESPOND already
+    // published, and may already have paid. Publishing it again reuses the
+    // provider's idempotency key, and the duplicate rejection lands in md as a
+    // failure, routing a paid respondent down the form's failure branch.
     case 'RESPOND_AND_RESET':
     case 'RESPOND_AGAIN': {
       const qa = state.qa
-      return withPayment(ctx, respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output))
+      return { messages: respond({ ...ctx, md: { ...state.md, ...output.md } }, qa, output) }
     }
 
     case 'SWITCH_FORM': {
@@ -924,9 +928,9 @@ function _wrapPayment(ctx, payment) {
   }
 }
 
-// Every branch that renders messages must go through here: a message carrying
-// metadata.payment that is sent without its payment being published leaves the
-// respondent waiting on a payment nobody requested.
+// Every branch that renders a message for the first time must go through here:
+// a message carrying metadata.payment that is sent without its payment being
+// published leaves the respondent waiting on a payment nobody requested.
 function withPayment(ctx, messages) {
   const payment = messages.map(m => getPaymentFromMessage(ctx, m)).find(p => p)
   return { messages, payment }

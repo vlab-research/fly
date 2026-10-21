@@ -158,26 +158,28 @@ two-sided measurement of `message-worker`'s command-processing latency, alongsid
 
 | `act()` branch | produced by | payment |
 |---|---|---|
-| `RESPOND`, `SWITCH_FORM`, `RESPOND_AGAIN`, `RESPOND_AND_RESET` | a user answer; a stitch echo or blank start; a dean `redo`; (no producer — dead) | extracted from `metadata.payment` of any rendered message, via `withPayment()` |
+| `RESPOND`, `SWITCH_FORM` | a user answer; a stitch echo or blank start | extracted from `metadata.payment` of any rendered message, via `withPayment()` |
 | `MAKE_PAYMENT` | dean `repeat_payment` | rebuilt from the payment field with `getPayment()`, no message sent |
+| `RESPOND_AGAIN`, `RESPOND_AND_RESET` | a dean `redo`; (no producer — dead) | none — the message is re-sent without its payment |
 
-**Invariant: a rendered message that carries `metadata.payment` always has its payment
-published in the same report.** Every message-rendering branch returns through
-`withPayment()` so that no branch can skip it. The send echo, not the payment, is what
+**Invariant: a message rendered for the first time that carries `metadata.payment` has
+its payment published in the same report.** Both first-render branches return through
+`withPayment()` so that neither can skip it. The send echo, not the payment, is what
 opens the `payment:*` wait, so a dropped payment looks like a perfectly healthy
 `WAIT_EXTERNAL_EVENT` state and is recovered only by dean's `Payments` sweep (2h grace,
-then six-hourly). Before VIR-46, `SWITCH_FORM` and `RESPOND_AGAIN` skipped extraction:
-a stitch into a form whose first field is a payment never requested it.
+then six-hourly). Before VIR-46, `SWITCH_FORM` skipped extraction: a stitch into a form
+whose first field is a payment never requested it.
 
 Consequences worth knowing:
 
-- **A `redo` re-publishes the payment** when the message it re-sends is a payment
-  message. The original `RESPOND` normally already published it (payments are produced
-  before commands in `processor()`), so this is a second attempt — consistent with the
-  at-least-once policy in `documentation/payment-recovery.md` §2, and the same
-  duplication dean's `repeat_payment` already causes. It is also the only prompt
-  payment when the original report failed before `publishPayment` (e.g. `getForm`
-  raising `INTERNAL`).
+- **A `redo` does not re-publish the payment**, even when the message it re-sends is a
+  payment message. The original `RESPOND` already published it (payments are produced
+  before commands in `processor()`), and it may already have succeeded. A second publish
+  reuses the provider's idempotency key (Reloadly's `customIdentifier`), so the provider
+  rejects it as a duplicate, and that failure Result is written into `md` — routing a
+  paid respondent to the form's failure branch. A payment that genuinely never went out
+  (e.g. the original report failed before `publishPayment`) is left to dean's `Payments`
+  sweep, which re-runs it with `MAKE_PAYMENT`.
 - **The "acknowledged statement first" form shape** (`pay_N_ready`, then the send) is
   no longer required for a stitched-into payment form to pay. It remains the house
   pattern because the payment retry loop needs a question to wait on.

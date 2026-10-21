@@ -5,9 +5,10 @@ const fs = require('fs')
 const { exec, act, apply } = require('./machine')
 const { parseEvent } = require('../event-normalizer')
 
-// Every act() branch that renders messages must publish the payment carried by
-// any of them. A stitch into a form whose first field is a payment, and a redo
-// that regenerates a payment message, are the two paths besides RESPOND.
+// An act() branch that renders a message for the first time must publish the
+// payment it carries: a stitch into a form whose first field is a payment is the
+// path besides RESPOND. A redo re-renders a message whose payment was already
+// published, so it must not publish it again.
 const F = JSON.parse(fs.readFileSync('mocks/switch-form-payment-events.json'))
 
 const PAYMENT_MD = JSON.stringify({
@@ -91,7 +92,7 @@ describe('payments generated outside RESPOND', () => {
     r3.payment.details.id.should.equal('p1')
   })
 
-  it('publishes the payment again when a redo regenerates the payment message', () => {
+  it('does not publish the payment again when a redo regenerates the payment message', () => {
     const ctx = ctxFor([gateField, sendField])
     const state = [F.stitchEcho, F.gateEcho, F.tap]
       .map(parseEvent)
@@ -102,7 +103,6 @@ describe('payments generated outside RESPOND', () => {
 
     output.action.should.equal('RESPOND_AGAIN')
     result.messages.map(m => m.metadata && m.metadata.ref).should.include('p1_send')
-    should.exist(result.payment)
-    result.payment.details.id.should.equal('p1')
+    should.not.exist(result.payment)
   })
 })
