@@ -647,3 +647,57 @@ func TestIntegration_QuestionResponse_NoMatch(t *testing.T) {
 		t.Errorf("expected no matches, got: %v", matched)
 	}
 }
+
+// A user_list bail with conditions matches only listed conversations that also
+// satisfy the conditions: not unlisted ones, and not the listed user on an
+// account the entry does not name.
+func TestIntegration_UserListWithConditions_RestrictsToList(t *testing.T) {
+	pool := integrationPool(t)
+	defer pool.Close()
+	resetTablesForQuery(t, pool)
+
+	owner := insertOwner(t, pool)
+	surveyID := insertSurveyFor(t, pool, owner, "source")
+	insertSurveyFor(t, pool, owner, "other")
+
+	old := time.Now().Add(-60 * 24 * time.Hour)
+	for _, c := range []struct{ userid, pageid, form string }{
+		{"listed_match", "p1", "source"},
+		{"listed_match", "p2", "source"},
+		{"unlisted_match", "p1", "source"},
+		{"listed_other_form", "p1", "other"},
+		{"listed_too_recent", "p1", "source"},
+	} {
+		insertStateOn(t, pool, owner, c.userid, c.pageid, c.form)
+	}
+	insertResponseFull(t, pool, surveyID, "listed_match", "p1", "source", "operator", "x", old)
+	insertResponseFull(t, pool, surveyID, "listed_match", "p2", "source", "operator", "x", old)
+	insertResponseFull(t, pool, surveyID, "unlisted_match", "p1", "source", "operator", "x", old)
+	insertResponseFull(t, pool, surveyID, "listed_other_form", "p1", "source", "operator", "x", old)
+	insertResponseFull(t, pool, surveyID, "listed_too_recent", "p1", "source", "operator", "x", time.Now())
+
+	def := &types.BailDefinition{
+		Type: "user_list",
+		Conditions: conditionFromJSON(`{"op": "and", "vars": [
+			{"type": "form", "value": "source"},
+			{"type": "elapsed_time", "duration": "1 month",
+			 "since": {"event": "response", "details": {"form": "source", "question_ref": "operator"}}}
+		]}`),
+	}
+	users := []types.UserListEntry{
+		{UserID: "listed_match", PageID: "p1", Shortcode: "dest"},
+		{UserID: "listed_other_form", PageID: "p1", Shortcode: "dest"},
+		{UserID: "listed_too_recent", PageID: "p1", Shortcode: "dest"},
+		{UserID: "not_in_states", PageID: "p1", Shortcode: "dest"},
+	}
+
+	sql, params, err := BuildQueryForUsers(def, owner, users)
+	if err != nil {
+		t.Fatalf("BuildQueryForUsers: %v", err)
+	}
+	got := runQueryConversations(t, pool, sql, params)
+
+	if len(got) != 1 || !containsConversation(got, "listed_match", "p1") {
+		t.Errorf("expected only listed_match/p1, got %+v", got)
+	}
+}

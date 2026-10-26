@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/vlab-research/exodus/db"
 	"github.com/vlab-research/exodus/platform"
 	"github.com/vlab-research/exodus/sender"
+	"github.com/vlab-research/exodus/types"
 )
 
 // Mock implementations for testing
@@ -67,9 +71,13 @@ func (m *mockBailStore) GetMessagingCredentials(ctx context.Context, pageids []s
 type mockQueryExecutor struct {
 	results    []map[string]interface{}
 	queryError error
+	queries    []string
+	lastArgs   []interface{}
 }
 
 func (m *mockQueryExecutor) Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
+	m.queries = append(m.queries, sql)
+	m.lastArgs = args
 	if m.queryError != nil {
 		return nil, m.queryError
 	}
@@ -1023,5 +1031,142 @@ func TestExecutor_Run_UserListBail_StoredPlatformLosesToCredential(t *testing.T)
 	if got := bodies[0]["platform"]; got != platform.Messenger {
 		t.Errorf("Posted platform = %v, want %q: the credential decides, not the stored value",
 			got, platform.Messenger)
+	}
+}
+
+// createConditionedUserListBail is a scheduled user_list bail whose conditions
+// narrow the list to who is waiting at thank_you_timeout on the source form.
+func createConditionedUserListBail(owner uuid.UUID, users []map[string]interface{}) *db.Bail {
+	def := map[string]interface{}{
+		"type":      "user_list",
+		"user_list": map[string]interface{}{"users": users},
+		"conditions": map[string]interface{}{"op": "and", "vars": []interface{}{
+			map[string]interface{}{"type": "form", "value": "source"},
+			map[string]interface{}{"type": "current_question", "value": "thank_you_timeout"},
+		}},
+		"execution": map[string]interface{}{"timing": "immediate"},
+		"action":    map[string]interface{}{},
+	}
+	defJSON, _ := json.Marshal(def)
+	return &db.Bail{
+		ID:         uuid.New(),
+		UserID:     owner,
+		Name:       "conditioned_list",
+		Enabled:    true,
+		Definition: defJSON,
+	}
+}
+
+func row(userid, pageid string) map[string]interface{} {
+	return map[string]interface{}{"userid": userid, "pageid": pageid, "platform": platform.Messenger}
+}
+
+func TestExecutor_Run_UserListWithConditions_MovesOnlyListedMatches(t *testing.T) {
+	owner := uuid.New()
+	bail := createConditionedUserListBail(owner, []map[string]interface{}{
+		{"userid": "matching", "pageid": "page1", "shortcode": "dest_a"},
+		{"userid": "not_matching", "pageid": "page1", "shortcode": "dest_b"},
+		{"userid": "matching_other_page", "pageid": "page2", "shortcode": "dest_c"},
+	})
+	store := &mockBailStore{
+		bails:       []*db.Bail{bail},
+		credentials: ownedCredentials(owner, platform.EntityFacebookPage, "page1", "page2"),
+	}
+	// The query returns a listed match, a match on a pageid the entry does not
+	// name, and a match that is not on the list at all. Only the first is moved.
+	q := &mockQueryExecutor{results: []map[string]interface{}{
+		row("matching", "page1"),
+		row("matching_other_page", "page1"),
+		row("unlisted", "page1"),
+	}}
+	snd := &mockBailSender{}
+
+	if err := New(store, q, snd, 100).Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(q.queries) != 1 {
+		t.Fatalf("expected exactly one condition query, got %d", len(q.queries))
+	}
+	if !strings.Contains(q.queries[0], "(s.userid, s.pageid) IN (SELECT * FROM unnest(") {
+		t.Errorf("expected the query to be restricted to the list, got:\n%s", q.queries[0])
+	}
+
+	if len(snd.sentBailouts) != 1 {
+		t.Fatalf("expected 1 bailout, got %d: %+v", len(snd.sentBailouts), snd.sentBailouts)
+	}
+	got := snd.sentBailouts[0]
+	if got.UserID != "matching" || got.PageID != "page1" || got.DestinationForm != "dest_a" {
+		t.Errorf("expected matching/page1 -> dest_a, got %+v", got)
+	}
+	if got.Platform != platform.Messenger {
+		t.Errorf("expected platform from the credential, got %q", got.Platform)
+	}
+
+	if len(store.recordedEvents) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(store.recordedEvents))
+	}
+	if ev := store.recordedEvents[0]; ev.UsersMatched != 1 || ev.UsersBailed != 1 {
+		t.Errorf("expected 1 matched / 1 bailed, got %d / %d", ev.UsersMatched, ev.UsersBailed)
+	}
+}
+
+// Someone moved on an earlier run has left the source form, so the condition
+// query no longer returns them and the run reaches no one and records nothing.
+func TestExecutor_Run_UserListWithConditions_NoMatchesRecordsNothing(t *testing.T) {
+	owner := uuid.New()
+	bail := createConditionedUserListBail(owner, []map[string]interface{}{
+		{"userid": "already_moved", "pageid": "page1", "shortcode": "dest_a"},
+	})
+	store := &mockBailStore{
+		bails:       []*db.Bail{bail},
+		credentials: ownedCredentials(owner, platform.EntityFacebookPage, "page1"),
+	}
+	q := &mockQueryExecutor{results: []map[string]interface{}{}}
+	snd := &mockBailSender{}
+
+	if err := New(store, q, snd, 100).Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snd.sentBailouts) != 0 {
+		t.Errorf("expected no bailouts, got %+v", snd.sentBailouts)
+	}
+	if len(store.recordedEvents) != 0 {
+		t.Errorf("expected no event for a run that matched nobody, got %d", len(store.recordedEvents))
+	}
+}
+
+func TestExecutor_Run_UserListWithConditions_QueryErrorRecordsError(t *testing.T) {
+	owner := uuid.New()
+	bail := createConditionedUserListBail(owner, []map[string]interface{}{
+		{"userid": "u", "pageid": "page1", "shortcode": "dest_a"},
+	})
+	store := &mockBailStore{bails: []*db.Bail{bail}}
+	q := &mockQueryExecutor{queryError: fmt.Errorf("boom")}
+	snd := &mockBailSender{}
+
+	if err := New(store, q, snd, 100).Run(context.Background()); err != nil {
+		t.Fatalf("Run should isolate bail errors, got: %v", err)
+	}
+	if len(snd.sentBailouts) != 0 {
+		t.Errorf("expected no bailouts, got %+v", snd.sentBailouts)
+	}
+	if len(store.recordedEvents) != 1 || store.recordedEvents[0].EventType != "error" {
+		t.Fatalf("expected one error event, got %+v", store.recordedEvents)
+	}
+}
+
+func TestFilterUserList(t *testing.T) {
+	entries := []types.UserListEntry{
+		{UserID: "a", PageID: "p1", Shortcode: "x"},
+		{UserID: "b", PageID: "p1", Shortcode: "y"},
+		{UserID: "a", PageID: "p2", Shortcode: "z"},
+	}
+	rows := []map[string]interface{}{row("a", "p2"), row("a", "p1"), row("c", "p1")}
+
+	got := filterUserList(entries, rows)
+	want := []types.UserListEntry{entries[0], entries[2]}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("filterUserList = %+v, want %+v", got, want)
 	}
 }

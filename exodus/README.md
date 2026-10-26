@@ -304,9 +304,12 @@ PostgreSQL interval format: `"<number> <unit>"` where unit is one of: `seconds`,
       - **conditions**: `query.BuildQuery(def, bail.UserID)`, then execute it. Every row is
         `(userid, pageid, platform)`, already owner-scoped by the credentials join. A row
         whose platform is unusable fails the whole bail (see "Platform resolution").
-      - **user_list**: `resolveUserList` collects the distinct pageids, loads one credential
-        each via `GetMessagingCredentials`, and calls `platform.Resolve` to split the entries
-        into targets and skips.
+      - **user_list**: with `conditions`, `matchingEntries` first runs
+        `query.BuildQueryForUsers` (the condition query restricted in SQL to the listed
+        `(userid, pageid)` pairs) and keeps only the entries it returns. Then
+        `resolveUserList` collects the distinct pageids, loads one credential each via
+        `GetMessagingCredentials`, and calls `platform.Resolve` to split the entries into
+        targets and skips.
    d. Apply `MaxBailUsers` limit
    e. Send bailout events to botserver via HTTP POST with rate limiting, including the
       conversation triple

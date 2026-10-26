@@ -225,8 +225,14 @@ func userListDefinition(pageids ...string) types.BailDefinition {
 	return types.BailDefinition{
 		Type:      "user_list",
 		UserList:  &types.UserList{Users: users},
-		Execution: types.Execution{Timing: "immediate"},
+		Execution: absoluteExecution(),
 	}
+}
+
+// absoluteExecution fires once, the timing a user_list without conditions must use.
+func absoluteExecution() types.Execution {
+	datetime, timezone := "2026-12-01T09:00:00", "UTC"
+	return types.Execution{Timing: "absolute", Datetime: &datetime, Timezone: &timezone}
 }
 
 // Helper to create a test bail definition
@@ -857,9 +863,7 @@ func TestCreateBail_UserListType(t *testing.T) {
 				},
 			},
 		},
-		Execution: types.Execution{
-			Timing: "immediate",
-		},
+		Execution: absoluteExecution(),
 		Action: types.Action{
 			Metadata: map[string]interface{}{"reason": "test"},
 		},
@@ -1261,4 +1265,176 @@ func TestPreviewBail_UserList_RejectsPageIDWithNoCredential(t *testing.T) {
 		"/users/:userId/bails/preview", server.PreviewBail)
 
 	assertInvalidPageIDs(t, rec, "page_bad")
+}
+
+func scheduledExecution() types.Execution {
+	timeOfDay, timezone := "09:00", "America/Los_Angeles"
+	return types.Execution{Timing: "scheduled", TimeOfDay: &timeOfDay, Timezone: &timezone}
+}
+
+func putDefinition(t *testing.T, server *Server, userID, bailID uuid.UUID, body map[string]interface{}) *httptest.ResponseRecorder {
+	t.Helper()
+	reqJSON, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/users/"+userID.String()+"/bails/"+bailID.String(),
+		strings.NewReader(string(reqJSON)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := server.echo.NewContext(req, rec)
+	c.SetPath("/users/:userId/bails/:id")
+	c.SetParamNames("userId", "id")
+	c.SetParamValues(userID.String(), bailID.String())
+	if err := server.UpdateBail(c); err != nil {
+		t.Fatalf("UpdateBail returned an error: %v", err)
+	}
+	return rec
+}
+
+func TestCreateBail_UserList_RecurringWithoutConditionsIsRefused(t *testing.T) {
+	for _, exec := range []types.Execution{scheduledExecution(), {Timing: "immediate"}} {
+		userID := uuid.New()
+		created := false
+		mock := &mockDB{
+			credentials: ownedCredentials(userID, "page1"),
+			createFunc:  func(ctx context.Context, b *db.Bail) error { created = true; return nil },
+		}
+		def := userListDefinition("page1")
+		def.Execution = exec
+
+		rec := postUserList(t, New(mock), userID, def, "/users/"+userID.String()+"/bails", New(mock).CreateBail)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d (%s)", exec.Timing, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "needs conditions") {
+			t.Errorf("%s: expected the error to say why, got %s", exec.Timing, rec.Body.String())
+		}
+		if created {
+			t.Errorf("%s: bail was created despite the refusal", exec.Timing)
+		}
+	}
+}
+
+func TestCreateBail_UserList_ScheduledWithConditionsIsAccepted(t *testing.T) {
+	userID := uuid.New()
+	mock := &mockDB{credentials: ownedCredentials(userID, "page1")}
+	server := New(mock)
+	def := userListDefinition("page1")
+	def.Execution = scheduledExecution()
+	def.Conditions = simpleFormCondition("source")
+
+	rec := postUserList(t, server, userID, def, "/users/"+userID.String()+"/bails", server.CreateBail)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var stored types.BailDefinition
+	if err := json.Unmarshal(mock.bails[0].Definition, &stored); err != nil {
+		t.Fatalf("stored definition: %v", err)
+	}
+	if stored.Conditions == nil {
+		t.Error("conditions were not stored")
+	}
+}
+
+func TestCreateBail_UserList_InvalidConditionsAreRefused(t *testing.T) {
+	userID := uuid.New()
+	server := New(&mockDB{credentials: ownedCredentials(userID, "page1")})
+	def := userListDefinition("page1")
+	def.Conditions = &types.Condition{}
+	notElapsed := `{"op": "not", "vars": [{"type": "elapsed_time", "duration": "1 month",
+		"since": {"event": "response", "details": {"form": "f", "question_ref": "q"}}}]}`
+	if err := json.Unmarshal([]byte(notElapsed), def.Conditions); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := postUserList(t, server, userID, def, "/users/"+userID.String()+"/bails", server.CreateBail)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid conditions") {
+		t.Fatalf("expected 400 invalid conditions, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateBail_UserList_StrippingConditionsFromScheduledIsRefused(t *testing.T) {
+	userID, bailID := uuid.New(), uuid.New()
+	existing := userListDefinition("page1")
+	existing.Execution = scheduledExecution()
+	existing.Conditions = simpleFormCondition("source")
+	existingJSON, _ := json.Marshal(existing)
+	mock := &mockDB{
+		bails:       []*db.Bail{{ID: bailID, UserID: userID, Name: "list", Enabled: true, Definition: existingJSON}},
+		credentials: ownedCredentials(userID, "page1"),
+	}
+	server := New(mock)
+
+	stripped := existing
+	stripped.Conditions = nil
+	rec := putDefinition(t, server, userID, bailID, map[string]interface{}{"definition": stripped})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if string(mock.bails[0].Definition) != string(existingJSON) {
+		t.Error("stored definition changed despite the refusal")
+	}
+}
+
+// The dashboard's enable toggle sends only {enabled}; it must keep working on
+// any stored bail, including one saved before the recurring guard existed.
+func TestUpdateBail_EnabledOnlyBypassesRecurringGuard(t *testing.T) {
+	userID, bailID := uuid.New(), uuid.New()
+	legacy := userListDefinition("page1")
+	legacy.Execution = types.Execution{Timing: "immediate"}
+	legacyJSON, _ := json.Marshal(legacy)
+	mock := &mockDB{
+		bails: []*db.Bail{{ID: bailID, UserID: userID, Name: "list", Enabled: true, Definition: legacyJSON}},
+	}
+
+	rec := putDefinition(t, New(mock), userID, bailID, map[string]interface{}{"enabled": false})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if mock.bails[0].Enabled {
+		t.Error("expected the bail to be disabled")
+	}
+}
+
+func TestPreviewBail_UserListWithConditions_ReturnsCurrentMatches(t *testing.T) {
+	userID := uuid.New()
+	var gotSQL string
+	var gotArgs []interface{}
+	mock := &mockDB{
+		credentials: ownedCredentials(userID, "page1", "page2"),
+		queryFunc: func(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
+			gotSQL, gotArgs = sql, args
+			return []map[string]interface{}{{"userid": "user2", "pageid": "page2", "platform": "messenger"}}, nil
+		},
+	}
+	server := New(mock)
+	def := userListDefinition("page1", "page2")
+	def.Execution = scheduledExecution()
+	def.Conditions = simpleFormCondition("source")
+
+	rec := postUserList(t, server, userID, def, "/users/"+userID.String()+"/bails/preview", server.PreviewBail)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(gotSQL, "unnest(") {
+		t.Errorf("expected the preview query to be restricted to the list, got:\n%s", gotSQL)
+	}
+	if ids, ok := gotArgs[2].([]string); !ok || strings.Join(ids, ",") != "user1,user2" {
+		t.Errorf("expected listed userids as $3, got %v", gotArgs)
+	}
+
+	var response PreviewResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if response.Count != 1 || len(response.Users) != 1 || response.Users[0].UserID != "user2" {
+		t.Errorf("expected only user2 to match, got %+v", response)
+	}
+	if response.SQL == "" || len(response.Params) == 0 {
+		t.Error("expected the preview to carry its SQL and params")
+	}
 }

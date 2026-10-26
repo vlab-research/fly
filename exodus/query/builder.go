@@ -35,6 +35,24 @@ func NewQueryBuilder() *QueryBuilder {
 // ownerID is the bail owner; only accounts they connected are matched.
 // Returns the complete SQL query string, parameters slice, and any error
 func BuildQuery(def *types.BailDefinition, ownerID uuid.UUID) (string, []interface{}, error) {
+	return buildQuery(def, ownerID, nil)
+}
+
+// BuildQueryForUsers is BuildQuery restricted to the listed conversations. It is
+// how a user_list bail with conditions finds which of its entries match now.
+// The restriction is applied in SQL so the conditions are only ever evaluated
+// over the list, never over everyone the owner can reach.
+func BuildQueryForUsers(def *types.BailDefinition, ownerID uuid.UUID, users []types.UserListEntry) (string, []interface{}, error) {
+	if len(users) == 0 {
+		return "", nil, fmt.Errorf("at least one user is required to restrict a query")
+	}
+	return buildQuery(def, ownerID, users)
+}
+
+func buildQuery(def *types.BailDefinition, ownerID uuid.UUID, users []types.UserListEntry) (string, []interface{}, error) {
+	if def.Conditions == nil {
+		return "", nil, fmt.Errorf("conditions are required to build a query")
+	}
 	builder := NewQueryBuilder()
 
 	// Build the WHERE clause from conditions
@@ -45,6 +63,19 @@ func BuildQuery(def *types.BailDefinition, ownerID uuid.UUID) (string, []interfa
 
 	// Numbered after the conditions so their parameter indexes are unaffected.
 	ownerParam := builder.addParam(ownerID)
+
+	if users != nil {
+		userids := make([]string, len(users))
+		pageids := make([]string, len(users))
+		for i, u := range users {
+			userids[i] = u.UserID
+			pageids[i] = u.PageID
+		}
+		useridParam := builder.addParam(userids)
+		pageidParam := builder.addParam(pageids)
+		whereClause = fmt.Sprintf("(%s)\nAND (s.userid, s.pageid) IN (SELECT * FROM unnest($%d::STRING[], $%d::STRING[]))",
+			whereClause, useridParam, pageidParam)
+	}
 
 	// Assemble the complete query
 	var query strings.Builder

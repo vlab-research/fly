@@ -199,14 +199,25 @@ func (e *Executor) processBail(ctx context.Context, dbBail *db.Bail, now time.Ti
 // queryUsers returns the conversations this bail should reach, plus the targets
 // it could not resolve to a transport.
 // For "conditions" type bails, it builds and executes a SQL query
-// For "user_list" type bails, it resolves the listed accounts against the owner's credentials
+// For "user_list" type bails, it resolves the listed accounts against the owner's credentials,
+// first narrowing the list to the entries matching the conditions when it has any
 func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition, bailType string) (users []sender.UserTarget, skipped []platform.Skipped, err error) {
 	if bailType == "user_list" {
 		if bailDef.UserList == nil {
 			return nil, nil, fmt.Errorf("user_list is nil for user_list-type bail")
 		}
+		list := bailDef.UserList
+		if bailDef.Conditions != nil {
+			list, err = e.matchingEntries(ctx, dbBail, bailDef)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(list.Users) == 0 {
+				return nil, nil, nil
+			}
+		}
 		log.Printf("Resolving user_list targets for bail %s", dbBail.Name)
-		return e.resolveUserList(ctx, dbBail, bailDef.UserList)
+		return e.resolveUserList(ctx, dbBail, list)
 	}
 
 	// Handle conditions-based bails: execute SQL query
@@ -257,6 +268,44 @@ func (e *Executor) queryUsers(ctx context.Context, dbBail *db.Bail, bailDef *typ
 	}
 
 	return users, nil, nil
+}
+
+// matchingEntries narrows a user_list bail's list to the entries whose
+// conversation matches its conditions right now. Each kept entry carries its own
+// destination, so the result goes through resolveUserList like an unfiltered list.
+func (e *Executor) matchingEntries(ctx context.Context, dbBail *db.Bail, bailDef *types.BailDefinition) (*types.UserList, error) {
+	sql, params, err := query.BuildQueryForUsers(bailDef, dbBail.UserID, bailDef.UserList.Users)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	log.Printf("Executing user_list condition query for bail %s", dbBail.Name)
+	rows, err := e.query.Query(ctx, sql, params...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+
+	return &types.UserList{Users: filterUserList(bailDef.UserList.Users, rows)}, nil
+}
+
+// filterUserList keeps the entries whose (userid, pageid) appears in rows, in
+// list order.
+func filterUserList(entries []types.UserListEntry, rows []map[string]interface{}) []types.UserListEntry {
+	type conversation struct{ userid, pageid string }
+	matched := make(map[conversation]struct{}, len(rows))
+	for _, row := range rows {
+		userID, _ := row["userid"].(string)
+		pageID, _ := row["pageid"].(string)
+		matched[conversation{userID, pageID}] = struct{}{}
+	}
+
+	kept := make([]types.UserListEntry, 0, len(matched))
+	for _, entry := range entries {
+		if _, ok := matched[conversation{entry.UserID, entry.PageID}]; ok {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }
 
 // resolveUserList turns a bail's listed users into targets, resolving each

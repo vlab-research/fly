@@ -49,7 +49,7 @@ The dashboard shows a table of all bail systems for the authenticated user at `/
 The create form (`/bails/create`) has four sections:
 
 1. **Basic Information** -- name, description, enabled toggle
-2. **Definition** -- either a visual condition builder (for conditions-type bails) or a user list (for user_list-type bails). Conditions support AND/OR/NOT logic trees with condition types: form, state, error_code, current_question, elapsed_time, question_response (with a mode toggle for "is answered" vs "equals specific response"), surveyid
+2. **Definition** -- either a visual condition builder (for conditions-type bails) or a user list (for user_list-type bails). A user list has an optional "Only move listed users who match these conditions" switch that reveals the same condition builder; editing a user list that has conditions shows and keeps them. Saving a user list with scheduled or immediate timing and no conditions is refused in the form and by the server. Conditions support AND/OR/NOT logic trees with condition types: form, state, error_code, current_question, elapsed_time, question_response (with a mode toggle for "is answered" vs "equals specific response"), surveyid
 3. **Execution Timing** -- choose immediate, scheduled (daily at a time + timezone), or absolute (one-time at a datetime)
 4. **Action** -- destination form shortcode and optional JSON metadata (conditions-type bails only)
 
@@ -68,7 +68,7 @@ A `BailDefinition` has a `type` field that determines how target users are ident
 | Type | Description |
 |------|-------------|
 | `"conditions"` | (default) Builds a SQL query from a condition tree. All bails created before `type` was introduced are implicitly `"conditions"`. |
-| `"user_list"` | Targets a fixed, explicitly enumerated list of users. No condition query is built, but the listed accounts are still resolved against the owner's credentials. |
+| `"user_list"` | Targets a fixed, explicitly enumerated list of users, each with its own destination. With optional `conditions`, each run moves only the listed users matching them. The listed accounts are resolved against the owner's credentials. |
 
 ### Conditions Type
 
@@ -203,6 +203,69 @@ the account; the MCP `create_bail` schema is `additionalProperties: false` over 
 three. The REST proxy forwards `definition` untouched, so a hand-written POST can still carry
 one, to no effect.
 
+#### User lists with conditions
+
+A `user_list` bail may also carry a `conditions` tree, with the same grammar and validation
+as a conditions bail (including the rule that `elapsed_time` and `question_response` cannot
+sit under `not`). **The list decides who can be moved; the conditions decide when.** Each run
+evaluates the conditions over the listed `(userid, pageid)` pairs only and moves the entries
+that match at that moment, each to its own `shortcode`. Without `conditions` a user list
+behaves exactly as above.
+
+How a run works (`executor.matchingEntries`):
+
+1. `query.BuildQueryForUsers` builds the ordinary condition query and adds
+   `AND (s.userid, s.pageid) IN (SELECT * FROM unnest($n::STRING[], $m::STRING[]))`, so the
+   conditions are evaluated in SQL over the list and never over everyone else the owner can
+   reach. The query is owner-scoped by the credentials join like any condition query.
+2. The list entries whose `(userid, pageid)` came back are kept, in list order, and go through
+   `resolveUserList` unchanged — per-entry destinations and skip reporting work as for any
+   user list.
+3. Matching nobody is a normal outcome and records no event, as for a conditions bail.
+
+This is what makes a recurring user list safe. With `timing: "scheduled"` one bail runs every
+day and moves each listed person as they come to match. Someone already moved has left the
+source form, stops matching, and is not moved again; no bookkeeping is needed.
+
+An entry on an account the owner no longer has connected simply stops matching (the
+credentials join excludes it) rather than being reported as `skipped`, which is how a
+conditions bail treats a disconnected account too. Write-time `invalid_pageids` checking
+still applies to every entry.
+
+**A recurring user list without conditions is refused on create and update.** A `user_list`
+with `scheduled` or `immediate` timing and no `conditions` would move the whole list again
+every day or every minute, so `POST` and `PUT` (when the `definition` is replaced) answer
+`400 invalid_definition` saying so. The rule lives in the handlers, not in
+`BailDefinition.Validate`, so rows stored before it existed still load and run, and an
+`{enabled}`-only update still toggles them. Use `absolute` timing to move a list once.
+
+Example — one bail per source form, moving each person a month after their `operator` answer
+while they are still waiting at `thank_you_timeout`:
+
+```json
+{
+  "type": "user_list",
+  "user_list": {"users": [{"userid": "…", "pageid": "…", "shortcode": "endlinebail"}]},
+  "conditions": {"op": "and", "vars": [
+    {"type": "form", "value": "girleffectincentive"},
+    {"type": "current_question", "value": "thank_you_timeout"},
+    {"type": "elapsed_time", "since": {"event": "response", "details": {"form": "girleffectincentive", "question_ref": "operator"}}, "duration": "1 month"}
+  ]},
+  "execution": {"timing": "scheduled", "time_of_day": "09:00", "timezone": "America/Los_Angeles"},
+  "action": {}
+}
+```
+
+**`"1 month"` is not the same length everywhere.** `elapsed_time` compiles to
+`INTERVAL '1 month'`, a calendar month (28–31 days). replybot's timeouts are parsed by
+`parse-duration`, where a month is a fixed 30.4375 days. A bail meant to fire when a replybot
+`"1 month"` timeout would have fired can therefore be up to about two days early or late. To
+match replybot exactly, write the duration in minutes: `"43830 minutes"` per month.
+
+`elapsed_time` measures from `MIN(responses.timestamp)` for that question on that form, i.e.
+the participant's *first* answer. Someone who answered it long before the moment you care
+about will match early.
+
 #### Why an un-named bailout is never sent
 
 `SendBailout` refuses a target whose platform is neither `messenger` nor `whatsapp`
@@ -258,10 +321,12 @@ against any user list bail whatever its entries carry. The race itself belongs t
 degraded path rather than to bails: it applies to any event that reaches replybot without a
 platform, from any producer.
 
-**Preview behavior:** Returns the user list directly without executing a query, after the
-same `invalid_pageids` check create and update apply — a preview is the cheapest way to find
-out that a pageid in a CSV is not one of yours. `sql` and `params` are empty in the preview
-response.
+**Preview behavior:** Without `conditions`, returns the user list directly without executing
+a query, after the same `invalid_pageids` check create and update apply — a preview is the
+cheapest way to find out that a pageid in a CSV is not one of yours. `sql` and `params` are
+empty in that response. With `conditions`, after the same check, it runs the restricted
+query and returns the listed users matching now, with `sql` and `params` (see "User lists
+with conditions").
 
 ---
 
@@ -693,7 +758,7 @@ Each run:
    c. Call `shouldExecute()` with the timing config, current time, and last execution
    d. If timing matches:
       - For `conditions` bails: build SQL query, execute it against the database; every row arrives with its platform already resolved by the credentials join
-      - For `user_list` bails: look up one messaging credential per distinct `pageid` and partition the entries into resolved targets and skipped ones
+      - For `user_list` bails: if the definition has `conditions`, first narrow the list to the entries matching them (a condition query restricted to the listed conversations); then look up one messaging credential per distinct `pageid` and partition the entries into resolved targets and skipped ones
       - Apply `EXODUS_MAX_BAIL_USERS` limit if matched count exceeds it
       - Send bailouts via botserver, record event — including a run where everything was skipped
 3. Exit
@@ -1005,7 +1070,8 @@ Content-Type: application/json
 ```
 
 The preview runs the same query the executor would, owner-scoped the same way, so its count
-is the count the bail would match — not a superset. The bound owner is the last parameter.
+is the count the bail would match — not a superset. The bound owner follows the condition
+parameters; for a user list with conditions, the listed userids and pageids follow it.
 
 **Response** (200 OK) for user_list bails:
 ```json
@@ -1020,7 +1086,7 @@ is the count the bail would match — not a superset. The bound owner is the las
 }
 ```
 
-Shows which users match the conditions without creating or executing the bail. For conditions-based bails, the generated SQL and parameters are included in the response, which is useful for debugging complex condition trees. For user_list bails, the user list is returned directly and no SQL is generated — but the accounts it names are checked, so a preview answers `400 invalid_pageids` for a list that create would also refuse.
+Shows which users match the conditions without creating or executing the bail. For conditions-based bails, the generated SQL and parameters are included in the response, which is useful for debugging complex condition trees. For user_list bails without conditions, the user list is returned directly and no SQL is generated. For user_list bails with conditions, the restricted query runs and the response lists only the entries matching **now**, with its SQL and parameters — this is how to check such a bail before enabling it. Either way the accounts the list names are checked, so a preview answers `400 invalid_pageids` for a list that create would also refuse.
 
 The dashboard-server proxy is a pure pass-through for preview.
 

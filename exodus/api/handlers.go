@@ -152,6 +152,9 @@ func (s *Server) CreateBail(c echo.Context) error {
 	if err := req.Definition.Validate(); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
 	}
+	if err := checkRecurringUserList(&req.Definition); err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
+	}
 
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
@@ -251,6 +254,9 @@ func (s *Server) UpdateBail(c echo.Context) error {
 	}
 	if req.Definition != nil {
 		if err := req.Definition.Validate(); err != nil {
+			return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
+		}
+		if err := checkRecurringUserList(req.Definition); err != nil {
 			return respondError(c, http.StatusBadRequest, "invalid_definition", err.Error())
 		}
 
@@ -461,8 +467,8 @@ func (s *Server) PreviewBail(c echo.Context) error {
 	ctx, cancel := parseTimeout(c.Request().Context())
 	defer cancel()
 
-	// For user_list bails, skip query building and return the user list directly
-	if req.Definition.Type == "user_list" && req.Definition.UserList != nil {
+	isUserList := req.Definition.Type == "user_list" && req.Definition.UserList != nil
+	if isUserList {
 		problem, err := s.checkUserListAccounts(ctx, req.Definition.UserList, userID)
 		if err != nil {
 			return respondError(c, http.StatusInternalServerError, "database_error", err.Error())
@@ -470,6 +476,10 @@ func (s *Server) PreviewBail(c echo.Context) error {
 		if problem != "" {
 			return respondError(c, http.StatusBadRequest, "invalid_pageids", problem)
 		}
+	}
+
+	// A user list without conditions moves everyone on it, so the list is the preview.
+	if isUserList && req.Definition.Conditions == nil {
 
 		users := make([]UserPreview, len(req.Definition.UserList.Users))
 		for i, entry := range req.Definition.UserList.Users {
@@ -484,7 +494,13 @@ func (s *Server) PreviewBail(c echo.Context) error {
 		})
 	}
 
-	sqlQuery, params, err := query.BuildQuery(&req.Definition, userID)
+	var sqlQuery string
+	var params []interface{}
+	if isUserList {
+		sqlQuery, params, err = query.BuildQueryForUsers(&req.Definition, userID, req.Definition.UserList.Users)
+	} else {
+		sqlQuery, params, err = query.BuildQuery(&req.Definition, userID)
+	}
 	if err != nil {
 		return respondError(c, http.StatusBadRequest, "query_build_error", err.Error())
 	}
@@ -516,6 +532,22 @@ func (s *Server) PreviewBail(c echo.Context) error {
 		SQL:    sqlQuery,
 		Params: params,
 	})
+}
+
+// checkRecurringUserList refuses a user_list bail that would move its whole
+// list again on every run. It is enforced on create and update only, not in
+// Validate, so rows saved before the rule still load and run.
+func checkRecurringUserList(def *types.BailDefinition) error {
+	if def.Type != "user_list" || def.Conditions != nil {
+		return nil
+	}
+	timing := def.Execution.Timing
+	if timing != "scheduled" && timing != "immediate" {
+		return nil
+	}
+	return fmt.Errorf("a user_list bail with %s timing needs conditions: without them every run moves "+
+		"everyone on the list again (every day for scheduled, every minute for immediate). "+
+		"Add conditions that stop matching once someone has been moved, or use absolute timing to move the list once", timing)
 }
 
 // checkUserListAccounts reports which of a user_list's accounts the caller has

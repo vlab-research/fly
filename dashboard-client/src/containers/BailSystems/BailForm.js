@@ -38,6 +38,8 @@ const BailForm = () => {
   const [userId, setUserId] = useState(null);
   const [bailType, setBailType] = useState('conditions');
   const [userList, setUserList] = useState([]);
+  // A user list may carry conditions that narrow it to who matches at each run.
+  const [listHasConditions, setListHasConditions] = useState(false);
 
   const isEdit = !!bailId;
 
@@ -58,10 +60,10 @@ const BailForm = () => {
   }, [bailType, isEdit, form]);
 
   useEffect(() => {
-    // When switching modes, clear fields that shouldn't be validated in the new mode
+    // When switching modes, clear fields that shouldn't be validated in the new mode.
+    // conditions stay: a user list can carry them too.
     if (bailType === 'user_list') {
       form.setFieldsValue({
-        conditions: undefined,
         destination_form: undefined,
       });
     }
@@ -85,6 +87,7 @@ const BailForm = () => {
           setBailType(defType);
           if (defType === 'user_list' && def.user_list) {
             setUserList(def.user_list.users || []);
+            setListHasConditions(!!def.conditions);
           }
 
           setTiming(execution.timing || 'immediate');
@@ -129,6 +132,7 @@ const BailForm = () => {
       setBailType(bailDefType);
       if (bailDefType === 'user_list' && def.user_list) {
         setUserList(def.user_list.users || []);
+        setListHasConditions(!!def.conditions);
       }
 
       // Populate form
@@ -183,11 +187,13 @@ const BailForm = () => {
     }
 
     if (bailType === 'user_list') {
+      const conditions = listHasConditions ? form.getFieldValue('conditions') : undefined;
       return {
         type: 'user_list',
         // Each user's platform is resolved server-side from their pageid's
         // messaging credential; it cannot be set here.
         user_list: { users: userList },
+        ...(conditions ? { conditions } : {}),
         execution,
         action: {
           destination_form: userList.length > 0 ? userList[0].shortcode : '',
@@ -213,6 +219,15 @@ const BailForm = () => {
       // Validate that user_list mode has users uploaded
       if (bailType === 'user_list' && userList.length === 0) {
         message.error('Please upload a CSV file with at least one user');
+        setSaving(false);
+        return;
+      }
+
+      if (bailType === 'user_list' && values.timing !== 'absolute' && !listHasConditions) {
+        message.error(
+          'A recurring user list needs conditions, or every run moves the whole list again. '
+          + 'Add conditions or use absolute timing.',
+        );
         setSaving(false);
         return;
       }
@@ -345,6 +360,29 @@ const BailForm = () => {
                 Upload a CSV file with user IDs, page IDs, and destination forms. Each user can be bailed to a different form.
               </p>
               <CsvUpload value={userList} onChange={setUserList} />
+            </Card>
+          )}
+
+          {bailType === 'user_list' && (
+            <Card title="List Conditions" style={{ marginBottom: 16 }}>
+              <Space align="center" style={{ marginBottom: 16 }}>
+                <Switch checked={listHasConditions} onChange={setListHasConditions} />
+                <span>Only move listed users who match these conditions</span>
+              </Space>
+              <p style={{ color: '#666', marginBottom: 16 }}>
+                The list decides who can be moved; the conditions decide when. Each run
+                moves only the listed users who match at that moment, so someone already
+                moved (who has left the form) is not moved again. Required for scheduled
+                and immediate timing.
+              </p>
+              {listHasConditions && (
+                <Form.Item
+                  name="conditions"
+                  rules={[{ required: true, message: 'Please define at least one condition' }]}
+                >
+                  <ConditionBuilder />
+                </Form.Item>
+              )}
             </Card>
           )}
 

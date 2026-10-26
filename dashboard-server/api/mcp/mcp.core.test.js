@@ -1114,6 +1114,19 @@ describe('mcp.core: buildBailRequest', () => {
     expect(request.definition.action.metadata).to.eql({ why: 'x' });
   });
 
+  it('passes a user_list bail\'s conditions through to Exodus untouched', () => {
+    const conditions = { op: 'and', vars: [{ type: 'form', value: 'src' }] };
+    const { request } = buildBailRequest({
+      definition: {
+        type: 'user_list',
+        user_list: { users: [{ userid: 'u', pageid: 'p', shortcode: 's' }] },
+        conditions,
+        execution: { timing: 'scheduled', time_of_day: '09:00', timezone: 'America/Los_Angeles' },
+      },
+    });
+    expect(request.definition.conditions).to.eql(conditions);
+  });
+
   it('does not invent a destination for a user_list bail', () => {
     const { request } = buildBailRequest({
       definition: {
@@ -1281,7 +1294,16 @@ describe('mcp.core: shapeBailPreview', () => {
     expect(shapeBailPreview({ count: 0, users: [], sql: 'SELECT 1' }).sql).to.equal('SELECT 1');
   });
 
-  it('handles a user_list preview, which generates no SQL', () => {
+  it('carries the SQL of a user_list preview with conditions', () => {
+    const shaped = shapeBailPreview({
+      count: 1, users: [{ userid: 'u', pageid: 'p' }], sql: 'SELECT … unnest($3, $4)', params: ['f', 'o', ['u'], ['p']],
+    });
+    expect(shaped.count).to.equal(1);
+    expect(shaped.sql).to.contain('unnest');
+    expect(shaped.params).to.have.length(4);
+  });
+
+  it('handles a user_list preview without conditions, which generates no SQL', () => {
     const shaped = shapeBailPreview({ count: 2, users: [{ userid: 'u' }], sql: '', params: null });
     expect(shaped.sql).to.equal(null);
     expect(shaped.count).to.equal(2);
