@@ -1038,3 +1038,86 @@ func TestBuildQuery_SurveyIDInsideAnd(t *testing.T) {
 		t.Errorf("Expected params[1]='550e8400-e29b-41d4-a716-446655440000', got %v", params[1])
 	}
 }
+
+var listedUsers = []types.UserListEntry{
+	{UserID: "u1", PageID: "p1", Shortcode: "dest_a"},
+	{UserID: "u2", PageID: "p2", Shortcode: "dest_b"},
+}
+
+func TestBuildQueryForUsers_RestrictsToListedConversations(t *testing.T) {
+	def := &types.BailDefinition{
+		Type:       "user_list",
+		Conditions: conditionFromJSON(`{"type": "form", "value": "source"}`),
+	}
+
+	sql, params, err := BuildQueryForUsers(def, testOwner, listedUsers)
+	if err != nil {
+		t.Fatalf("BuildQueryForUsers failed: %v", err)
+	}
+
+	// $1=form, $2=owner, $3=userids, $4=pageids
+	if !strings.Contains(sql, "WHERE (s.current_form = $1)\nAND (s.userid, s.pageid) IN (SELECT * FROM unnest($3::STRING[], $4::STRING[]))") {
+		t.Errorf("SQL not restricted to the list as expected, got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "AND c.userid = $2") {
+		t.Errorf("owner should stay $2, got:\n%s", sql)
+	}
+	if len(params) != 4 {
+		t.Fatalf("expected 4 params, got %d: %v", len(params), params)
+	}
+	if params[1] != testOwner {
+		t.Errorf("params[1] = %v, want owner", params[1])
+	}
+	if got := params[2].([]string); strings.Join(got, ",") != "u1,u2" {
+		t.Errorf("userids param = %v", got)
+	}
+	if got := params[3].([]string); strings.Join(got, ",") != "p1,p2" {
+		t.Errorf("pageids param = %v", got)
+	}
+}
+
+func TestBuildQueryForUsers_NumbersAfterElapsedTimeCTE(t *testing.T) {
+	def := &types.BailDefinition{
+		Type: "user_list",
+		Conditions: conditionFromJSON(`{"op": "and", "vars": [
+			{"type": "form", "value": "source"},
+			{"type": "current_question", "value": "thank_you_timeout"},
+			{"type": "elapsed_time", "duration": "1 month",
+			 "since": {"event": "response", "details": {"form": "source", "question_ref": "operator"}}}
+		]}`),
+	}
+
+	sql, params, err := BuildQueryForUsers(def, testOwner, listedUsers)
+	if err != nil {
+		t.Fatalf("BuildQueryForUsers failed: %v", err)
+	}
+
+	// $1=form, $2=question, $3=CTE form, $4=CTE question_ref, $5=duration,
+	// $6=owner, $7=userids, $8=pageids
+	for _, want := range []string{
+		"WHERE shortcode = $3 AND question_ref = $4",
+		"rt0.response_time + $5::INTERVAL < NOW()",
+		"AND c.userid = $6",
+		"unnest($7::STRING[], $8::STRING[])",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("SQL missing %q, got:\n%s", want, sql)
+		}
+	}
+	if len(params) != 8 {
+		t.Fatalf("expected 8 params, got %d: %v", len(params), params)
+	}
+	if params[4] != "1 month" || params[5] != testOwner {
+		t.Errorf("unexpected params: %v", params)
+	}
+}
+
+func TestBuildQueryForUsers_RequiresUsersAndConditions(t *testing.T) {
+	withConds := &types.BailDefinition{Conditions: conditionFromJSON(`{"type": "form", "value": "x"}`)}
+	if _, _, err := BuildQueryForUsers(withConds, testOwner, nil); err == nil {
+		t.Error("expected an error for an empty user list")
+	}
+	if _, _, err := BuildQueryForUsers(&types.BailDefinition{}, testOwner, listedUsers); err == nil {
+		t.Error("expected an error for missing conditions")
+	}
+}

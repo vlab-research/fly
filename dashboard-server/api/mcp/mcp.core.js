@@ -1293,16 +1293,30 @@ const BAIL_DEFINITION_SCHEMA = {
   type: 'object',
   description:
     'Who to move, when, and where to. `type` defaults to "conditions"; use ' +
-    '"user_list" to name the participants explicitly instead.',
+    '"user_list" to name the participants explicitly instead. A user_list may also ' +
+    'carry `conditions`, and then each run moves only the listed participants who ' +
+    'match them at that moment.',
   properties: {
     type: {
       type: 'string',
       enum: BAIL_TYPES,
       description:
         '"conditions" (default) selects participants with a condition tree; ' +
-        '"user_list" takes an explicit list, each with their own destination.',
+        '"user_list" takes an explicit list, each with their own destination, ' +
+        'optionally narrowed by `conditions`.',
     },
-    conditions: BAIL_CONDITION_SCHEMA,
+    conditions: {
+      ...BAIL_CONDITION_SCHEMA,
+      description: [
+        BAIL_CONDITION_SCHEMA.description,
+        '',
+        'Required for type "conditions". Optional for type "user_list", where it is a',
+        'filter on the list: the list decides who CAN be moved, the conditions decide',
+        'WHEN. Someone already moved has left the form, stops matching, and is not moved',
+        'again. A user_list with "scheduled" or "immediate" timing is refused without',
+        'conditions, since every run would move the whole list again.',
+      ].join('\n'),
+    },
     user_list: {
       type: 'object',
       description:
@@ -1437,7 +1451,10 @@ const BAIL_TOOLS = [
       '',
       'A user_list bail is refused unless every pageid is a messaging account connected',
       'to you (list_messaging_accounts); each entry\'s platform is read from that',
-      'account\'s credential and is not something you pass.',
+      'account\'s credential and is not something you pass. A user_list with "scheduled"',
+      'or "immediate" timing must carry `conditions`: on each run it moves only the',
+      'listed people who match them then. Without conditions use "absolute", which',
+      'moves the whole list once.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -1534,7 +1551,9 @@ const BAIL_TOOLS = [
       '',
       'It is also how a user_list is checked before anything is created: a pageid that',
       'is not a messaging account of yours is refused here exactly as create_bail would',
-      'refuse it.',
+      'refuse it. A user_list without conditions previews as the list itself, with no',
+      'SQL; with conditions, it returns the listed participants who match right now,',
+      'with the SQL.',
     ].join('\n'),
     inputSchema: {
       type: 'object',

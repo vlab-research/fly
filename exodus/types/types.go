@@ -13,7 +13,7 @@ import (
 // BailDefinition represents a complete bail configuration
 type BailDefinition struct {
 	Type       string     `json:"type,omitempty"`       // "conditions" (default) or "user_list"
-	Conditions *Condition `json:"conditions,omitempty"` // Required when Type="conditions"
+	Conditions *Condition `json:"conditions,omitempty"` // Required when Type="conditions"; optional filter on the list when Type="user_list"
 	UserList   *UserList  `json:"user_list,omitempty"`  // Required when Type="user_list"
 	Execution  Execution  `json:"execution"`
 	Action     Action     `json:"action"`
@@ -40,6 +40,12 @@ func (bd *BailDefinition) Validate() error {
 		}
 		if err := bd.UserList.Validate(); err != nil {
 			return fmt.Errorf("invalid user_list: %w", err)
+		}
+		// Optional here: when present they narrow the list to who matches at run time.
+		if bd.Conditions != nil {
+			if err := bd.Conditions.Validate(); err != nil {
+				return fmt.Errorf("invalid conditions: %w", err)
+			}
 		}
 	default:
 		return fmt.Errorf("invalid bail type: %s (must be 'conditions' or 'user_list')", bailType)
