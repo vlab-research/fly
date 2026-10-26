@@ -44,7 +44,10 @@ commandsTopic: &commandstopic "vlab-prod-commands"
 # a withheld payment failure is visible to the survey owner.
 # v0.0.79 -> v0.0.80: GET /api/v1/whatsapp/health and MCP get_whatsapp_health,
 # a live read of the caller's WhatsApp numbers' quality and sending status.
-versionDashboard: &vdashboard v0.0.80
+# v0.0.80 -> v0.0.82: refuses export links outside the caller's owner prefix
+# (VIR-23; needs exporter v0.7.2, live first), and the MCP bail schema documents
+# conditions on user_list bails (VIR-111). v0.0.81 was staging-only.
+versionDashboard: &vdashboard v0.0.82
 versionBotserver: &vbotserver v0.0.12
 # v0.0.3-wa -> v0.0.5: carries 36808aa5 "feat(envelope): every event carries
 # platform and account_id" -- the PRODUCER side of the conversation-identity
