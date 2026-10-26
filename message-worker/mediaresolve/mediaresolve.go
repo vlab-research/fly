@@ -12,6 +12,8 @@
 package mediaresolve
 
 import (
+	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -88,4 +90,26 @@ func ParseAssetID(rawURL string) (string, bool) {
 	}
 	// Normalise: gen_random_uuid() emits lowercase, so the column is lowercase.
 	return strings.ToLower(m[1]), true
+}
+
+// Filename is the name a recipient should see for a document sent from rawURL:
+// the URL's last path segment, percent-decoded, or "" when there is none.
+//
+// A WhatsApp document send carries no name of its own -- neither a cached media
+// id nor a link supplies one -- so without this the recipient sees "untitled".
+// Dashboard asset URLs end in the uploaded file's name for exactly this reason.
+// A bare /a/<uuid> asset URL has no name segment, and the uuid is not a name.
+func Filename(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	name := path.Base(u.Path)
+	if name == "." || name == "/" {
+		return ""
+	}
+	if id, ok := ParseAssetID(rawURL); ok && strings.EqualFold(name, id) {
+		return ""
+	}
+	return name
 }
