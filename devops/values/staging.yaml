@@ -21,7 +21,10 @@ chatLogTopic: &chatlogtopic "vlab-staging-chat-log"
 commandsTopic: &commandstopic "vlab-staging-commands"
 
 # v0.0.79: `awaiting-payment` health finding; see production.yaml.
-versionDashboard: &vdashboard v0.0.80
+# v0.0.81: refuses export links outside the caller's owner prefix (VIR-23).
+#   Needs exporter v0.7.2 live first.
+# v0.0.82: MCP bail schema documents conditions on user_list bails (VIR-111).
+versionDashboard: &vdashboard v0.0.82
 versionBotserver: &vbotserver v0.0.12
 # Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
 # suffix guards WhatsApp work from reaching production, and WhatsApp is in
@@ -64,13 +67,15 @@ versionScribble: &vscribble v0.0.34
 # withheld and re-driven; see production.yaml.
 versionDinersclub: &vdinersclub v0.0.54
 versionFormcentral: &vformcentral v0.0.14-wa
-versionExporter: &vexporter v0.7.1
+# v0.7.2: owner-scoped export keys (VIR-23); see production.yaml.
+versionExporter: &vexporter v0.7.2
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
 # v0.2.7: malformed timing rejected at write; timing errors recorded (VIR-57);
 # see production.yaml.
 # v0.2.8: bail platform comes from the owner's credential (VIR-60, VIR-64);
 # see production.yaml.
-versionExodus: &vexodus v0.2.8
+# v0.2.9: user_list bails may carry conditions (VIR-111); see production.yaml.
+versionExodus: &vexodus v0.2.9
 versionMessageWorker: &vmessageworker v0.1.28
 # Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
 # gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
