@@ -207,7 +207,10 @@ versionExporter: &vexporter v0.7.2
 # (VIR-60, VIR-64). Conditions bails match only accounts the owner connected;
 # a user list naming any other account is refused at write and skipped, with a
 # recorded reason, at execution. No schema and no config change.
-versionExodus: &vexodus v0.2.8
+# v0.2.8 -> v0.2.9: a user_list bail may carry conditions; each run moves only
+# the listed participants matching them then (VIR-111). Create/update refuse a
+# scheduled or immediate user_list without conditions. No schema/config change.
+versionExodus: &vexodus v0.2.9
 # v0.1.19 -> v0.1.21: same reason as versionHermes above -- both carry
 # 36808aa5, the producer-side envelope. Clean descendant. vstag has run v0.1.21
 # since 2026-08-23, zero CHAT_EVENTS_ENVELOPE_MISSING.
