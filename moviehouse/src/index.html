@@ -21,11 +21,9 @@
 
 <body>
   <script>
-    // Only load Messenger Extensions if useExtensions=true is in the URL
+    // Only load Messenger Extensions if useExtensions=true. This reads script.js's
+    // resolved `useExtensions`, not the URL, which script.js has already stripped.
     (function (d, s, id) {
-      var url = new URL(window.location);
-      var useExtensions = url.searchParams.get('useExtensions') === 'true';
-
       if (useExtensions) {
         var js, fjs = d.getElementsByTagName(s)[0];
         if (d.getElementById(id)) { return; }

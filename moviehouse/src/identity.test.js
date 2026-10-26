@@ -18,6 +18,7 @@ const {
   PARAM_VIDEO,
   resolveUser,
   resolveVideoId,
+  chooseParams,
   resolveConversation,
   buildSyntheticBody
 } = require('./identity');
@@ -65,6 +66,41 @@ test.describe('resolveVideoId', () => {
 
   test('treats whitespace as absent', () => {
     assert.strictEqual(resolveVideoId({ vlab_video: '   ', id: '164118668' }), '164118668');
+  });
+});
+
+// script.js strips the query string after reading it, so a reload arrives with
+// no params and has to run on the ones stored from the first load.
+test.describe('chooseParams', () => {
+  const opened = { vlab_video: '164118668', vlab_user: 'psid-1', vlab_account: 'page-1', vlab_platform: 'messenger' };
+
+  test('a URL that names a video wins over anything stored', () => {
+    const stored = { vlab_video: 'other', vlab_user: 'psid-2', vlab_account: 'page-2' };
+    assert.strictEqual(chooseParams(opened, stored), opened);
+  });
+
+  test('a legacy id URL also counts as a fresh open', () => {
+    const legacy = { id: '164118668', pageId: 'page-1', userId: 'psid-1' };
+    assert.strictEqual(chooseParams(legacy, opened), legacy);
+  });
+
+  test('a reload with an empty query string runs on the stored params', () => {
+    assert.deepStrictEqual(chooseParams({}, opened), opened);
+  });
+
+  test('a query string with no video, e.g. only fbclid, runs on the stored params', () => {
+    assert.deepStrictEqual(chooseParams({ fbclid: 'x' }, opened), opened);
+  });
+
+  test('with nothing stored, the URL params are used as they are', () => {
+    assert.deepStrictEqual(chooseParams({}, null), {});
+    assert.deepStrictEqual(chooseParams({ fbclid: 'x' }, null), { fbclid: 'x' });
+  });
+
+  test('ignores stored values that are not a params object', () => {
+    for (const junk of [null, undefined, 'str', 42, true, ['a']]) {
+      assert.deepStrictEqual(chooseParams({}, junk), {});
+    }
   });
 });
 
