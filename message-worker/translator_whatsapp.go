@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/vlab-research/fly/message-worker/mediaresolve"
 	"github.com/vlab-research/fly/message-worker/types"
 	"github.com/vlab-research/trans"
 )
@@ -429,6 +430,7 @@ func translateWhatsAppMedia(msg types.MessageContent, resolved *types.MediaSenda
 			Audio: &media,
 		}
 	case types.MediaTypeFile:
+		media.Filename = mediaresolve.Filename(*msg.MediaURL)
 		whatsappMsg = types.WhatsAppMessage{
 			Type:     "document",
 			Document: &media,

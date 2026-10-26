@@ -295,6 +295,13 @@ message in `types.MessengerSendRequest`, which `worker.go`'s
 | Question (>10 options) | Error: `ErrTooManyOptions` |
 | Media | Type-specific field (`image`, `video`, `audio`, `document`) |
 
+A `document` also carries `filename`, the last path segment of the media URL
+(`mediaresolve.Filename`). Neither a cached media id nor a link gives WhatsApp a
+name, so without it the recipient sees "untitled". Dashboard asset URLs end in
+the uploaded file's name, so the name a researcher uploaded is the one shown.
+Renaming that URL segment in the survey renames the document; the asset is
+unchanged.
+
 ### Instagram
 
 Same as Messenger (Instagram uses the same API structure).

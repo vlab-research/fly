@@ -153,6 +153,29 @@ func TestResolveMedia_LiveHandle_SendsByID(t *testing.T) {
 	})
 }
 
+// A document sent by cached media id still needs its name on the wire: the id
+// carries none, and WhatsApp shows a nameless document as "untitled".
+func TestResolveMedia_WhatsAppDocumentByID_KeepsFilename(t *testing.T) {
+	store := &stubMediaStore{handle: &types.MediaHandle{PlatformMediaID: "platform_media_123"}}
+	sender := &capturingMessageSender{}
+	w := newMediaWorker(t, sender, store, true)
+
+	cmd := mediaCommand(types.PlatformWhatsApp, testAssetURL+"/Informed%20Consent.docx")
+	cmd.Message.MediaType = mediaTypePtr(types.MediaTypeFile)
+	if err := w.processSendMessage(context.Background(), cmd); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := json.Marshal(sender.lastMessage)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"type":"document","document":{"id":"platform_media_123","filename":"Informed Consent.docx"}}`
+	if string(got) != want {
+		t.Errorf("payload = %s, want %s", got, want)
+	}
+}
+
 // No handle row (nil, nil) is an ordinary miss: send by URL on both platforms.
 func TestResolveMedia_Miss_SendsByURL(t *testing.T) {
 	store := &stubMediaStore{} // handle: nil, err: nil

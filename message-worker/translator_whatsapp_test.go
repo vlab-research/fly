@@ -321,7 +321,33 @@ func TestTranslateToWhatsApp(t *testing.T) {
 			want: types.WhatsAppMessage{
 				Type: "document",
 				Document: &types.WhatsAppMedia{
-					Link: "https://example.com/document.pdf",
+					Link:     "https://example.com/document.pdf",
+					Filename: "document.pdf",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			// Without filename WhatsApp shows the document as "untitled".
+			name: "document from the media library carries its uploaded name",
+			cmd: types.SendMessageCommand{
+				CommandID:      "cmd_11",
+				ConversationID: "conv_1",
+				UserID:         "user_1",
+				Platform:       types.PlatformWhatsApp,
+				Message: types.MessageContent{
+					Type:      types.MessageTypeMedia,
+					MediaType: mediaTypePtr(types.MediaTypeFile),
+					MediaURL:  stringPtr("https://media.vlab.digital/a/e8dffa13-4560-428c-8751-71d2ff0d36bd/Informed%20Consent.pdf"),
+					Caption:   stringPtr("Consent form"),
+				},
+			},
+			want: types.WhatsAppMessage{
+				Type: "document",
+				Document: &types.WhatsAppMedia{
+					Link:     "https://media.vlab.digital/a/e8dffa13-4560-428c-8751-71d2ff0d36bd/Informed%20Consent.pdf",
+					Caption:  "Consent form",
+					Filename: "Informed Consent.pdf",
 				},
 			},
 			wantErr: false,

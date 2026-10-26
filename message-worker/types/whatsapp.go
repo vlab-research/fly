@@ -120,4 +120,6 @@ type WhatsAppMedia struct {
 	Link    string `json:"link,omitempty"`
 	ID      string `json:"id,omitempty"`
 	Caption string `json:"caption,omitempty"`
+	// Filename is accepted by the Cloud API on documents only.
+	Filename string `json:"filename,omitempty"`
 }

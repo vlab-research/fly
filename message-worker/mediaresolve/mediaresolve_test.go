@@ -237,3 +237,53 @@ func TestParseAssetIDBarePath(t *testing.T) {
 		t.Errorf("bare path: got %q, %v; want %q, true", got, ok, uuid)
 	}
 }
+
+func TestFilename(t *testing.T) {
+	const uuid = "550e8400-e29b-41d4-a716-446655440000"
+
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "asset url as the dashboard emits it, percent-encoded",
+			url:  "https://media.vlab.digital/a/" + uuid + "/Informed%20Consent.pdf",
+			want: "Informed Consent.pdf",
+		},
+		{
+			name: "parentheses and dots survive",
+			url:  "https://media.vlab.digital/a/" + uuid + "/3.%20Rao%20Ads%20(1).docx",
+			want: "3. Rao Ads (1).docx",
+		},
+		{
+			name: "unencoded space as pasted by hand",
+			url:  "https://media.vlab.digital/a/" + uuid + "/Informed Consent.docx",
+			want: "Informed Consent.docx",
+		},
+		{
+			name: "query and fragment are not part of the name",
+			url:  "https://media.vlab.digital/a/" + uuid + "/consent.pdf?v=2#p1",
+			want: "consent.pdf",
+		},
+		{
+			name: "third party url",
+			url:  "https://example.com/files/consent.pdf",
+			want: "consent.pdf",
+		},
+		{name: "asset url without a name segment", url: "https://media.vlab.digital/a/" + uuid},
+		{name: "asset url with a trailing slash", url: "https://media.vlab.digital/a/" + uuid + "/"},
+		{name: "uppercase asset uuid is still not a name", url: "https://media.vlab.digital/a/550E8400-E29B-41D4-A716-446655440000"},
+		{name: "host only", url: "https://example.com"},
+		{name: "host with root path", url: "https://example.com/"},
+		{name: "unparseable url", url: "https://exa mple.com/%zz"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Filename(tt.url); got != tt.want {
+				t.Errorf("Filename(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
