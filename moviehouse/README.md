@@ -249,6 +249,27 @@ where the page displays browser/forbidden errors (`2071010`, `2071011`) if
 opened outside a Messenger conversation. In the default direct mode the PSID
 comes from the URL, so any browser can open the link.
 
+### Reloading the page
+
+`script.js` removes the query string from the address bar once it has read it,
+so the participant id (the phone number, on WhatsApp) stays out of the browser's
+history and out of any link copied from the address bar. A reload therefore
+arrives with no params. To survive it, the params are saved in `sessionStorage`
+(key `moviehouse:params`) whenever the URL names a video, and a load whose URL
+names no video runs on the saved copy (`chooseParams` in `identity.js`). A URL
+that names a video always wins, so a second video opened in the same tab plays
+that video, not the first.
+
+`sessionStorage` lasts as long as the tab. A reload or a restored tab works; the
+bare URL opened in a new tab or another browser (e.g. "Open in browser" from an
+in-app browser) still fails with "Missing Parameters". If storage is unavailable
+the page logs `[MOVIEHOUSE_STORAGE_UNAVAILABLE]` and works on first load only.
+
+A reload sends events as a second viewing would: a new `play` when the
+participant presses play, then heartbeats from wherever playback is. Once a
+`wait` has resolved, later events are only appended to `externalEvents`
+(`replybot/lib/typewheels/machine.js` `_handleExternalEvent`).
+
 ## Hosts
 
 moviehouse deploys from Netlify, not the cluster. Replybot owns the URL end to end,
@@ -318,7 +339,7 @@ zero dependencies:
 
 ```bash
 cd moviehouse
-npm test          # node --test src/
+npm test          # node --test 'src/*.test.js'
 ```
 
 19 tests, covering `account_id` preferred over `pageId`, whitespace-only params

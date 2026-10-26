@@ -83,6 +83,18 @@
     return pick(params, [PARAM_VIDEO, 'id']);
   }
 
+  // Pure. Which params this page load runs on. script.js strips the query string
+  // from the address bar, so a reload arrives with none; the params saved from
+  // the first load (`stored`) stand in for it. A URL that names a video is a
+  // fresh open of a link and always wins, so opening a second video in the same
+  // tab never plays the first one. `stored` is whatever came out of storage and
+  // may be anything.
+  function chooseParams(urlParams, stored) {
+    if (resolveVideoId(urlParams) !== '') return urlParams;
+    var isObject = stored !== null && typeof stored === 'object' && !Array.isArray(stored);
+    return isObject ? stored : (urlParams || {});
+  }
+
   // Pure. Resolve the conversation identity out of moviehouse's own query params.
   //
   // Two paths produce those params and only one is trustworthy:
@@ -202,6 +214,7 @@
     PARAM_VIDEO: PARAM_VIDEO,
     resolveUser: resolveUser,
     resolveVideoId: resolveVideoId,
+    chooseParams: chooseParams,
     resolveConversation: resolveConversation,
     buildSyntheticBody: buildSyntheticBody
   };

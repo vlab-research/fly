@@ -4,7 +4,10 @@
 const SERVER_URL = '{{{SERVER_URL}}}';
 const HEARTBEAT_INTERVAL_MS = parseInt('{{{HEARTBEAT_INTERVAL_MS}}}', 10) || 30000;
 
-// make params dissapear after getting them
+// sessionStorage is per tab and survives a reload, which is exactly the lifetime
+// the stripped query string needs.
+const PARAMS_STORAGE_KEY = 'moviehouse:params';
+
 const params = getQueryParams()
 
 // Everything this page needs is resolved through the pure core, which reads the
@@ -38,15 +41,43 @@ let currentPsid = null;
 
 Sentry.init({ dsn: 'https://17c9ad73343d4a15b8e155a722224374@sentry.io/2581797' });
 
+// The query string carries the participant id (a phone number on WhatsApp), so
+// it is removed from the address bar and browser history once read. It is kept
+// in sessionStorage instead, or a reload would find no params and fail with
+// "Missing Parameters".
 function getQueryParams() {
-  const obj = {}
+  const fromUrl = {}
   const url = new URL(window.location)
   url.searchParams.forEach((v, k) => {
-    obj[k] = v
+    fromUrl[k] = v
   })
 
+  const params = MoviehouseIdentity.chooseParams(fromUrl, readStoredParams())
+  if (MoviehouseIdentity.resolveVideoId(fromUrl) !== '') {
+    storeParams(fromUrl)
+  }
+
   window.history.replaceState({}, document.title, url.pathname)
-  return obj
+  return params
+}
+
+// Storage can be disabled or throw (private browsing, some in-app webviews);
+// the page then still works on first load, it just cannot survive a reload.
+function readStoredParams() {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(PARAMS_STORAGE_KEY))
+  } catch (err) {
+    console.warn(`[MOVIEHOUSE_STORAGE_UNAVAILABLE] cannot read saved params: ${err}`)
+    return null
+  }
+}
+
+function storeParams(obj) {
+  try {
+    window.sessionStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(obj))
+  } catch (err) {
+    console.warn(`[MOVIEHOUSE_STORAGE_UNAVAILABLE] params will not survive a reload: ${err}`)
+  }
 }
 
 // The only place moviehouse talks to hermes. Body construction is pure

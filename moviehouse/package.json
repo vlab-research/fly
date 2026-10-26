@@ -15,7 +15,7 @@
   },
   "scripts": {
     "start": "gulp replace",
-    "test": "node --test src/",
+    "test": "node --test 'src/*.test.js'",
     "lint": "eslint src gulpfile.js"
   },
   "repository": {
