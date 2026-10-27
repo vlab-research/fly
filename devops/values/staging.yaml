@@ -76,7 +76,7 @@ versionExporter: &vexporter v0.7.2
 # see production.yaml.
 # v0.2.9: user_list bails may carry conditions (VIR-111); see production.yaml.
 versionExodus: &vexodus v0.2.9
-versionMessageWorker: &vmessageworker v0.1.28
+versionMessageWorker: &vmessageworker v0.1.29
 # Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
 # gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
 # does not exist in ghcr.io yet") is retired.
