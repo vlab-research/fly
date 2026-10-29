@@ -627,26 +627,7 @@ function exec(state, nxt) {
       }
     }
 
-    case 'POSTBACK': {
-      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
-
-      if (state.state === 'START') {
-        return _blankStart(nxt)
-      }
-
-      // A tap on an earlier question's button is not an answer to this one:
-      // record nothing and ask this question again.
-      const refCheck = validateRef(state.question, nxt.payload.source_message_id)
-      if (!refCheck.valid) return { ..._repeat(state), validation: refCheck }
-
-      return {
-        action: 'RESPOND',
-        response: nxt.payload.value,
-        responseValue: nxt.payload.value,
-        question: state.question
-      }
-    }
-
+    case 'POSTBACK':
     case 'QUICK_REPLY': {
       if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
 
