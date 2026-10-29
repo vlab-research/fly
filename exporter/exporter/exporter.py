@@ -3,6 +3,7 @@ import itertools
 import json
 import os
 import tempfile
+from typing import NamedTuple
 
 import polars as pl
 from pydantic import BaseModel
@@ -44,49 +45,84 @@ def expand_groups(groups):
     return types
 
 
-def classify_event(msg):
-    source = msg.get("source")
-    if source == "messenger":
-        m = msg.get("message", {})
-        if m.get("is_echo"):
-            return "echo"
-        if m.get("quick_reply"):
-            return "quick_reply"
-        if "text" in m:
-            return "text"
-        if m.get("attachments"):
-            return "media"
-        if msg.get("postback"):
-            return "postback"
-        if msg.get("referral"):
-            return "referral"
-        if msg.get("read") or msg.get("delivery"):
-            return "watermark"
-        if msg.get("reaction"):
-            return "reaction"
-        if msg.get("optin"):
-            return "optin"
-        if msg.get("pass_thread_control"):
-            return "handover"
-        return "unknown_messenger"
-    elif source == "synthetic":
-        etype = msg.get("event", {}).get("type", "")
-        if etype == "external":
-            subtype = msg.get("event", {}).get("value", {}).get("type", "")
-            if subtype.startswith("moviehouse:"):
-                return "moviehouse"
-            if subtype.startswith("linksniffer:"):
-                return "linksniffer"
-            if subtype.startswith("payment:"):
-                return "payment"
-            return "external_other"
-        if etype in (
-            "bailout", "redo", "follow_up", "repeat_payment", "block_user",
-            "unblock", "platform_response", "machine_report", "timeout",
-        ):
-            return etype
-        return "unknown_synthetic"
-    return "unknown"
+class Event(NamedTuple):
+    type: str
+    content: object = ""
+    detail: str = ""
+
+
+def _parse_messenger(msg):
+    m = msg.get("message", {})
+    if m.get("is_echo"):
+        return Event("echo", m.get("text", ""))
+    if m.get("quick_reply"):
+        return Event("quick_reply", m.get("text", ""))
+    if "text" in m:
+        return Event("text", m.get("text", ""))
+    attachments = m.get("attachments")
+    if attachments:
+        return Event("media", attachments[0].get("type", "attachment"))
+    if msg.get("postback"):
+        return Event("postback", msg["postback"].get("title", ""))
+    if msg.get("referral"):
+        return Event("referral", msg["referral"].get("ref", ""))
+    if msg.get("read") or msg.get("delivery"):
+        return Event("watermark")
+    if msg.get("reaction"):
+        return Event("reaction")
+    if msg.get("optin"):
+        return Event("optin")
+    if msg.get("pass_thread_control"):
+        return Event("handover")
+    return Event("unknown_messenger")
+
+
+EXTERNAL_PREFIXES = {
+    "moviehouse:": "moviehouse",
+    "linksniffer:": "linksniffer",
+    "payment:": "payment",
+}
+
+# Synthetic event types exported under their own name, with the type as content.
+SYNTHETIC_TYPES = (
+    "bailout", "redo", "follow_up", "repeat_payment", "block_user",
+    "unblock", "timeout",
+)
+
+
+def _parse_synthetic(msg):
+    event = msg.get("event", {})
+    etype = event.get("type", "")
+    if etype == "external":
+        subtype = event.get("value", {}).get("type", "")
+        for prefix, name in EXTERNAL_PREFIXES.items():
+            if subtype.startswith(prefix):
+                return Event(name, detail=subtype)
+        return Event("external_other", detail=subtype)
+    if etype in SYNTHETIC_TYPES:
+        return Event(etype, etype)
+    if etype == "machine_report":
+        return Event(etype, event.get("value", ""))
+    if etype == "platform_response":
+        value = event.get("value", {})
+        if isinstance(value, dict):
+            return Event(etype, value.get("error", value.get("message_id", "")))
+        return Event(etype, str(value))
+    return Event("unknown_synthetic")
+
+
+PARSERS = {
+    "messenger": _parse_messenger,
+    "synthetic": _parse_synthetic,
+}
+
+
+def parse_event(msg):
+    """The export type, content and detail of one `messages` row, decided together."""
+    parser = PARSERS.get(msg.get("source"))
+    if parser is None:
+        return Event("unknown")
+    return parser(msg)
 
 
 def get_direction(event_type):
@@ -103,39 +139,6 @@ def _to_str(val):
     if val is None:
         return ""
     return str(val)
-
-
-def extract_content(msg, event_type):
-    if event_type == "echo":
-        return msg.get("message", {}).get("text", "")
-    if event_type in ("text", "quick_reply"):
-        return msg.get("message", {}).get("text", "")
-    if event_type == "postback":
-        return msg.get("postback", {}).get("title", "")
-    if event_type == "referral":
-        return msg.get("referral", {}).get("ref", "")
-    if event_type == "media":
-        attachments = msg.get("message", {}).get("attachments", [])
-        if attachments:
-            return attachments[0].get("type", "attachment")
-        return "attachment"
-    if event_type in ("bailout", "redo", "follow_up", "repeat_payment",
-                      "block_user", "unblock", "timeout"):
-        return msg.get("event", {}).get("type", "")
-    if event_type == "machine_report":
-        return msg.get("event", {}).get("value", "")
-    if event_type == "platform_response":
-        value = msg.get("event", {}).get("value", {})
-        if isinstance(value, dict):
-            return value.get("error", value.get("message_id", ""))
-        return str(value)
-    return ""
-
-
-def extract_event_detail(msg, event_type):
-    if event_type in ("moviehouse", "linksniffer", "payment", "external_other"):
-        return msg.get("event", {}).get("value", {}).get("type", "")
-    return ""
 
 
 FULL_MESSAGES_COLUMNS = [
@@ -158,8 +161,8 @@ def _iter_messages(raw_rows, allowed_types, include_raw_json, stats=None):
             stats["json_errors"] += 1
             continue
 
-        event_type = classify_event(msg)
-        if event_type not in allowed_types:
+        event = parse_event(msg)
+        if event.type not in allowed_types:
             stats["filtered"] += 1
             continue
 
@@ -168,10 +171,10 @@ def _iter_messages(raw_rows, allowed_types, include_raw_json, stats=None):
             "userid": row["userid"],
             "timestamp": row["timestamp"],
             "source": msg.get("source", "unknown"),
-            "event_type": event_type,
-            "direction": get_direction(event_type),
-            "content": _to_str(extract_content(msg, event_type)),
-            "event_detail": extract_event_detail(msg, event_type),
+            "event_type": event.type,
+            "direction": get_direction(event.type),
+            "content": _to_str(event.content),
+            "event_detail": event.detail,
         }
         if include_raw_json:
             out["raw_json"] = raw

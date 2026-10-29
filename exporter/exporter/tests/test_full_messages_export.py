@@ -6,11 +6,9 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from exporter.exporter import (
-    classify_event,
+    parse_event,
     expand_groups,
     get_direction,
-    extract_content,
-    extract_event_detail,
     _iter_messages,
     export_full_messages,
     EVENT_GROUPS,
@@ -20,97 +18,97 @@ from exporter.main import FullMessagesExportOptions
 from exporter.tests.conftest import SNAPSHOT
 
 
-# --- classify_event ---
+# --- parse_event ---
 
 
-class TestClassifyEvent:
+class TestParseEvent:
     def test_echo(self):
         msg = {"source": "messenger", "message": {"is_echo": True, "text": "hi"}}
-        assert classify_event(msg) == "echo"
+        assert parse_event(msg).type == "echo"
 
     def test_quick_reply(self):
         msg = {"source": "messenger", "message": {"quick_reply": {"payload": "yes"}, "text": "Yes"}}
-        assert classify_event(msg) == "quick_reply"
+        assert parse_event(msg).type == "quick_reply"
 
     def test_text(self):
         msg = {"source": "messenger", "message": {"text": "hello"}}
-        assert classify_event(msg) == "text"
+        assert parse_event(msg).type == "text"
 
     def test_media(self):
         msg = {"source": "messenger", "message": {"attachments": [{"type": "image"}]}}
-        assert classify_event(msg) == "media"
+        assert parse_event(msg).type == "media"
 
     def test_postback(self):
         msg = {"source": "messenger", "postback": {"title": "Get Started"}}
-        assert classify_event(msg) == "postback"
+        assert parse_event(msg).type == "postback"
 
     def test_referral(self):
         msg = {"source": "messenger", "referral": {"ref": "ad_123"}}
-        assert classify_event(msg) == "referral"
+        assert parse_event(msg).type == "referral"
 
     def test_watermark_read(self):
         msg = {"source": "messenger", "read": {"watermark": 123}}
-        assert classify_event(msg) == "watermark"
+        assert parse_event(msg).type == "watermark"
 
     def test_watermark_delivery(self):
         msg = {"source": "messenger", "delivery": {"watermark": 123}}
-        assert classify_event(msg) == "watermark"
+        assert parse_event(msg).type == "watermark"
 
     def test_reaction(self):
         msg = {"source": "messenger", "reaction": {"reaction": "love"}}
-        assert classify_event(msg) == "reaction"
+        assert parse_event(msg).type == "reaction"
 
     def test_optin(self):
         msg = {"source": "messenger", "optin": {"ref": "abc"}}
-        assert classify_event(msg) == "optin"
+        assert parse_event(msg).type == "optin"
 
     def test_handover(self):
         msg = {"source": "messenger", "pass_thread_control": {"new_owner_app_id": "123"}}
-        assert classify_event(msg) == "handover"
+        assert parse_event(msg).type == "handover"
 
     def test_unknown_messenger(self):
         msg = {"source": "messenger"}
-        assert classify_event(msg) == "unknown_messenger"
+        assert parse_event(msg).type == "unknown_messenger"
 
     def test_bailout(self):
         msg = {"source": "synthetic", "event": {"type": "bailout"}}
-        assert classify_event(msg) == "bailout"
+        assert parse_event(msg).type == "bailout"
 
     def test_redo(self):
         msg = {"source": "synthetic", "event": {"type": "redo"}}
-        assert classify_event(msg) == "redo"
+        assert parse_event(msg).type == "redo"
 
     def test_machine_report(self):
         msg = {"source": "synthetic", "event": {"type": "machine_report", "value": "error"}}
-        assert classify_event(msg) == "machine_report"
+        assert parse_event(msg).type == "machine_report"
 
     def test_moviehouse(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "moviehouse:play"}}}
-        assert classify_event(msg) == "moviehouse"
+        assert parse_event(msg).type == "moviehouse"
 
     def test_linksniffer(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "linksniffer:click"}}}
-        assert classify_event(msg) == "linksniffer"
+        assert parse_event(msg).type == "linksniffer"
 
     def test_payment_external(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "payment:success"}}}
-        assert classify_event(msg) == "payment"
+        assert parse_event(msg).type == "payment"
 
     def test_external_other(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "handoff_return"}}}
-        assert classify_event(msg) == "external_other"
+        assert parse_event(msg).type == "external_other"
 
     def test_unknown_synthetic(self):
         msg = {"source": "synthetic", "event": {"type": "some_new_thing"}}
-        assert classify_event(msg) == "unknown_synthetic"
+        assert parse_event(msg).type == "unknown_synthetic"
 
     def test_unknown_source(self):
         msg = {"source": "something_else"}
-        assert classify_event(msg) == "unknown"
+        assert parse_event(msg).type == "unknown"
 
     def test_no_source(self):
         msg = {}
-        assert classify_event(msg) == "unknown"
+        assert parse_event(msg).type == "unknown"
 
 
 # --- expand_groups ---
