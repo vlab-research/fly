@@ -246,6 +246,13 @@ function _noop() {
   return { action: 'NONE' }
 }
 
+// Buttons outlive their question (WhatsApp keeps every one tappable), so a tap
+// carrying another question's ref must not be recorded as this one's answer.
+function _isStaleTap(state, nxt) {
+  const ref = nxt.payload && nxt.payload.source_message_id
+  return !!ref && ref !== state.question
+}
+
 function _isHandoffWait(state) {
   return state.state === 'WAIT_EXTERNAL_EVENT' && state.wait && state.wait.type === 'handover'
 }
@@ -634,6 +641,8 @@ function exec(state, nxt) {
         return _blankStart(nxt)
       }
 
+      if (_isStaleTap(state, nxt)) return _noop()
+
       return {
         action: 'RESPOND',
         response: nxt.payload.value,
@@ -648,6 +657,8 @@ function exec(state, nxt) {
       if (state.state === 'START') {
         return _blankStart(nxt)
       }
+
+      if (_isStaleTap(state, nxt)) return _noop()
 
       return {
         action: 'RESPOND',

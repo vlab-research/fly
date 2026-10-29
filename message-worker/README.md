@@ -290,8 +290,8 @@ message in `types.MessengerSendRequest`, which `worker.go`'s
 | Message Type | Translation |
 |-------------|-------------|
 | Text | `type: "text"` with `body` |
-| Question (≤3 options) | `type: "interactive"` with buttons |
-| Question (4-10 options) | `type: "interactive"` with list |
+| Question (≤3 options) | `type: "interactive"` with buttons; each button id `{"value":<option value>,"ref":<fieldRef>}` |
+| Question (4-10 options) | `type: "interactive"` with list; each row id `{"value":<option value>,"ref":<fieldRef>}` |
 | Question (>10 options) | Error: `ErrTooManyOptions` |
 | Media | Type-specific field (`image`, `video`, `audio`, `document`) |
 

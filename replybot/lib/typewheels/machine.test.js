@@ -1400,7 +1400,7 @@ describe('Machine', () => {
   })
 
 
-  it('Invalidates answers to short_text when a previous postback is sent', () => {
+  it('Ignores a postback from a previous question', () => {
     const form = {
       logic: [],
       fields: [{ type: 'legal', title: 'foo', ref: 'foo' },
@@ -1409,8 +1409,19 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
-    const actions = getMessage(log, form, user)
-    actions.messages[0].metadata.repeat.should.be.true
+    getState(log).qa.should.deep.equal([['foo', true]])
+    getMessage(log, form, user).messages.should.be.empty
+  })
+
+  it('Records a tap only when its ref is the current question, or it carries none', () => {
+    const state = getState([referral, echo])
+    state.state.should.equal('QOUT')
+    for (const base of [qr, multipleChoice]) {
+      const tap = ref => ({ ...base, payload: { ...base.payload, source_message_id: ref } })
+      exec(state, tap(state.question)).action.should.equal('RESPOND')
+      exec(state, tap('')).action.should.equal('RESPOND')
+      exec(state, tap('an_earlier_question')).action.should.equal('NONE')
+    }
   })
 
 
@@ -4439,14 +4450,21 @@ describe('a participant message during a timeout wait', () => {
       const log = () => [...waiting(), event]
       const afterEchoes = () => reply(waiting(), event, T2)
 
-      it('is answered with the responseMessage nudge, then the wait question again', () => {
-        const sent = getMessage(log(), form, user).messages
-        sent.length.should.equal(2)
-        sent[0].text.should.equal('Stay tuned!')
-        sent[0].metadata.should.deep.equal({ repeat: true, ref: 'thanks' })
-        sent[1].metadata.ref.should.equal('thanks')
-        sent[1].metadata.isRepeat.should.be.true
-      })
+      // A tap carries the ref of the question whose button it was, never the wait's.
+      if (event === messages['quick reply'] || event === messages.postback) {
+        it('is ignored, since its button belongs to an earlier question', () => {
+          getMessage(log(), form, user).messages.should.be.empty
+        })
+      } else {
+        it('is answered with the responseMessage nudge, then the wait question again', () => {
+          const sent = getMessage(log(), form, user).messages
+          sent.length.should.equal(2)
+          sent[0].text.should.equal('Stay tuned!')
+          sent[0].metadata.should.deep.equal({ repeat: true, ref: 'thanks' })
+          sent[1].metadata.ref.should.equal('thanks')
+          sent[1].metadata.isRepeat.should.be.true
+        })
+      }
 
       it('leaves the participant in the same wait, still started at T0', () => {
         const state = getState(afterEchoes())

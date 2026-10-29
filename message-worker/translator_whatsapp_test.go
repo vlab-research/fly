@@ -3,6 +3,7 @@ package messageworker
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -677,4 +678,46 @@ func TestTranslateWhatsAppListButton(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTranslateWhatsAppChoiceIDsCarryRef(t *testing.T) {
+	question := func(n int) types.SendMessageCommand {
+		opts := make([]types.Option, n)
+		for i := range opts {
+			v := fmt.Sprintf("%d", i+1)
+			opts[i] = types.Option{Value: json.RawMessage(`"` + v + `"`), Label: v}
+		}
+		return types.SendMessageCommand{
+			CommandID:      "cmd_ref",
+			ConversationID: "conv_1",
+			UserID:         "user_1",
+			Platform:       types.PlatformWhatsApp,
+			Message: types.MessageContent{
+				Type:         types.MessageTypeQuestion,
+				QuestionText: stringPtr("Gender?"),
+				Options:      opts,
+				Metadata:     json.RawMessage(`{"ref":"demog_gender"}`),
+			},
+		}
+	}
+
+	t.Run("buttons", func(t *testing.T) {
+		got, err := TranslateToWhatsApp(question(2))
+		if err != nil {
+			t.Fatalf("TranslateToWhatsApp() error = %v", err)
+		}
+		if id := got.Interactive.Action.Buttons[1].Reply.ID; id != `{"ref":"demog_gender","value":"2"}` {
+			t.Errorf("button id = %s", id)
+		}
+	})
+
+	t.Run("list rows", func(t *testing.T) {
+		got, err := TranslateToWhatsApp(question(5))
+		if err != nil {
+			t.Fatalf("TranslateToWhatsApp() error = %v", err)
+		}
+		if id := got.Interactive.Action.Sections[0].Rows[1].ID; id != `{"ref":"demog_gender","value":"2"}` {
+			t.Errorf("row id = %s", id)
+		}
+	})
 }

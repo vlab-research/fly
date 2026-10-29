@@ -189,6 +189,15 @@ Notes on specific shapes:
 - **Payload parsing** — Messenger delivers `quick_reply`, `postback`, and
   `optin` payloads as JSON strings; the normalizer parses them to objects
   (`parsePayload`), falling back to the raw string when not valid JSON.
+- **Button taps carry their question's ref** — every choice button is sent
+  with a `{value, ref}` payload: Messenger quick replies and postbacks, and
+  WhatsApp button, list-row and template-button ids. The normalizer puts the
+  `ref` in `payload.source_message_id`. The machine's `QUICK_REPLY` and
+  `POSTBACK` cases ignore (`_noop()`) a tap whose ref is not `state.question`,
+  because buttons stay tappable after their question is answered (always, on
+  WhatsApp) and such a tap would otherwise be recorded as the answer to the
+  current question. A tap with no ref (a bare WhatsApp id from before refs
+  were sent, a Messenger utility-template postback) is not checked.
 - **Optin** — normalized to `event_type: 'optin'` with
   `payload: { type: 'optin', optin_type: <messenger optin.type, e.g.
   'one_time_notif_req'>, token: <one_time_notif_token>, payload: <parsed

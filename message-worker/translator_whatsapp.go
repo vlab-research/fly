@@ -252,13 +252,17 @@ func translateWhatsAppQuestion(msg types.MessageContent) (types.WhatsAppMessage,
 		types.ErrTooManyOptions, maxListItems, optionCount)
 }
 
+// Button and list-row ids carry {"value","ref"} like Messenger quick replies.
+// WhatsApp leaves every earlier question's buttons tappable, and the ref is how
+// replybot tells a tap on an old question from an answer to the current one.
 func translateWhatsAppButtons(msg types.MessageContent) (types.WhatsAppMessage, error) {
+	ref := getRefFromMetadata(msg.Metadata)
 	buttons := make([]types.WhatsAppButton, len(msg.Options))
 	for i, opt := range msg.Options {
 		buttons[i] = types.WhatsAppButton{
 			Type: "reply",
 			Reply: types.WhatsAppButtonReply{
-				ID:    opt.ValueAsString(),
+				ID:    buildQuickReplyPayload(opt.Value, ref),
 				Title: opt.Label,
 			},
 		}
@@ -355,10 +359,11 @@ func translateWhatsAppList(msg types.MessageContent) (types.WhatsAppMessage, err
 		listButton = "Choose"
 	}
 
+	ref := getRefFromMetadata(msg.Metadata)
 	rows := make([]types.WhatsAppRow, len(msg.Options))
 	for i, opt := range msg.Options {
 		rows[i] = types.WhatsAppRow{
-			ID:    opt.ValueAsString(),
+			ID:    buildQuickReplyPayload(opt.Value, ref),
 			Title: opt.Label,
 		}
 		// An explicit description from the form wins; otherwise fall back to the
