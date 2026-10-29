@@ -32,15 +32,19 @@ function offMessage(messages) {
   return _validationMessages(messages)['label.error.mustAccept']
 }
 
-function staleTapMessage(messages) {
-  return _validationMessages(messages)['block.multipleChoice.hint']
+// The text for a failed validation. A validation made without the form (the
+// machine has none) names a Messages key, resolved here against the form's own.
+function invalidMessage({ message, messageKey }, messages) {
+  const m = _validationMessages(messages)
+  return message || (messageKey && m[messageKey]) || m['label.error.mustEnter']
 }
 
 // A button answers only the question it was sent with. Buttons stay tappable
 // after their question is answered (always, on WhatsApp). A tap with no ref
 // cannot be checked and passes.
 function validateRef(questionRef, tapRef) {
-  return { valid: !tapRef || tapRef === questionRef }
+  if (!tapRef || tapRef === questionRef) return { valid: true }
+  return { valid: false, messageKey: 'block.multipleChoice.hint' }
 }
 
 function _validateQuestion(r, validValues, messages) {
@@ -301,4 +305,4 @@ function parseNumber(str, locale = 'en-US') {
   return _parseNumber(str, locale)
 }
 
-module.exports = { validator, validateRef, defaultMessage, followUpMessage, offMessage, staleTapMessage, parseNumber }
+module.exports = { validator, validateRef, invalidMessage, defaultMessage, followUpMessage, offMessage, parseNumber }

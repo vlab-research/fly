@@ -4,7 +4,10 @@ const should = chai.should()
 const fs = require('fs')
 const _ = require('lodash')
 const { parseLogJSON } = require('./utils')
-const { followUpMessage, offMessage, staleTapMessage } = require('../generic-validator')
+const { followUpMessage, offMessage, validateRef, invalidMessage } = require('../generic-validator')
+
+// The default text a tap from another question is answered with.
+const staleTapMessage = messages => invalidMessage(validateRef('current', 'earlier'), messages)
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata, categorizeEvent } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
@@ -1440,7 +1443,7 @@ describe('Machine', () => {
 
       const stale = exec(state, tap('an_earlier_question'))
       stale.action.should.equal('RESPOND')
-      stale.staleTap.should.be.true
+      stale.validation.should.deep.equal({ valid: false, messageKey: 'block.multipleChoice.hint' })
       should.not.exist(stale.responseValue)
       getState([referral, echo, tap('an_earlier_question')]).qa.should.deep.equal(state.qa)
     }

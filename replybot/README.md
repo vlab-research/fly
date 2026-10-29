@@ -196,9 +196,11 @@ Notes on specific shapes:
   question is answered (always, on WhatsApp), so the machine's `QUICK_REPLY`
   and `POSTBACK` cases check the ref with `validateRef`
   (`generic-validator.js`). A tap from another question returns `_repeat`
-  marked `staleTap`: `response: null`, so nothing goes into qa or `responses`,
-  and `_response` sends the stale-tap message (`block.multipleChoice.hint`)
-  and the current question again. A tap with no ref (a bare WhatsApp id from
+  carrying that failed `validation`: `response: null`, so nothing goes into qa
+  or `responses`, and `_response` re-asks the current question. Because the
+  machine has no form, the failed validation names its Messages key
+  (`block.multipleChoice.hint`) and `invalidMessage` resolves it against the
+  form's own Messages. A tap with no ref (a bare WhatsApp id from
   an older send, a Messenger utility-template postback) is not checked.
 - **Optin** — normalized to `event_type: 'optin'` with
   `payload: { type: 'optin', optin_type: <messenger optin.type, e.g.

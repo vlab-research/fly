@@ -1,7 +1,7 @@
 const util = require('util')
 const _ = require('lodash')
 const { getForm, getMetadata, _group } = require('./utils')
-const { validator, validateRef, defaultMessage, followUpMessage, offMessage, staleTapMessage } = require('../generic-validator')
+const { validator, validateRef, invalidMessage, followUpMessage, offMessage } = require('../generic-validator')
 const { translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const { waitConditionFulfilled } = require('./waiting')
 
@@ -636,9 +636,8 @@ function exec(state, nxt) {
 
       // A tap on an earlier question's button is not an answer to this one:
       // record nothing and ask this question again.
-      if (!validateRef(state.question, nxt.payload.source_message_id).valid) {
-        return { ..._repeat(state), staleTap: true }
-      }
+      const refCheck = validateRef(state.question, nxt.payload.source_message_id)
+      if (!refCheck.valid) return { ..._repeat(state), validation: refCheck }
 
       return {
         action: 'RESPOND',
@@ -657,9 +656,8 @@ function exec(state, nxt) {
 
       // A tap on an earlier question's button is not an answer to this one:
       // record nothing and ask this question again.
-      if (!validateRef(state.question, nxt.payload.source_message_id).valid) {
-        return { ..._repeat(state), staleTap: true }
-      }
+      const refCheck = validateRef(state.question, nxt.payload.source_message_id)
+      if (!refCheck.valid) return { ..._repeat(state), validation: refCheck }
 
       return {
         action: 'RESPOND',
@@ -1019,7 +1017,7 @@ function _gatherResponses(ctx, qa, q, previous = []) {
 
 
 function _response(
-  ctx, qa, { question, validation, response, token, followUp, staleTap }
+  ctx, qa, { question, validation, response, token, followUp }
 ) {
 
   if (ctx.form.offTime && ctx.timestamp > ctx.form.offTime) {
@@ -1041,18 +1039,12 @@ function _response(
     return repeatResponse(question, followUpMessage(ctx.form.custom_messages))
   }
 
-  if (staleTap) {
-    return repeatResponse(question, staleTapMessage(ctx.form.custom_messages))
-  }
-
-  const { valid, message } = validation ||
+  const result = validation ||
     validator(addCustomType(interpolateField(ctx, qa, getField(ctx, question))),
       ctx.form.custom_messages)(response)
 
-  if (!valid) {
-
-    const msg = message || defaultMessage(ctx.form.custom_messages)
-    return repeatResponse(question, msg)
+  if (!result.valid) {
+    return repeatResponse(question, invalidMessage(result, ctx.form.custom_messages))
   }
 
   if (token) {

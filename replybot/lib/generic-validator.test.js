@@ -1,7 +1,7 @@
 const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
-const { validator, validateRef } = require('./generic-validator')
+const { validator, validateRef, invalidMessage } = require('./generic-validator')
 const { categorizeWhatsAppEvent } = require('./event-normalizer')
 
 // An upload question as it reaches the validator: field.type 'upload', with the
@@ -164,7 +164,23 @@ describe('validateRef', () => {
     validateRef('demog_gender', undefined).valid.should.be.true
   })
 
-  it('fails a tap whose ref is another question', () => {
-    validateRef('demog_gender', 'intro_1').valid.should.be.false
+  it('fails a tap whose ref is another question, naming the stale-tap message', () => {
+    validateRef('demog_gender', 'intro_1').should.deep.equal({ valid: false, messageKey: 'block.multipleChoice.hint' })
+  })
+})
+
+describe('invalidMessage', () => {
+  it('uses the text a validator gave', () => {
+    invalidMessage({ valid: false, message: 'Pick one' }, {}).should.equal('Pick one')
+  })
+
+  it('resolves a Messages key against the form, then the default', () => {
+    const v = { valid: false, messageKey: 'block.multipleChoice.hint' }
+    invalidMessage(v, { 'block.multipleChoice.hint': 'Otra pregunta' }).should.equal('Otra pregunta')
+    invalidMessage(v, {}).should.match(/earlier question/)
+  })
+
+  it('falls back to the form\'s mustEnter message', () => {
+    invalidMessage({ valid: false }, { 'label.error.mustEnter': 'No' }).should.equal('No')
   })
 })
