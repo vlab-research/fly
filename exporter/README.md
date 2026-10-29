@@ -38,7 +38,7 @@ The exporter supports three export sources, each with its own handler:
 
 - **`responses`**: Survey response data in pivot or flat format. See `export_data()` in `exporter.py` and the vlab-prepro library for formatting options.
 - **`chat_log`**: Conversation history with optional raw payload and metadata fields, written row by row with no preprocessing. See `export_chat_log()` in `exporter.py`.
-- **`full_messages`**: Complete message history with event-type filtering and optional raw JSON. Covers all message sources (Messenger, WhatsApp, synthetic) and event types (conversation, referrals, payments, system, etc.). See `export_full_messages()` in `exporter.py` and `documentation/full-messages-export.md` for details.
+- **`full_messages`**: Complete message history with event-type filtering and optional raw JSON. Parses Messenger, WhatsApp and synthetic rows, one parser per source, into event types grouped as conversation, referrals, payments, system, etc. See `export_full_messages()` in `exporter.py` and `documentation/full-messages-export.md` for details.
 
 ### Responses and chat_log: batches of users
 

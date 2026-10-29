@@ -9,6 +9,12 @@ Steps 1–5 implemented on branch `feature/synthetic-echo` (worktree `../fly-syn
 Not committed, not deployed. Steps 6 and 7 are unstarted by design — 6 needs the deploy,
 and 7 is sequenced after it.
 
+**Steps 1 and 5 have shipped separately under VIR-114**, for WhatsApp only:
+`WhatsAppEcho.Text` / `EchoText` in `message-worker/envelope.go`, and `bot_echo` plus WhatsApp
+parsing in the exporter's `parse_event`. When this branch is rebased, drop its `echo.go` copy of
+`EchoText` and its exporter changes. Its `BotEcho` struct also predates the identity envelope:
+it lacks `platform` and `phone_number_id`, and must be built on `BuildWhatsAppEcho` instead.
+
 Deviations from the plan as written, all noted in place below:
 
 - **Step 3's alert is not built.** Retry (5 attempts, `AlwaysRetriable` because
