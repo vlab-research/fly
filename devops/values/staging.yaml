@@ -68,7 +68,7 @@ versionScribble: &vscribble v0.0.34
 versionDinersclub: &vdinersclub v0.0.54
 versionFormcentral: &vformcentral v0.0.14-wa
 # v0.7.2: owner-scoped export keys (VIR-23); see production.yaml.
-versionExporter: &vexporter v0.7.2
+versionExporter: &vexporter v0.7.3
 # v0.2.6: unknown bail id answers 404, not 500; see production.yaml.
 # v0.2.7: malformed timing rejected at write; timing errors recorded (VIR-57);
 # see production.yaml.
@@ -76,7 +76,7 @@ versionExporter: &vexporter v0.7.2
 # see production.yaml.
 # v0.2.9: user_list bails may carry conditions (VIR-111); see production.yaml.
 versionExodus: &vexodus v0.2.9
-versionMessageWorker: &vmessageworker v0.1.29
+versionMessageWorker: &vmessageworker v0.1.30
 # Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
 # gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
 # does not exist in ghcr.io yet") is retired.

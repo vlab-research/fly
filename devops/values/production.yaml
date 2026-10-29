@@ -188,7 +188,7 @@ versionFormcentral: &vformcentral v0.0.14-wa
 # v0.7.2: export objects are keyed under exports/<owner-hash>/ so researchers who
 #   share a survey name no longer overwrite each other (PR #185, VIR-23). Ship
 #   BEFORE dashboard v0.0.81, which refuses links outside the caller's prefix.
-versionExporter: &vexporter v0.7.2
+versionExporter: &vexporter v0.7.3
 # v0.2.3 -> v0.2.5: carries e2bdfae8 "fix(scribble,exodus): stop discarding a
 # second account's rows" -- multi-account specific, so it only manifests once a
 # participant exists on two accounts. Part of the same rollout stack.
@@ -229,7 +229,7 @@ versionExodus: &vexodus v0.2.9
 #   translator is untouched, and the WhatsApp path is still dormant here.
 # v0.1.25: renders that list button from replybot's metadata, falling back to
 #   "Choose". Pairs with replybot v0.0.224.
-versionMessageWorker: &vmessageworker v0.1.29
+versionMessageWorker: &vmessageworker v0.1.30
 versionMediaProxy: &vmediaproxy v0.0.1
 # One-shot, not a service: the Phase 1.5 messages backfill
 # (planning/backfill-in-cluster-job.md). Kept here anyway so its image is
