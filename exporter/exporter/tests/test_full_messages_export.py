@@ -6,11 +6,9 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from exporter.exporter import (
-    classify_event,
+    parse_event,
     expand_groups,
     get_direction,
-    extract_content,
-    extract_event_detail,
     _iter_messages,
     export_full_messages,
     EVENT_GROUPS,
@@ -20,97 +18,206 @@ from exporter.main import FullMessagesExportOptions
 from exporter.tests.conftest import SNAPSHOT
 
 
-# --- classify_event ---
+# --- parse_event ---
 
 
-class TestClassifyEvent:
+class TestParseEvent:
     def test_echo(self):
         msg = {"source": "messenger", "message": {"is_echo": True, "text": "hi"}}
-        assert classify_event(msg) == "echo"
+        assert parse_event(msg).type == "echo"
 
     def test_quick_reply(self):
         msg = {"source": "messenger", "message": {"quick_reply": {"payload": "yes"}, "text": "Yes"}}
-        assert classify_event(msg) == "quick_reply"
+        assert parse_event(msg).type == "quick_reply"
 
     def test_text(self):
         msg = {"source": "messenger", "message": {"text": "hello"}}
-        assert classify_event(msg) == "text"
+        assert parse_event(msg).type == "text"
 
     def test_media(self):
         msg = {"source": "messenger", "message": {"attachments": [{"type": "image"}]}}
-        assert classify_event(msg) == "media"
+        assert parse_event(msg).type == "media"
 
     def test_postback(self):
         msg = {"source": "messenger", "postback": {"title": "Get Started"}}
-        assert classify_event(msg) == "postback"
+        assert parse_event(msg).type == "postback"
 
     def test_referral(self):
         msg = {"source": "messenger", "referral": {"ref": "ad_123"}}
-        assert classify_event(msg) == "referral"
+        assert parse_event(msg).type == "referral"
 
     def test_watermark_read(self):
         msg = {"source": "messenger", "read": {"watermark": 123}}
-        assert classify_event(msg) == "watermark"
+        assert parse_event(msg).type == "watermark"
 
     def test_watermark_delivery(self):
         msg = {"source": "messenger", "delivery": {"watermark": 123}}
-        assert classify_event(msg) == "watermark"
+        assert parse_event(msg).type == "watermark"
 
     def test_reaction(self):
         msg = {"source": "messenger", "reaction": {"reaction": "love"}}
-        assert classify_event(msg) == "reaction"
+        assert parse_event(msg).type == "reaction"
 
     def test_optin(self):
         msg = {"source": "messenger", "optin": {"ref": "abc"}}
-        assert classify_event(msg) == "optin"
+        assert parse_event(msg).type == "optin"
 
     def test_handover(self):
         msg = {"source": "messenger", "pass_thread_control": {"new_owner_app_id": "123"}}
-        assert classify_event(msg) == "handover"
+        assert parse_event(msg).type == "handover"
 
     def test_unknown_messenger(self):
         msg = {"source": "messenger"}
-        assert classify_event(msg) == "unknown_messenger"
+        assert parse_event(msg).type == "unknown_messenger"
 
     def test_bailout(self):
         msg = {"source": "synthetic", "event": {"type": "bailout"}}
-        assert classify_event(msg) == "bailout"
+        assert parse_event(msg).type == "bailout"
 
     def test_redo(self):
         msg = {"source": "synthetic", "event": {"type": "redo"}}
-        assert classify_event(msg) == "redo"
+        assert parse_event(msg).type == "redo"
 
     def test_machine_report(self):
         msg = {"source": "synthetic", "event": {"type": "machine_report", "value": "error"}}
-        assert classify_event(msg) == "machine_report"
+        assert parse_event(msg).type == "machine_report"
 
     def test_moviehouse(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "moviehouse:play"}}}
-        assert classify_event(msg) == "moviehouse"
+        assert parse_event(msg).type == "moviehouse"
 
     def test_linksniffer(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "linksniffer:click"}}}
-        assert classify_event(msg) == "linksniffer"
+        assert parse_event(msg).type == "linksniffer"
 
     def test_payment_external(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "payment:success"}}}
-        assert classify_event(msg) == "payment"
+        assert parse_event(msg).type == "payment"
 
     def test_external_other(self):
         msg = {"source": "synthetic", "event": {"type": "external", "value": {"type": "handoff_return"}}}
-        assert classify_event(msg) == "external_other"
+        assert parse_event(msg).type == "external_other"
 
     def test_unknown_synthetic(self):
         msg = {"source": "synthetic", "event": {"type": "some_new_thing"}}
-        assert classify_event(msg) == "unknown_synthetic"
+        assert parse_event(msg).type == "unknown_synthetic"
 
     def test_unknown_source(self):
         msg = {"source": "something_else"}
-        assert classify_event(msg) == "unknown"
+        assert parse_event(msg).type == "unknown"
 
     def test_no_source(self):
         msg = {}
-        assert classify_event(msg) == "unknown"
+        assert parse_event(msg).type == "unknown"
+
+
+# WhatsApp rows as Hermes publishes them: one Cloud API `messages[]` or
+# `statuses[]` item, with source, phone_number_id, the identity envelope and a
+# millisecond timestamp added.
+def _wa(**fields):
+    return {
+        "source": "whatsapp",
+        "platform": "whatsapp",
+        "account_id": "PHONE_ID_1",
+        "phone_number_id": "PHONE_ID_1",
+        "timestamp": 1640995200000,
+        **fields,
+    }
+
+
+def _wa_inbound(**fields):
+    return _wa(**{"from": "27123456789", "id": "wamid.abc", **fields})
+
+
+def _wa_status(status, **fields):
+    return _wa(**{"id": "wamid.abc", "status": status, "recipient_id": "27123456789", **fields})
+
+
+def _bot_echo(source="whatsapp", **fields):
+    return {
+        "source": source,
+        "account_id": "PHONE_ID_1",
+        "platform": source,
+        "phone_number_id": "PHONE_ID_1",
+        "from": "27123456789",
+        "type": "bot_echo",
+        "metadata": {"ref": "q1", "type": "multiple_choice"},
+        "timestamp": 1640995200000,
+        **fields,
+    }
+
+
+class TestParseWhatsApp:
+    @pytest.mark.parametrize("msg, expected", [
+        (_wa_inbound(type="text", text={"body": "Hello bot!"}), ("text", "Hello bot!")),
+        (_wa_inbound(type="interactive", interactive={
+            "type": "button_reply", "button_reply": {"id": "r0", "title": "Red"}}),
+         ("quick_reply", "Red")),
+        (_wa_inbound(type="interactive", interactive={
+            "type": "list_reply", "list_reply": {"id": "r3", "title": "Lagos", "description": "x"}}),
+         ("quick_reply", "Lagos")),
+        (_wa_inbound(type="button", button={"text": "Confirm", "payload": "p1"}),
+         ("quick_reply", "Confirm")),
+        (_wa_inbound(type="image", image={"id": "1234", "mime_type": "image/jpeg"}), ("media", "image")),
+        (_wa_inbound(type="video", video={"id": "1234"}), ("media", "video")),
+        (_wa_inbound(type="audio", audio={"id": "1234"}), ("media", "audio")),
+        (_wa_inbound(type="voice", voice={"id": "1234"}), ("media", "audio")),
+        (_wa_inbound(type="document", document={"id": "1234"}), ("media", "document")),
+        (_wa_inbound(type="sticker", sticker={"id": "1234"}), ("media", "sticker")),
+        (_wa_inbound(type="reaction", reaction={"message_id": "wamid.x", "emoji": "👍"}),
+         ("reaction", "👍")),
+        (_wa_status("sent"), ("watermark", "sent")),
+        (_wa_status("delivered"), ("watermark", "delivered")),
+        (_wa_status("read"), ("watermark", "read")),
+        (_wa_inbound(type="location", location={"latitude": 1, "longitude": 2}),
+         ("unknown_whatsapp", "")),
+    ])
+    def test_shapes(self, msg, expected):
+        event = parse_event(msg)
+        assert (event.type, event.content) == expected
+
+    def test_referral_with_ref(self):
+        msg = _wa_inbound(type="text", text={"body": "Hi"}, referral={"ref": "form.ABC", "ctwa_clid": "c1"})
+        assert parse_event(msg) == ("referral", "form.ABC", "")
+
+    def test_ctwa_referral_without_ref_reads_the_autofill_text(self):
+        msg = _wa_inbound(type="text", text={"body": "form.ABC.creative.x"},
+                          referral={"source_type": "ad", "ctwa_clid": "c1"})
+        assert parse_event(msg) == ("referral", "form.ABC.creative.x", "")
+
+    def test_bare_form_token_is_text(self):
+        msg = _wa_inbound(type="text", text={"body": "form.ABC"})
+        assert parse_event(msg) == ("text", "form.ABC", "")
+
+    def test_null_text_body(self):
+        assert parse_event(_wa_inbound(type="text", text=None)) == ("text", "", "")
+
+    def test_failed_status_is_a_send_failure_not_a_watermark(self):
+        msg = _wa_status("failed", errors=[{
+            "code": 131047, "title": "Re-engagement message",
+            "error_data": {"details": "more than 24 hours"}}])
+        assert parse_event(msg) == ("send_failed", "131047: Re-engagement message", "")
+
+    def test_failed_status_without_errors(self):
+        assert parse_event(_wa_status("failed")) == ("send_failed", "", "")
+
+    def test_send_failed_is_system(self):
+        assert get_direction("send_failed") == "system"
+        assert "send_failed" in EVENT_GROUPS["system"]
+
+
+class TestParseBotEcho:
+    def test_whatsapp_echo_is_bot_text(self):
+        assert parse_event(_bot_echo(text="What is your favourite colour?")) == (
+            "echo", "What is your favourite colour?", "")
+
+    def test_echo_without_text_is_still_a_bot_row(self):
+        # Echoes published before message-worker added `text`.
+        assert parse_event(_bot_echo()) == ("echo", "", "")
+
+    def test_matched_before_the_source_dispatch(self):
+        # A messenger-sourced bot_echo would otherwise be unknown_messenger.
+        assert parse_event(_bot_echo(source="messenger", text="hi")) == ("echo", "hi", "")
 
 
 # --- expand_groups ---
@@ -219,6 +326,23 @@ class TestIterMessages:
         rows = [self._make_row(msg)]
         result = list(_iter_messages(iter(rows), {"moviehouse"}, False))
         assert result[0]["event_detail"] == "moviehouse:play"
+
+    def test_mixed_platform_conversation_exports_both_sides_of_both(self):
+        rows = [
+            self._make_row({"source": "messenger", "message": {"is_echo": True, "text": "Q1?"}}, "fb"),
+            self._make_row({"source": "messenger", "message": {"quick_reply": {"payload": "y"}, "text": "Yes"}}, "fb"),
+            self._make_row(_bot_echo(text="Q1?"), "wa"),
+            self._make_row(_wa_inbound(type="interactive", interactive={
+                "type": "button_reply", "button_reply": {"id": "r0", "title": "Yes"}}), "wa"),
+            self._make_row(_wa_status("read"), "wa"),
+        ]
+        result = list(_iter_messages(iter(rows), expand_groups(["conversation"]), False))
+        assert [(r["userid"], r["source"], r["direction"], r["content"]) for r in result] == [
+            ("fb", "messenger", "bot", "Q1?"),
+            ("fb", "messenger", "user", "Yes"),
+            ("wa", "whatsapp", "bot", "Q1?"),
+            ("wa", "whatsapp", "user", "Yes"),
+        ]
 
     def test_preserves_userid_and_timestamp(self):
         rows = [self._make_row(

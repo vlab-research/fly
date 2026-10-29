@@ -419,6 +419,10 @@ nothing is derived or inferred — and retains `phone_number_id` alongside them,
 The body is built by `BuildWhatsAppEcho` (`envelope.go`), which is pure and takes the clock
 as a parameter so the wire shape is assertable byte-for-byte.
 
+The echo also carries `text`, the message as the participant saw it (`EchoText`: the text, a
+question's text without its options, or a media caption). Nothing in the state machine reads it;
+it is the bot's side of the full messages export (`documentation/full-messages-export.md`).
+
 > **Why this is called out so heavily.** Until 2026-08-17 the echo carried six fields and
 > neither identity field. Every WhatsApp send archived a `messages` row with a NULL
 > `account_id`, and the replay query's temporary `OR account_id IS NULL` clause — there so

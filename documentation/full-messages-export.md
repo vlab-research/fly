@@ -46,18 +46,36 @@ The row's `options` column (`full_messages_options`) carries the times as ISO-86
 
 ## Event Classification and Direction
 
-`classify_event` maps each raw row's JSON to one of the types in `EVENT_GROUPS`; `get_direction` then labels it `bot`, `user`, or `system`. **`echo` is the only type that yields `bot`** — so whether the bot's side of a conversation appears in the export at all depends entirely on what classifies as an echo.
+`parse_event` (`exporter/exporter/exporter.py`) reads each raw row's JSON once and returns its type (one of those in `EVENT_GROUPS`), its `content` and its `event_detail` together. It dispatches on `source` to one parser per platform: `messenger`, `whatsapp` and `synthetic`. A row from any other source is `unknown`, and a shape a platform parser does not recognise is `unknown_<source>`. No group contains those types, so the export drops them; they count towards the `filtered` total in the job's log line. `get_direction` then labels each type `bot`, `user` or `system`.
 
-Two shapes do:
+### The bot's side
+
+**`echo` is the only type that yields `bot`.** So whether the bot's side of a conversation appears at all depends entirely on what is classified as an echo. Two shapes are:
 
 | Shape | Where the text lives | Notes |
 |---|---|---|
-| `type: "bot_echo"` | flat `text` | message-worker's send echo, published after every successful send on every platform. Matched **before** the per-source branch, because `source` names the platform but the envelope is ours — a messenger-sourced `bot_echo` would otherwise fall through to `unknown_messenger`. |
-| `source: "messenger"` + `message.is_echo` | nested `message.text` | Facebook's webhook. Historical rows keep this shape indefinitely, so both are read. |
+| `type: "bot_echo"` | flat `text` | message-worker's send echo, published after each successful WhatsApp send. It is matched **before** the source dispatch: `source` names the platform, but the envelope is ours. |
+| `source: "messenger"` + `message.is_echo` | nested `message.text` | Facebook's webhook. |
 
-**Previously, WhatsApp conversations exported with no bot side at all.** `classify_event` had branches for `messenger` and `synthetic` and none for `whatsapp`, so WhatsApp rows fell through to `unknown`; and the synthetic echo carried no message text to export even if they hadn't. The synthetic-echo migration fixed both halves — the echo now carries rendered text, and it is classified on every platform. See `planning/synthetic-echo-migration.md`.
+The echo's `text` is the message as the participant saw it: the text, a question's text without its options, or a media caption. Uncaptioned media exports as a `bot` row with empty content, as Facebook's `is_echo` does. The exporter does not invent a placeholder for content the bot did not write. **WhatsApp echoes published before message-worker added `text` (VIR-114) also export with empty content.** The text of those messages exists only in the `machine_report` rows' `send_message` commands, and the export does not read it from there.
 
-Note that an uncaptioned media echo exports as a `bot` row with empty content, the same as Facebook's `is_echo` did — the exporter does not invent a placeholder for content the bot did not write.
+WhatsApp status webhooks are not a substitute. They carry the message id, not its content or our metadata.
+
+### WhatsApp rows
+
+Hermes publishes each Cloud API `messages[]` or `statuses[]` item as its own row. `_parse_whatsapp` reads them in the same order, and with the same readings, as replybot's `categorizeWhatsAppEvent`, so the export agrees with what the state machine took each row to be:
+
+| WhatsApp row | `event_type` | `content` |
+|---|---|---|
+| has `referral` (Click-to-WhatsApp) | `referral` | `referral.ref`, or else the ad's autofill text, which carries the form token when Meta sends no `ref` |
+| `status: failed` | `send_failed` (group `system`) | `<code>: <title>` of the first error. This is Meta's asynchronous send rejection, not a receipt. |
+| `status`: `sent`, `delivered` or `read` | `watermark` | the status |
+| `type: text` | `text` | `text.body`. A bare `form.<code>` entry token stays `text`: it is what the participant typed. |
+| `type: interactive` (`button_reply`, `list_reply`) | `quick_reply` | the reply's `title`, the label the machine validates answers against |
+| `type: button` (template quick reply) | `quick_reply` | `button.text` |
+| `image`, `video`, `audio`, `voice`, `document`, `sticker` | `media` | the media type (`voice` is reported as `audio`) |
+| `type: reaction` | `reaction` | the emoji |
+| anything else (e.g. `location`) | `unknown_whatsapp` | dropped |
 
 ## Key File References
 
