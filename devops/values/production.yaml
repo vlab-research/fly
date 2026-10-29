@@ -84,7 +84,11 @@ versionHermes: &vhermes v0.0.7
 #   (PR #180). Deploy BEFORE migration 33 and dean v0.0.48; harmless alone.
 # v0.0.230: a participant message during a wait no longer restarts the
 #   countdown; a wait's start lasts until the wait is fulfilled (PR #200).
-versionReplybot: &vreplybot v0.0.230
+# v0.0.231: a tap on an earlier question's button is not recorded; the
+#   participant gets the stale-tap message and the current question again
+#   (VIR-113, PR #211). Also carries the VIR-46 payment fixes. Pairs with
+#   message-worker v0.1.31.
+versionReplybot: &vreplybot v0.0.231
 # Bumped v0.0.6 -> v0.0.9 together with the repository move below: ghcr holds
 # only v0.0.8/v0.0.9, so the registry change CANNOT ship without the version
 # change or the pull 404s. Behaviour change to announce: an *invalid*
@@ -229,7 +233,8 @@ versionExodus: &vexodus v0.2.9
 #   translator is untouched, and the WhatsApp path is still dormant here.
 # v0.1.25: renders that list button from replybot's metadata, falling back to
 #   "Choose". Pairs with replybot v0.0.224.
-versionMessageWorker: &vmessageworker v0.1.30
+# v0.1.31: WhatsApp button and list-row ids carry {value, ref} (VIR-113).
+versionMessageWorker: &vmessageworker v0.1.31
 versionMediaProxy: &vmediaproxy v0.0.1
 # One-shot, not a service: the Phase 1.5 messages backfill
 # (planning/backfill-in-cluster-job.md). Kept here anyway so its image is

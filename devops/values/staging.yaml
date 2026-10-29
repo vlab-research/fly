@@ -46,7 +46,11 @@ versionHermes: &vhermes v0.0.5
 #   (PR #180). Deploy BEFORE migration 33 and dean v0.0.48; harmless alone.
 # v0.0.230: a participant message during a wait no longer restarts the
 #   countdown; a wait's start lasts until the wait is fulfilled (PR #200).
-versionReplybot: &vreplybot v0.0.230
+# v0.0.231: a tap on an earlier question's button is not recorded; the
+#   participant gets the stale-tap message and the current question again
+#   (VIR-113, PR #211). Also carries the VIR-46 payment fixes. Pairs with
+#   message-worker v0.1.31.
+versionReplybot: &vreplybot v0.0.231
 versionLinksniffer: &vlinksniffer v0.0.9
 # v0.0.48: FollowUps measures from states.last_inbound and only nudges
 #   someone who has answered (PR #180). REQUIRES MIGRATION 33 -- the query
@@ -76,7 +80,8 @@ versionExporter: &vexporter v0.7.3
 # see production.yaml.
 # v0.2.9: user_list bails may carry conditions (VIR-111); see production.yaml.
 versionExodus: &vexodus v0.2.9
-versionMessageWorker: &vmessageworker v0.1.30
+# v0.1.31: WhatsApp button and list-row ids carry {value, ref} (VIR-113).
+versionMessageWorker: &vmessageworker v0.1.31
 # Released and running: `media-proxy-v0.0.1` was cut on 2026-08-10 and
 # gbv-media-proxy has been 2/2 in vstag since. The former warning here ("this tag
 # does not exist in ghcr.io yet") is retired.
