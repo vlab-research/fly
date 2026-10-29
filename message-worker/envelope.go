@@ -50,7 +50,10 @@ type WhatsAppEcho struct {
 	From          string          `json:"from"`
 	Type          string          `json:"type"`
 	Metadata      json.RawMessage `json:"metadata"`
-	Timestamp     int64           `json:"timestamp"`
+	// Text is the rendered content of the message. The state machine never
+	// reads it; it is the bot's side of the full messages export.
+	Text      string `json:"text"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // BuildWhatsAppEcho is pure and total: same command and same clock in, same
@@ -78,8 +81,30 @@ func BuildWhatsAppEcho(cmd types.SendMessageCommand, now time.Time) WhatsAppEcho
 		From:          cmd.UserID,
 		Type:          "bot_echo",
 		Metadata:      metadata,
+		Text:          EchoText(cmd.Message),
 		Timestamp:     now.UnixMilli(),
 	}
+}
+
+// EchoText renders the participant-visible text of an outbound message.
+//
+// It does not invent content: uncaptioned media yields "", as Facebook's
+// is_echo does for a bare attachment, and a question's options are left out,
+// as is_echo reports them separately.
+func EchoText(mc types.MessageContent) string {
+	var text *string
+	switch mc.Type {
+	case types.MessageTypeText:
+		text = mc.Text
+	case types.MessageTypeQuestion:
+		text = mc.QuestionText
+	case types.MessageTypeMedia:
+		text = mc.Caption
+	}
+	if text == nil {
+		return ""
+	}
+	return *text
 }
 
 // MissingEnvelopeFields reports which of the two normalized identity fields an

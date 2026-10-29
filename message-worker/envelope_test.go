@@ -71,6 +71,81 @@ func TestBuildWhatsAppEcho_StampsTheEnvelope(t *testing.T) {
 	}
 }
 
+func TestBuildWhatsAppEcho_CarriesTheRenderedText(t *testing.T) {
+	echo := BuildWhatsAppEcho(whatsappSendCommand(), time.UnixMilli(0))
+	if echo.Text != "Hello from a survey" {
+		t.Errorf("text = %q, want the message's text", echo.Text)
+	}
+
+	data, err := json.Marshal(echo)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["text"] != "Hello from a survey" {
+		t.Errorf("serialized text = %v, want it at the top level, where the exporter reads it: %s", body["text"], data)
+	}
+}
+
+func TestEchoText(t *testing.T) {
+	str := func(s string) *string { return &s }
+	image := types.MediaTypeImage
+
+	tests := []struct {
+		name string
+		msg  types.MessageContent
+		want string
+	}{
+		{
+			"text message",
+			types.MessageContent{Type: types.MessageTypeText, Text: str("Hello")},
+			"Hello",
+		},
+		{
+			"question renders the question, not the options",
+			types.MessageContent{
+				Type:         types.MessageTypeQuestion,
+				QuestionText: str("Pick one"),
+				Options:      []types.Option{{Label: "A"}, {Label: "B"}},
+			},
+			"Pick one",
+		},
+		{
+			"media renders its caption",
+			types.MessageContent{
+				Type: types.MessageTypeMedia, MediaType: &image,
+				MediaURL: str("https://example.com/a.png"), Caption: str("A chart"),
+			},
+			"A chart",
+		},
+		{
+			// Inventing a placeholder would put words in the bot's mouth.
+			"uncaptioned media renders nothing",
+			types.MessageContent{
+				Type: types.MessageTypeMedia, MediaType: &image,
+				MediaURL: str("https://example.com/a.png"),
+			},
+			"",
+		},
+		{
+			"missing text field does not panic",
+			types.MessageContent{Type: types.MessageTypeText},
+			"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := EchoText(tt.msg); got != tt.want {
+				t.Errorf("EchoText() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildWhatsAppEcho_IsPure(t *testing.T) {
 	cmd := whatsappSendCommand()
 	at := time.UnixMilli(1786647529000)
