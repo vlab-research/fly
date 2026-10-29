@@ -111,6 +111,115 @@ class TestParseEvent:
         assert parse_event(msg).type == "unknown"
 
 
+# WhatsApp rows as Hermes publishes them: one Cloud API `messages[]` or
+# `statuses[]` item, with source, phone_number_id, the identity envelope and a
+# millisecond timestamp added.
+def _wa(**fields):
+    return {
+        "source": "whatsapp",
+        "platform": "whatsapp",
+        "account_id": "PHONE_ID_1",
+        "phone_number_id": "PHONE_ID_1",
+        "timestamp": 1640995200000,
+        **fields,
+    }
+
+
+def _wa_inbound(**fields):
+    return _wa(**{"from": "27123456789", "id": "wamid.abc", **fields})
+
+
+def _wa_status(status, **fields):
+    return _wa(**{"id": "wamid.abc", "status": status, "recipient_id": "27123456789", **fields})
+
+
+def _bot_echo(source="whatsapp", **fields):
+    return {
+        "source": source,
+        "account_id": "PHONE_ID_1",
+        "platform": source,
+        "phone_number_id": "PHONE_ID_1",
+        "from": "27123456789",
+        "type": "bot_echo",
+        "metadata": {"ref": "q1", "type": "multiple_choice"},
+        "timestamp": 1640995200000,
+        **fields,
+    }
+
+
+class TestParseWhatsApp:
+    @pytest.mark.parametrize("msg, expected", [
+        (_wa_inbound(type="text", text={"body": "Hello bot!"}), ("text", "Hello bot!")),
+        (_wa_inbound(type="interactive", interactive={
+            "type": "button_reply", "button_reply": {"id": "r0", "title": "Red"}}),
+         ("quick_reply", "Red")),
+        (_wa_inbound(type="interactive", interactive={
+            "type": "list_reply", "list_reply": {"id": "r3", "title": "Lagos", "description": "x"}}),
+         ("quick_reply", "Lagos")),
+        (_wa_inbound(type="button", button={"text": "Confirm", "payload": "p1"}),
+         ("quick_reply", "Confirm")),
+        (_wa_inbound(type="image", image={"id": "1234", "mime_type": "image/jpeg"}), ("media", "image")),
+        (_wa_inbound(type="video", video={"id": "1234"}), ("media", "video")),
+        (_wa_inbound(type="audio", audio={"id": "1234"}), ("media", "audio")),
+        (_wa_inbound(type="voice", voice={"id": "1234"}), ("media", "audio")),
+        (_wa_inbound(type="document", document={"id": "1234"}), ("media", "document")),
+        (_wa_inbound(type="sticker", sticker={"id": "1234"}), ("media", "sticker")),
+        (_wa_inbound(type="reaction", reaction={"message_id": "wamid.x", "emoji": "👍"}),
+         ("reaction", "👍")),
+        (_wa_status("sent"), ("watermark", "sent")),
+        (_wa_status("delivered"), ("watermark", "delivered")),
+        (_wa_status("read"), ("watermark", "read")),
+        (_wa_inbound(type="location", location={"latitude": 1, "longitude": 2}),
+         ("unknown_whatsapp", "")),
+    ])
+    def test_shapes(self, msg, expected):
+        event = parse_event(msg)
+        assert (event.type, event.content) == expected
+
+    def test_referral_with_ref(self):
+        msg = _wa_inbound(type="text", text={"body": "Hi"}, referral={"ref": "form.ABC", "ctwa_clid": "c1"})
+        assert parse_event(msg) == ("referral", "form.ABC", "")
+
+    def test_ctwa_referral_without_ref_reads_the_autofill_text(self):
+        msg = _wa_inbound(type="text", text={"body": "form.ABC.creative.x"},
+                          referral={"source_type": "ad", "ctwa_clid": "c1"})
+        assert parse_event(msg) == ("referral", "form.ABC.creative.x", "")
+
+    def test_bare_form_token_is_text(self):
+        msg = _wa_inbound(type="text", text={"body": "form.ABC"})
+        assert parse_event(msg) == ("text", "form.ABC", "")
+
+    def test_null_text_body(self):
+        assert parse_event(_wa_inbound(type="text", text=None)) == ("text", "", "")
+
+    def test_failed_status_is_a_send_failure_not_a_watermark(self):
+        msg = _wa_status("failed", errors=[{
+            "code": 131047, "title": "Re-engagement message",
+            "error_data": {"details": "more than 24 hours"}}])
+        assert parse_event(msg) == ("send_failed", "131047: Re-engagement message", "")
+
+    def test_failed_status_without_errors(self):
+        assert parse_event(_wa_status("failed")) == ("send_failed", "", "")
+
+    def test_send_failed_is_system(self):
+        assert get_direction("send_failed") == "system"
+        assert "send_failed" in EVENT_GROUPS["system"]
+
+
+class TestParseBotEcho:
+    def test_whatsapp_echo_is_bot_text(self):
+        assert parse_event(_bot_echo(text="What is your favourite colour?")) == (
+            "echo", "What is your favourite colour?", "")
+
+    def test_echo_without_text_is_still_a_bot_row(self):
+        # Echoes published before message-worker added `text`.
+        assert parse_event(_bot_echo()) == ("echo", "", "")
+
+    def test_matched_before_the_source_dispatch(self):
+        # A messenger-sourced bot_echo would otherwise be unknown_messenger.
+        assert parse_event(_bot_echo(source="messenger", text="hi")) == ("echo", "hi", "")
+
+
 # --- expand_groups ---
 
 
@@ -217,6 +326,23 @@ class TestIterMessages:
         rows = [self._make_row(msg)]
         result = list(_iter_messages(iter(rows), {"moviehouse"}, False))
         assert result[0]["event_detail"] == "moviehouse:play"
+
+    def test_mixed_platform_conversation_exports_both_sides_of_both(self):
+        rows = [
+            self._make_row({"source": "messenger", "message": {"is_echo": True, "text": "Q1?"}}, "fb"),
+            self._make_row({"source": "messenger", "message": {"quick_reply": {"payload": "y"}, "text": "Yes"}}, "fb"),
+            self._make_row(_bot_echo(text="Q1?"), "wa"),
+            self._make_row(_wa_inbound(type="interactive", interactive={
+                "type": "button_reply", "button_reply": {"id": "r0", "title": "Yes"}}), "wa"),
+            self._make_row(_wa_status("read"), "wa"),
+        ]
+        result = list(_iter_messages(iter(rows), expand_groups(["conversation"]), False))
+        assert [(r["userid"], r["source"], r["direction"], r["content"]) for r in result] == [
+            ("fb", "messenger", "bot", "Q1?"),
+            ("fb", "messenger", "user", "Yes"),
+            ("wa", "whatsapp", "bot", "Q1?"),
+            ("wa", "whatsapp", "user", "Yes"),
+        ]
 
     def test_preserves_userid_and_timestamp(self):
         rows = [self._make_row(

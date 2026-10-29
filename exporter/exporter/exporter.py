@@ -33,7 +33,7 @@ EVENT_GROUPS = {
     "payments": ["payment", "repeat_payment"],
     "external_tracking": ["moviehouse", "linksniffer", "external_other"],
     "retries": ["redo", "follow_up"],
-    "system": ["machine_report", "platform_response", "block_user", "unblock"],
+    "system": ["machine_report", "platform_response", "send_failed", "block_user", "unblock"],
     "other": ["watermark", "reaction", "media", "handover", "timeout"],
 }
 
@@ -111,14 +111,63 @@ def _parse_synthetic(msg):
     return Event("unknown_synthetic")
 
 
+WHATSAPP_MEDIA_TYPES = ("image", "video", "audio", "voice", "document", "sticker")
+
+
+def _send_error(msg):
+    errors = msg.get("errors") or [{}]
+    error = errors[0]
+    code, title = error.get("code"), error.get("title") or error.get("message") or ""
+    return f"{code}: {title}" if code is not None else title
+
+
+def _body(msg):
+    return (msg.get("text") or {}).get("body") or ""
+
+
+def _parse_whatsapp(msg):
+    # Same order and readings as categorizeWhatsAppEvent in
+    # replybot/lib/event-normalizer.js, so the export agrees with what the
+    # state machine took each row to be.
+    referral = msg.get("referral")
+    if referral:
+        # A Click-to-WhatsApp referral need not carry `ref`; the form token
+        # then arrives as the ad's autofill text.
+        return Event("referral", referral.get("ref") or _body(msg))
+    status = msg.get("status")
+    if status == "failed":
+        return Event("send_failed", _send_error(msg))
+    if status:
+        return Event("watermark", status)
+    mtype = msg.get("type")
+    if mtype == "text":
+        return Event("text", _body(msg))
+    if mtype == "interactive":
+        interactive = msg.get("interactive") or {}
+        reply = interactive.get("button_reply") or interactive.get("list_reply") or {}
+        return Event("quick_reply", reply.get("title") or "")
+    if mtype == "button":
+        return Event("quick_reply", (msg.get("button") or {}).get("text") or "")
+    if mtype in WHATSAPP_MEDIA_TYPES:
+        return Event("media", "audio" if mtype == "voice" else mtype)
+    if mtype == "reaction":
+        return Event("reaction", (msg.get("reaction") or {}).get("emoji") or "")
+    return Event("unknown_whatsapp")
+
+
 PARSERS = {
     "messenger": _parse_messenger,
     "synthetic": _parse_synthetic,
+    "whatsapp": _parse_whatsapp,
 }
 
 
 def parse_event(msg):
     """The export type, content and detail of one `messages` row, decided together."""
+    # message-worker's send echo is our own envelope, not the platform's, so
+    # it is matched before dispatching on `source`, which names the platform.
+    if msg.get("type") == "bot_echo":
+        return Event("echo", msg.get("text", ""))
     parser = PARSERS.get(msg.get("source"))
     if parser is None:
         return Event("unknown")
