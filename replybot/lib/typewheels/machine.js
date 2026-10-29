@@ -1,7 +1,7 @@
 const util = require('util')
 const _ = require('lodash')
 const { getForm, getMetadata, _group } = require('./utils')
-const { validator, defaultMessage, followUpMessage, offMessage } = require('../generic-validator')
+const { validator, validateRef, defaultMessage, followUpMessage, offMessage, staleTapMessage } = require('../generic-validator')
 const { translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const { waitConditionFulfilled } = require('./waiting')
 
@@ -244,13 +244,6 @@ function stampInbound(state, event) {
 
 function _noop() {
   return { action: 'NONE' }
-}
-
-// Buttons outlive their question (WhatsApp keeps every one tappable), so a tap
-// carrying another question's ref must not be recorded as this one's answer.
-function _isStaleTap(state, nxt) {
-  const ref = nxt.payload && nxt.payload.source_message_id
-  return !!ref && ref !== state.question
 }
 
 function _isHandoffWait(state) {
@@ -641,7 +634,11 @@ function exec(state, nxt) {
         return _blankStart(nxt)
       }
 
-      if (_isStaleTap(state, nxt)) return _noop()
+      // A tap on an earlier question's button is not an answer to this one:
+      // record nothing and ask this question again.
+      if (!validateRef(state.question, nxt.payload.source_message_id).valid) {
+        return { ..._repeat(state), staleTap: true }
+      }
 
       return {
         action: 'RESPOND',
@@ -658,7 +655,11 @@ function exec(state, nxt) {
         return _blankStart(nxt)
       }
 
-      if (_isStaleTap(state, nxt)) return _noop()
+      // A tap on an earlier question's button is not an answer to this one:
+      // record nothing and ask this question again.
+      if (!validateRef(state.question, nxt.payload.source_message_id).valid) {
+        return { ..._repeat(state), staleTap: true }
+      }
 
       return {
         action: 'RESPOND',
@@ -1018,7 +1019,7 @@ function _gatherResponses(ctx, qa, q, previous = []) {
 
 
 function _response(
-  ctx, qa, { question, validation, response, token, followUp }
+  ctx, qa, { question, validation, response, token, followUp, staleTap }
 ) {
 
   if (ctx.form.offTime && ctx.timestamp > ctx.form.offTime) {
@@ -1038,6 +1039,10 @@ function _response(
 
   if (followUp) {
     return repeatResponse(question, followUpMessage(ctx.form.custom_messages))
+  }
+
+  if (staleTap) {
+    return repeatResponse(question, staleTapMessage(ctx.form.custom_messages))
   }
 
   const { valid, message } = validation ||

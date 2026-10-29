@@ -1,7 +1,7 @@
 const mocha = require('mocha')
 const chai = require('chai')
 const should = chai.should()
-const { validator } = require('./generic-validator')
+const { validator, validateRef } = require('./generic-validator')
 const { categorizeWhatsAppEvent } = require('./event-normalizer')
 
 // An upload question as it reaches the validator: field.type 'upload', with the
@@ -151,5 +151,20 @@ describe('validatePhone', () => {
     it('rejects a number that is too short to dial', () => {
       validator(phoneField('AR'), {})('23345').valid.should.be.false
     })
+  })
+})
+
+describe('validateRef', () => {
+  it('passes a tap whose ref is the current question', () => {
+    validateRef('demog_gender', 'demog_gender').valid.should.be.true
+  })
+
+  it('passes a tap that carries no ref, which cannot be checked', () => {
+    validateRef('demog_gender', '').valid.should.be.true
+    validateRef('demog_gender', undefined).valid.should.be.true
+  })
+
+  it('fails a tap whose ref is another question', () => {
+    validateRef('demog_gender', 'intro_1').valid.should.be.false
   })
 })
