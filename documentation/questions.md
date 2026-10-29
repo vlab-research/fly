@@ -72,6 +72,27 @@ Which region do you live in?
 
 The `-` and the `.` before and after the letters are optional, but recommended for legibility.
 
+3. Every button carries the ref of the question it was sent with. Buttons stay tappable after their question is answered (always, on WhatsApp), so a participant can tap an earlier question's button. That tap is not recorded. The bot replies with the stale-tap message and asks the current question again. Set the message's text, or translate it, in Typeform's Messages under `block.multipleChoice.hint` (see "Messages keys" below).
+
+## Messages keys
+
+Fly reads some of the participant-facing messages from the form's Typeform **Messages** settings, falling back to an English default. Typeform accepts only its own fixed set of keys and rejects the whole Messages payload if it contains any other key. So a message Typeform has no key for borrows an allowed key that fly does not otherwise use.
+
+| Key | What fly sends with it | Max chars |
+|---|---|---|
+| `label.error.mustEnter` | an answer is not valid | 255 |
+| `label.error.mustSelect` | a choice answer is not one of the buttons | 386 |
+| `label.error.phoneNumber` | a phone number is not valid | 200 |
+| `label.error.emailAddress` | an email is not valid | 216 |
+| `label.error.range` | a number is out of range | 64 |
+| `label.error.mustAccept` | the survey is closed | 250 |
+| `label.buttonHint.default` | the follow-up reminder | 200 |
+| `block.shortText.placeholder` | a statement does not take a reply | 100 |
+| `block.dropdown.hint` | *borrowed:* the button that opens a WhatsApp choice list | 64 |
+| `block.multipleChoice.hint` | *borrowed:* a tap on an earlier question's button | 165 |
+
+Allowed keys fly does not use, measured against the Typeform API, for the next borrow: `label.error.url` (163), `label.error.minValue` (147), `label.error.server` (128), `label.warning.connection` (128), `label.warning.formUnavailable` (128), `label.error.sizeLimit` (255), `block.legal.accept` / `block.legal.reject` (255), `label.yes.default` / `label.no.default` (255), `label.button.ok` / `label.button.review` / `label.button.submit` (100), `block.dropdown.placeholder` (100), `label.error.required` (64), `label.error.maxValue` (64). Typeform rejects `label.warning.correction`, `label.error.minLength`, `label.error.maxLength`, `label.hint.default` and `block.longtext.hint`.
+
 ## Number
 
 Number type validates that the user has sent us a number and only a number. To change the error message when a user enters something other than a number, do: ....

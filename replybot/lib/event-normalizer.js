@@ -17,6 +17,12 @@ function parsePayload(payload) {
   return payload
 }
 
+// The question ref a button was sent with, when its payload carries one.
+function _payloadRef(payload) {
+  const p = parsePayload(payload)
+  return (p && typeof p === 'object' && typeof p.ref === 'string') ? p.ref : ''
+}
+
 function categorizeMessengerEvent(data) {
   // Messenger delivers quick_reply/postback payloads as JSON STRINGS, so these
   // must be parsed BEFORE testing for `.referral` -- reading `.referral` off
@@ -493,7 +499,7 @@ function categorizeWhatsAppEvent(data) {
 
   // Interactive replies (button_reply / list_reply). The machine validates
   // choice answers against the field's option LABELS, so value = the reply
-  // title (the visible label); the reply id is kept as source_message_id.
+  // title (the visible label); the reply id's ref is kept as source_message_id.
   if (data.type === 'interactive' && data.interactive) {
     const reply = data.interactive.button_reply || data.interactive.list_reply || {}
     const label = reply.title || ''
@@ -503,7 +509,7 @@ function categorizeWhatsAppEvent(data) {
         type: 'user_interaction',
         value: label,
         label,
-        source_message_id: reply.id || '',
+        source_message_id: _payloadRef(reply.id),
         interaction_type: 'quick_reply'
       }
     }
@@ -518,7 +524,7 @@ function categorizeWhatsAppEvent(data) {
         type: 'user_interaction',
         value: label,
         label,
-        source_message_id: data.button.payload || '',
+        source_message_id: _payloadRef(data.button.payload),
         interaction_type: 'quick_reply'
       }
     }

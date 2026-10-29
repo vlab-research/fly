@@ -538,28 +538,38 @@ describe('categorizeWhatsAppEvent', () => {
   it('categorizes an interactive button_reply as user_interaction with the title as value', () => {
     const { event_type, payload } = categorizeWhatsAppEvent({
       type: 'interactive',
-      interactive: { type: 'button_reply', button_reply: { id: 'ref_a', title: 'Yes' } }
+      interactive: { type: 'button_reply', button_reply: { id: '{"ref":"consent","value":"1"}', title: 'Yes' } }
     })
     event_type.should.equal('user_interaction')
     payload.value.should.equal('Yes')
     payload.label.should.equal('Yes')
-    payload.source_message_id.should.equal('ref_a')
+    payload.source_message_id.should.equal('consent')
     payload.interaction_type.should.equal('quick_reply')
   })
 
   it('categorizes an interactive list_reply as user_interaction with the title as value', () => {
     const { payload } = categorizeWhatsAppEvent({
       type: 'interactive',
-      interactive: { type: 'list_reply', list_reply: { id: 'row_1', title: 'Blue', description: 'the colour' } }
+      interactive: { type: 'list_reply', list_reply: { id: '{"ref":"colour","value":"Blue"}', title: 'Blue', description: 'the colour' } }
     })
     payload.value.should.equal('Blue')
-    payload.source_message_id.should.equal('row_1')
+    payload.source_message_id.should.equal('colour')
+  })
+
+  it('carries no ref for a reply id that is a bare option value', () => {
+    const { payload } = categorizeWhatsAppEvent({
+      type: 'interactive',
+      interactive: { type: 'button_reply', button_reply: { id: '2', title: '2' } }
+    })
+    payload.value.should.equal('2')
+    payload.source_message_id.should.equal('')
   })
 
   it('categorizes a template button click (type button) as user_interaction', () => {
-    const { event_type, payload } = categorizeWhatsAppEvent({ type: 'button', button: { text: 'Confirm', payload: 'p1' } })
+    const { event_type, payload } = categorizeWhatsAppEvent({ type: 'button', button: { text: 'Confirm', payload: '{"ref":"remind","value":"Confirm"}' } })
     event_type.should.equal('user_interaction')
     payload.value.should.equal('Confirm')
+    payload.source_message_id.should.equal('remind')
   })
 
   it('categorizes a referral as conversation_started', () => {

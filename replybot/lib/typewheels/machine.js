@@ -1,7 +1,7 @@
 const util = require('util')
 const _ = require('lodash')
 const { getForm, getMetadata, _group } = require('./utils')
-const { validator, defaultMessage, followUpMessage, offMessage } = require('../generic-validator')
+const { validator, validateRef, invalidMessage, followUpMessage, offMessage } = require('../generic-validator')
 const { translateField, getField, getNextField, addCustomType, interpolateField } = require('./form')
 const { waitConditionFulfilled } = require('./waiting')
 
@@ -627,27 +627,18 @@ function exec(state, nxt) {
       }
     }
 
-    case 'POSTBACK': {
-      if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
-
-      if (state.state === 'START') {
-        return _blankStart(nxt)
-      }
-
-      return {
-        action: 'RESPOND',
-        response: nxt.payload.value,
-        responseValue: nxt.payload.value,
-        question: state.question
-      }
-    }
-
+    case 'POSTBACK':
     case 'QUICK_REPLY': {
       if (state.state === 'RESPONDING' || state.state === 'USER_BLOCKED' || _isHandoffWait(state)) return _noop()
 
       if (state.state === 'START') {
         return _blankStart(nxt)
       }
+
+      // A tap on an earlier question's button is not an answer to this one:
+      // record nothing and ask this question again.
+      const refCheck = validateRef(state.question, nxt.payload.source_message_id)
+      if (!refCheck.valid) return { ..._repeat(state), validation: refCheck }
 
       return {
         action: 'RESPOND',
@@ -1029,14 +1020,12 @@ function _response(
     return repeatResponse(question, followUpMessage(ctx.form.custom_messages))
   }
 
-  const { valid, message } = validation ||
+  const result = validation ||
     validator(addCustomType(interpolateField(ctx, qa, getField(ctx, question))),
       ctx.form.custom_messages)(response)
 
-  if (!valid) {
-
-    const msg = message || defaultMessage(ctx.form.custom_messages)
-    return repeatResponse(question, msg)
+  if (!result.valid) {
+    return repeatResponse(question, invalidMessage(result, ctx.form.custom_messages))
   }
 
   if (token) {

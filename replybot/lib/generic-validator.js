@@ -10,6 +10,10 @@ const defaultMessages = {
   'label.buttonHint.default': "Hello, we just wanted to send a friendly follow up. If you would like to stop the survey, just ignore this message and we won't bother you again.",
   'label.error.mustAccept': "We're sorry, but this survey is now over and closed.",
   'block.shortText.placeholder': "Sorry, I can't accept any responses now.",
+  // Typeform accepts only its own Messages keys, so the stale-tap message
+  // borrows one fly does not otherwise read (165 chars). See
+  // documentation/questions.md, "Messages keys".
+  'block.multipleChoice.hint': 'Sorry, that button was for an earlier question. Please answer this one:',
 }
 
 function _validationMessages(messages) {
@@ -26,6 +30,21 @@ function followUpMessage(messages) {
 
 function offMessage(messages) {
   return _validationMessages(messages)['label.error.mustAccept']
+}
+
+// The text for a failed validation. A validation made without the form (the
+// machine has none) names a Messages key, resolved here against the form's own.
+function invalidMessage({ message, messageKey }, messages) {
+  const m = _validationMessages(messages)
+  return message || (messageKey && m[messageKey]) || m['label.error.mustEnter']
+}
+
+// A button answers only the question it was sent with. Buttons stay tappable
+// after their question is answered (always, on WhatsApp). A tap with no ref
+// cannot be checked and passes.
+function validateRef(questionRef, tapRef) {
+  if (!tapRef || tapRef === questionRef) return { valid: true }
+  return { valid: false, messageKey: 'block.multipleChoice.hint' }
 }
 
 function _validateQuestion(r, validValues, messages) {
@@ -286,4 +305,4 @@ function parseNumber(str, locale = 'en-US') {
   return _parseNumber(str, locale)
 }
 
-module.exports = { validator, defaultMessage, followUpMessage, offMessage, parseNumber }
+module.exports = { validator, validateRef, invalidMessage, defaultMessage, followUpMessage, offMessage, parseNumber }

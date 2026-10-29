@@ -4,7 +4,10 @@ const should = chai.should()
 const fs = require('fs')
 const _ = require('lodash')
 const { parseLogJSON } = require('./utils')
-const { followUpMessage, offMessage } = require('../generic-validator')
+const { followUpMessage, offMessage, validateRef, invalidMessage } = require('../generic-validator')
+
+// The default text a tap from another question is answered with.
+const staleTapMessage = messages => invalidMessage(validateRef('current', 'earlier'), messages)
 const { _initialState, getMessage, exec, act, apply, getState, getCurrentForm, getWatermark, makeEventMetadata, categorizeEvent } = require('./machine')
 const form = JSON.parse(fs.readFileSync('mocks/sample.json'))
 const { echo, tyEcho, statementEcho, repeatEcho, delivery, read, qr, text, sticker, multipleChoice, referral, USER_ID, PAGE_ID, reaction, syntheticBail, syntheticPR, optin, payloadReferral, syntheticRedo, synthetic, handover, whatsappReferral, WA_USER_ID, WA_PHONE_NUMBER_ID } = require('./events.test')
@@ -1400,7 +1403,7 @@ describe('Machine', () => {
   })
 
 
-  it('Invalidates answers to short_text when a previous postback is sent', () => {
+  it('Re-asks the current question when a postback from a previous question is sent', () => {
     const form = {
       logic: [],
       fields: [{ type: 'legal', title: 'foo', ref: 'foo' },
@@ -1409,8 +1412,41 @@ describe('Machine', () => {
     }
 
     const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
-    const actions = getMessage(log, form, user)
-    actions.messages[0].metadata.repeat.should.be.true
+    getState(log).qa.should.deep.equal([['foo', true]])
+
+    const sent = getMessage(log, form, user).messages
+    sent.length.should.equal(2)
+    sent[0].text.should.equal(staleTapMessage({}))
+    sent[0].metadata.should.deep.equal({ repeat: true, ref: 'bar' })
+    sent[1].metadata.ref.should.equal('bar')
+  })
+
+  it('Sends the form\'s own stale-tap message when it sets one', () => {
+    const form = {
+      logic: [],
+      custom_messages: { 'block.multipleChoice.hint': 'Esa respuesta era para otra pregunta.' },
+      fields: [{ type: 'legal', title: 'foo', ref: 'foo' },
+      { type: 'short_text', title: 'bar', ref: 'bar' }]
+    }
+
+    const log = [referral, echo, multipleChoice, _echo('bar'), multipleChoice]
+    getMessage(log, form, user).messages[0].text.should.equal('Esa respuesta era para otra pregunta.')
+  })
+
+  it('Records a tap only when its ref is the current question, or it carries none', () => {
+    const state = getState([referral, echo])
+    state.state.should.equal('QOUT')
+    for (const base of [qr, multipleChoice]) {
+      const tap = ref => ({ ...base, payload: { ...base.payload, source_message_id: ref } })
+      exec(state, tap(state.question)).responseValue.should.equal(base.payload.value)
+      exec(state, tap('')).responseValue.should.equal(base.payload.value)
+
+      const stale = exec(state, tap('an_earlier_question'))
+      stale.action.should.equal('RESPOND')
+      stale.validation.should.deep.equal({ valid: false, messageKey: 'block.multipleChoice.hint' })
+      should.not.exist(stale.responseValue)
+      getState([referral, echo, tap('an_earlier_question')]).qa.should.deep.equal(state.qa)
+    }
   })
 
 
@@ -4439,10 +4475,15 @@ describe('a participant message during a timeout wait', () => {
       const log = () => [...waiting(), event]
       const afterEchoes = () => reply(waiting(), event, T2)
 
-      it('is answered with the responseMessage nudge, then the wait question again', () => {
+      // A tap carries the ref of the question whose button it was, never the
+      // wait's, so it is answered as a stale tap rather than with the nudge.
+      const isTap = event === messages['quick reply'] || event === messages.postback
+      const answer = isTap ? staleTapMessage({}) : 'Stay tuned!'
+
+      it(`is answered with "${answer}", then the wait question again`, () => {
         const sent = getMessage(log(), form, user).messages
         sent.length.should.equal(2)
-        sent[0].text.should.equal('Stay tuned!')
+        sent[0].text.should.equal(answer)
         sent[0].metadata.should.deep.equal({ repeat: true, ref: 'thanks' })
         sent[1].metadata.ref.should.equal('thanks')
         sent[1].metadata.isRepeat.should.be.true
