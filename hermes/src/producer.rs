@@ -28,7 +28,9 @@ impl KafkaProducer {
             // linger.ms. 1000 added ~1s to every event; 5 is librdkafka's default.
             .set("queue.buffering.max.ms", "5")
             .set("batch.num.messages", "1000000")
-            // Explicit murmur2_random to match librdkafka/Java default and node-rdkafka behavior
+            // Java's default, and NOT librdkafka's (consistent_random). message-worker
+            // also produces to chat-events and must set the same value, or one user's
+            // events split across partitions (message-worker/kafka.go).
             .set("partitioner", "murmur2_random")
             .create()?;
         Ok(KafkaProducer {

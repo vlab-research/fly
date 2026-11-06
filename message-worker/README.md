@@ -404,6 +404,18 @@ The topic is `KAFKA_EVENT_TOPIC` (`config.go`, default `chat-events`), wired to 
 `chatTopic` anchor in every values file — the same topic hermes ingests into and replybot
 consumes.
 
+### It must partition exactly as hermes does
+
+Both producers key by user id, but a key only picks a partition through the producer's hash.
+hermes sets `partitioner: murmur2_random`; librdkafka's default (`consistent_random`, CRC32)
+puts the same user id on a different partition. Before v0.1.32 message-worker used the
+default, so a WhatsApp participant's echoes were consumed by a different replybot instance
+than their inbound messages and delivery receipts. The two instances raced on the cached state
+in Redis. When a receipt's write overwrote an echo's, the participant stayed in `RESPONDING`
+and every reply they sent was ignored until dean's redo, 20–50 minutes later.
+`producerConfig` (`kafka.go`) sets the partitioner, and `kafka_partition_test.go` produces
+against librdkafka's mock cluster and checks each key lands on hermes' partition.
+
 ### Therefore: anything published here must stamp the envelope itself
 
 Every event body on `chat-events` carries top-level `account_id` and `platform`
