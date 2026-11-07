@@ -34,17 +34,21 @@ func (kp *KafkaProducer) WithStrictEnvelope(strict bool) *KafkaProducer {
 	return kp
 }
 
-// NewKafkaProducer creates a new Kafka event producer
-func NewKafkaProducer(brokers []string, topic string, logger *zap.Logger) (*KafkaProducer, error) {
-	config := &kafka.ConfigMap{
-		"bootstrap.servers": joinStrings(brokers, ","),
-		"acks":              "all",
-		"retries":           10,
+func producerConfig(brokers []string) *kafka.ConfigMap {
+	return &kafka.ConfigMap{
+		"bootstrap.servers":                     joinStrings(brokers, ","),
+		"acks":                                  "all",
+		"retries":                               10,
 		"max.in.flight.requests.per.connection": 5,
 		"compression.type":                      "snappy",
+		// Must match hermes, so a user's events share a partition.
+		"partitioner": "murmur2_random",
 	}
+}
 
-	producer, err := kafka.NewProducer(config)
+// NewKafkaProducer creates a new Kafka event producer
+func NewKafkaProducer(brokers []string, topic string, logger *zap.Logger) (*KafkaProducer, error) {
+	producer, err := kafka.NewProducer(producerConfig(brokers))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kafka producer: %w", err)
 	}

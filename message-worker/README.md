@@ -404,6 +404,12 @@ The topic is `KAFKA_EVENT_TOPIC` (`config.go`, default `chat-events`), wired to 
 `chatTopic` anchor in every values file — the same topic hermes ingests into and replybot
 consumes.
 
+### It must partition exactly as hermes does
+
+Both key by user id, and replybot needs all of a user's events on one partition, so both set
+`partitioner: murmur2_random` (librdkafka's default hashes differently).
+`kafka_partition_test.go` checks message-worker lands each key on hermes' partition.
+
 ### Therefore: anything published here must stamp the envelope itself
 
 Every event body on `chat-events` carries top-level `account_id` and `platform`

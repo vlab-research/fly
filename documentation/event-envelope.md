@@ -140,7 +140,10 @@ identifies the user by a global address, so this is the general case, not a What
 special case.
 
 The **Kafka key is unchanged** — it remains the user id, so a participant's events still
-partition together and stay ordered. Only the message body changed.
+partition together and stay ordered. Only the message body changed. That holds only if
+every producer to `chat-events` hashes the key the same way: hermes and message-worker
+both set librdkafka's `partitioner: murmur2_random` (see `message-worker/README.md`,
+"It must partition exactly as hermes does").
 
 ### `source` is not `platform`
 
