@@ -36,9 +36,9 @@ func (kp *KafkaProducer) WithStrictEnvelope(strict bool) *KafkaProducer {
 
 func producerConfig(brokers []string) *kafka.ConfigMap {
 	return &kafka.ConfigMap{
-		"bootstrap.servers": joinStrings(brokers, ","),
-		"acks":              "all",
-		"retries":           10,
+		"bootstrap.servers":                     joinStrings(brokers, ","),
+		"acks":                                  "all",
+		"retries":                               10,
 		"max.in.flight.requests.per.connection": 5,
 		"compression.type":                      "snappy",
 		// Must match hermes, so a user's events share a partition.
