@@ -34,15 +34,6 @@ func (kp *KafkaProducer) WithStrictEnvelope(strict bool) *KafkaProducer {
 	return kp
 }
 
-// producerConfig is the librdkafka configuration for the chat-events producer.
-//
-// "partitioner" must match hermes (hermes/src/producer.rs), the other producer
-// to chat-events. librdkafka's default is consistent_random (CRC32), which sends
-// the same user id to a different partition than hermes' murmur2_random. A
-// participant's echoes and their inbound messages and receipts would then be
-// consumed by different replybot instances, which race on the participant's
-// cached state: a lost echo update leaves them in RESPONDING, where every
-// reply they send is ignored.
 func producerConfig(brokers []string) *kafka.ConfigMap {
 	return &kafka.ConfigMap{
 		"bootstrap.servers": joinStrings(brokers, ","),
@@ -50,7 +41,8 @@ func producerConfig(brokers []string) *kafka.ConfigMap {
 		"retries":           10,
 		"max.in.flight.requests.per.connection": 5,
 		"compression.type":                      "snappy",
-		"partitioner":                           "murmur2_random",
+		// Must match hermes, so a user's events share a partition.
+		"partitioner": "murmur2_random",
 	}
 }
 

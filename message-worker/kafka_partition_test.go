@@ -11,12 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// message-worker and hermes both produce to chat-events keyed by user id, and
-// replybot relies on every event for one participant arriving on one
-// partition. These tests pin message-worker's partitioning to hermes': the Java
-// murmur2 hash that librdkafka's murmur2_random implements.
-
-// javaMurmur2 is Kafka's Utils.murmur2, written out independently of librdkafka.
+// javaMurmur2 is Kafka's Utils.murmur2, independent of librdkafka.
 func javaMurmur2(data []byte) int32 {
 	const (
 		seed uint32 = 0x9747b28c
@@ -73,8 +68,6 @@ func TestProducerConfigUsesHermesPartitioner(t *testing.T) {
 	}
 }
 
-// Produces through the real producer against librdkafka's in-process mock
-// cluster and checks every key lands where hermes would put it.
 func TestPublishLandsOnHermesPartition(t *testing.T) {
 	const topic = "chat-events"
 	const partitions = 48 // vlab-prod-chat-events
