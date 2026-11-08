@@ -27,7 +27,9 @@ commandsTopic: &commandstopic "vlab-staging-commands"
 # v0.0.82 -> v0.0.83: POST /api/v1/whatsapp/register and MCP
 # register_whatsapp_number register a verified number with the Cloud API,
 # keeping a generated two-step PIN as a whatsapp_registration_pin credential.
-versionDashboard: &vdashboard v0.0.83
+# v0.0.83 -> v0.0.84: the PIN insert conflicts on (userid, entity, key), the
+# only credentials unique index production has (#219).
+versionDashboard: &vdashboard v0.0.84
 versionBotserver: &vbotserver v0.0.12
 # Off the -wa scheme as of v0.0.5, following dean's precedent in 7c6658ff: the
 # suffix guards WhatsApp work from reaching production, and WhatsApp is in
