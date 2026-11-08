@@ -166,16 +166,17 @@ async function create ({entity, key, details, email}) {
 }
 
 /*
- * Insert unless a row for (entity, key) already exists, under any user, and
- * leave the existing row untouched. For values that must be written once and
- * never replaced, such as a WhatsApp number's registration PIN. Returns the new
- * row, or undefined if one already existed; read it back with `getOne`.
+ * Insert unless this user already has a row for (entity, key), and leave that
+ * row untouched. For values that must be written once and never replaced, such
+ * as a WhatsApp number's registration PIN. Returns the new row, or undefined if
+ * one already existed; read it back with `getOne`. The conflict target is
+ * unique_entity_key_per_user: production has no UNIQUE(entity, key).
  */
 async function createIfAbsent ({entity, key, details, email}) {
   const q = `
     INSERT INTO credentials (entity, key, details, userid)
     VALUES ($1, $2, $3, (SELECT id FROM users WHERE email = $4))
-    ON CONFLICT (entity, key) DO NOTHING
+    ON CONFLICT (userid, entity, key) DO NOTHING
     RETURNING *
   `
 
