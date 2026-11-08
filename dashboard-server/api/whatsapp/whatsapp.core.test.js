@@ -10,6 +10,10 @@ const {
   parsePhoneNumberIds,
   selectNumbers,
   shapeNumberHealth,
+  hasNotRegisteredError,
+  registrationNeeded,
+  generatePin,
+  parseRegisterResponse,
 } = require('./whatsapp.core');
 
 describe('whatsapp.core', () => {
@@ -210,6 +214,13 @@ describe('whatsapp.core', () => {
     });
   });
 
+  const UNREGISTERED = {
+    can_send_message: 'BLOCKED',
+    entities: [{ entity_type: 'PHONE_NUMBER', id: 'w1', can_send_message: 'BLOCKED',
+      errors: [{ error_code: 141000, error_description: 'not linked to your WhatsApp account',
+        possible_solution: 'Register and finish the OTP authentication process' }] }],
+  };
+
   describe('shapeNumberHealth', () => {
     const GRAPH = {
       id: 'w1',
@@ -239,8 +250,14 @@ describe('whatsapp.core', () => {
         throughput: { level: 'STANDARD' },
         name_status: 'APPROVED',
         status: 'CONNECTED',
+        hint: null,
         error: null,
       });
+    });
+
+    it('points an unregistered number (141000) at register_whatsapp_number', () => {
+      const shaped = shapeNumberHealth('w1', { status: 'PENDING', health_status: UNREGISTERED });
+      shaped.hint.should.include('141000').and.include('register_whatsapp_number');
     });
 
     it('keeps a Graph error on the number', () => {
@@ -251,6 +268,66 @@ describe('whatsapp.core', () => {
 
     it('treats an empty body as an error', () => {
       shapeNumberHealth('w1', null).error.message.should.include('Empty');
+    });
+  });
+
+  describe('hasNotRegisteredError', () => {
+    it('finds 141000 on any entity and ignores other codes', () => {
+      hasNotRegisteredError(UNREGISTERED).should.equal(true);
+      hasNotRegisteredError({ entities: [{ errors: [{ error_code: 138024 }] }] }).should.equal(false);
+      hasNotRegisteredError(null).should.equal(false);
+      hasNotRegisteredError({ can_send_message: 'AVAILABLE' }).should.equal(false);
+    });
+  });
+
+  describe('registrationNeeded', () => {
+    const health = over => ({ status: 'CONNECTED', health_status: null, error: null, ...over });
+
+    it('leaves a CONNECTED number alone', () => {
+      registrationNeeded(health()).should.equal(false);
+    });
+
+    it('registers a PENDING number, or any number Meta reports as 141000', () => {
+      registrationNeeded(health({ status: 'PENDING' })).should.equal(true);
+      registrationNeeded(health({ health_status: UNREGISTERED })).should.equal(true);
+    });
+
+    it('decides nothing when the health read failed', () => {
+      registrationNeeded(health({ status: null, error: { code: 190, message: 'expired' } })).should.equal(false);
+    });
+  });
+
+  describe('generatePin', () => {
+    it('is six digits, keeping leading zeros', () => {
+      generatePin(() => 42).should.equal('000042');
+      generatePin(() => 999999).should.equal('999999');
+    });
+
+    it('asks for an integer in [0, 1000000)', () => {
+      let range;
+      generatePin((min, max) => { range = [min, max]; return 0; });
+      range.should.deep.equal([0, 1000000]);
+    });
+  });
+
+  describe('parseRegisterResponse', () => {
+    it('accepts { success: true }', () => {
+      parseRegisterResponse({ success: true }, '123456').should.deep.equal({ ok: true });
+    });
+
+    it('keeps Meta\'s code and message', () => {
+      parseRegisterResponse({ error: { code: 133005, message: 'Two step verification PIN Mismatch', fbtrace_id: 'x' } }, '123456')
+        .should.deep.equal({ ok: false, error: { code: 133005, message: 'Two step verification PIN Mismatch' } });
+    });
+
+    it('scrubs the PIN if Meta echoes it', () => {
+      parseRegisterResponse({ error: { code: 100, message: 'pin 123456 invalid' } }, '123456')
+        .error.message.should.equal('pin REDACTED invalid');
+    });
+
+    it('rejects an empty or non-success response', () => {
+      parseRegisterResponse(null, '1').error.message.should.include('Empty');
+      parseRegisterResponse({ success: false }, '1').ok.should.equal(false);
     });
   });
 });

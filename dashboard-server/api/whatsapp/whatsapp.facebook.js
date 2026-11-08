@@ -67,4 +67,24 @@ async function facebookNumberHealth(phoneNumberId, accessToken) {
   }
 }
 
-module.exports = { facebookExchangeCode, facebookSubscribeWaba, facebookNumberHealth };
+/**
+ * Registers a phone number with the WhatsApp Cloud API. The PIN becomes the
+ * number's two-step verification PIN if none is set, and must match it if one is.
+ *
+ * @param {string} phoneNumberId
+ * @param {string} pin - six digits
+ * @param {string} accessToken - the number's stored whatsapp_business token
+ * @returns {Promise<Object>} - Graph's JSON, { success: true } or { error: {...} }
+ */
+async function facebookRegisterNumber(phoneNumberId, pin, accessToken) {
+  const params = new URLSearchParams({ access_token: accessToken });
+  const url = `${fb.url}/${encodeURIComponent(phoneNumberId)}/register?${params.toString()}`;
+  try {
+    return await r2.post(url, { json: { messaging_product: 'whatsapp', pin } }).json;
+  } catch (err) {
+    const safeMsg = (err.message || '').replace(/access_token=[^&\s]+/g, 'access_token=REDACTED');
+    throw new Error(safeMsg);
+  }
+}
+
+module.exports = { facebookExchangeCode, facebookSubscribeWaba, facebookNumberHealth, facebookRegisterNumber };

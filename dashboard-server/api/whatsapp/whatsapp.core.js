@@ -106,6 +106,19 @@ function selectNumbers(rows, requested) {
   };
 }
 
+// Meta's health error for a number that passed OTP verification but was never
+// registered with the Cloud API; every send fails until it is.
+const NOT_REGISTERED_ERROR = 141000;
+
+const NOT_REGISTERED_HINT =
+  'Error 141000: this number is not registered with the WhatsApp Cloud API. Register it with ' +
+  'the register_whatsapp_number MCP tool or POST /api/v1/whatsapp/register.';
+
+function hasNotRegisteredError(healthStatus) {
+  const entities = (healthStatus && Array.isArray(healthStatus.entities)) ? healthStatus.entities : [];
+  return entities.some(e => Array.isArray(e.errors) && e.errors.some(err => err.error_code === NOT_REGISTERED_ERROR));
+}
+
 /**
  * Shapes Graph's answer for one phone number. Every field is named, so nothing
  * Meta adds later passes through unseen; a Graph error is kept per number so
@@ -120,9 +133,50 @@ function shapeNumberHealth(phoneNumberId, body) {
   return {
     phone_number_id: phoneNumberId,
     ...Object.fromEntries(HEALTH_FIELDS.map(k => [k, pick(k)])),
+    hint: hasNotRegisteredError(b.health_status) ? NOT_REGISTERED_HINT : null,
     error: b.error
       ? { code: b.error.code || null, message: b.error.message || null }
       : body ? null : { code: null, message: 'Empty response from Facebook' },
+  };
+}
+
+/**
+ * Whether a number needs POST /{id}/register. A CONNECTED number without the
+ * 141000 error is left alone: Meta rate-limits registration per number, and
+ * re-registering a live number buys nothing. An unreadable health answer
+ * decides nothing, because the token that failed it would fail registration too.
+ *
+ * @param {Object} health - shapeNumberHealth's output
+ */
+function registrationNeeded(health) {
+  if (health.error) return false;
+  return health.status !== 'CONNECTED' || hasNotRegisteredError(health.health_status);
+}
+
+/**
+ * A six-digit two-step verification PIN, leading zeros kept.
+ *
+ * @param {Function} randomInt - (min, max) => integer in [min, max); crypto.randomInt in production
+ */
+function generatePin(randomInt) {
+  return String(randomInt(0, 1000000)).padStart(6, '0');
+}
+
+/**
+ * Parses Meta's answer to POST /{phone_number_id}/register, whose success
+ * shape is { success: true }. The PIN is scrubbed from Meta's message in case
+ * it is ever echoed back.
+ *
+ * @returns {{ ok: true } | { ok: false, error: { code, message } }}
+ */
+function parseRegisterResponse(fbResponse, pin) {
+  if (fbResponse && fbResponse.success === true) return { ok: true };
+  const e = (fbResponse && fbResponse.error) || {};
+  const message = e.message
+    || (fbResponse ? 'Registration did not report success' : 'Empty response from Facebook');
+  return {
+    ok: false,
+    error: { code: e.code || null, message: pin ? message.split(pin).join('REDACTED') : message },
   };
 }
 
@@ -134,4 +188,8 @@ module.exports = {
   parsePhoneNumberIds,
   selectNumbers,
   shapeNumberHealth,
+  hasNotRegisteredError,
+  registrationNeeded,
+  generatePin,
+  parseRegisterResponse,
 };

@@ -73,6 +73,7 @@ function makeService(overrides = {}) {
     // accounts
     listMessagingAccounts: record('listMessagingAccounts'),
     numberHealth: record('numberHealth'),
+    registerNumber: record('registerNumber'),
     listTypeformForms: record('listTypeformForms'),
     '@noCallThru': true,
   };
@@ -1211,6 +1212,73 @@ describe('mcp.tools: get_whatsapp_health', () => {
     const out = await runTool('get_whatsapp_health', {}, { ...CONTEXT, scopes: ['surveys:read'] });
 
     expect(out.isError).to.equal(true);
+    expect(calls).to.have.lengthOf(0);
+  });
+});
+
+describe('mcp.tools: register_whatsapp_number', () => {
+  const NUMBER = { phone_number_id: 'w1', status: 'CONNECTED', error: null };
+
+  it('registers the named number for the caller and returns the new health', async () => {
+    const { runTool, calls } = loadTools({
+      registerNumber: async () => ({ ok: true, registration: 'registered', registration_error: null, number: NUMBER }),
+    });
+    const out = await runTool('register_whatsapp_number', { phone_number_id: 'w1' }, CONTEXT);
+
+    expect(out.isError).to.not.equal(true);
+    expect(calls[0].args).to.eql({ email: CONTEXT.email, phoneNumberId: 'w1' });
+    expect(payloadOf(out)).to.eql({ registration: 'registered', number: NUMBER });
+  });
+
+  it('reports an already registered number as a success', async () => {
+    const { runTool } = loadTools({
+      registerNumber: async () => ({ ok: true, registration: 'already_registered', registration_error: null, number: NUMBER }),
+    });
+    const out = await runTool('register_whatsapp_number', { phone_number_id: 'w1' }, CONTEXT);
+
+    expect(out.isError).to.not.equal(true);
+    expect(payloadOf(out).registration).to.equal('already_registered');
+  });
+
+  it('is a tool error carrying Meta\'s reason and the health when registration fails', async () => {
+    const { runTool } = loadTools({
+      registerNumber: async () => ({
+        ok: true,
+        registration: 'failed',
+        registration_error: { code: 133005, message: 'Two step verification PIN Mismatch' },
+        number: { ...NUMBER, status: 'PENDING' },
+      }),
+    });
+    const out = await runTool('register_whatsapp_number', { phone_number_id: 'w1' }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.include('PIN Mismatch').and.include('133005').and.include('PENDING');
+  });
+
+  it('answers an id that is not the caller\'s with the ones that are', async () => {
+    const { runTool } = loadTools({
+      registerNumber: async () => ({ ok: false, error: 'No WhatsApp number connected to your account with phone_number_id w9', known: ['w1'] }),
+    });
+    const out = await runTool('register_whatsapp_number', { phone_number_id: 'w9' }, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.include('Your WhatsApp numbers: w1');
+  });
+
+  it('requires phone_number_id', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('register_whatsapp_number', {}, CONTEXT);
+
+    expect(out.isError).to.equal(true);
+    expect(calls).to.have.lengthOf(0);
+  });
+
+  it('needs credentials:write; credentials:read is not enough', async () => {
+    const { runTool, calls } = loadTools();
+    const out = await runTool('register_whatsapp_number', { phone_number_id: 'w1' }, { ...CONTEXT, scopes: ['credentials:read'] });
+
+    expect(out.isError).to.equal(true);
+    expect(textOf(out)).to.include('credentials:write');
     expect(calls).to.have.lengthOf(0);
   });
 });

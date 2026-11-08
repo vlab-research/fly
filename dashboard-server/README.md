@@ -215,7 +215,7 @@ pre-filter so the lateral version-resolution join does not scan the whole
 | `/credentials` | Credential management. **Messaging entities dual-write the account registry — see "Credentials and the messaging account registry"** |
 | `/facebook` | Facebook integration |
 | `/auth` | API key minting (`POST /auth/api-token`) and revocation (`DELETE /auth/api-token?name=`); see "Authentication" |
-| `/mcp` | MCP server — `POST` only, Streamable HTTP, twenty-eight tools (five survey, five monitoring, three data, four template, two media, seven bail, two account). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
+| `/mcp` | MCP server — `POST` only, Streamable HTTP, thirty tools (five survey, five monitoring, three data, four template, two media, seven bail, four account). Authorization is **delegated** to `TOOL_SCOPES`; see "MCP server" below |
 | `/users/:userId/bails` | User-scoped bail-out system management (list, create, get, update, delete, preview); access controlled via `validateUserAccess` middleware. Bail definitions are JSON objects with `type` (default `"conditions"`), a condition tree or user list, execution timing, action, and optional destination form. See `documentation/bail-systems.md` §4–5 for the complete grammar: condition types (form, state, error_code, current_question, elapsed_time, question_response, surveyid), logical operators (and, or, not), and user list structure. |
 | `/users/:userId/bail-events` | All bail events for a user. Both bail routes are also the seven bail MCP tools, which resolve the user id from the caller's email instead of taking it in the path. See "Bail systems" below for what this server does and does not decide about a bail |
 | `/surveys/:surveyName/states` | Participant state monitoring (summary, list, detail) |
@@ -251,6 +251,11 @@ connect flows go through it — `dashboard-client` `FacebookPages.js` and
 `WhatsAppEmbedded.js` each POST `entity` themselves — so there is no separate
 "connect" endpoint distinct from a generic one, which is worth knowing before adding
 entity-specific behaviour here.
+
+Embedded Signup verifies a WhatsApp number but does not register it with the Cloud
+API; `POST /whatsapp/register` (MCP `register_whatsapp_number`) does, storing the
+number's two-step PIN as a `whatsapp_registration_pin` credential that `GET
+/credentials` never returns. See `documentation/agent-api.md` §6.
 
 A messaging credential's `key` **is** the platform account id (`facebook_page` →
 page id, `whatsapp_business` → phone_number_id), and those ids are globally unique

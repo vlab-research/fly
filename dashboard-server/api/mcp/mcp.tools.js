@@ -67,12 +67,16 @@ const TOOL_SCOPES = {
   list_bail_events: 'users:read',
 
 
-  // accounts. Reads only: no tool writes a credential or mints an API key —
-  // those stay in the dashboard, where a human does them (plan section 8).
+  // accounts. No tool writes a credential or mints an API key — those stay in
+  // the dashboard, where a human does them (plan section 8).
+  // register_whatsapp_number stores a PIN for a number the caller already
+  // connected, but never a token; it is credentials:write because REST derives
+  // that from POST /whatsapp/register.
   // list_typeform_forms is surveys:read because /typeform maps to `surveys`,
   // for the reason ROUTE_RESOURCES gives.
   list_messaging_accounts: 'credentials:read',
   get_whatsapp_health: 'credentials:read',
+  register_whatsapp_number: 'credentials:write',
   list_typeform_forms: 'surveys:read',
 };
 
@@ -543,6 +547,22 @@ const TOOL_HANDLERS = {
       return toolError(`${result.error}. Your WhatsApp numbers: ${result.known.join(', ') || 'none'}.`);
     }
     return toolResult({ count: result.numbers.length, items: result.numbers });
+  },
+
+  async register_whatsapp_number(args, { email }) {
+    const result = await service.registerNumber({ email, phoneNumberId: args.phone_number_id });
+    if (!result.ok) {
+      return toolError(`${result.error}. Your WhatsApp numbers: ${result.known.join(', ') || 'none'}.`);
+    }
+    const { registration, registration_error, number } = result;
+    if (registration_error) {
+      return toolError(
+        `Registration ${registration}: ${registration_error.message}` +
+          `${registration_error.code ? ` (code ${registration_error.code})` : ''}. ` +
+          `Current health: ${JSON.stringify(number)}`,
+      );
+    }
+    return toolResult({ registration, number });
   },
 
   async list_typeform_forms(args, { email }) {

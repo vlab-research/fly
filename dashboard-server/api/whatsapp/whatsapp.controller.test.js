@@ -26,6 +26,7 @@ describe('whatsapp.controller (makeHandlers)', () => {
       facebookClient: overrides.facebookClient || defaultFacebookClient,
       subscribeClient: overrides.subscribeClient || defaultSubscribeClient,
       numberHealth: overrides.numberHealth,
+      registerNumber: overrides.registerNumber,
     });
   }
 
@@ -227,6 +228,83 @@ describe('whatsapp.controller (makeHandlers)', () => {
       const handlers = makeTestHandlers({ numberHealth: async () => { throw new Error('Network error'); } });
       const res = mockRes();
       await handlers.getNumberHealth(req, res);
+      res.statusCode.should.equal(500);
+    });
+  });
+
+  // -------------------------------------------------------
+  // postRegisterNumber
+  // -------------------------------------------------------
+  describe('postRegisterNumber', () => {
+    const req = { user: { email: 'test@vlab.com' }, body: { phone_number_id: ' w1 ' } };
+    const NUMBER = { phone_number_id: 'w1', status: 'CONNECTED', error: null };
+
+    it('registers the caller\'s number and returns the registration and new health', async () => {
+      let captured;
+      const handlers = makeTestHandlers({
+        registerNumber: async args => {
+          captured = args;
+          return { ok: true, registration: 'registered', registration_error: null, number: NUMBER };
+        },
+      });
+      const res = mockRes();
+      await handlers.postRegisterNumber(req, res);
+      captured.should.deep.equal({ email: 'test@vlab.com', phoneNumberId: 'w1' });
+      res.statusCode.should.equal(200);
+      res.body.should.deep.equal({ registration: 'registered', registration_error: null, number: NUMBER });
+    });
+
+    it('answers an already registered number with 200', async () => {
+      const handlers = makeTestHandlers({
+        registerNumber: async () => ({ ok: true, registration: 'already_registered', registration_error: null, number: NUMBER }),
+      });
+      const res = mockRes();
+      await handlers.postRegisterNumber(req, res);
+      res.statusCode.should.equal(200);
+      res.body.registration.should.equal('already_registered');
+    });
+
+    it('returns 400 without a phone_number_id and registers nothing', async () => {
+      let called = false;
+      const handlers = makeTestHandlers({ registerNumber: async () => { called = true; } });
+      const res = mockRes();
+      await handlers.postRegisterNumber({ user: req.user, body: {} }, res);
+      res.statusCode.should.equal(400);
+      called.should.equal(false);
+    });
+
+    it('returns 404 with the caller\'s numbers for one they do not own', async () => {
+      const handlers = makeTestHandlers({
+        registerNumber: async () => ({ ok: false, error: 'No WhatsApp number ... w9', known: ['w1'] }),
+      });
+      const res = mockRes();
+      await handlers.postRegisterNumber(req, res);
+      res.statusCode.should.equal(404);
+      res.body.known.should.deep.equal(['w1']);
+    });
+
+    it('returns 502 with Meta\'s reason and the health when registration fails', async () => {
+      const error = { code: 133005, message: 'Two step verification PIN Mismatch' };
+      const handlers = makeTestHandlers({
+        registerNumber: async () => ({ ok: true, registration: 'failed', registration_error: error, number: NUMBER }),
+      });
+      const res = mockRes();
+      await handlers.postRegisterNumber(req, res);
+      res.statusCode.should.equal(502);
+      res.body.registration_error.should.deep.equal(error);
+      res.body.number.should.deep.equal(NUMBER);
+    });
+
+    it('returns 500 when registration throws', async () => {
+      const handlers = makeTestHandlers({ registerNumber: async () => { throw new Error('Network error'); } });
+      const res = mockRes();
+      const originalError = console.error;
+      console.error = () => {};
+      try {
+        await handlers.postRegisterNumber(req, res);
+      } finally {
+        console.error = originalError;
+      }
       res.statusCode.should.equal(500);
     });
   });
