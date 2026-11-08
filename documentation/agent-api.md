@@ -444,6 +444,7 @@ Credentials are **append-mostly**: readers everywhere take the newest row per
 | `whatsapp_business` | the **phone_number_id** | `{ id, waba_id, access_token }`. `details.display_phone_number` is read by the dashboard if present, so it is written by some path | `dashboard-client/.../WhatsAppEmbedded.js`, `Accounts.js` |
 | `reloadly` | your own label, referenced as `payment.key` in a field | `{ id, secret }` | `dashboard-client/.../Reloadly.js`, `dinersclub/reloadly.go` |
 | `secrets` | the variable name used in `<< ... >>` templating | `{ value: "<string>" }` | `dashboard-client/.../Secrets.js`, `dinersclub/http_provider.go` |
+| `whatsapp_registration_pin` | the **phone_number_id** | `{ pin }`: the six-digit two-step verification PIN `POST /whatsapp/register` created for that number. Never returned: `GET /credentials` leaves this entity out | `api/whatsapp/whatsapp.deps.js` |
 | `api_token` | the token name | `{ name, jti, issued_at, expires_at }`, plus `scopes` when the key is scoped. Legacy rows hold only `{ name }`. **This row is the API key** — deleting it revokes the token | `dashboard-server/utils/auth/auth.util.js`, `api/auth/auth.core.js` |
 
 `dingconnect` appears as a payment *provider* but deliberately has **no
@@ -506,8 +507,48 @@ with each number's stored `whatsapp_business` token. Needs `credentials:read`
 - Every call is a live Graph read. `quality_rating` reflects days of blocks and
   reports and a single read can flicker (`UNKNOWN` for a moment): confirm a
   change with a second read before acting on it.
+- `hint` is `null` unless an entity carries error `141000`, the number passed OTP
+  verification but was never registered with the Cloud API. It then points to
+  `POST /whatsapp/register`.
 
 The MCP tool is `get_whatsapp_health` (§9, "Account tools").
+
+### Registering a WhatsApp number: `POST /api/v1/whatsapp/register`
+
+Embedded Signup verifies a number (OTP) but does not register it with the Cloud
+API. Until it is registered the number stays `status: PENDING`, health shows
+`can_send_message: BLOCKED` with error `141000`, and every send and media upload
+fails with `(#133010) Account not registered`. This calls Meta's
+`POST /{phone_number_id}/register` with the number's stored token. Needs
+`credentials:write`.
+
+    POST /api/v1/whatsapp/register   {"phone_number_id": "1368266703029944"}
+
+It reads health first and registers only a number that is not `CONNECTED` or
+shows `141000`, so repeating it is safe and spends none of Meta's per-number
+registration limit. Registration needs a six-digit two-step verification PIN:
+Fly generates one with `crypto.randomInt` the first time, stores it as the
+number's `whatsapp_registration_pin` credential, and reuses it after that. The
+PIN is never returned or logged. The credential is stored as the number's access
+token is, in plain `credentials.details`: Fly has no application-level
+encryption for credentials.
+
+The answer is `{registration, registration_error, number}`, `number` being the
+health read *after* the attempt, in the `GET /whatsapp/health` shape:
+
+| `registration` | Status | Meaning |
+|---|---|---|
+| `registered` | `200` | Meta accepted the registration |
+| `already_registered` | `200` | `CONNECTED` and no `141000`; nothing was sent to Meta |
+| `failed` | `502` | Meta refused; its `{code, message}` is in `registration_error` |
+| `health_unreadable` | `502` | the first health read failed (usually the token), so nothing was attempted |
+
+A number that already has a two-step PIN set outside Fly fails with Meta's PIN
+mismatch error: turn two-step verification off in WhatsApp Manager and call
+this again, and Fly's PIN becomes the number's PIN. A `phone_number_id` that is
+not yours is a `404` `{error, known}`, as for health.
+
+The MCP tool is `register_whatsapp_number` (§9, "Account tools").
 
 ---
 
@@ -675,6 +716,7 @@ see it. **The scope is enforced per tool instead** (`TOOL_SCOPES` in
 | `list_bail_events` | `users:read` |
 | `list_messaging_accounts` | `credentials:read` |
 | `get_whatsapp_health` | `credentials:read` |
+| `register_whatsapp_number` | `credentials:write` |
 | `list_typeform_forms` | `surveys:read` |
 
 The rule behind the table: a tool needs exactly the scope the REST route it
@@ -950,7 +992,8 @@ failure is invisible from the outside, so it is refused before the write.
 
 ### Account tools
 
-Two lists of identifiers other tools take, and the WhatsApp numbers' health.
+Two lists of identifiers other tools take, and the WhatsApp numbers' health
+and registration.
 
 **`list_messaging_accounts()`** — the connected Messenger pages and WhatsApp
 business numbers, as `{entity, account_id, name, created}`. `account_id` is what
@@ -966,6 +1009,11 @@ as `{count, items}`, one item per number in the REST shape. Omit
 tool error naming the ones that are. The pure shaping is
 `api/whatsapp/whatsapp.core.js#shapeNumberHealth`, which names every field it
 returns.
+
+**`register_whatsapp_number({phone_number_id})`** — `POST /whatsapp/register`
+(§6) as `{registration, number}`. `failed` and `health_unreadable` are tool
+errors carrying Meta's reason and the number's health. It stores a PIN, never a
+token, which is why it is the one account tool that writes.
 
 **`list_typeform_forms()`** — `GET /typeform/form` shaped down to
 `{formid, title, last_updated_at}` per form, which is what `create_survey`

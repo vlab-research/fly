@@ -404,6 +404,12 @@ Dashboard frontend: POST /api/v1/credentials
 credentials table (same schema as Track A)
        │
        ▼
+Number not yet registered with the Cloud API (status PENDING, health error 141000)?
+       │
+       ├─ POST /api/v1/whatsapp/register, or MCP register_whatsapp_number
+       │  (documentation/agent-api.md §6)
+       │
+       ▼
 Researcher creates survey in dashboard
        │
        └─ (Survey start flow identical to Track A)

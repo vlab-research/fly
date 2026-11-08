@@ -45,7 +45,7 @@ const media = mediaService.makeService(require('../media/media.deps'));
 const bails = require('../bails/bails.service');
 const credentials = require('../credentials/credential.service');
 const typeform = require('../typeform/typeform.service');
-const { numberHealth } = require('../whatsapp/whatsapp.deps');
+const { numberHealth, registerNumber } = require('../whatsapp/whatsapp.deps');
 
 /*
  * Author a form in the researcher's own Typeform account.
@@ -137,5 +137,6 @@ module.exports = {
   // accounts (api/credentials, api/whatsapp, api/typeform)
   listMessagingAccounts: credentials.listMessagingAccounts,
   numberHealth,
+  registerNumber,
   listTypeformForms: typeform.listForms,
 };

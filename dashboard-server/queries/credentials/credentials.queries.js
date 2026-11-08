@@ -1,9 +1,12 @@
+// Serves GET /credentials, which returns `details` to the browser. A WhatsApp
+// registration PIN is only ever read server-side (api/whatsapp/whatsapp.deps.js).
 async function get ({email}) {
    const q = `
      WITH t AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY entity, key ORDER BY created DESC) AS n
                 FROM credentials
                 JOIN users ON userid=id
-                WHERE email = $1)
+                WHERE email = $1
+                AND entity <> 'whatsapp_registration_pin')
      SELECT entity, key, details, created
      FROM t
      WHERE n = 1
@@ -162,11 +165,29 @@ async function create ({entity, key, details, email}) {
   return rows[0]
 }
 
+/*
+ * Insert unless a row for (entity, key) already exists, under any user, and
+ * leave the existing row untouched. For values that must be written once and
+ * never replaced, such as a WhatsApp number's registration PIN. Returns the new
+ * row, or undefined if one already existed; read it back with `getOne`.
+ */
+async function createIfAbsent ({entity, key, details, email}) {
+  const q = `
+    INSERT INTO credentials (entity, key, details, userid)
+    VALUES ($1, $2, $3, (SELECT id FROM users WHERE email = $4))
+    ON CONFLICT (entity, key) DO NOTHING
+    RETURNING *
+  `
+
+  const {rows} = await this.query(q, [entity, key, details, email])
+  return rows[0]
+}
 
 module.exports = {
   name: 'Credential',
   queries: pool => ({
     create: create.bind(pool),
+    createIfAbsent: createIfAbsent.bind(pool),
     update: update.bind(pool),
     get: get.bind(pool),
     getOne: getOne.bind(pool),

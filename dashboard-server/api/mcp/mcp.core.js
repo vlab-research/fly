@@ -82,7 +82,8 @@ const ACCOUNTS_NOTE = [
   'ACCOUNTS. list_messaging_accounts gives the account_id the message-template',
   'tools take; list_typeform_forms gives the formid create_survey takes;',
   'get_whatsapp_health reads a WhatsApp number\'s quality rating and sending',
-  'status live from Meta.',
+  'status live from Meta; register_whatsapp_number registers a verified number',
+  'with the Cloud API so it can send.',
   'Connecting either account is a browser login and cannot be done from here.',
   'Nothing in this server returns an access token, and nothing writes a',
   'credential or an API key — do those in the dashboard.',
@@ -1808,6 +1809,9 @@ const ACCOUNT_TOOLS = [
       'Each read calls Meta, so a single read can flicker (UNKNOWN for a moment); confirm',
       'a change with a second read before acting on it. A number whose read fails has',
       '`error` set and its other fields null. Access tokens are never returned.',
+      '',
+      'Error 141000 in health_status means the number is not registered with the Cloud',
+      'API; `hint` then says so, and register_whatsapp_number fixes it.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -1819,6 +1823,43 @@ const ACCOUNT_TOOLS = [
           description:
             'Optional: only these numbers (account_id of a whatsapp_business row in ' +
             'list_messaging_accounts). Omit for all your WhatsApp numbers.',
+        },
+      },
+    },
+  },
+
+  {
+    name: 'register_whatsapp_number',
+    description: [
+      'Register one of your WhatsApp numbers with the WhatsApp Cloud API, then read its',
+      'health again and return it. Use it when get_whatsapp_health shows error 141000, or',
+      'status PENDING after the number passed OTP verification: until a number is',
+      'registered, every send and media upload fails with "(#133010) Account not',
+      'registered".',
+      '',
+      'Safe to repeat. A number that is already CONNECTED is not registered again',
+      '(`registration: already_registered`). Fly creates the number\'s two-step',
+      'verification PIN on the first registration and reuses it on every later one; the',
+      'PIN is never returned. If the number already has a two-step PIN set outside Fly,',
+      'Meta refuses with a PIN mismatch: turn two-step verification off in WhatsApp',
+      'Manager and run this again.',
+      '',
+      '`registration` is registered, already_registered, failed (Meta\'s reason in',
+      '`registration_error`) or health_unreadable (the health read itself failed, so',
+      'nothing was attempted). The new status can take a moment to show; confirm with',
+      'get_whatsapp_health.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['phone_number_id'],
+      properties: {
+        phone_number_id: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'The number to register: account_id of a whatsapp_business row in ' +
+            'list_messaging_accounts.',
         },
       },
     },

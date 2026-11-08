@@ -111,7 +111,12 @@ const TOOL_NAMES = {
     'list_bail_events',
   ],
   TICKET_TOOLS: [],
-  ACCOUNT_TOOLS: ['list_messaging_accounts', 'get_whatsapp_health', 'list_typeform_forms'],
+  ACCOUNT_TOOLS: [
+    'list_messaging_accounts',
+    'get_whatsapp_health',
+    'register_whatsapp_number',
+    'list_typeform_forms',
+  ],
 };
 
 const AREAS = {
