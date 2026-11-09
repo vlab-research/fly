@@ -240,7 +240,8 @@ versionExodus: &vexodus v0.2.9
 #   "Choose". Pairs with replybot v0.0.224.
 # v0.1.31: WhatsApp button and list-row ids carry {value, ref} (VIR-113).
 # v0.1.32: chat-events partitioner matches hermes (murmur2_random).
-versionMessageWorker: &vmessageworker v0.1.32
+# v0.1.33: WhatsApp list rows show the text of two-digit options (VIR-118).
+versionMessageWorker: &vmessageworker v0.1.33
 versionMediaProxy: &vmediaproxy v0.0.1
 # One-shot, not a service: the Phase 1.5 messages backfill
 # (planning/backfill-in-cluster-job.md). Kept here anyway so its image is
