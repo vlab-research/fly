@@ -573,6 +573,24 @@ func TestTranslateWhatsAppListDescriptions(t *testing.T) {
 			wantDesc: []string{"", "", "", ""},
 		},
 		{
+			// Option codes run past one digit, so "10" has to parse as a code
+			// rather than being dropped from the map.
+			name: "recovers the text of a two-digit option code",
+			cmd: listCmd("Which party do you feel closest to?\n\n"+
+				"1. One\n2. Two\n3. Three\n4. Four\n5. Five\n6. Six\n7. Seven\n"+
+				"8. Eight\n9. Nine\n10. Prefer not to say",
+				func() []types.Option {
+					opts := make([]types.Option, 10)
+					for i := range opts {
+						code := fmt.Sprint(i + 1)
+						opts[i] = types.Option{Value: json.RawMessage(`"` + code + `"`), Label: code}
+					}
+					return opts
+				}()),
+			wantDesc: []string{"One", "Two", "Three", "Four", "Five", "Six", "Seven",
+				"Eight", "Nine", "Prefer not to say"},
+		},
+		{
 			// An explicit description from the form wins over the derived one.
 			name: "prefers an explicit description",
 			cmd: listCmd("Where?\n\nA. Cafe\nB. Fast food\nC. Stall\nD. Canteen",
