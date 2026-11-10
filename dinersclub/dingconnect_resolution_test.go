@@ -356,7 +356,7 @@ func TestDingResolutionFailuresMapToResultCodes(t *testing.T) {
 			lookup:   "",
 			details: `{"account_number":"5491112345678","distributor_ref":"ar_p1",
 				"amount":1000,"amount_currency":"ARS","tolerance":200}`,
-			wantCode: codeCouldNotDetectOperator,
+			wantCode: codeOperatorNotDetermined,
 			wantMsg:  "could not determine the operator",
 		},
 		{
@@ -480,7 +480,7 @@ func TestDingResolutionReasonIsItsOwnField(t *testing.T) {
 			details: `{"account_number":"5491112345678","distributor_ref":"ar_p1",
 				"amount":1000,"amount_currency":"ARS","tolerance":200}`,
 			wantReason: "OperatorNotDetermined",
-			wantCode:   codeCouldNotDetectOperator,
+			wantCode:   codeOperatorNotDetermined,
 		},
 		{
 			name: "ImpossibleAmount",

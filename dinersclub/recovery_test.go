@@ -291,3 +291,62 @@ func TestProviderWithNoResultIsAFaultNotAVerdict(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, int32(0), atomic.LoadInt32(&received))
 }
+
+// preAuthedDingConnect wires a stub-API DingConnectProvider into Process.
+//
+// Job resolves the user and the credential through the provider before paying.
+// The stub's client is what points at the httptest server, and Auth would
+// rebuild it from a database secret, so both are stubbed here: the guarantee
+// under test is about delivery, and the payout path stays real.
+type preAuthedDingConnect struct {
+	*DingConnectProvider
+}
+
+func (p preAuthedDingConnect) GetUserFromPaymentEvent(event *PaymentEvent) (*User, error) {
+	return &User{Id: "stub-user"}, nil
+}
+
+func (p preAuthedDingConnect) Auth(user *User, key string) error { return nil }
+
+// TestDingConnectOperatorNotDeterminedIsWithheld runs the inconclusive-lookup
+// case end to end: AccountLookup answers the number with no single operator
+// and the payment block pins nothing, so resolution refuses to guess. That is
+// a configuration gap -- releasing the respondent would loop them back to a
+// phone question their number already answers, and withholding keeps them
+// parked for dean while the block is fixed.
+func TestDingConnectOperatorNotDeterminedIsWithheld(t *testing.T) {
+	var received int32
+	var last string
+	ts := countingBotserver(&received, &last)
+	defer ts.Close()
+
+	stub := newDingStub()
+	stub.products = arProducts()
+	stub.lookup = "" // no operator resolved
+
+	dc := getDC(ts)
+	dc.getProvider = func(pool *pgxpool.Pool, event *PaymentEvent) (Provider, error) {
+		return preAuthedDingConnect{stub.provider(t)}, nil
+	}
+
+	err := dc.Process(makeMessages([]string{`{
+		"userid": "foo",
+		"pageid": "page",
+		"timestamp": 1600558963867,
+		"provider": "dingconnect",
+		"key": "DINGCONNECT_API_KEY",
+		"details": {
+			"id": "payment-1",
+			"account_number": "5491112345678",
+			"distributor_ref": "ar_p1",
+			"amount": 1000,
+			"amount_currency": "ARS",
+			"tolerance": 200
+		}
+	}`}))
+
+	assert.Nil(t, err)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&received),
+		"an undetermined operator is a configuration fault, not the respondent's to fix")
+	assert.Empty(t, stub.sends, "resolution refusing means no transfer may be attempted")
+}

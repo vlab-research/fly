@@ -126,9 +126,13 @@ own — otherwise one payment point would inflate the metrics and the
 > `PROVIDER_TIMED_OUT` are names nothing emits; removing them is a separate
 > decision. Only nine codes are dinersclub's own inventions for DingConnect
 > (`PIN_DRIFT`, `AMOUNT_CURRENCY_MISMATCH`, `NO_PIN_FOR_OPERATOR`,
-> `IMPOSSIBLE_AMOUNT`, `INVALID_PAYMENT_DETAILS`, `COULD_NOT_AUTO_DETECT_OPERATOR`,
+> `IMPOSSIBLE_AMOUNT`, `INVALID_PAYMENT_DETAILS`, `OPERATOR_NOT_DETERMINED`,
 > `INVALID_RESPONSE`, `HTTP_REQUEST_FAILED`, `PAYMENT_FAILED`); everything else
 > is the provider's, so check `go-dingconnect/errors.go` before adding a row.
+> `OPERATOR_NOT_DETERMINED` (ours: lookup inconclusive, nothing pinned --
+> `precondition`) is deliberately distinct from Reloadly's
+> `COULD_NOT_AUTO_DETECT_OPERATOR` (theirs: a number its detection failed on --
+> `respondent`), because the two same-sounding codes recover differently.
 
 **An unrecognised code is `precondition`**, i.e. it is withheld. A code nobody
 has looked at says nothing about the respondent's number, so asking them for

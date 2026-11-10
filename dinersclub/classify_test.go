@@ -61,6 +61,8 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		// precondition (ours or the provider's to fix, so it is withheld) ----
 		{"PHONE_RECENTLY_RECHARGED", 3627, RecoveryRespondent},
 		{"CUSTOM_IDENTIFIER_ALREADY_USED", 2385, RecoveryRespondent},
+		// Reloadly's code. DingConnect's equivalent, OPERATOR_NOT_DETERMINED,
+		// is a configuration fault and withheld below.
 		{"COULD_NOT_AUTO_DETECT_OPERATOR", 812, RecoveryRespondent},
 		{"OPERATOR_NOT_FOUND", 361, RecoveryRespondent},
 		{"INVALID_RECIPIENT_PHONE", 275, RecoveryRespondent},
@@ -94,6 +96,10 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"AccountNumberInvalid", 23, RecoveryRespondent},
 		{"ParameterInvalid", 4, RecoveryPrecondition},
 		{"DuplicateTransactionPrevented", 0, RecoveryRespondent},
+		// The line cannot take the product (postpaid/business). Only as a
+		// FINAL failure: inside the discovery cascade it is the wrong-operator
+		// refusal that advances to the next candidate.
+		{"RechargeNotAllowed", 0, RecoveryRespondent},
 
 		// DingConnect amount resolution (VIR-40). Withheld: the pin is the
 		// researcher's to re-declare, and PaymentPinDrift is what makes it loud.
@@ -101,6 +107,10 @@ func TestClassifyPinsEveryProductionCode(t *testing.T) {
 		{"AMOUNT_CURRENCY_MISMATCH", 0, RecoveryPrecondition},
 		{"NO_PIN_FOR_OPERATOR", 0, RecoveryPrecondition},
 		{"RateLimited", 0, RecoveryPrecondition},
+		// The lookup was inconclusive and nothing was pinned to try. Ours to
+		// fix (pin the operators, or name one); a different respondent number
+		// hits the same ambiguity.
+		{"OPERATOR_NOT_DETERMINED", 0, RecoveryPrecondition},
 
 		// The fake provider's fixture code (facebot/testrunner,
 		// forms/gk3gt9ag.json). Not production data -- it is here so the
