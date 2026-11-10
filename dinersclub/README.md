@@ -480,7 +480,7 @@ at all — it is paid. See `documentation/phone-numbers.md`.
    several operators) **and pins present** → *discovery*: try the pinned
    candidates until one accepts the number. Exactly one of them is the number's
    operator; sending is what settles it.
-5. **Detection inconclusive and no pins** → `COULD_NOT_AUTO_DETECT_OPERATOR`.
+5. **Detection inconclusive and no pins** → `OPERATOR_NOT_DETERMINED`.
 
 Nothing that satisfies the window → `IMPOSSIBLE_AMOUNT`, naming the window and
 what was available. **The delivered amount is never outside the window.**
@@ -637,17 +637,20 @@ value space:
 | `PinOutOfWindow` | the pin no longer delivers inside the window | `PIN_DRIFT` |
 | `CurrencyMismatch` | the product's `ReceiveCurrencyIso` is not `amount_currency` | `AMOUNT_CURRENCY_MISMATCH` |
 | `NoPinForOperator` | an operator was detected but is not in `operators` | `NO_PIN_FOR_OPERATOR` |
-| `OperatorNotDetermined` | no operator resolved and nothing pinned to try | `COULD_NOT_AUTO_DETECT_OPERATOR` |
+| `OperatorNotDetermined` | no operator resolved and nothing pinned to try | `OPERATOR_NOT_DETERMINED` |
 | `ImpossibleAmount` | nothing in the catalogue delivers inside the window | `IMPOSSIBLE_AMOUNT` |
 | `InvalidRequest` | the payment block itself is not coherent | `INVALID_PAYMENT_DETAILS` |
 
 **Every one of these means no money moved.** A respondent seeing any of them was
 not paid and was not partially paid.
 
-**Only `OperatorNotDetermined` reaches a survey.** `COULD_NOT_AUTO_DETECT_OPERATOR`
-is `respondent`; every other row maps to a `precondition` code, so its Result is
-withheld (see "Recovery classes") and the code is visible only in dinersclub's
-logs and metrics.
+**No resolution reason reaches a survey.** Every row maps to a `precondition`
+code, so its Result is withheld (see "Recovery classes") and the code is visible
+only in dinersclub's logs and metrics. `OperatorNotDetermined` in particular is
+a configuration gap -- the lookup was inconclusive and the block pinned nothing
+-- which a different respondent number does not fix. (Reloadly's
+`COULD_NOT_AUTO_DETECT_OPERATOR`, which DingConnect's code deliberately does not
+share, is `respondent`: there a different number may resolve.)
 
 The rest of the resolution block is available too:
 `e_payment_dingconnect_resolution_{path,operator,country,sku_code,send_value,expected_delivered,delivered,currency}`.
@@ -669,7 +672,7 @@ Codes produced by resolution itself, before any transfer is sent:
 | `AMOUNT_CURRENCY_MISMATCH` | The product's `ReceiveCurrencyIso` is not `amount_currency` |
 | `NO_PIN_FOR_OPERATOR` | An operator was detected but the block pins no entry for it |
 | `IMPOSSIBLE_AMOUNT` | Nothing in the catalogue delivers inside the window |
-| `COULD_NOT_AUTO_DETECT_OPERATOR` | No operator resolved and nothing pinned to try |
+| `OPERATOR_NOT_DETERMINED` | No operator resolved and nothing pinned to try |
 
 **Explicit SKU (the escape hatch)**: `sku_code` + `send_value` still works
 exactly as before and is sent as authored, with no intent to verify against.

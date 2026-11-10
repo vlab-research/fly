@@ -106,7 +106,12 @@ const (
 	codeNoPinForOperator       = "NO_PIN_FOR_OPERATOR"
 	codeImpossibleAmount       = "IMPOSSIBLE_AMOUNT"
 	codeInvalidPaymentDetails  = "INVALID_PAYMENT_DETAILS"
-	codeCouldNotDetectOperator = "COULD_NOT_AUTO_DETECT_OPERATOR"
+
+	// Deliberately not COULD_NOT_AUTO_DETECT_OPERATOR: that string is
+	// Reloadly's code for a number its own detection failed on, and it is
+	// classed respondent there. This one means OUR lookup was inconclusive and
+	// the block pinned nothing to try, which no different number fixes.
+	codeOperatorNotDetermined = "OPERATOR_NOT_DETERMINED"
 )
 
 // Drift reasons, used as the `reason` label on dinersclub_dingconnect_pin_drift_total.
@@ -133,7 +138,7 @@ var resolutionReasonToCode = map[dingconnect.ResolutionReason]struct {
 	dingconnect.ReasonPinOutOfWindow:        {codePinDrift, driftOutOfWindow},
 	dingconnect.ReasonCurrencyMismatch:      {codeAmountCurrencyMismatch, driftCurrencyMismatch},
 	dingconnect.ReasonNoPinForOperator:      {codeNoPinForOperator, ""},
-	dingconnect.ReasonOperatorNotDetermined: {codeCouldNotDetectOperator, ""},
+	dingconnect.ReasonOperatorNotDetermined: {codeOperatorNotDetermined, ""},
 	dingconnect.ReasonImpossibleAmount:      {codeImpossibleAmount, ""},
 }
 

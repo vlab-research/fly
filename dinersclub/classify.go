@@ -82,7 +82,7 @@ func (r Recovery) Silent() bool {
 // PascalCase, so a SCREAMING_SNAKE row added "for DingConnect" matches nothing
 // and the code silently takes the unknown-code default. Only PIN_DRIFT,
 // AMOUNT_CURRENCY_MISMATCH, NO_PIN_FOR_OPERATOR, IMPOSSIBLE_AMOUNT,
-// INVALID_PAYMENT_DETAILS, COULD_NOT_AUTO_DETECT_OPERATOR, INVALID_RESPONSE,
+// INVALID_PAYMENT_DETAILS, OPERATOR_NOT_DETERMINED, INVALID_RESPONSE,
 // HTTP_REQUEST_FAILED and PAYMENT_FAILED are ours to spell; check
 // go-dingconnect/errors.go for the rest.
 
@@ -166,6 +166,13 @@ var recoveryByCode = map[string]Recovery{
 	"AMOUNT_CURRENCY_MISMATCH": RecoveryPrecondition, // product delivers a different currency
 	"NO_PIN_FOR_OPERATOR":      RecoveryPrecondition, // operator detected, not pinned
 
+	// DingConnect's AccountLookup can answer one number with several
+	// operators, and with nothing pinned there is no candidate to try. That is
+	// a configuration gap a different respondent number does not fix --
+	// Reloadly's same-sounding COULD_NOT_AUTO_DETECT_OPERATOR below is the
+	// respondent-side case, where a different number may resolve.
+	"OPERATOR_NOT_DETERMINED": RecoveryPrecondition, // dingconnect
+
 	// Malformed on our side of the wire.
 	"INVALID_PAYMENT_DETAILS":   RecoveryPrecondition, // 20
 	"JSON_SYNTAX_ERROR":         RecoveryPrecondition, // 18
@@ -190,8 +197,10 @@ var recoveryByCode = map[string]Recovery{
 
 	// A different number, the right operator, or simply knowing about a
 	// recharge window they can wait out.
-	"PHONE_RECENTLY_RECHARGED":       RecoveryRespondent, // 3627
-	"COULD_NOT_AUTO_DETECT_OPERATOR": RecoveryRespondent, // 812
+	"PHONE_RECENTLY_RECHARGED": RecoveryRespondent, // 3627
+	// Reloadly could not detect an operator for this number. DingConnect's
+	// equivalent, OPERATOR_NOT_DETERMINED above, is ours to fix and withheld.
+	"COULD_NOT_AUTO_DETECT_OPERATOR": RecoveryRespondent, // 812 reloadly
 	"OPERATOR_NOT_FOUND":             RecoveryRespondent, // 361
 	"INVALID_RECIPIENT_PHONE":        RecoveryRespondent, // 275
 	"PHONE_BANNED_BY_OPERATOR":       RecoveryRespondent, // 4
@@ -200,6 +209,12 @@ var recoveryByCode = map[string]Recovery{
 	"INVALID_ACCOUNT_NUMBER":         RecoveryRespondent, // dingconnect
 
 	"AccountNumberInvalid": RecoveryRespondent, // dingconnect
+
+	// The line cannot take the product at all -- typically a postpaid or
+	// business line. DingConnect also returns it as the wrong-operator
+	// refusal that advances the discovery cascade; this row decides the
+	// outcome only once every candidate has refused.
+	"RechargeNotAllowed": RecoveryRespondent, // dingconnect
 
 	// The operator refused this number outright, or the recipient hit a
 	// limit. Another number can still be paid.
