@@ -370,44 +370,46 @@ that org-owned numbers never require.
 ### Data Flow
 
 ```
-Dashboard UI: Researcher clicks "Connect WhatsApp"
+Dashboard UI: Researcher clicks "Connect WhatsApp", then "Continue"
+       │      (FB.login must run from a click, or the browser blocks the popup)
+       ▼
+Embedded Signup popup (FB SDK, Embedded Signup v4)
+       │
+       ├─ FB.login(cb, { config_id: REACT_APP_WHATSAPP_CONFIG_ID, response_type: 'code',
+       │                 override_default_response_type: true, extras: { setup: {} } })
+       ├─ Researcher selects/creates a WABA + number and grants whatsapp_business_* permissions
        │
        ▼
-Embedded Signup popup (via FB SDK)
+Two separate signals, in either order:
        │
-       ├─ window.FB.login({ feature: 'whatsapp_embedded_signup', config_id: CONFIG_ID })
-       ├─ Meta popup renders; researcher selects WABA + number
-       ├─ Researcher grants whatsapp_business_* permissions
+       ├─ window 'message' from https://*.facebook.com (JSON string):
+       │    { type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH',
+       │      data: { phone_number_id, waba_id, business_id } }      ← ids are under data
+       │    event 'CANCEL' → data.current_step;  event 'ERROR' → data.error_message, error_code, session_id
        │
-       ▼
-postMessage event → authorization code to frontend
-       │
-       ├─ event.data = { type: 'whatsapp_embedded_signup', code: '<auth_code>', phone_number_id: '...' }
-       │
-       ▼
-Dashboard frontend: POST /api/v1/whatsapp/exchange-code
-       │
-       ├─ Request: { code, phone_number_id }
+       └─ FB.login callback: authResponse.code   (only when the researcher clicks Finish;
+                                                  the code expires after 30 seconds)
        │
        ▼
-Dashboard backend: exchangeCode()
+Dashboard frontend: POST /api/v1/whatsapp/exchange-code  { code, phone_number_id, waba_id }
        │
-       ├─ Call Graph API: POST /me/token_exchanges?code=...&client_id=...&client_secret=...
-       ├─ Extract long-lived access_token
+       ├─ GET /oauth/access_token?client_id&client_secret&code   → business token
+       ├─ POST /{waba_id}/subscribed_apps                        → webhooks reach Fly (502 if refused)
        │
        ▼
 Dashboard frontend: POST /api/v1/credentials
        │
-       ├─ Request: { entity: 'whatsapp_business', key: phone_number_id, details: { ... access_token ... } }
+       ├─ { entity: 'whatsapp_business', key: phone_number_id, details: { id, waba_id, access_token } }
        │
        ▼
-credentials table (same schema as Track A)
+Dashboard frontend: POST /api/v1/whatsapp/register  { phone_number_id }
+       │
+       ├─ No-op if the number is already CONNECTED; otherwise registers it with a
+       │  Fly-generated PIN (documentation/agent-api.md §6). A failure is shown to
+       │  the researcher: the credential is saved but the number cannot send.
        │
        ▼
-Number not yet registered with the Cloud API (status PENDING, health error 141000)?
-       │
-       ├─ POST /api/v1/whatsapp/register, or MCP register_whatsapp_number
-       │  (documentation/agent-api.md §6)
+Researcher adds a payment method in WhatsApp Manager (Meta requires it; Fly cannot)
        │
        ▼
 Researcher creates survey in dashboard
@@ -450,12 +452,13 @@ VALUES (
 
 | Aspect | Facebook (Messenger) | WhatsApp (Embedded Signup) |
 |--------|---|---|
-| **Signup UI** | `window.FB.login()` with `scope` list → login → select pages | `window.FB.login()` with `feature: 'whatsapp_embedded_signup'` → popup → select WABA |
-| **Token return method** | `authResponse.accessToken` (standard OAuth) | `window.postMessage` event (custom callback) |
+| **Signup UI** | `window.FB.login()` with `scope` list → login → select pages | `window.FB.login()` with `config_id` + `response_type: 'code'` → popup → select WABA + number |
+| **Token return method** | `authResponse.accessToken` (standard OAuth) | `authResponse.code` (30 s TTL); account ids arrive separately by `postMessage` |
 | **Exchange endpoint** | `POST /facebook/exchange-token` | `POST /whatsapp/exchange-code` |
-| **Exchange API** | Facebook `/oauth/access_token?grant_type=fb_exchange_token` | Graph API `/me/token_exchanges` |
+| **Exchange API** | Facebook `/oauth/access_token?grant_type=fb_exchange_token` | Facebook `/oauth/access_token?code=…` |
 | **Token type** | User page access token (per-page) | Business Integration System User token (org-level) |
-| **Webhook setup** | Backend calls `POST /webhooks` + `POST /get-started` | (Phase 2 hardening; not in minimal demo) |
+| **Webhook setup** | Backend calls `POST /webhooks` + `POST /get-started` | Backend calls `POST /{waba_id}/subscribed_apps` during the exchange |
+| **Post-connect** | none | `POST /whatsapp/register` registers the number with the Cloud API |
 
 ### Dashboard Endpoints (Track B Minimal Demo)
 
@@ -526,9 +529,9 @@ See `planning/whatsapp-tech-provider-app-review.md` for full App Review checklis
 
 ### Track B
 
-1. **Embedded Signup postMessage payload** — Exact shape of `window.postMessage` event from Meta's Embedded Signup (fields, auth code format, phone_number_id presence) is not yet fully specified. Must check Meta's implementation guide (not just app-review checklist) before building the frontend event listener.
+1. **Embedded Signup configuration IDs** — `REACT_APP_WHATSAPP_CONFIG_ID` in `dashboard-client/netlify.toml` is empty in both contexts until a configuration is created in each app (Facebook Login for Business → Configurations, "WhatsApp Embedded Signup" variation). Until then the connect page shows "WhatsApp config ID not configured".
 
-2. **Webhook integration** — Once credentials are stored, do inbound WhatsApp webhooks "just work" (same as Track A), or is there additional webhook setup needed? Likely "just work" but confirm during build.
+2. **Webhook integration** — Resolved: the exchange subscribes the customer WABA via `POST /{waba_id}/subscribed_apps`. The app-level callback and its `messages` and `account_update` fields must still be configured once per app.
 
 3. **Token expiration & refresh (Track B)** — Business Integration System User tokens are long-lived. Determine actual TTL and whether refresh logic is needed in production. Not blocking for minimal demo (Phase 1), but needed for Phase 2 hardening.
 
