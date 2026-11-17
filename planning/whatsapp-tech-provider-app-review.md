@@ -304,19 +304,22 @@ Once App Review is approved:
 ### 6.2 Token Generation Process
 
 1. [ ] Client completes **Embedded Signup** (grants permissions)
-2. [ ] Client's browser returns **authorization code** (expires in 60 minutes)
+2. [ ] Client's browser returns **authorization code** (expires in 30 seconds)
 3. [ ] Your **server-side code** calls Graph API to exchange code for **customer-scoped business token**
 4. [ ] Store token securely (encrypted, in database)
 5. [ ] Use token to call Cloud API on behalf of customer
 
 **API Endpoint (Token Exchange):**
 ```
-POST https://graph.instagram.com/v25.0/me/token_exchanges
-  ?fields=access_token
-  &code=<AUTHORIZATION_CODE>
-  &client_id=<APP_ID>
+GET https://graph.facebook.com/v25.0/oauth/access_token
+  ?client_id=<APP_ID>
   &client_secret=<APP_SECRET>
+  &code=<AUTHORIZATION_CODE>
 ```
+
+Then `POST /<WABA_ID>/subscribed_apps` and `POST /<PHONE_NUMBER_ID>/register`
+(6-digit PIN). Fly does all three during connect; see
+`documentation/whatsapp-onboarding.md` Track B.
 
 **Result:** Returns `access_token` (long-lived) scoped to that specific customer WABA.
 

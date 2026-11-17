@@ -3,6 +3,9 @@ import { useHistory } from 'react-router-dom';
 import { Spin, message } from 'antd';
 import api from '../../services/api';
 import WhatsAppWarning from './WhatsAppWarning';
+import {
+  isMetaOrigin, loginOptions, parseSignupMessage, describeRegistration,
+} from './embeddedSignup';
 
 const initFB = (cb) => {
   const appId = process.env.REACT_APP_FACEBOOK_APP_ID;
@@ -37,119 +40,115 @@ const loadSDK = () => {
   load(document, 'script', 'facebook-jssdk');
 };
 
+const readJSON = async (res) => {
+  try {
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+};
+
+const errorText = (body, fallback) => {
+  const err = body && body.error;
+  if (!err) return fallback;
+  return typeof err === 'string' ? err : err.message || JSON.stringify(err);
+};
+
 const WhatsAppEmbedded = () => {
   const history = useHistory();
-  const [status, setStatus] = useState('loading'); // 'loading', 'idle', 'exchanging', 'success', 'error'
+  // 'loading' | 'idle' | 'popup' | 'exchanging' | 'registering' | 'success' | 'cancelled' | 'error'
+  const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
   const [code, setCode] = useState(null);
-  const [phoneNumberId, setPhoneNumberId] = useState(null);
+  const [signup, setSignup] = useState(null);
 
   const back = () => history.go(-1);
 
-  // Handle postMessage from Facebook Embedded Signup popup
+  const fail = (msg) => {
+    setError(msg);
+    setStatus('error');
+  };
+
   const handleMessage = (event) => {
-    // Security: validate origin
-    if (!event.origin.endsWith('facebook.com')) {
-      return;
-    }
+    if (!isMetaOrigin(event.origin)) return;
+    const parsed = parseSignupMessage(event.data);
+    if (!parsed) return;
 
-    let data = event.data;
-    if (typeof data === 'string') {
-      try {
-        data = JSON.parse(data);
-      } catch (e) {
-        return;
-      }
-    }
-
-    if (data && data.type === 'WA_EMBEDDED_SIGNUP') {
-      if (data.phone_number_id && data.waba_id) {
-        setPhoneNumberId({ phoneId: data.phone_number_id, wabaId: data.waba_id });
-      }
+    if (parsed.kind === 'finish') {
+      setSignup({ phoneNumberId: parsed.phoneNumberId, wabaId: parsed.wabaId });
+    } else if (parsed.kind === 'cancel') {
+      setStatus('cancelled');
+    } else {
+      const ref = [parsed.code && `code ${parsed.code}`, parsed.sessionId && `session ${parsed.sessionId}`]
+        .filter(Boolean).join(', ');
+      fail(ref ? `${parsed.message} (${ref})` : parsed.message);
     }
   };
 
-  // Initiate FB.login and exchange flow
+  // Opened from a click: browsers block popups that no user gesture started.
   const initiateFlow = () => {
     const configId = process.env.REACT_APP_WHATSAPP_CONFIG_ID;
-
     if (!configId) {
-      setError('WhatsApp config ID not configured');
-      setStatus('error');
+      fail('WhatsApp config ID not configured');
       return;
     }
 
-    const config = {
-      config_id: configId,
-      response_type: 'code',
-      override_default_response_type: true,
-      extras: {
-        sessionInfoVersion: '3',
-      },
-    };
+    setError(null);
+    setCode(null);
+    setSignup(null);
+    setStatus('popup');
 
     window.FB.login((res) => {
-      if (res.error) {
-        setError(JSON.stringify(res.error));
-        setStatus('error');
+      if (res.authResponse && res.authResponse.code) {
+        setCode(res.authResponse.code);
         return;
       }
-
-      if (!res.authResponse || !res.authResponse.code) {
-        setError('No authorization code in response');
-        setStatus('error');
-        return;
-      }
-
-      setCode(res.authResponse.code);
-    }, config);
+      // Closing the popup early returns no code; a CANCEL or ERROR message,
+      // if Meta sent one, has already set the status.
+      setStatus(s => (s === 'popup' ? 'cancelled' : s));
+    }, loginOptions(configId));
   };
 
-  // Exchange code for access token once both code and phoneNumberId are available
-  const exchangeCodeForToken = async (authCode, phoneId) => {
+  const connect = async (authCode, { phoneNumberId, wabaId }) => {
     setStatus('exchanging');
     try {
       const exchangeRes = await api.fetcher({
         path: '/whatsapp/exchange-code',
         method: 'POST',
-        body: {
-          code: authCode,
-          phone_number_id: phoneId.phoneId,
-          waba_id: phoneId.wabaId,
-        },
+        body: { code: authCode, phone_number_id: phoneNumberId, waba_id: wabaId },
+        raw: true,
       });
-
+      const exchanged = await readJSON(exchangeRes);
       if (!exchangeRes.ok) {
-        const errData = await exchangeRes.json();
-        setError(JSON.stringify(errData.error || 'Failed to exchange code'));
-        setStatus('error');
+        fail(errorText(exchanged, 'Could not exchange the signup code with WhatsApp'));
         return;
       }
-
-      const { access_token, phone_number_id } = await exchangeRes.json();
-
-      // Now save credentials to backend
-      const credBody = {
-        entity: 'whatsapp_business',
-        key: phone_number_id,
-        details: {
-          id: phone_number_id,
-          waba_id: phoneId.wabaId,
-          access_token,
-        },
-      };
 
       const credRes = await api.fetcher({
         path: '/credentials',
         method: 'POST',
-        body: credBody,
+        body: {
+          entity: 'whatsapp_business',
+          key: phoneNumberId,
+          details: { id: phoneNumberId, waba_id: wabaId, access_token: exchanged.access_token },
+        },
         raw: true,
       });
-
       if (!credRes.ok) {
-        const errData = await credRes.json();
-        setError(JSON.stringify(errData.error || 'Failed to save credentials'));
-        setStatus('error');
+        fail(errorText(await readJSON(credRes), 'Could not save the WhatsApp credentials'));
+        return;
+      }
+
+      setStatus('registering');
+      const regRes = await api.fetcher({
+        path: '/whatsapp/register',
+        method: 'POST',
+        body: { phone_number_id: phoneNumberId },
+        raw: true,
+      });
+      const registration = describeRegistration(regRes.status, await readJSON(regRes));
+      if (!registration.ok) {
+        fail(registration.message);
         return;
       }
 
@@ -158,32 +157,29 @@ const WhatsAppEmbedded = () => {
       setTimeout(() => back(), 1500);
     } catch (e) {
       console.error(e); // eslint-disable-line no-console
-      setError(e.message || 'An unexpected error occurred');
-      setStatus('error');
+      fail(e.message || 'An unexpected error occurred');
     }
   };
 
-  // Trigger exchange when both pieces are ready
+  // The code (from the login callback) and the ids (from the session message)
+  // arrive separately and in either order. The code expires after 30 seconds,
+  // so connect as soon as both are here.
   useEffect(() => {
-    if (code && phoneNumberId) {
-      exchangeCodeForToken(code, phoneNumberId);
-    }
-  }, [code, phoneNumberId]);
+    if (code && signup) connect(code, signup);
+  }, [code, signup]);
 
-  // Initialize FB SDK and start flow
   useEffect(() => {
     loadSDK();
     window.addEventListener('message', handleMessage);
-
-    initFB(() => {
-      setStatus('idle');
-      initiateFlow();
-    });
-
-    return () => {
-      window.removeEventListener('message', handleMessage);
-    };
+    initFB(() => setStatus('idle'));
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  const button = (label, onClick) => (
+    <button type="button" onClick={onClick} style={{ padding: '10px 20px', fontSize: 16, marginRight: 8 }}>
+      {label}
+    </button>
+  );
 
   return (
     <div style={{ width: 600, margin: '2em auto' }}>
@@ -194,23 +190,35 @@ const WhatsAppEmbedded = () => {
 
       {status === 'idle' && (
         <div>
-          <p>Click "Continue" to connect your WhatsApp Business Account.</p>
-          <button onClick={initiateFlow} style={{ padding: '10px 20px', fontSize: 16 }}>
-            Continue
-          </button>
+          <p>Click &quot;Continue&quot; to connect your WhatsApp Business Account.</p>
+          {button('Continue', initiateFlow)}
         </div>
       )}
 
+      {status === 'popup' && <Spin tip="Complete the steps in the WhatsApp window..." />}
+
       {status === 'exchanging' && <Spin tip="Connecting to WhatsApp..." />}
+
+      {status === 'registering' && <Spin tip="Registering your phone number..." />}
 
       {status === 'success' && <div>Success! Redirecting...</div>}
 
+      {status === 'cancelled' && (
+        <div style={{ marginTop: '20px' }}>
+          <p>The WhatsApp signup was closed before it finished. Nothing was connected.</p>
+          {button('Try again', initiateFlow)}
+          {button('Go Back', back)}
+        </div>
+      )}
+
       {status === 'error' && (
         <div style={{ color: 'red', marginTop: '20px' }}>
-          <p>Error: {error}</p>
-          <button onClick={back} style={{ padding: '10px 20px', fontSize: 16 }}>
-            Go Back
-          </button>
+          <p>
+Error:
+            {error}
+          </p>
+          {button('Try again', initiateFlow)}
+          {button('Go Back', back)}
         </div>
       )}
     </div>
