@@ -22,7 +22,7 @@
   REACT_APP_TYPEFORM_CLIENT_ID="J5QQVwzqpy2WeSo97MvvmTJDp9iPbJcAUL1LxHttyXdR"
   REACT_APP_TYPEFORM_AUTH_URL="https://api.typeform.com"
   # WhatsApp Embedded Signup config ID from Meta App Dashboard → Embedded Signup configuration (external prerequisite)
-  REACT_APP_WHATSAPP_CONFIG_ID=""
+  REACT_APP_WHATSAPP_CONFIG_ID="1660712542178774"
 
 [context.staging.environment]
   REACT_APP_SERVER_URL="https://staging.fly-dashboard-api.vlab.digital"
